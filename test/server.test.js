@@ -271,14 +271,17 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     'Discussed the launch plan.<br>Decision: ship Friday.',
     'Todo: call Sam.',
   ].join('\n')
+  const meetingSteering = 'meeting-notes/morning-meeting - classify this capture'
+  const meetingCapture = `${meetingSteering}\n${meeting}`
   const meetingDraftId = 'untitled:meeting-draft'
   await fetch(`${baseUrl}/api/draft?id=${encodeURIComponent(meetingDraftId)}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ content: meeting, createdAt: draftCreatedAt, updatedAt: draftUpdatedAt }),
+    body: JSON.stringify({ content: meetingCapture, createdAt: draftCreatedAt, updatedAt: draftUpdatedAt }),
   })
   const meetingResult = await jsonRequest(`${baseUrl}/api/notes`, {
-    content: meeting,
+    content: meetingCapture,
+    filedContent: meeting,
     draftId: meetingDraftId,
     timeZone: 'America/New_York',
   })
@@ -294,17 +297,19 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const meetingFile = await fs.readFile(path.join(dataRoot, 'bundle', meetingResult.note.id.slice(1)), 'utf8')
   assert.match(meetingFile, /Morning meeting\nDiscussed the launch plan\.  \nDecision: ship Friday\.\nTodo: call Sam\./)
   const rawMeetingFile = await fs.readFile(path.join(dataRoot, 'bundle', meetingResult.note.rawId.slice(1)), 'utf8')
+  assert.match(rawMeetingFile, /classify this capture/)
+  assert.doesNotMatch(meetingFile, /classify this capture/)
   const remainingDrafts = await (await fetch(`${baseUrl}/api/drafts`)).json()
   assert.deepEqual(remainingDrafts.map((draft) => draft.id), [draftId])
   const archivedDrafts = await Promise.all((await fs.readdir(path.join(dataRoot, 'drafts')))
     .map(async (filename) => JSON.parse(await fs.readFile(path.join(dataRoot, 'drafts', filename), 'utf8'))))
   const archivedMeetingDraft = archivedDrafts.find((draft) => draft.id === meetingDraftId)
-  assert.equal(archivedMeetingDraft.content, meeting)
+  assert.equal(archivedMeetingDraft.content, meetingCapture)
   assert.equal(archivedMeetingDraft.filedId, meetingResult.note.id)
   const repeatedFilingResponse = await fetch(`${baseUrl}/api/notes`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ content: meeting, draftId: meetingDraftId, timeZone: 'America/New_York' }),
+    body: JSON.stringify({ content: meetingCapture, filedContent: meeting, draftId: meetingDraftId, timeZone: 'America/New_York' }),
   })
   const repeatedFiling = await repeatedFilingResponse.json()
   assert.equal(repeatedFilingResponse.status, 200)
@@ -360,7 +365,8 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.match(classificationPrompts[1], /- økonomi \(used 1 time; similar note: "Morning launch meeting"\)/)
   assert.ok(embeddingInputs.includes('task: search result | query: Planning note\nWe depend on Project Aurora.'))
   const aurora = await jsonRequest(`${baseUrl}/api/notes`, {
-    content: 'Project Aurora details\nThe launch remains confidential.',
+    content: 'projects/project-aurora - first steering line\nProject Aurora details\nThe launch remains confidential.',
+    filedContent: 'Project Aurora details\nThe launch remains confidential.',
     timeZone: 'America/New_York',
   })
   const auroraId = '/projects/project-aurora-2020-01-01.md'
@@ -370,7 +376,8 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   )
   await fetch(`${baseUrl}/api/reindex`, { method: 'POST' })
   const mergedAurora = await jsonRequest(`${baseUrl}/api/notes`, {
-    content: 'Project Aurora details\nThe launch budget was approved.',
+    content: 'projects/project-aurora - second steering line\nProject Aurora details\nThe launch budget was approved.',
+    filedContent: 'Project Aurora details\nThe launch budget was approved.',
     timeZone: 'America/New_York',
   })
   assert.equal(mergedAurora.note.id, auroraId)
@@ -378,6 +385,10 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const mergedAuroraFile = await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8')
   assert.match(mergedAuroraFile, /The launch remains confidential\./)
   assert.match(mergedAuroraFile, /The launch budget was approved\./)
+  assert.doesNotMatch(mergedAuroraFile, /first steering line|second steering line/)
+  const auroraRawCaptures = await Promise.all((await fs.readdir(path.join(dataRoot, 'bundle', 'references', 'inbox')))
+    .map((filename) => fs.readFile(path.join(dataRoot, 'bundle', 'references', 'inbox', filename), 'utf8')))
+  assert.ok(auroraRawCaptures.some((rawCapture) => /second steering line/.test(rawCapture)))
   const planningFilePath = path.join(dataRoot, 'bundle', planning.note.id.slice(1))
   const planningFile = await fs.readFile(planningFilePath, 'utf8')
   assert.match(planningFile, /<!-- folio:generated-related:start -->/)
@@ -613,7 +624,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
 
   const [firstTodo, secondTodo] = await Promise.all([
     jsonRequest(`${baseUrl}/api/notes`, { content: 'todo: Buy milk', timeZone: 'America/New_York' }),
-    jsonRequest(`${baseUrl}/api/notes`, { content: 'TODO\nCall Sam', timeZone: 'America/New_York' }),
+    jsonRequest(`${baseUrl}/api/notes`, { content: 'TODO - chores route only\nCall Sam', filedContent: 'Call Sam', timeZone: 'America/New_York' }),
   ])
   assert.equal(firstTodo.note.id, '/todo-list.md')
   assert.equal(firstTodo.appended, false)
@@ -622,6 +633,10 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const todoFile = await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')
   assert.match(todoFile, /- \[ \] Buy milk/)
   assert.match(todoFile, /- \[ \] Call Sam/)
+  assert.doesNotMatch(todoFile, /chores route only/)
+  const todoRawCaptures = await Promise.all((await fs.readdir(path.join(dataRoot, 'bundle', 'references', 'inbox')))
+    .map((filename) => fs.readFile(path.join(dataRoot, 'bundle', 'references', 'inbox', filename), 'utf8')))
+  assert.ok(todoRawCaptures.some((rawCapture) => /chores route only/.test(rawCapture)))
   const protectedMoveResponse = await fetch(`${baseUrl}/api/file/move`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -651,13 +666,17 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.match(uncheckedTodo.content, /- \[ \] Buy milk/)
 
   const firstDaily = await jsonRequest(`${baseUrl}/api/notes`, { content: 'daily: Felt focused today.', timeZone: 'America/New_York' })
-  const secondDaily = await jsonRequest(`${baseUrl}/api/notes`, { content: 'Daily\nFinished the release.', timeZone: 'America/New_York' })
+  const secondDaily = await jsonRequest(`${baseUrl}/api/notes`, { content: 'Daily - release route only\nFinished the release.', filedContent: 'Finished the release.', timeZone: 'America/New_York' })
   assert.match(firstDaily.note.id, /^\/daily\/\d{4}-\d{2}-\d{2}\.md$/)
   assert.equal(secondDaily.note.id, firstDaily.note.id)
   assert.equal(secondDaily.appended, true)
   const dailyFile = await fs.readFile(path.join(dataRoot, 'bundle', firstDaily.note.id.slice(1)), 'utf8')
   assert.match(dailyFile, /Felt focused today\./)
   assert.match(dailyFile, /Finished the release\./)
+  assert.doesNotMatch(dailyFile, /release route only/)
+  const dailyRawCaptures = await Promise.all((await fs.readdir(path.join(dataRoot, 'bundle', 'references', 'inbox')))
+    .map((filename) => fs.readFile(path.join(dataRoot, 'bundle', 'references', 'inbox', filename), 'utf8')))
+  assert.ok(dailyRawCaptures.some((rawCapture) => /release route only/.test(rawCapture)))
 
   const notesResponse = await fetch(`${baseUrl}/api/notes`)
   const notes = await notesResponse.json()

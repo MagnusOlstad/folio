@@ -2809,7 +2809,11 @@ app.post('/api/notes', async (request, response, next) => {
         }
       }
     }
-    const conceptContent = normalizeMarkdownBreaks(content)
+    const filedContent = request.body?.filedContent === undefined
+      ? content
+      : String(request.body.filedContent).trim()
+    if (!filedContent) return response.status(400).json({ error: 'Write note content below the steering line before saving.' })
+    const conceptContent = normalizeMarkdownBreaks(filedContent)
 
     const createdAt = new Date().toISOString()
     const timeZone = validTimeZone(String(request.body?.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone))
@@ -2846,7 +2850,7 @@ app.post('/api/notes', async (request, response, next) => {
       }
     }
 
-    const classification = normalizeClassification(result, conceptContent, records)
+    const classification = normalizeClassification(result, content, records)
     let noteEmbedding = null
     if (classification.kind === 'note') {
       try {

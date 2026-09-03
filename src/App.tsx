@@ -223,6 +223,11 @@ function isUntitledId(id: string) {
   return id.startsWith('untitled:')
 }
 
+function filedDraftContent(value: string) {
+  const firstLineBreak = value.indexOf('\n')
+  return firstLineBreak === -1 ? value : value.slice(firstLineBreak + 1)
+}
+
 function loadExpandedDirectoryState(): ExpandedDirectoryState {
   try {
     const stored = window.localStorage.getItem('folio:expanded-directories')
@@ -1140,6 +1145,8 @@ function App() {
   function persistDocument(document: ViewerDocument, nextContent: string, nextTags: string[]) {
     if (!document.deletable || !nextContent.trim()) return
     const id = document.id
+    const filedContent = isUntitledId(id) ? filedDraftContent(nextContent) : nextContent
+    if (!filedContent.trim()) return
     const existingQueue = saveQueues.current[id] || Promise.resolve()
     setDocuments((current) => ({
       ...current,
@@ -1157,6 +1164,7 @@ function App() {
             method: 'POST',
             body: JSON.stringify({
               content: nextContent,
+              filedContent,
               draftId: id,
               timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             }),
@@ -1169,7 +1177,7 @@ function App() {
             ? { ...detailResult.value, deletable: true }
             : {
                 ...result.note,
-                content: nextContent,
+                content: filedContent,
                 deletable: true,
                 movable: true,
                 links: [],
@@ -1254,7 +1262,7 @@ function App() {
 
   function fileDraft(document: ViewerDocument) {
     const content = drafts[document.id] ?? document.content
-    if (!content.trim() || savingDocuments.has(document.id)) return
+    if (!filedDraftContent(content).trim() || savingDocuments.has(document.id)) return
     filingDraftIds.current.add(document.id)
     setEditingKey(null)
     persistDocument(document, content, [])
@@ -2095,7 +2103,7 @@ function App() {
                           <span>State</span>
                           <div className="save-state-controls">
                             {isUntitledId(document.id) ? (
-                              <button type="button" onClick={() => fileDraft(document)} disabled={savingDocuments.has(document.id) || !(drafts[document.id] || '').trim()} title="Classify and add to the bundle (Cmd+Enter)">
+                              <button type="button" onClick={() => fileDraft(document)} disabled={savingDocuments.has(document.id) || !filedDraftContent(drafts[document.id] || '').trim()} title="Classify and add to the bundle (Cmd+Enter)">
                                 {savingDocuments.has(document.id) ? 'Filing...' : 'File note'}
                               </button>
                             ) : (
