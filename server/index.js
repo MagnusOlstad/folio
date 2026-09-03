@@ -390,13 +390,18 @@ function markdownRelationships(currentId, parsed) {
       const id = resolveMarkdownLink(currentId, match[1])
       if (!id) continue
       const trailingText = line.slice((match.index || 0) + match[0].length).replace(/^\s*[-:–]\s*/, '').trim()
-      relationships.push({ id, relation: trailingText || section })
+      relationships.push({ id, relation: trailingText || section, origin: 'content' })
     }
   }
 
   for (const source of parsed.sources) {
     const id = resolveMarkdownLink(currentId, source?.resource)
-    if (id) relationships.push({ id, relation: source.title ? `Source: ${source.title}` : 'Source' })
+    if (id) relationships.push({ id, relation: source.title ? `Source: ${source.title}` : 'Source', origin: 'frontmatter' })
+  }
+
+  for (const related of Array.isArray(parsed.frontmatter.folio_related) ? parsed.frontmatter.folio_related : []) {
+    const id = resolveMarkdownLink(currentId, related)
+    if (id) relationships.push({ id, relation: 'Confirmed related', origin: 'frontmatter' })
   }
 
   return Array.from(new Map(
@@ -793,6 +798,7 @@ function documentSummary(document) {
     title: document.parsed.title,
     type: document.parsed.type,
     description: document.parsed.description,
+    createdAt: document.parsed.generatedAt || document.fileStat.mtime.toISOString(),
   }
 }
 
@@ -805,7 +811,9 @@ function semanticSuggestionSummaries(record, records) {
       title: suggested.title,
       type: suggested.type,
       description: suggested.description,
+      createdAt: suggested.createdAt,
       relation: 'Suggested by meaning',
+      origin: 'semantic',
     }] : []
   })
 }
@@ -826,8 +834,8 @@ async function relationshipIndex() {
     for (const relationship of document.relationships) {
       const targetId = aliases.get(relationship.id) || relationship.id
       if (!nodes.has(targetId)) continue
-      const forward = { ...nodes.get(targetId), relation: relationship.relation }
-      const backward = { ...nodes.get(document.id), relation: relationship.relation }
+      const forward = { ...nodes.get(targetId), relation: relationship.relation, origin: relationship.origin }
+      const backward = { ...nodes.get(document.id), relation: relationship.relation, origin: relationship.origin }
       outgoing.set(document.id, [...(outgoing.get(document.id) || []), forward])
       incoming.set(targetId, [...(incoming.get(targetId) || []), backward])
     }

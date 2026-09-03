@@ -415,7 +415,10 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   })
   const confirmedSemantic = await confirmResponse.json()
   assert.equal(confirmResponse.status, 200, JSON.stringify(confirmedSemantic))
-  assert.ok(confirmedSemantic.links.some((item) => item.id === meetingResult.note.id && item.relation === 'Confirmed related'))
+  const confirmedMeetingLink = confirmedSemantic.links.find((item) => item.id === meetingResult.note.id && item.relation === 'Confirmed related')
+  assert.ok(confirmedMeetingLink)
+  assert.equal(confirmedMeetingLink.origin, 'frontmatter')
+  assert.ok(confirmedMeetingLink.createdAt)
   assert.ok(!confirmedSemantic.suggestions.some((item) => item.id === meetingResult.note.id))
 
   const manualDirectory = path.join(dataRoot, 'bundle', 'manual')

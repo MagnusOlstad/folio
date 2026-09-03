@@ -26,7 +26,9 @@ type Relationship = {
   title: string
   type: string
   description: string
+  createdAt: string
   relation: string
+  origin: 'frontmatter' | 'content' | 'semantic'
 }
 
 type SearchResult = Note & {
@@ -601,6 +603,7 @@ function App() {
   const [tagDrafts, setTagDrafts] = useState<Record<string, string>>({})
   const [savingDocuments, setSavingDocuments] = useState<Set<string>>(() => new Set())
   const [deletingDraftIds, setDeletingDraftIds] = useState<Set<string>>(() => new Set())
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTag, setSelectedTag] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
@@ -853,6 +856,73 @@ function App() {
         next.delete(id)
         return next
       })
+    }
+  }
+
+  async function deleteFiledNote(document: ViewerDocument) {
+    if (!document.deletable || isUntitledId(document.id) || deletingNoteId || savingDocuments.has(document.id)) return
+    if (!window.confirm(`Delete "${document.title}"? The raw capture will be retained.`)) return
+
+    setDeletingNoteId(document.id)
+    setMessage('')
+    try {
+      await (saveQueues.current[document.id] || Promise.resolve())
+      const result = await api<{ deletedId: string; rawId: string | null }>(`/api/note?id=${encodeURIComponent(document.id)}`, {
+        method: 'DELETE',
+      })
+      const [notesResult, filesResult] = await Promise.allSettled([
+        api<Note[]>('/api/notes'),
+        api<BundleFile[]>('/api/files'),
+      ])
+      setNotes((current) => notesResult.status === 'fulfilled'
+        ? notesResult.value
+        : current.filter((note) => note.id !== result.deletedId))
+      setFiles((current) => filesResult.status === 'fulfilled'
+        ? filesResult.value
+        : current.filter((file) => file.id !== result.deletedId))
+      setDocuments((current) => {
+        const next = { ...current }
+        delete next[result.deletedId]
+        return next
+      })
+      setDrafts((current) => {
+        const next = { ...current }
+        delete next[result.deletedId]
+        return next
+      })
+      setPathDrafts((current) => {
+        const next = { ...current }
+        delete next[result.deletedId]
+        return next
+      })
+      setTagDrafts((current) => {
+        const next = { ...current }
+        delete next[result.deletedId]
+        return next
+      })
+      setGroups((current) => current.map((group) => {
+        const tabIndex = group.tabs.indexOf(result.deletedId)
+        const tabs = group.tabs.filter((id) => id !== result.deletedId)
+        const activeId = group.activeId === result.deletedId
+          ? tabs[Math.min(tabIndex, tabs.length - 1)] || null
+          : group.activeId
+        return { ...group, tabs, activeId }
+      }))
+      setEditingKey((current) => current?.endsWith(`:${result.deletedId}`) ? null : current)
+      setSearchResults((current) => current.filter((note) => note.id !== result.deletedId))
+      setAnswer(null)
+      delete documentRequests.current[result.deletedId]
+      for (const key of Object.keys(editorIntents.current)) {
+        if (key.endsWith(`:${result.deletedId}`)) delete editorIntents.current[key]
+      }
+      for (const key of Object.keys(readerScrollPositions.current)) {
+        if (key.endsWith(`:${result.deletedId}`)) delete readerScrollPositions.current[key]
+      }
+      setMessage(`Deleted ${document.title}.${result.rawId ? ' The raw capture was retained.' : ''}`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not delete note')
+    } finally {
+      setDeletingNoteId(null)
     }
   }
 
@@ -1113,7 +1183,7 @@ function App() {
   }
 
   function beginEditing(groupId: string, document: ViewerDocument, intent?: EditorIntent) {
-    if (!document.deletable || savingDocuments.has(document.id)) return
+    if (!document.deletable || savingDocuments.has(document.id) || deletingNoteId === document.id) return
     const key = `${groupId}:${document.id}`
     if (intent) editorIntents.current[key] = intent
     setDrafts((current) => ({ ...current, [document.id]: document.content }))
@@ -1673,6 +1743,18 @@ function App() {
             const editKey = document ? `${group.id}:${document.id}` : ''
             const isEditing = editingKey === editKey
             const editorIntent = editorIntents.current[editKey]
+            const footerLinks = document
+              ? Array.from(new Map(
+                  document.links
+                    .filter((link) => link.origin === 'frontmatter')
+                    .map((link) => [link.id, link]),
+                ).values())
+                  .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.title.localeCompare(right.title))
+                  .slice(0, 6)
+              : []
+            const frontmatterLinkCount = document
+              ? new Set(document.links.filter((link) => link.origin === 'frontmatter').map((link) => link.id)).size
+              : 0
             return (
               <Fragment key={group.id}>
                 {groupIndex === 1 && (
@@ -1893,7 +1975,7 @@ function App() {
                             {document.movable ? (
                               <input
                                 value={pathDrafts[document.id] ?? directoryForId(document.id)}
-                                disabled={movingFileId === document.id || savingDocuments.has(document.id)}
+                                disabled={movingFileId === document.id || savingDocuments.has(document.id) || deletingNoteId === document.id}
                                 onFocus={() => setPathDrafts((current) => ({
                                   ...current,
                                   [document.id]: directoryForId(document.id),
@@ -1954,19 +2036,53 @@ function App() {
                             )}
                           </div>
                           <div><span>Status</span><strong>{document.status}</strong></div>
-                          <div><span>Created</span><strong>{formatDate(document.createdAt)}</strong></div>
+                          <div><span>Last edited</span><strong>{formatDate(document.createdAt)}</strong></div>
                           <div><span>Filing</span><strong>{isUntitledId(document.id) ? 'Pending' : document.filedBy?.startsWith('human:') ? 'Human' : 'Agent'}</strong></div>
                         </div>
                         <div className="save-state">
                           <span>State</span>
-                          {isUntitledId(document.id) ? (
-                            <button type="button" onClick={() => fileDraft(document)} disabled={savingDocuments.has(document.id) || !(drafts[document.id] || '').trim()} title="Classify and add to the bundle (Cmd+Enter)">
-                              {savingDocuments.has(document.id) ? 'Filing...' : 'File note'}
-                            </button>
-                          ) : (
-                            <strong>{savingDocuments.has(document.id) ? 'Saving...' : document.deletable ? 'Saved' : 'Read only'}</strong>
-                          )}
+                          <div className="save-state-controls">
+                            {isUntitledId(document.id) ? (
+                              <button type="button" onClick={() => fileDraft(document)} disabled={savingDocuments.has(document.id) || !(drafts[document.id] || '').trim()} title="Classify and add to the bundle (Cmd+Enter)">
+                                {savingDocuments.has(document.id) ? 'Filing...' : 'File note'}
+                              </button>
+                            ) : (
+                              <>
+                                <strong>{savingDocuments.has(document.id) ? 'Saving...' : deletingNoteId === document.id ? 'Deleting...' : document.deletable ? 'Saved' : 'Read only'}</strong>
+                                {document.deletable && (
+                                  <button
+                                    type="button"
+                                    className="document-delete"
+                                    onClick={() => void deleteFiledNote(document)}
+                                    disabled={Boolean(deletingNoteId) || savingDocuments.has(document.id)}
+                                    title={`Delete ${document.title}`}
+                                  >
+                                    Delete
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
                         </div>
+                        {footerLinks.length > 0 && (
+                          <div className="document-footer-links">
+                            <span>Links {frontmatterLinkCount}</span>
+                            <div className="document-footer-link-list">
+                              {footerLinks.map((link) => (
+                                <button
+                                  type="button"
+                                  className="document-footer-link"
+                                  onClick={() => void openDocument(link.id, 'file', group.id)}
+                                  title={`${link.relation} / ${formatDate(link.createdAt)}`}
+                                  key={link.id}
+                                >
+                                  <strong>{link.title}</strong>
+                                  <small>{formatDate(link.createdAt)}</small>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </footer>
                     </article>
                   ) : (
