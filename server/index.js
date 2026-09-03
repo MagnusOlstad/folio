@@ -336,6 +336,13 @@ function markdownDocument(frontmatter, content) {
   return `---\n${YAML.stringify(frontmatter, { lineWidth: 0 }).trimEnd()}\n---\n\n${content.trim()}\n`
 }
 
+function updatedGenerated(frontmatter, by, at) {
+  const generated = frontmatter.generated && typeof frontmatter.generated === 'object' && !Array.isArray(frontmatter.generated)
+    ? frontmatter.generated
+    : {}
+  return { ...generated, by, at }
+}
+
 function resolveMarkdownLink(currentId, target) {
   let cleanTarget = String(target || '').replace(/^<|>$/g, '').split(/[?#]/)[0]
   try {
@@ -1635,7 +1642,7 @@ async function rankedRecords(query, records, limit = 8, tag = '') {
   if (!query) {
     return candidates
       .map((record) => ({ ...record, score: lifecycleFactor(record), bestChunk: null, snippet: searchResultSnippet(record.content, '') }))
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .sort((left, right) => right.score - left.score || right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id))
       .slice(0, limit)
   }
 
@@ -1658,7 +1665,7 @@ async function rankedRecords(query, records, limit = 8, tag = '') {
       }
     })
     .filter((record) => record.score > 0)
-    .sort((left, right) => right.score - left.score)
+    .sort((left, right) => right.score - left.score || right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id))
     .slice(0, limit)
 }
 
@@ -2000,16 +2007,8 @@ function aggregateEntryContent(content, kind) {
 function normalizeClassification(result, content, records) {
   const firstLine = content.split('\n').find((line) => line.trim())?.replace(/^#+\s*/, '').replace(/:$/, '') || 'Untitled note'
   const candidate = result?.concept || (Array.isArray(result?.concepts) ? result.concepts[0] : result) || {}
-  let title = normalizeInlineText(candidate.title || firstLine).slice(0, 100)
-  let description = normalizeInlineText(candidate.description || firstLine).slice(0, 240)
-  const copiedMetadata = records.some((record) => (
-    record.title.toLowerCase() === title.toLowerCase()
-    && record.description.toLowerCase() === description.toLowerCase()
-  ))
-  if (copiedMetadata) {
-    title = firstLine.slice(0, 100)
-    description = content.replace(/[#*_>`-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240)
-  }
+  const title = normalizeInlineText(candidate.title || firstLine).slice(0, 100)
+  const description = normalizeInlineText(candidate.description || firstLine).slice(0, 240)
 
   const type = normalizeInlineText(candidate.type || 'Note').slice(0, 80) || 'Note'
   const candidatePath = Array.isArray(candidate.path) ? candidate.path : String(candidate.path || '').split('/')
@@ -2132,6 +2131,68 @@ function conceptDocument(classification, rawId, createdAt, relatedConcepts, cont
       author: 'human:local',
     }],
   }, lines.join('\n'))
+}
+
+async function findExactConceptFile(directory, title) {
+  let entries
+  try {
+    entries = await fs.readdir(directory, { withFileTypes: true })
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    throw error
+  }
+
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    if (!entry.isFile() || path.extname(entry.name) !== '.md') continue
+    const filePath = path.join(directory, entry.name)
+    if (!isMovableConceptId(bundleFileId(filePath))) continue
+    try {
+      const parsed = parseMarkdownFile(await fs.readFile(filePath, 'utf8'), filePath)
+      if (parsed.type !== 'Raw Capture' && parsed.title === title) return filePath
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
+  }
+  return null
+}
+
+async function availableConceptFilename(directory, title, dateKey) {
+  const slug = slugify(title)
+  for (let collision = 1; ; collision += 1) {
+    const filename = `${slug}${collision === 1 ? '' : `-${collision}`}-${dateKey}.md`
+    try {
+      await fs.access(path.join(directory, filename))
+    } catch (error) {
+      if (error.code === 'ENOENT') return filename
+      throw error
+    }
+  }
+}
+
+async function appendConceptDocument({ filePath, classification, rawId, content, createdAt, generatedBy }) {
+  const parsed = parseMarkdownFile(await fs.readFile(filePath, 'utf8'), filePath)
+  const existingContent = stripGeneratedRelatedSection(parsed.content).trim()
+  const nextCapture = content.trim()
+  const combinedContent = indexedConceptContent(parsed.content) === nextCapture
+    ? existingContent
+    : `${existingContent}\n\n---\n\n${nextCapture}`.trim()
+  const sources = Array.isArray(parsed.frontmatter.sources) ? [...parsed.frontmatter.sources] : []
+  sources.push({
+    id: `raw-capture-${sources.length + 1}`,
+    resource: rawId,
+    title: 'Raw inbox capture',
+    author: 'human:local',
+  })
+  const tags = Array.from(new Set([
+    ...parsed.tags.map(normalizeTag),
+    ...classification.tags,
+  ].filter(Boolean)))
+  await fs.writeFile(filePath, markdownDocument({
+    ...parsed.frontmatter,
+    tags,
+    sources,
+    generated: updatedGenerated(parsed.frontmatter, generatedBy, createdAt),
+  }, combinedContent))
 }
 
 function localTimeLabel(value, timeZone, includeDate = false) {
@@ -2374,8 +2435,20 @@ app.put('/api/draft', async (request, response, next) => {
   }
 })
 
-app.delete('/api/draft', async (_request, response) => {
-  response.status(405).json({ error: 'Drafts are retained for recovery and cannot be deleted.' })
+app.delete('/api/draft', async (request, response, next) => {
+  try {
+    const id = normalizeDraftId(request.query.id)
+    if (!id) return response.status(400).json({ error: 'Invalid draft ID.' })
+    await queueDraftMutation(async () => {
+      const filePath = draftFilePath(id)
+      const draft = await readDraft(id)
+      if (!draft || !filePath) return
+      await fs.unlink(filePath)
+    })
+    response.json({ deletedId: id })
+  } catch (error) {
+    next(error)
+  }
 })
 
 app.get('/api/note', async (request, response, next) => {
@@ -2457,6 +2530,8 @@ app.get('/api/files', async (_request, response, next) => {
       return {
         id,
         name,
+        title: record?.title || name,
+        createdAt: record?.createdAt || '',
         directory: directory === '/' ? '/' : directory,
         type: record?.type || reservedType,
         deletable: Boolean(record),
@@ -2660,6 +2735,7 @@ app.patch('/api/note', async (request, response, next) => {
       if (status !== undefined) parsed.frontmatter.status = status
       if (staleAfter) parsed.frontmatter.stale_after = new Date(staleAfter).toISOString()
       else if (staleAfter === null || staleAfter === '') delete parsed.frontmatter.stale_after
+      parsed.frontmatter.generated = updatedGenerated(parsed.frontmatter, 'human:local', new Date().toISOString())
       await fs.writeFile(filePath, markdownDocument(parsed.frontmatter, parsed.content))
       return null
     })
@@ -2793,8 +2869,6 @@ app.post('/api/notes', async (request, response, next) => {
       appended = aggregate.appended
     } else {
       const folder = classification.path.join('/')
-      const filename = `${createdAt.slice(0, 10)}-${slugify(classification.title)}-${crypto.randomBytes(2).toString('hex')}.md`
-      classification.id = `/${folder}/${filename}`
       classification.relationships = []
       classification.relatedIds = []
 
@@ -2802,6 +2876,22 @@ app.post('/api/notes', async (request, response, next) => {
       const targetFolder = path.join(bundleRoot, folder)
       await queueMarkdownMutation(async () => {
         await fs.mkdir(targetFolder, { recursive: true })
+        const existingFile = await findExactConceptFile(targetFolder, classification.title)
+        if (existingFile) {
+          classification.id = bundleFileId(existingFile)
+          await appendConceptDocument({
+            filePath: existingFile,
+            classification,
+            rawId,
+            content: conceptContent,
+            createdAt,
+            generatedBy: classifiedByModel ? `okf-notetaker/${classifierModel}` : 'human:local',
+          })
+          appended = true
+          return
+        }
+        const filename = await availableConceptFilename(targetFolder, classification.title, createdAt.slice(0, 10))
+        classification.id = `/${folder}/${filename}`
         await fs.writeFile(
           path.join(targetFolder, filename),
           conceptDocument(classification, rawId, createdAt, relatedConcepts, conceptContent, classifiedByModel),
@@ -2814,11 +2904,13 @@ app.post('/api/notes', async (request, response, next) => {
     let createdRecord = reindexed.records.find((record) => record.id === classification.id)
     if (!createdRecord) throw new Error('The filed note could not be indexed.')
     let currentRecords = reindexed.records
-    if (noteEmbedding && classification.kind === 'note') {
-      createdRecord.embedding = noteEmbedding
-      createdRecord.embeddingModel = embedModel
-      createdRecord.embeddingSchemaVersion = embeddingSchemaVersion
-      createdRecord.embeddingInputHash = embeddingInputHash(createdRecord)
+    if (classification.kind === 'note') {
+      if (noteEmbedding && !appended) {
+        createdRecord.embedding = noteEmbedding
+        createdRecord.embeddingModel = embedModel
+        createdRecord.embeddingSchemaVersion = embeddingSchemaVersion
+        createdRecord.embeddingInputHash = embeddingInputHash(createdRecord)
+      }
       try {
         const embeddingErrors = await refreshRecordEmbeddings([createdRecord])
         if (embeddingErrors.length) throw new Error(embeddingErrors[0].error)

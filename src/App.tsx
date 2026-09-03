@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
+import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
 import './App.css'
 
@@ -55,6 +56,8 @@ type FileMoveResult = {
 type BundleFile = {
   id: string
   name: string
+  title: string
+  createdAt: string
   directory: string
   type: string
   deletable: boolean
@@ -142,6 +145,18 @@ type TreeDirectory = {
   files: BundleFile[]
 }
 
+type EditorIntent = {
+  lineNumber: number
+  scrollTop: number
+}
+
+type MarkdownNode = {
+  position?: {
+    start: { line: number }
+    end: { line: number }
+  }
+}
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
@@ -180,6 +195,16 @@ function parseTags(value: string) {
     .split(',')
     .map((tag) => tag.trim())
     .filter(Boolean)))
+}
+
+function directoryForId(id: string) {
+  const directory = id.split('/').slice(0, -1).join('/')
+  return directory || '/'
+}
+
+function normalizeDirectoryInput(value: string) {
+  const parts = value.trim().replaceAll('\\', '/').split('/').filter(Boolean)
+  return parts.length ? `/${parts.join('/')}` : '/'
 }
 
 function hasInstalledModel(model: string, installed: string[]) {
@@ -257,6 +282,23 @@ function draftTitle(content: string) {
   return firstLine ? firstLine.slice(0, 48) : 'Untitled'
 }
 
+function sourcePosition(node?: MarkdownNode) {
+  return {
+    'data-source-line': node?.position?.start.line,
+    'data-source-end-line': node?.position?.end.line,
+  }
+}
+
+function lineStartOffset(value: string, lineNumber: number) {
+  let offset = 0
+  for (let line = 1; line < lineNumber; line += 1) {
+    const lineBreak = value.indexOf('\n', offset)
+    if (lineBreak === -1) return value.length
+    offset = lineBreak + 1
+  }
+  return offset
+}
+
 function storedDraftDocument(draft: StoredDraft): ViewerDocument {
   return {
     id: draft.id,
@@ -278,6 +320,88 @@ function storedDraftDocument(draft: StoredDraft): ViewerDocument {
     suggestions: [],
     updatedAt: draft.updatedAt,
   }
+}
+
+function NoteEditor({
+  value,
+  onChange,
+  onBlur,
+  onFile,
+  steered = false,
+  intent,
+  ariaLabel,
+}: {
+  value: string
+  onChange: (value: string) => void
+  onBlur: (scrollTop: number) => void
+  onFile?: () => void
+  steered?: boolean
+  intent?: EditorIntent
+  ariaLabel: string
+}) {
+  const shellRef = useRef<HTMLDivElement>(null)
+  const measureRef = useRef<HTMLDivElement>(null)
+  const editorRef = useRef<HTMLTextAreaElement>(null)
+  const initialValue = useRef(value)
+  const [steeringHeight, setSteeringHeight] = useState(0)
+  const placeholder = 'Optional: steer the title or path here. Press Enter to let the agent decide.'
+  const firstLine = value.split('\n', 1)[0]
+  const measuredFirstLine = firstLine || (!value ? placeholder : ' ')
+
+  useLayoutEffect(() => {
+    if (!steered) return
+    const shell = shellRef.current
+    const measure = measureRef.current
+    if (!shell || !measure) return
+    const updateHeight = () => setSteeringHeight(Math.ceil(measure.getBoundingClientRect().height))
+    updateHeight()
+    const observer = new ResizeObserver(updateHeight)
+    observer.observe(shell)
+    return () => observer.disconnect()
+  }, [measuredFirstLine, steered])
+
+  useLayoutEffect(() => {
+    const editor = editorRef.current
+    if (!editor) return
+    const frame = window.requestAnimationFrame(() => {
+      editor.focus({ preventScroll: true })
+      if (!intent) return
+      const offset = lineStartOffset(initialValue.current, intent.lineNumber)
+      editor.setSelectionRange(offset, offset)
+      editor.scrollTop = intent.scrollTop
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [intent])
+
+  const editor = (
+    <textarea
+      className="document-editor"
+      ref={editorRef}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      onBlur={(event) => onBlur(event.currentTarget.scrollTop)}
+      onKeyDown={(event) => {
+        if (onFile && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+          event.preventDefault()
+          onFile()
+        }
+      }}
+      aria-label={ariaLabel}
+    />
+  )
+
+  if (!steered) return editor
+
+  return (
+    <div className="draft-note-editor" ref={shellRef} style={{ '--steering-height': `${steeringHeight}px` } as React.CSSProperties}>
+      <div className="draft-steering-band" />
+      <div className="draft-steering-measure" ref={measureRef} aria-hidden="true">
+        {measuredFirstLine}
+      </div>
+      {!value && <span className="draft-steering-placeholder" aria-hidden="true">{placeholder}</span>}
+      {editor}
+    </div>
+  )
 }
 
 function loadLocalDrafts() {
@@ -330,7 +454,11 @@ function buildFileTree(files: BundleFile[]): TreeDirectory {
     directories: [...directory.directories.values()]
       .sort((left, right) => left.name.localeCompare(right.name))
       .map(finalize),
-    files: directory.files.sort((left, right) => left.name.localeCompare(right.name)),
+    files: directory.files.sort((left, right) => (
+      left.title.localeCompare(right.title)
+      || right.createdAt.localeCompare(left.createdAt)
+      || left.name.localeCompare(right.name)
+    )),
   })
 
   return finalize(root)
@@ -455,6 +583,8 @@ function App() {
   const [groups, setGroups] = useState<TabGroup[]>([
     { id: 'primary', tabs: [], activeId: null },
   ])
+  const [sidebarWidth, setSidebarWidth] = useState<number | null>(null)
+  const [splitPosition, setSplitPosition] = useState(50)
   const [activeGroupId, setActiveGroupId] = useState('primary')
   const [draggedTab, setDraggedTab] = useState<{ documentId: string; groupId: string } | null>(null)
   const [dropGroupId, setDropGroupId] = useState<string | null>(null)
@@ -467,8 +597,10 @@ function App() {
       .filter((document) => isUntitledId(document.id))
       .map((document) => [document.id, document.content]),
   ))
+  const [pathDrafts, setPathDrafts] = useState<Record<string, string>>({})
   const [tagDrafts, setTagDrafts] = useState<Record<string, string>>({})
   const [savingDocuments, setSavingDocuments] = useState<Set<string>>(() => new Set())
+  const [deletingDraftIds, setDeletingDraftIds] = useState<Set<string>>(() => new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTag, setSelectedTag] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
@@ -488,6 +620,8 @@ function App() {
   const saveQueues = useRef<Record<string, Promise<void>>>({})
   const draftSyncQueues = useRef<Record<string, Promise<void>>>({})
   const filingDraftIds = useRef<Set<string>>(new Set())
+  const editorIntents = useRef<Record<string, EditorIntent>>({})
+  const readerScrollPositions = useRef<Record<string, number>>({})
   const documentsRef = useRef(documents)
   const draftSnapshotRef = useRef<StoredDraft[]>([])
   const untitledCounter = useRef(0)
@@ -634,6 +768,7 @@ function App() {
     setGroups((current) => current.map((group) => group.id === groupId
       ? { ...group, activeId: documentId }
       : group))
+    if (isUntitledId(documentId)) setEditingKey(`${groupId}:${documentId}`)
   }
 
   function createNewTab(targetGroupId = activeGroupId) {
@@ -680,6 +815,45 @@ function App() {
       : group))
     setActiveGroupId(targetGroupId)
     setEditingKey(`${targetGroupId}:${id}`)
+  }
+
+  async function deleteLocalDraft(id: string) {
+    if (deletingDraftIds.has(id) || savingDocuments.has(id)) return
+    filingDraftIds.current.add(id)
+    setDeletingDraftIds((current) => new Set(current).add(id))
+    setMessage('')
+    try {
+      await (draftSyncQueues.current[id] || Promise.resolve()).catch(() => undefined)
+      await api<{ deletedId: string }>(`/api/draft?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+      setDocuments((current) => {
+        const next = { ...current }
+        delete next[id]
+        return next
+      })
+      setDrafts((current) => {
+        const next = { ...current }
+        delete next[id]
+        return next
+      })
+      setGroups((current) => current.map((group) => {
+        const tabIndex = group.tabs.indexOf(id)
+        const tabs = group.tabs.filter((tabId) => tabId !== id)
+        const activeId = group.activeId === id
+          ? tabs[Math.min(tabIndex, tabs.length - 1)] || null
+          : group.activeId
+        return { ...group, tabs, activeId }
+      }))
+      setEditingKey((current) => current?.endsWith(`:${id}`) ? null : current)
+    } catch (error) {
+      filingDraftIds.current.delete(id)
+      setMessage(error instanceof Error ? error.message : 'Could not delete draft')
+    } finally {
+      setDeletingDraftIds((current) => {
+        const next = new Set(current)
+        next.delete(id)
+        return next
+      })
+    }
   }
 
   async function openDocument(id: string, source: 'note' | 'file' = 'file', targetGroupId = activeGroupId) {
@@ -749,6 +923,41 @@ function App() {
       { id: newGroupId, tabs: source.activeId ? [source.activeId] : [], activeId: source.activeId },
     ])
     setActiveGroupId(newGroupId)
+  }
+
+  function beginHorizontalResize(event: React.PointerEvent<HTMLElement>) {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    document.body.classList.add('resizing-horizontal')
+  }
+
+  function finishHorizontalResize(event: React.PointerEvent<HTMLElement>) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    document.body.classList.remove('resizing-horizontal')
+  }
+
+  function resizeSidebar(clientX: number, handle: HTMLElement) {
+    const workspace = handle.parentElement
+    if (!workspace) return
+    const bounds = workspace.getBoundingClientRect()
+    const maxWidth = Math.max(220, Math.min(520, bounds.width - 420))
+    setSidebarWidth(Math.round(Math.min(maxWidth, Math.max(220, clientX - bounds.left))))
+  }
+
+  function resizeSplit(clientX: number, handle: HTMLElement) {
+    const workspace = handle.parentElement
+    if (!workspace) return
+    const bounds = workspace.getBoundingClientRect()
+    const availableWidth = bounds.width - handle.offsetWidth
+    const minimumPaneWidth = Math.min(280, availableWidth / 2)
+    const leftWidth = Math.min(
+      availableWidth - minimumPaneWidth,
+      Math.max(minimumPaneWidth, clientX - bounds.left),
+    )
+    setSplitPosition((leftWidth / availableWidth) * 100)
   }
 
   function closeGroup(groupId: string) {
@@ -903,18 +1112,21 @@ function App() {
     saveQueues.current[id] = save
   }
 
-  function beginEditing(groupId: string, document: ViewerDocument) {
+  function beginEditing(groupId: string, document: ViewerDocument, intent?: EditorIntent) {
     if (!document.deletable || savingDocuments.has(document.id)) return
+    const key = `${groupId}:${document.id}`
+    if (intent) editorIntents.current[key] = intent
     setDrafts((current) => ({ ...current, [document.id]: document.content }))
-    setEditingKey(`${groupId}:${document.id}`)
+    setEditingKey(key)
   }
 
-  function finishEditing(groupId: string, document: ViewerDocument) {
+  function finishEditing(groupId: string, document: ViewerDocument, scrollTop = 0) {
     const key = `${groupId}:${document.id}`
     if (editingKey !== key) return
     const content = drafts[document.id] ?? document.content
-    setEditingKey(null)
     if (isUntitledId(document.id)) return
+    readerScrollPositions.current[key] = scrollTop
+    setEditingKey(null)
     if (content !== document.content) persistDocument(document, content, document.tags)
   }
 
@@ -1079,6 +1291,12 @@ function App() {
         next[result.newId] = result.note.tags.join(', ')
         return next
       })
+      setPathDrafts((current) => {
+        if (!(result.oldId in current)) return current
+        const next = { ...current }
+        delete next[result.oldId]
+        return next
+      })
       setNotes(notesResult.status === 'fulfilled'
         ? notesResult.value
         : (current) => current.map((note) => note.id === result.oldId ? { ...note, ...result.note } : note))
@@ -1234,7 +1452,11 @@ function App() {
         </div>
       </header>
 
-      <section className="workspace" id="workspace">
+      <section
+        className="workspace"
+        id="workspace"
+        style={sidebarWidth === null ? undefined : { '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
+      >
         <aside className="workbench-sidebar">
           <nav className="sidebar-tabs" aria-label="Sidebar tools">
             {(['explore', 'search', 'ask'] as SidebarMode[]).map((mode) => (
@@ -1272,10 +1494,22 @@ function App() {
                             <small>{localDraftDocuments.length}</small>
                           </div>
                           {localDraftDocuments.map((draft) => (
-                            <button type="button" className="tree-row tree-file" style={{ '--tree-depth': 1 } as React.CSSProperties} onClick={() => openLocalDraft(draft.id)} title="Local draft" key={draft.id}>
-                              <span className="tree-file-mark">D</span>
-                              <span>{draftTitle(drafts[draft.id] ?? draft.content)}</span>
-                            </button>
+                            <div className="tree-row tree-file draft-tree-row" style={{ '--tree-depth': 1 } as React.CSSProperties} key={draft.id}>
+                              <button type="button" className="draft-tree-open" onClick={() => openLocalDraft(draft.id)} title="Local draft">
+                                <span className="tree-file-mark">D</span>
+                                <span>{draftTitle(drafts[draft.id] ?? draft.content)}</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="draft-tree-delete"
+                                onClick={() => void deleteLocalDraft(draft.id)}
+                                disabled={deletingDraftIds.has(draft.id) || savingDocuments.has(draft.id)}
+                                title="Delete draft"
+                                aria-label={`Delete ${draftTitle(drafts[draft.id] ?? draft.content)}`}
+                              >
+                                x
+                              </button>
+                            </div>
                           ))}
                         </div>
                       )}
@@ -1404,45 +1638,103 @@ function App() {
           </section>
         </aside>
 
-        <section className={`editor-workspace ${groups.length === 2 ? 'is-split' : ''}`}>
-          {groups.map((group) => {
+        <div
+          className="horizontal-resize-handle sidebar-resize-handle"
+          role="separator"
+          tabIndex={0}
+          aria-label="Resize sidebar"
+          aria-orientation="vertical"
+          aria-valuemin={220}
+          aria-valuemax={520}
+          aria-valuenow={sidebarWidth ?? undefined}
+          onPointerDown={beginHorizontalResize}
+          onPointerMove={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) resizeSidebar(event.clientX, event.currentTarget)
+          }}
+          onPointerUp={finishHorizontalResize}
+          onPointerCancel={finishHorizontalResize}
+          onDoubleClick={() => setSidebarWidth(null)}
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+            event.preventDefault()
+            const currentWidth = sidebarWidth || event.currentTarget.previousElementSibling?.getBoundingClientRect().width || 310
+            const workspaceLeft = event.currentTarget.parentElement?.getBoundingClientRect().left || 0
+            resizeSidebar(workspaceLeft + currentWidth + (event.key === 'ArrowLeft' ? -16 : 16), event.currentTarget)
+          }}
+        />
+
+        <section
+          className={`editor-workspace ${groups.length === 2 ? 'is-split' : ''}`}
+          style={{ '--split-position': `${splitPosition}%` } as React.CSSProperties}
+        >
+          {groups.map((group, groupIndex) => {
             const document = group.activeId ? documents[group.activeId] : null
             const isLoading = Boolean(group.activeId && loadingDocuments.has(group.activeId))
             const editKey = document ? `${group.id}:${document.id}` : ''
             const isEditing = editingKey === editKey
+            const editorIntent = editorIntents.current[editKey]
             return (
-              <section
-                className={`editor-group ${activeGroupId === group.id ? 'active' : ''} ${dropGroupId === group.id ? 'drop-target' : ''}`}
-                onMouseDown={() => setActiveGroupId(group.id)}
-                onDragOver={(event) => {
-                  if (!draggedTab) return
-                  event.preventDefault()
-                  event.dataTransfer.dropEffect = 'move'
-                  setDropGroupId(group.id)
-                }}
-                onDragLeave={(event) => {
-                  if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropGroupId(null)
-                }}
-                onDrop={(event) => {
-                  event.preventDefault()
-                  const payload = event.dataTransfer.getData('application/x-folio-tab')
-                  let tab = draggedTab
-                  if (payload) {
-                    try {
-                      const parsed = JSON.parse(payload) as { documentId?: unknown; groupId?: unknown }
-                      if (typeof parsed.documentId === 'string' && typeof parsed.groupId === 'string') {
-                        tab = { documentId: parsed.documentId, groupId: parsed.groupId }
+              <Fragment key={group.id}>
+                {groupIndex === 1 && (
+                  <div
+                    className="horizontal-resize-handle split-resize-handle"
+                    role="separator"
+                    tabIndex={0}
+                    aria-label="Resize split notes"
+                    aria-orientation="vertical"
+                    aria-valuemin={20}
+                    aria-valuemax={80}
+                    aria-valuenow={Math.round(splitPosition)}
+                    onPointerDown={beginHorizontalResize}
+                    onPointerMove={(event) => {
+                      if (event.currentTarget.hasPointerCapture(event.pointerId)) resizeSplit(event.clientX, event.currentTarget)
+                    }}
+                    onPointerUp={finishHorizontalResize}
+                    onPointerCancel={finishHorizontalResize}
+                    onDoubleClick={() => setSplitPosition(50)}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+                      event.preventDefault()
+                      const workspace = event.currentTarget.parentElement
+                      if (!workspace) return
+                      const bounds = workspace.getBoundingClientRect()
+                      const availableWidth = bounds.width - event.currentTarget.offsetWidth
+                      const nextPosition = splitPosition + (event.key === 'ArrowLeft' ? -2 : 2)
+                      resizeSplit(bounds.left + availableWidth * nextPosition / 100, event.currentTarget)
+                    }}
+                  />
+                )}
+                <section
+                  className={`editor-group ${activeGroupId === group.id ? 'active' : ''} ${dropGroupId === group.id ? 'drop-target' : ''}`}
+                  onMouseDown={() => setActiveGroupId(group.id)}
+                  onDragOver={(event) => {
+                    if (!draggedTab) return
+                    event.preventDefault()
+                    event.dataTransfer.dropEffect = 'move'
+                    setDropGroupId(group.id)
+                  }}
+                  onDragLeave={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropGroupId(null)
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault()
+                    const payload = event.dataTransfer.getData('application/x-folio-tab')
+                    let tab = draggedTab
+                    if (payload) {
+                      try {
+                        const parsed = JSON.parse(payload) as { documentId?: unknown; groupId?: unknown }
+                        if (typeof parsed.documentId === 'string' && typeof parsed.groupId === 'string') {
+                          tab = { documentId: parsed.documentId, groupId: parsed.groupId }
+                        }
+                      } catch {
+                        tab = null
                       }
-                    } catch {
-                      tab = null
                     }
-                  }
-                  if (tab) moveTabToGroup(tab.documentId, tab.groupId, group.id)
-                  setDraggedTab(null)
-                  setDropGroupId(null)
-                }}
-                key={group.id}
-              >
+                    if (tab) moveTabToGroup(tab.documentId, tab.groupId, group.id)
+                    setDraggedTab(null)
+                    setDropGroupId(null)
+                  }}
+                >
                 <div className="editor-tabs">
                   <div className="tab-strip">
                     {group.tabs.map((id) => (
@@ -1503,46 +1795,63 @@ function App() {
                           {document.description && <span>{document.description}</span>}
                         </header>
                       )}
-                      {isEditing ? (
-                        <textarea
-                          className="document-editor"
-                          autoFocus
+                      {isUntitledId(document.id) ? (
+                        <NoteEditor
+                          key={editKey}
                           value={drafts[document.id] ?? document.content}
-                          onChange={(event) => {
-                            const content = event.target.value
+                          onChange={(content) => {
                             setDrafts((current) => ({ ...current, [document.id]: content }))
-                            if (isUntitledId(document.id)) {
-                              setDocuments((current) => ({
-                                ...current,
-                                [document.id]: {
-                                  ...current[document.id],
-                                  content,
-                                  updatedAt: new Date().toISOString(),
-                                },
-                              }))
-                            }
+                            setDocuments((current) => ({
+                              ...current,
+                              [document.id]: {
+                                ...current[document.id],
+                                content,
+                                updatedAt: new Date().toISOString(),
+                              },
+                            }))
                           }}
-                          onBlur={() => finishEditing(group.id, document)}
-                          onKeyDown={(event) => {
-                            if (isUntitledId(document.id) && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                              event.preventDefault()
-                              fileDraft(document)
-                            }
-                          }}
-                          placeholder={isUntitledId(document.id) ? 'Start typing. This stays a local draft until you file it with Cmd+Enter.' : undefined}
-                          aria-label={`Edit ${document.title}`}
+                          onBlur={() => undefined}
+                          onFile={() => fileDraft(document)}
+                          steered
+                          ariaLabel="Write a new note"
+                        />
+                      ) : isEditing ? (
+                        <NoteEditor
+                          key={editKey}
+                          value={drafts[document.id] ?? document.content}
+                          onChange={(content) => setDrafts((current) => ({ ...current, [document.id]: content }))}
+                          onBlur={(scrollTop) => finishEditing(group.id, document, scrollTop)}
+                          intent={editorIntent}
+                          ariaLabel={`Edit ${document.title}`}
                         />
                       ) : (
                         <div
                           className={`document-content ${document.deletable ? 'editable' : 'read-only'}`}
+                          ref={(element) => {
+                            if (!element) return
+                            const scrollTop = readerScrollPositions.current[editKey]
+                            if (scrollTop === undefined) return
+                            element.scrollTop = scrollTop
+                            delete readerScrollPositions.current[editKey]
+                          }}
                           onClick={(event) => {
                             if ((event.target as Element).closest('a, button, input')) return
-                            beginEditing(group.id, document)
+                            const source = (event.target as Element).closest<HTMLElement>('[data-source-line]')
+                            const startLine = Number(source?.dataset.sourceLine) || 1
+                            const endLine = Number(source?.dataset.sourceEndLine) || startLine
+                            const lineHeight = source ? Number.parseFloat(window.getComputedStyle(source).lineHeight) || 32 : 32
+                            const visualLine = source
+                              ? Math.max(0, Math.floor((event.clientY - source.getBoundingClientRect().top) / lineHeight))
+                              : 0
+                            beginEditing(group.id, document, {
+                              lineNumber: Math.min(endLine, startLine + visualLine),
+                              scrollTop: event.currentTarget.scrollTop,
+                            })
                           }}
                           title={document.deletable ? 'Click to edit' : 'Read-only file'}
                         >
                           <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
+                            remarkPlugins={[remarkGfm, remarkBreaks]}
                             components={{
                               a: ({ href, children }) => {
                                 const linkedFile = resolveBundleLink(document.id, href)
@@ -1550,7 +1859,17 @@ function App() {
                                   <a href={conceptUrl(linkedFile)} onClick={(event) => { event.preventDefault(); void openDocument(linkedFile, 'file', group.id) }}>{children}</a>
                                 ) : <a href={href}>{children}</a>
                               },
-                              li: ({ node, ...props }) => <li {...props} data-source-line={node?.position?.start.line} />,
+                              p: ({ node, ...props }) => <p {...props} {...sourcePosition(node)} />,
+                              h1: ({ node, ...props }) => <h1 {...props} {...sourcePosition(node)} />,
+                              h2: ({ node, ...props }) => <h2 {...props} {...sourcePosition(node)} />,
+                              h3: ({ node, ...props }) => <h3 {...props} {...sourcePosition(node)} />,
+                              h4: ({ node, ...props }) => <h4 {...props} {...sourcePosition(node)} />,
+                              h5: ({ node, ...props }) => <h5 {...props} {...sourcePosition(node)} />,
+                              h6: ({ node, ...props }) => <h6 {...props} {...sourcePosition(node)} />,
+                              blockquote: ({ node, ...props }) => <blockquote {...props} {...sourcePosition(node)} />,
+                              pre: ({ node, ...props }) => <pre {...props} {...sourcePosition(node)} />,
+                              li: ({ node, ...props }) => <li {...props} {...sourcePosition(node)} />,
+                              table: ({ node, ...props }) => <table {...props} {...sourcePosition(node)} />,
                               input: ({ node: _node, ...props }) => (
                                 <input
                                   {...props}
@@ -1571,7 +1890,44 @@ function App() {
                         <div className="document-footer-details">
                           <div className="document-path" title={document.id}>
                             <span>Path</span>
-                            <strong>{isUntitledId(document.id) ? 'Unfiled' : document.id}</strong>
+                            {document.movable ? (
+                              <input
+                                value={pathDrafts[document.id] ?? directoryForId(document.id)}
+                                disabled={movingFileId === document.id || savingDocuments.has(document.id)}
+                                onFocus={() => setPathDrafts((current) => ({
+                                  ...current,
+                                  [document.id]: directoryForId(document.id),
+                                }))}
+                                onChange={(event) => setPathDrafts((current) => ({
+                                  ...current,
+                                  [document.id]: event.target.value,
+                                }))}
+                                onBlur={(event) => {
+                                  const directory = normalizeDirectoryInput(event.target.value)
+                                  setPathDrafts((current) => {
+                                    const next = { ...current }
+                                    delete next[document.id]
+                                    return next
+                                  })
+                                  if (directory !== directoryForId(document.id)) void moveBundleFile(document.id, directory)
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') event.currentTarget.blur()
+                                  if (event.key === 'Escape') {
+                                    event.preventDefault()
+                                    event.currentTarget.value = directoryForId(document.id)
+                                    setPathDrafts((current) => ({
+                                      ...current,
+                                      [document.id]: directoryForId(document.id),
+                                    }))
+                                    event.currentTarget.blur()
+                                  }
+                                }}
+                                aria-label={`Path for ${document.title}`}
+                              />
+                            ) : (
+                              <strong>{isUntitledId(document.id) ? 'Unfiled' : document.id}</strong>
+                            )}
                           </div>
                           <div className="document-tags">
                             <span>Tags</span>
@@ -1622,7 +1978,8 @@ function App() {
                     </div>
                   )}
                 </div>
-              </section>
+                </section>
+              </Fragment>
             )
           })}
           {message && <button type="button" className="workspace-message" onClick={() => setMessage('')} title="Dismiss">{message}</button>}

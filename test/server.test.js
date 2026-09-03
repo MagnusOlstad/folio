@@ -254,6 +254,18 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal((await staleDraftResponse.json()).content, 'A durable unfinished thought.')
   assert.equal((await fs.readdir(path.join(dataRoot, 'drafts'))).length, 1)
 
+  const deletedDraftId = 'untitled:delete-test'
+  await fetch(`${baseUrl}/api/draft?id=${encodeURIComponent(deletedDraftId)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: 'Discard this thought.', createdAt: draftCreatedAt, updatedAt: draftUpdatedAt }),
+  })
+  const deleteDraftResponse = await fetch(`${baseUrl}/api/draft?id=${encodeURIComponent(deletedDraftId)}`, { method: 'DELETE' })
+  assert.equal(deleteDraftResponse.status, 200)
+  assert.deepEqual(await deleteDraftResponse.json(), { deletedId: deletedDraftId })
+  assert.deepEqual((await (await fetch(`${baseUrl}/api/drafts`)).json()).map((draft) => draft.id), [draftId])
+  assert.equal((await fetch(`${baseUrl}/api/draft?id=${encodeURIComponent(deletedDraftId)}`, { method: 'DELETE' })).status, 200)
+
   const meeting = [
     'Morning meeting',
     'Discussed the launch plan.<br>Decision: ship Friday.',
@@ -273,7 +285,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal(meetingResult.notes.length, 1)
   assert.equal(meetingResult.note.title, 'Morning launch meeting')
   assert.equal(meetingResult.note.description, 'The morning meeting covered the launch and its follow-up.')
-  assert.match(meetingResult.note.id, /^\/meeting-notes\/morning-meeting\/[^/]+\.md$/)
+  assert.match(meetingResult.note.id, /^\/meeting-notes\/morning-meeting\/morning-launch-meeting-\d{4}-\d{2}-\d{2}\.md$/)
   assert.equal('embeddingModel' in meetingResult.note, false)
   assert.equal('chunks' in meetingResult.note, false)
   const meetingDetailResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(meetingResult.note.id)}`)
@@ -317,6 +329,8 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.ok(embeddingInputs.some((input) => input.startsWith('title: Morning launch meeting | text: ')))
   const editedMeetingFile = await fs.readFile(path.join(dataRoot, 'bundle', meetingResult.note.id.slice(1)), 'utf8')
   assert.match(editedMeetingFile, /# Captured note\n\nMorning meeting\nDiscussed the revised launch plan\.  \nDecision: ship Monday\./)
+  assert.match(editedMeetingFile, /generated:\n  by: human:local\n  at: /)
+  assert.ok(editedMeeting.createdAt >= meetingResult.note.createdAt)
   const explorerResponse = await fetch(`${baseUrl}/api/file?path=${encodeURIComponent(meetingResult.note.id)}`)
   const explorerMeeting = await explorerResponse.json()
   assert.equal(explorerMeeting.content, editedContent)
@@ -349,10 +363,25 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     content: 'Project Aurora details\nThe launch remains confidential.',
     timeZone: 'America/New_York',
   })
+  const auroraId = '/projects/project-aurora-2020-01-01.md'
+  await fs.rename(
+    path.join(dataRoot, 'bundle', aurora.note.id.slice(1)),
+    path.join(dataRoot, 'bundle', auroraId.slice(1)),
+  )
+  await fetch(`${baseUrl}/api/reindex`, { method: 'POST' })
+  const mergedAurora = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: 'Project Aurora details\nThe launch budget was approved.',
+    timeZone: 'America/New_York',
+  })
+  assert.equal(mergedAurora.note.id, auroraId)
+  assert.equal(mergedAurora.appended, true)
+  const mergedAuroraFile = await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8')
+  assert.match(mergedAuroraFile, /The launch remains confidential\./)
+  assert.match(mergedAuroraFile, /The launch budget was approved\./)
   const planningFilePath = path.join(dataRoot, 'bundle', planning.note.id.slice(1))
   const planningFile = await fs.readFile(planningFilePath, 'utf8')
   assert.match(planningFile, /<!-- folio:generated-related:start -->/)
-  assert.match(planningFile, new RegExp(`\\[Project Aurora\\]\\(${aurora.note.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\) - Mentions`))
+  assert.match(planningFile, new RegExp(`\\[Project Aurora\\]\\(${auroraId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\) - Mentions`))
 
   const authoredRelated = `${planningFile.replace(/\n?<!-- folio:generated-related:start -->[\s\S]*?<!-- folio:generated-related:end -->\n?/g, '\n').trim()}\n\n# Related\n\nManual context that must remain searchable.[^manual]\n\n[^manual]: Authored footnote that must survive metadata edits.\n`
   await fs.writeFile(planningFilePath, authoredRelated)
@@ -391,6 +420,8 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
 
   const manualDirectory = path.join(dataRoot, 'bundle', 'manual')
   const spacedId = '/manual/Odd (File).md'
+  const olderTieId = '/manual/tie-a-older.md'
+  const newerTieId = '/manual/tie-z-newer.md'
   const semanticRelativeLink = path.posix.relative('/manual', semantic.note.id)
   await fs.mkdir(manualDirectory, { recursive: true })
   await fs.writeFile(path.join(manualDirectory, 'Odd (File).md'), [
@@ -418,6 +449,22 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     `Inline code stays literal: \`[example](${semanticRelativeLink})\`.`,
     '',
   ].join('\n'))
+  const tieDocument = (generatedAt) => [
+    '---',
+    'type: Reference',
+    'title: Tie result',
+    'description: Identical search ordering test.',
+    'status: stable',
+    `generated: { by: human:test, at: "${generatedAt}" }`,
+    '---',
+    '',
+    '# Tie ordering',
+    '',
+    'Unique tiephrase content.',
+    '',
+  ].join('\n')
+  await fs.writeFile(path.join(dataRoot, 'bundle', olderTieId.slice(1)), tieDocument('2026-08-01T12:00:00Z'))
+  await fs.writeFile(path.join(dataRoot, 'bundle', newerTieId.slice(1)), tieDocument('2026-09-01T12:00:00Z'))
   const rawSemanticPath = path.join(dataRoot, 'bundle', semantic.note.rawId.slice(1))
   const rawSemanticWithLink = `${await fs.readFile(rawSemanticPath, 'utf8')}\nRaw example [Odd File](/manual/Odd%20%28File%29.md).\n`
   await fs.writeFile(rawSemanticPath, rawSemanticWithLink)
@@ -425,6 +472,16 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     path.join(dataRoot, 'bundle', semantic.note.id.slice(1)),
     '\nEscaped [Odd File](/manual/Odd%20\\(File\\).md).\n',
   )
+  await fetch(`${baseUrl}/api/reindex`, { method: 'POST' })
+  const tieSearch = await (await fetch(`${baseUrl}/api/search?q=tiephrase`)).json()
+  assert.deepEqual(tieSearch.slice(0, 2).map((record) => record.id), [newerTieId, olderTieId])
+  const explorerFiles = await (await fetch(`${baseUrl}/api/files`)).json()
+  const tieFiles = explorerFiles.filter((file) => file.title === 'Tie result')
+  assert.deepEqual(tieFiles.map((file) => file.createdAt).sort().reverse(), ['2026-09-01T12:00:00.000Z', '2026-08-01T12:00:00.000Z'])
+  await Promise.all([
+    fs.unlink(path.join(dataRoot, 'bundle', olderTieId.slice(1))),
+    fs.unlink(path.join(dataRoot, 'bundle', newerTieId.slice(1))),
+  ])
   await fetch(`${baseUrl}/api/reindex`, { method: 'POST' })
   const spacedConfirmResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(semantic.note.id)}`, {
     method: 'PATCH',
