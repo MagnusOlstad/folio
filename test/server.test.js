@@ -219,12 +219,57 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.deepEqual(pulledModels, ['embeddinggemma'])
   assert.deepEqual(installedStatus.missingModels, [])
 
+  const draftId = 'untitled:server-persistence-test'
+  const draftCreatedAt = '2026-09-03T06:00:00.000Z'
+  const draftUpdatedAt = '2026-09-03T06:01:00.000Z'
+  const savedDraftResponse = await fetch(`${baseUrl}/api/draft?id=${encodeURIComponent(draftId)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      content: 'A durable unfinished thought.',
+      createdAt: draftCreatedAt,
+      updatedAt: draftUpdatedAt,
+    }),
+  })
+  assert.equal(savedDraftResponse.status, 200)
+  const savedDraft = await savedDraftResponse.json()
+  assert.equal(savedDraft.content, 'A durable unfinished thought.')
+  const draftsResponse = await fetch(`${baseUrl}/api/drafts`)
+  const drafts = await draftsResponse.json()
+  assert.deepEqual(drafts, [{
+    id: draftId,
+    content: 'A durable unfinished thought.',
+    createdAt: draftCreatedAt,
+    updatedAt: draftUpdatedAt,
+  }])
+  const staleDraftResponse = await fetch(`${baseUrl}/api/draft?id=${encodeURIComponent(draftId)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      content: 'Older content must not win.',
+      createdAt: draftCreatedAt,
+      updatedAt: '2026-09-03T06:00:30.000Z',
+    }),
+  })
+  assert.equal((await staleDraftResponse.json()).content, 'A durable unfinished thought.')
+  assert.equal((await fs.readdir(path.join(dataRoot, 'drafts'))).length, 1)
+
   const meeting = [
     'Morning meeting',
     'Discussed the launch plan.<br>Decision: ship Friday.',
     'Todo: call Sam.',
   ].join('\n')
-  const meetingResult = await jsonRequest(`${baseUrl}/api/notes`, { content: meeting, timeZone: 'America/New_York' })
+  const meetingDraftId = 'untitled:meeting-draft'
+  await fetch(`${baseUrl}/api/draft?id=${encodeURIComponent(meetingDraftId)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: meeting, createdAt: draftCreatedAt, updatedAt: draftUpdatedAt }),
+  })
+  const meetingResult = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: meeting,
+    draftId: meetingDraftId,
+    timeZone: 'America/New_York',
+  })
   assert.equal(meetingResult.notes.length, 1)
   assert.equal(meetingResult.note.title, 'Morning launch meeting')
   assert.equal(meetingResult.note.description, 'The morning meeting covered the launch and its follow-up.')
@@ -237,6 +282,21 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const meetingFile = await fs.readFile(path.join(dataRoot, 'bundle', meetingResult.note.id.slice(1)), 'utf8')
   assert.match(meetingFile, /Morning meeting\nDiscussed the launch plan\.  \nDecision: ship Friday\.\nTodo: call Sam\./)
   const rawMeetingFile = await fs.readFile(path.join(dataRoot, 'bundle', meetingResult.note.rawId.slice(1)), 'utf8')
+  const remainingDrafts = await (await fetch(`${baseUrl}/api/drafts`)).json()
+  assert.deepEqual(remainingDrafts.map((draft) => draft.id), [draftId])
+  const archivedDrafts = await Promise.all((await fs.readdir(path.join(dataRoot, 'drafts')))
+    .map(async (filename) => JSON.parse(await fs.readFile(path.join(dataRoot, 'drafts', filename), 'utf8'))))
+  const archivedMeetingDraft = archivedDrafts.find((draft) => draft.id === meetingDraftId)
+  assert.equal(archivedMeetingDraft.content, meeting)
+  assert.equal(archivedMeetingDraft.filedId, meetingResult.note.id)
+  const repeatedFilingResponse = await fetch(`${baseUrl}/api/notes`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: meeting, draftId: meetingDraftId, timeZone: 'America/New_York' }),
+  })
+  const repeatedFiling = await repeatedFilingResponse.json()
+  assert.equal(repeatedFilingResponse.status, 200)
+  assert.equal(repeatedFiling.note.id, meetingResult.note.id)
   assert.match(rawMeetingFile, /Discussed the launch plan\.<br>Decision: ship Friday\./)
 
   const editedInput = 'Morning meeting\nDiscussed the revised launch plan.<br/>Decision: ship Monday.'

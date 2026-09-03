@@ -13,6 +13,7 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const dataRoot = process.env.FOLIO_DATA_ROOT || path.join(projectRoot, 'data')
 const bundleRoot = path.join(dataRoot, 'bundle')
 const rawRoot = path.join(bundleRoot, 'references', 'inbox')
+const draftsRoot = path.join(dataRoot, 'drafts')
 const indexPath = path.join(dataRoot, 'search-index.json')
 const distRoot = process.env.FOLIO_DIST_ROOT || path.join(projectRoot, 'dist')
 
@@ -58,6 +59,7 @@ let ollamaServerLaunch = null
 let embeddingRefresh = null
 let reindexQueue = Promise.resolve()
 let markdownMutationQueue = Promise.resolve()
+let draftMutationQueue = Promise.resolve()
 const ollamaServiceToggles = new Map()
 const ollamaModelInstalls = new Map()
 const ollamaServices = {
@@ -69,7 +71,10 @@ const ollamaServices = {
 const app = express()
 app.use(express.json({ limit: '1mb' }))
 
-await fs.mkdir(rawRoot, { recursive: true })
+await Promise.all([
+  fs.mkdir(rawRoot, { recursive: true }),
+  fs.mkdir(draftsRoot, { recursive: true }),
+])
 
 const classificationSchema = {
   type: 'object',
@@ -161,6 +166,66 @@ async function writeRecords(records) {
   const temporaryPath = `${indexPath}.${process.pid}.tmp`
   await fs.writeFile(temporaryPath, `${JSON.stringify(records, null, 2)}\n`)
   await fs.rename(temporaryPath, indexPath)
+}
+
+function normalizeDraftId(value) {
+  const id = String(value || '').trim()
+  return /^untitled:[a-zA-Z0-9:._-]{1,160}$/.test(id) ? id : null
+}
+
+function draftFilePath(id) {
+  const normalized = normalizeDraftId(id)
+  if (!normalized) return null
+  const hash = crypto.createHash('sha256').update(normalized).digest('hex')
+  return path.join(draftsRoot, `${hash}.json`)
+}
+
+async function readDrafts() {
+  const entries = await fs.readdir(draftsRoot, { withFileTypes: true })
+  const drafts = []
+  for (const entry of entries) {
+    if (!entry.isFile() || path.extname(entry.name) !== '.json') continue
+    try {
+      const draft = JSON.parse(await fs.readFile(path.join(draftsRoot, entry.name), 'utf8'))
+      const id = normalizeDraftId(draft?.id)
+      if (!id || typeof draft?.content !== 'string' || draft.filedId) continue
+      const createdAt = Number.isNaN(Date.parse(draft.createdAt)) ? new Date().toISOString() : draft.createdAt
+      drafts.push({
+        id,
+        content: draft.content,
+        createdAt,
+        updatedAt: Number.isNaN(Date.parse(draft.updatedAt)) ? createdAt : draft.updatedAt,
+      })
+    } catch {
+      // Preserve unreadable draft files for manual recovery instead of overwriting them.
+    }
+  }
+  return drafts.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+}
+
+async function readDraft(id) {
+  const filePath = draftFilePath(id)
+  if (!filePath) return null
+  try {
+    return JSON.parse(await fs.readFile(filePath, 'utf8'))
+  } catch (error) {
+    if (error.code === 'ENOENT' || error instanceof SyntaxError) return null
+    throw error
+  }
+}
+
+function queueDraftMutation(callback) {
+  const operation = draftMutationQueue.then(callback, callback)
+  draftMutationQueue = operation.catch(() => {})
+  return operation
+}
+
+async function writeDraft(draft) {
+  const filePath = draftFilePath(draft.id)
+  if (!filePath) throw new Error('Invalid draft ID.')
+  const temporaryPath = `${filePath}.${process.pid}.${crypto.randomBytes(3).toString('hex')}.tmp`
+  await fs.writeFile(temporaryPath, `${JSON.stringify(draft, null, 2)}\n`, { flag: 'wx' })
+  await fs.rename(temporaryPath, filePath)
 }
 
 async function readOptionalFile(filePath) {
@@ -2276,6 +2341,43 @@ app.get('/api/notes', async (_request, response, next) => {
   }
 })
 
+app.get('/api/drafts', async (_request, response, next) => {
+  try {
+    response.json(await readDrafts())
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.put('/api/draft', async (request, response, next) => {
+  try {
+    const id = normalizeDraftId(request.query.id)
+    const content = String(request.body?.content ?? '')
+    if (!id) return response.status(400).json({ error: 'Invalid draft ID.' })
+    const requestedCreatedAt = String(request.body?.createdAt || '')
+    const requestedUpdatedAt = String(request.body?.updatedAt || '')
+    const now = new Date().toISOString()
+    const draft = await queueDraftMutation(async () => {
+      const existing = await readDraft(id)
+      if (existing?.filedId) return existing
+      const createdAt = existing?.createdAt
+        || (Number.isNaN(Date.parse(requestedCreatedAt)) ? now : requestedCreatedAt)
+      const updatedAt = Number.isNaN(Date.parse(requestedUpdatedAt)) ? now : requestedUpdatedAt
+      if (existing?.updatedAt && existing.updatedAt > updatedAt) return existing
+      const nextDraft = { id, content, createdAt, updatedAt }
+      await writeDraft(nextDraft)
+      return nextDraft
+    })
+    response.json(draft)
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.delete('/api/draft', async (_request, response) => {
+  response.status(405).json({ error: 'Drafts are retained for recovery and cannot be deleted.' })
+})
+
 app.get('/api/note', async (request, response, next) => {
   try {
     const id = String(request.query.id || '')
@@ -2607,6 +2709,22 @@ app.post('/api/notes', async (request, response, next) => {
   try {
     const content = String(request.body?.content || '').trim()
     if (!content) return response.status(400).json({ error: 'Write something before saving.' })
+    const sourceDraftId = normalizeDraftId(request.body?.draftId)
+    if (sourceDraftId) {
+      const archivedDraft = await readDraft(sourceDraftId)
+      if (archivedDraft?.filedId) {
+        const existingRecord = (await readRecords()).find((record) => record.id === archivedDraft.filedId)
+        if (existingRecord) {
+          const existingNote = publicRecord(existingRecord)
+          return response.json({
+            note: existingNote,
+            notes: [existingNote],
+            warning: null,
+            appended: Boolean(archivedDraft.appended),
+          })
+        }
+      }
+    }
     const conceptContent = normalizeMarkdownBreaks(content)
 
     const createdAt = new Date().toISOString()
@@ -2725,6 +2843,21 @@ app.post('/api/notes', async (request, response, next) => {
     }
     if (warning) void refreshMissingEmbeddingsInBackground()
     const createdNote = publicRecord(createdRecord)
+    if (sourceDraftId) {
+      await queueDraftMutation(async () => {
+        const existingDraft = await readDraft(sourceDraftId)
+        const archivedAt = new Date().toISOString()
+        await writeDraft({
+          id: sourceDraftId,
+          content,
+          createdAt: existingDraft?.createdAt || createdAt,
+          updatedAt: archivedAt,
+          filedId: createdNote.id,
+          filedAt: archivedAt,
+          appended,
+        })
+      })
+    }
     response.status(201).json({ note: createdNote, notes: [createdNote], warning, appended })
   } catch (error) {
     next(error)

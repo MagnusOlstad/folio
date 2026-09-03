@@ -45,6 +45,13 @@ type NoteUpdateResult = NoteDetail & {
   warning: string | null
 }
 
+type FileMoveResult = {
+  oldId: string
+  newId: string
+  warning: string | null
+  note: ViewerDocument
+}
+
 type BundleFile = {
   id: string
   name: string
@@ -74,6 +81,14 @@ type ViewerDocument = {
   links: Relationship[]
   backlinks: Relationship[]
   suggestions: Relationship[]
+  updatedAt?: string
+}
+
+type StoredDraft = {
+  id: string
+  content: string
+  createdAt: string
+  updatedAt: string
 }
 
 type VersionInfo = {
@@ -81,8 +96,6 @@ type VersionInfo = {
   repo: string
   latest: string | null
   latestUrl?: string
-  publishedAt?: string | null
-  checkError?: string | null
   updateAvailable: boolean
 }
 
@@ -96,8 +109,6 @@ type ModelStatus = {
   configuredModels: string[]
   missingModels: string[]
   installingModels: string[]
-  warmKeepAlive: string
-  askContextLength: number
   installed: string[]
   running: string[]
   embeddingCoverage: {
@@ -116,14 +127,26 @@ type AskResult = {
   retrieval: string
 }
 
-const starterPrompt = `Met Sam after lunch. We decided the first version of the local notes app should keep raw notes immutable and only generate derived structured notes. I need to test retrieval quality this Friday.`
+type SidebarMode = 'explore' | 'search' | 'ask'
+
+type TabGroup = {
+  id: string
+  tabs: string[]
+  activeId: string | null
+}
+
+type TreeDirectory = {
+  name: string
+  path: string
+  directories: TreeDirectory[]
+  files: BundleFile[]
+}
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
+    year: 'numeric',
   }).format(new Date(value))
 }
 
@@ -159,14 +182,13 @@ function parseTags(value: string) {
     .filter(Boolean)))
 }
 
-function bundleDirectory(id: string) {
-  const lastSlash = id.lastIndexOf('/')
-  return lastSlash > 0 ? id.slice(0, lastSlash) : '/'
-}
-
 function hasInstalledModel(model: string, installed: string[]) {
   const canonicalName = model.includes(':') ? model : `${model}:latest`
   return installed.includes(model) || installed.includes(canonicalName)
+}
+
+function isUntitledId(id: string) {
+  return id.startsWith('untitled:')
 }
 
 function toggleTaskAtLine(content: string, lineNumber: number, checked: boolean) {
@@ -179,147 +201,734 @@ function toggleTaskAtLine(content: string, lineNumber: number, checked: boolean)
 }
 
 async function api<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...options,
-    headers: { 'content-type': 'application/json', ...options?.headers },
+  let response: Response
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers: { 'content-type': 'application/json', ...options?.headers },
+    })
+  } catch {
+    throw new Error('The local Folio service is not ready yet.')
+  }
+  const body = await response.text()
+  let result: unknown = null
+  if (body) {
+    try {
+      result = JSON.parse(body)
+    } catch {
+      throw new Error(response.ok
+        ? 'The server returned an invalid response.'
+        : [502, 503, 504].includes(response.status)
+          ? 'The local Folio service is not ready yet.'
+          : `Request failed (${response.status}).`)
+    }
+  }
+  if (!response.ok) {
+    const error = result && typeof result === 'object' && 'error' in result
+      ? String(result.error)
+      : [502, 503, 504].includes(response.status)
+        ? 'The local Folio service is not ready yet.'
+        : `Request failed (${response.status}).`
+    throw new Error(error)
+  }
+  return result as T
+}
+
+async function apiWithRetry<T>(url: string, options?: RequestInit, attempts = 8): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await api<T>(url, options)
+    } catch (error) {
+      lastError = error
+      if (attempt < attempts - 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, Math.min(250 * 2 ** attempt, 1500)))
+      }
+    }
+  }
+  throw lastError
+}
+
+function draftTitle(content: string) {
+  const firstLine = content
+    .split('\n')
+    .map((line) => line.replace(/^\s*#+\s*/, '').trim())
+    .find(Boolean)
+  return firstLine ? firstLine.slice(0, 48) : 'Untitled'
+}
+
+function storedDraftDocument(draft: StoredDraft): ViewerDocument {
+  return {
+    id: draft.id,
+    title: 'Untitled',
+    type: 'Local draft',
+    description: '',
+    tags: [],
+    createdAt: draft.createdAt,
+    content: draft.content,
+    deletable: true,
+    movable: false,
+    status: 'draft',
+    staleAfter: null,
+    stale: false,
+    filedBy: null,
+    filedAt: null,
+    links: [],
+    backlinks: [],
+    suggestions: [],
+    updatedAt: draft.updatedAt,
+  }
+}
+
+function loadLocalDrafts() {
+  if (typeof window === 'undefined') return [] as ViewerDocument[]
+  const storedDrafts = window.localStorage.getItem('folio:drafts') || '[]'
+  try {
+    const parsed: unknown = JSON.parse(storedDrafts)
+    if (!Array.isArray(parsed)) return []
+    return parsed.flatMap((draft) => {
+      if (!draft || typeof draft !== 'object') return []
+      const value = draft as Record<string, unknown>
+      if (typeof value.id !== 'string' || !isUntitledId(value.id) || typeof value.content !== 'string') return []
+      const createdAt = typeof value.createdAt === 'string' ? value.createdAt : new Date().toISOString()
+      const updatedAt = typeof value.updatedAt === 'string' ? value.updatedAt : createdAt
+      return [storedDraftDocument({ id: value.id, content: value.content, createdAt, updatedAt })]
+    })
+  } catch {
+    try {
+      window.localStorage.setItem(`folio:drafts-recovery:${Date.now()}`, storedDrafts)
+      window.localStorage.removeItem('folio:drafts')
+    } catch {
+      // Leave the original value untouched when browser storage is unavailable.
+    }
+    return []
+  }
+}
+
+function buildFileTree(files: BundleFile[]): TreeDirectory {
+  type MutableTree = Omit<TreeDirectory, 'directories'> & { directories: Map<string, MutableTree> }
+  const root: MutableTree = { name: 'Bundle', path: '/', directories: new Map(), files: [] }
+
+  for (const file of files) {
+    const parts = file.id.split('/').filter(Boolean)
+    parts.pop()
+    let current = root
+    let path = ''
+    for (const part of parts) {
+      path += `/${part}`
+      if (!current.directories.has(part)) {
+        current.directories.set(part, { name: part, path, directories: new Map(), files: [] })
+      }
+      current = current.directories.get(part)!
+    }
+    current.files.push(file)
+  }
+
+  const finalize = (directory: MutableTree): TreeDirectory => ({
+    name: directory.name,
+    path: directory.path,
+    directories: [...directory.directories.values()]
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map(finalize),
+    files: directory.files.sort((left, right) => left.name.localeCompare(right.name)),
   })
-  const result = await response.json()
-  if (!response.ok) throw new Error(result.error || 'Request failed')
-  return result
+
+  return finalize(root)
+}
+
+function FileTree({
+  directory,
+  depth,
+  expanded,
+  draggedFileId,
+  dropDirectoryPath,
+  movingFileId,
+  blockedFileIds,
+  onToggle,
+  onOpen,
+  onFileDragStart,
+  onFileDragEnd,
+  onDirectoryDragOver,
+  onMove,
+}: {
+  directory: TreeDirectory
+  depth: number
+  expanded: Set<string>
+  draggedFileId: string | null
+  dropDirectoryPath: string | null
+  movingFileId: string | null
+  blockedFileIds: Set<string>
+  onToggle: (path: string) => void
+  onOpen: (id: string) => void
+  onFileDragStart: (id: string) => void
+  onFileDragEnd: () => void
+  onDirectoryDragOver: (path: string | null) => void
+  onMove: (id: string, directory: string) => void
+}) {
+  const isExpanded = expanded.has(directory.path)
+  return (
+    <div className="tree-branch">
+      <button
+        type="button"
+        className={`tree-row tree-directory ${dropDirectoryPath === directory.path ? 'drop-target' : ''}`}
+        style={{ '--tree-depth': depth } as React.CSSProperties}
+        onClick={() => onToggle(directory.path)}
+        onDragOver={(event) => {
+          if (!draggedFileId && !event.dataTransfer.types.includes('application/x-folio-file')) return
+          event.preventDefault()
+          event.stopPropagation()
+          event.dataTransfer.dropEffect = 'move'
+          onDirectoryDragOver(directory.path)
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node)) onDirectoryDragOver(null)
+        }}
+        onDrop={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          const fileId = event.dataTransfer.getData('application/x-folio-file') || draggedFileId
+          if (fileId) onMove(fileId, directory.path)
+          onFileDragEnd()
+        }}
+        aria-expanded={isExpanded}
+      >
+        <span className="tree-chevron">{isExpanded ? 'v' : '>'}</span>
+        <span className="tree-folder" aria-hidden="true" />
+        <span>{directory.name}</span>
+      </button>
+      {isExpanded && (
+        <div>
+          {directory.directories.map((child) => (
+            <FileTree
+              key={child.path}
+              directory={child}
+              depth={depth + 1}
+              expanded={expanded}
+              draggedFileId={draggedFileId}
+              dropDirectoryPath={dropDirectoryPath}
+              movingFileId={movingFileId}
+              blockedFileIds={blockedFileIds}
+              onToggle={onToggle}
+              onOpen={onOpen}
+              onFileDragStart={onFileDragStart}
+              onFileDragEnd={onFileDragEnd}
+              onDirectoryDragOver={onDirectoryDragOver}
+              onMove={onMove}
+            />
+          ))}
+          {directory.files.map((file) => (
+            <button
+              type="button"
+              className={`tree-row tree-file ${draggedFileId === file.id ? 'dragging' : ''} ${movingFileId === file.id ? 'moving' : ''}`}
+              style={{ '--tree-depth': depth + 1 } as React.CSSProperties}
+              onClick={() => onOpen(file.id)}
+              draggable={file.movable && !blockedFileIds.has(file.id) && movingFileId !== file.id}
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = 'move'
+                event.dataTransfer.setData('application/x-folio-file', file.id)
+                onFileDragStart(file.id)
+              }}
+              onDragEnd={onFileDragEnd}
+              title={file.movable ? `${file.id} - drag onto a folder to move` : `${file.id} - fixed OKF path`}
+              key={file.id}
+            >
+              <span className="tree-file-mark">M</span>
+              <span>{file.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function App() {
-  const [mode, setMode] = useState<'capture' | 'search' | 'ask' | 'explore'>('capture')
-  const [content, setContent] = useState('')
+  const [documents, setDocuments] = useState<Record<string, ViewerDocument>>(() => Object.fromEntries(
+    loadLocalDrafts().map((document) => [document.id, document]),
+  ))
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>('explore')
+  const [notes, setNotes] = useState<Note[]>([])
+  const [files, setFiles] = useState<BundleFile[]>([])
+  const [filesLoading, setFilesLoading] = useState(true)
+  const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(() => new Set())
+  const [loadingDocuments, setLoadingDocuments] = useState<Set<string>>(() => new Set())
+  const [groups, setGroups] = useState<TabGroup[]>([
+    { id: 'primary', tabs: [], activeId: null },
+  ])
+  const [activeGroupId, setActiveGroupId] = useState('primary')
+  const [draggedTab, setDraggedTab] = useState<{ documentId: string; groupId: string } | null>(null)
+  const [dropGroupId, setDropGroupId] = useState<string | null>(null)
+  const [draggedFileId, setDraggedFileId] = useState<string | null>(null)
+  const [dropDirectoryPath, setDropDirectoryPath] = useState<string | null>(null)
+  const [movingFileId, setMovingFileId] = useState<string | null>(null)
+  const [editingKey, setEditingKey] = useState<string | null>(null)
+  const [drafts, setDrafts] = useState<Record<string, string>>(() => Object.fromEntries(
+    Object.values(documents)
+      .filter((document) => isUntitledId(document.id))
+      .map((document) => [document.id, document.content]),
+  ))
+  const [tagDrafts, setTagDrafts] = useState<Record<string, string>>({})
+  const [savingDocuments, setSavingDocuments] = useState<Set<string>>(() => new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTag, setSelectedTag] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+  const [searching, setSearching] = useState(false)
   const [question, setQuestion] = useState('')
-  const [notes, setNotes] = useState<Note[]>([])
-  const [files, setFiles] = useState<BundleFile[]>([])
-  const [filesLoading, setFilesLoading] = useState(false)
+  const [answer, setAnswer] = useState<AskResult | null>(null)
+  const [asking, setAsking] = useState(false)
   const [status, setStatus] = useState<ModelStatus | null>(null)
   const [askModel, setAskModel] = useState('')
-  const [latest, setLatest] = useState<Note | null>(null)
-  const [answer, setAnswer] = useState<AskResult | null>(null)
-  const [viewerId, setViewerId] = useState<string | null>(null)
-  const [selectedDocument, setSelectedDocument] = useState<ViewerDocument | null>(null)
-  const [viewerLoading, setViewerLoading] = useState(false)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [savingLifecycle, setSavingLifecycle] = useState(false)
-  const [editingNote, setEditingNote] = useState(false)
-  const [editingPath, setEditingPath] = useState(false)
-  const [pathInput, setPathInput] = useState('')
-  const [editingFileId, setEditingFileId] = useState<string | null>(null)
-  const [filePathInput, setFilePathInput] = useState('')
-  const [movingFileId, setMovingFileId] = useState<string | null>(null)
-  const [draggedFileId, setDraggedFileId] = useState<string | null>(null)
-  const [dropDirectory, setDropDirectory] = useState<string | null>(null)
-  const [editedContent, setEditedContent] = useState('')
-  const [editedTags, setEditedTags] = useState('')
-  const [savingContent, setSavingContent] = useState(false)
-  const [confirmingSuggestion, setConfirmingSuggestion] = useState<string | null>(null)
-  const [searching, setSearching] = useState(false)
-  const [reindexing, setReindexing] = useState(false)
-  const [message, setMessage] = useState('')
-  const [busy, setBusy] = useState(false)
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null)
+  const [message, setMessage] = useState('')
+  const [reindexing, setReindexing] = useState(false)
   const [togglingService, setTogglingService] = useState<string | null>(null)
   const [installingModels, setInstallingModels] = useState(false)
-  const viewerRequest = useRef(0)
   const searchRequest = useRef(0)
+  const documentRequests = useRef<Record<string, number>>({})
+  const saveQueues = useRef<Record<string, Promise<void>>>({})
+  const draftSyncQueues = useRef<Record<string, Promise<void>>>({})
+  const filingDraftIds = useRef<Set<string>>(new Set())
+  const documentsRef = useRef(documents)
+  const draftSnapshotRef = useRef<StoredDraft[]>([])
+  const untitledCounter = useRef(0)
 
   useEffect(() => {
-    api<Note[]>('/api/notes')
-      .then(setNotes)
-      .catch((error) => setMessage(error.message))
+    let cancelled = false
+    let reconnectTimer = 0
+    const reconnectMessage = 'The local Folio service is still starting. Reconnecting automatically.'
 
-    api<VersionInfo>('/api/version')
-      .then(setVersionInfo)
-      .catch(() => setVersionInfo(null))
+    const loadWorkspace = async () => {
+      try {
+        const currentStatus = await apiWithRetry<ModelStatus>('/api/status')
+        if (cancelled) return
+        setStatus(currentStatus)
+      } catch {
+        if (cancelled) return
+        setFilesLoading(false)
+        setStatus(null)
+        setMessage(reconnectMessage)
+        reconnectTimer = window.setTimeout(loadWorkspace, 2_000)
+        return
+      }
+      const [notesResult, filesResult, draftsResult, versionResult] = await Promise.allSettled([
+        api<Note[]>('/api/notes'),
+        api<BundleFile[]>('/api/files'),
+        api<StoredDraft[]>('/api/drafts'),
+        api<VersionInfo>('/api/version'),
+      ])
+      if (cancelled) return
+      if (notesResult.status === 'fulfilled') setNotes(notesResult.value)
+      if (filesResult.status === 'fulfilled') setFiles(filesResult.value)
+      if (versionResult.status === 'fulfilled') setVersionInfo(versionResult.value)
+      if (draftsResult.status === 'fulfilled') mergeRemoteDrafts(draftsResult.value)
+      setFilesLoading(false)
+      if (notesResult.status === 'rejected' || filesResult.status === 'rejected') {
+        setMessage(reconnectMessage)
+        reconnectTimer = window.setTimeout(loadWorkspace, 2_000)
+      } else {
+        setMessage((current) => current === reconnectMessage ? '' : current)
+      }
+    }
+    void loadWorkspace()
 
     const refreshStatus = () => {
       api<ModelStatus>('/api/status')
         .then(setStatus)
         .catch(() => setStatus(null))
     }
-    refreshStatus()
     const interval = window.setInterval(refreshStatus, 10_000)
+    return () => {
+      cancelled = true
+      window.clearTimeout(reconnectTimer)
+      window.clearInterval(interval)
+    }
+  }, [])
+
+  useEffect(() => {
+    documentsRef.current = documents
+    const localDrafts: StoredDraft[] = Object.values(documents)
+      .filter((document) => isUntitledId(document.id))
+      .map((document) => ({
+        id: document.id,
+        content: drafts[document.id] ?? document.content,
+        createdAt: document.createdAt,
+        updatedAt: document.updatedAt || document.createdAt,
+      }))
+    draftSnapshotRef.current = localDrafts
+    try {
+      window.localStorage.setItem('folio:drafts', JSON.stringify(localDrafts))
+    } catch {
+      // The server copy remains authoritative when browser storage is unavailable.
+    }
+    const syncTimer = window.setTimeout(() => {
+      for (const draft of localDrafts) queueDraftSync(draft)
+    }, 450)
+    return () => window.clearTimeout(syncTimer)
+  }, [documents, drafts])
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      for (const draft of draftSnapshotRef.current) queueDraftSync(draft)
+    }, 15_000)
     return () => window.clearInterval(interval)
   }, [])
 
   useEffect(() => {
-    if (!viewerId) return
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeViewer()
+    const openNewTab = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 't') return
+      event.preventDefault()
+      createNewTab()
     }
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    window.addEventListener('keydown', closeOnEscape)
-    return () => {
-      document.body.style.overflow = previousOverflow
-      window.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [viewerId])
+    window.addEventListener('keydown', openNewTab)
+    return () => window.removeEventListener('keydown', openNewTab)
+  }, [activeGroupId])
 
-  function closeViewer() {
-    viewerRequest.current += 1
-    setViewerId(null)
-    setSelectedDocument(null)
-    setViewerLoading(false)
-    setConfirmingDelete(false)
-    setEditingNote(false)
-    setEditingPath(false)
+  function titleForId(id: string) {
+    if (isUntitledId(id)) return draftTitle(drafts[id] ?? documents[id]?.content ?? '')
+    return documents[id]?.title
+      || notes.find((note) => note.id === id)?.title
+      || files.find((file) => file.id === id)?.name.replace(/\.md$/i, '')
+      || id.split('/').at(-1)?.replace(/\.md$/i, '')
+      || id
   }
 
-  async function saveNote() {
-    if (!content.trim() || busy) return
-    setBusy(true)
-    setMessage('')
-    setLatest(null)
-    try {
-      const result = await api<{ note: Note; notes: Note[]; warning: string | null; appended: boolean }>('/api/notes', {
-        method: 'POST',
-        body: JSON.stringify({
-          content,
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        }),
+  function mergeRemoteDrafts(remoteDrafts: StoredDraft[]) {
+    const currentDocuments = documentsRef.current
+    const acceptedDrafts = remoteDrafts.filter((draft) => {
+      const local = currentDocuments[draft.id]
+      return !local || draft.updatedAt > (local.updatedAt || local.createdAt)
+    })
+    if (!acceptedDrafts.length) return
+    setDocuments((current) => ({
+      ...current,
+      ...Object.fromEntries(acceptedDrafts.map((draft) => [draft.id, storedDraftDocument(draft)])),
+    }))
+    setDrafts((current) => ({
+      ...current,
+      ...Object.fromEntries(acceptedDrafts.map((draft) => [draft.id, draft.content])),
+    }))
+  }
+
+  function queueDraftSync(draft: StoredDraft) {
+    if (filingDraftIds.current.has(draft.id)) return Promise.resolve()
+    const existingQueue = draftSyncQueues.current[draft.id] || Promise.resolve()
+    const sync = existingQueue
+      .catch(() => undefined)
+      .then(async () => {
+        if (filingDraftIds.current.has(draft.id)) return
+        await api<StoredDraft>(`/api/draft?id=${encodeURIComponent(draft.id)}`, {
+          method: 'PUT',
+          body: JSON.stringify(draft),
+        })
       })
-      setNotes((current) => [result.note, ...current.filter((note) => note.id !== result.note.id)])
-      setLatest(result.note)
-      setContent('')
-      setMessage(result.warning || (result.appended
-        ? 'Captured, classified, and appended to the existing concept.'
-        : 'Captured, classified, and added to your OKF bundle.'))
+      .catch(() => undefined)
+      .finally(() => {
+        if (draftSyncQueues.current[draft.id] === sync) delete draftSyncQueues.current[draft.id]
+      })
+    draftSyncQueues.current[draft.id] = sync
+    return sync
+  }
+
+  function activateTab(groupId: string, documentId: string) {
+    setActiveGroupId(groupId)
+    setGroups((current) => current.map((group) => group.id === groupId
+      ? { ...group, activeId: documentId }
+      : group))
+  }
+
+  function createNewTab(targetGroupId = activeGroupId) {
+    const id = `untitled:${Date.now()}:${++untitledCounter.current}`
+    const createdAt = new Date().toISOString()
+    const document: ViewerDocument = {
+      id,
+      title: 'Untitled',
+      type: 'Local draft',
+      description: '',
+      tags: [],
+      createdAt,
+      content: '',
+      deletable: true,
+      movable: false,
+      status: 'draft',
+      staleAfter: null,
+      stale: false,
+      filedBy: null,
+      filedAt: null,
+      links: [],
+      backlinks: [],
+      suggestions: [],
+      updatedAt: createdAt,
+    }
+    setDocuments((current) => ({ ...current, [id]: document }))
+    setDrafts((current) => ({ ...current, [id]: '' }))
+    setGroups((current) => current.map((group) => group.id === targetGroupId
+      ? { ...group, tabs: [...group.tabs, id], activeId: id }
+      : group))
+    setActiveGroupId(targetGroupId)
+    setEditingKey(`${targetGroupId}:${id}`)
+  }
+
+  function openLocalDraft(id: string, targetGroupId = activeGroupId) {
+    const existingGroup = groups.find((group) => group.tabs.includes(id))
+    if (existingGroup) {
+      activateTab(existingGroup.id, id)
+      setEditingKey(`${existingGroup.id}:${id}`)
+      return
+    }
+    setGroups((current) => current.map((group) => group.id === targetGroupId
+      ? { ...group, tabs: [...group.tabs, id], activeId: id }
+      : group))
+    setActiveGroupId(targetGroupId)
+    setEditingKey(`${targetGroupId}:${id}`)
+  }
+
+  async function openDocument(id: string, source: 'note' | 'file' = 'file', targetGroupId = activeGroupId) {
+    const existingGroup = groups.find((group) => group.tabs.includes(id))
+    if (existingGroup && existingGroup.id !== targetGroupId) {
+      activateTab(existingGroup.id, id)
+      return
+    }
+
+    setActiveGroupId(targetGroupId)
+    setGroups((current) => current.map((group) => group.id === targetGroupId
+      ? {
+          ...group,
+          tabs: group.tabs.includes(id) ? group.tabs : [...group.tabs, id],
+          activeId: id,
+        }
+      : group))
+
+    if (documents[id] || loadingDocuments.has(id)) return
+    const requestId = (documentRequests.current[id] || 0) + 1
+    documentRequests.current[id] = requestId
+    setLoadingDocuments((current) => new Set(current).add(id))
+    try {
+      const document = source === 'note'
+        ? { ...await api<NoteDetail>(`/api/note?id=${encodeURIComponent(id)}`), deletable: true }
+        : await api<ViewerDocument>(`/api/file?path=${encodeURIComponent(id)}`)
+      if (documentRequests.current[id] !== requestId) return
+      setDocuments((current) => ({ ...current, [document.id]: document }))
+      if (document.id !== id) {
+        setGroups((current) => current.map((group) => ({
+          ...group,
+          tabs: group.tabs.map((tabId) => tabId === id ? document.id : tabId),
+          activeId: group.activeId === id ? document.id : group.activeId,
+        })))
+      }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not save note')
+      closeTab(targetGroupId, id)
+      setMessage(error instanceof Error ? error.message : 'Could not open file')
     } finally {
-      setBusy(false)
+      setLoadingDocuments((current) => {
+        const next = new Set(current)
+        next.delete(id)
+        return next
+      })
     }
   }
 
-  async function askNotes() {
-    if (!question.trim() || busy) return
-    const selectedModel = status?.answerModels.includes(askModel) ? askModel : status?.answerModel
-    if (!selectedModel) return
-    setBusy(true)
-    setMessage('')
-    setAnswer(null)
-    try {
-      setAnswer(await api<AskResult>('/api/ask', {
-        method: 'POST',
-        body: JSON.stringify({
-          question,
-          model: selectedModel,
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        }),
-      }))
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not search notes')
-    } finally {
-      setBusy(false)
-    }
+  function closeTab(groupId: string, documentId: string) {
+    setGroups((current) => current.map((group) => {
+      if (group.id !== groupId) return group
+      const tabIndex = group.tabs.indexOf(documentId)
+      const tabs = group.tabs.filter((id) => id !== documentId)
+      const activeId = group.activeId === documentId
+        ? tabs[Math.min(tabIndex, tabs.length - 1)] || null
+        : group.activeId
+      return { ...group, tabs, activeId }
+    }))
+    setEditingKey((current) => current === `${groupId}:${documentId}` ? null : current)
+  }
+
+  function splitWorkspace() {
+    if (groups.length === 2) return
+    const source = groups.find((group) => group.id === activeGroupId) || groups[0]
+    const newGroupId = source.id === 'primary' ? 'secondary' : 'primary'
+    setGroups((current) => [
+      ...current,
+      { id: newGroupId, tabs: source.activeId ? [source.activeId] : [], activeId: source.activeId },
+    ])
+    setActiveGroupId(newGroupId)
+  }
+
+  function closeGroup(groupId: string) {
+    if (groups.length === 1) return
+    const closing = groups.find((group) => group.id === groupId)
+    const remaining = groups.find((group) => group.id !== groupId)
+    if (!closing || !remaining) return
+    const tabs = [...remaining.tabs, ...closing.tabs.filter((id) => !remaining.tabs.includes(id))]
+    setGroups([{ ...remaining, tabs, activeId: remaining.activeId || closing.activeId || tabs[0] || null }])
+    setActiveGroupId(remaining.id)
+    setEditingKey(null)
+  }
+
+  function moveTabToGroup(documentId: string, sourceGroupId: string, targetGroupId: string) {
+    if (sourceGroupId === targetGroupId) return
+    setGroups((current) => current.map((group) => {
+      if (group.id === sourceGroupId) {
+        const tabIndex = group.tabs.indexOf(documentId)
+        const tabs = group.tabs.filter((id) => id !== documentId)
+        return {
+          ...group,
+          tabs,
+          activeId: group.activeId === documentId
+            ? tabs[Math.min(tabIndex, tabs.length - 1)] || null
+            : group.activeId,
+        }
+      }
+      if (group.id === targetGroupId) {
+        return {
+          ...group,
+          tabs: group.tabs.includes(documentId) ? group.tabs : [...group.tabs, documentId],
+          activeId: documentId,
+        }
+      }
+      return group
+    }))
+    setActiveGroupId(targetGroupId)
+    setEditingKey(null)
+  }
+
+  function applyUpdatedNote(updated: NoteDetail) {
+    setDocuments((current) => ({
+      ...current,
+      [updated.id]: { ...current[updated.id], ...updated, deletable: true },
+    }))
+    setNotes((current) => current.map((note) => note.id === updated.id ? { ...note, ...updated } : note))
+    setSearchResults((current) => current.map((note) => note.id === updated.id ? {
+      ...note,
+      ...updated,
+      snippet: updated.content.replace(/\s+/g, ' ').trim().slice(0, 320),
+    } : note))
+    setAnswer((current) => current ? {
+      ...current,
+      sources: current.sources.map((note) => note.id === updated.id ? { ...note, ...updated } : note),
+    } : null)
+  }
+
+  function persistDocument(document: ViewerDocument, nextContent: string, nextTags: string[]) {
+    if (!document.deletable || !nextContent.trim()) return
+    const id = document.id
+    const existingQueue = saveQueues.current[id] || Promise.resolve()
+    setDocuments((current) => ({
+      ...current,
+      [id]: { ...current[id], content: nextContent, tags: nextTags },
+    }))
+    setSavingDocuments((current) => new Set(current).add(id))
+
+    const save = existingQueue
+      .catch(() => undefined)
+      .then(async () => {
+        if (isUntitledId(id)) {
+          filingDraftIds.current.add(id)
+          await (draftSyncQueues.current[id] || Promise.resolve()).catch(() => undefined)
+          const result = await api<{ note: Note; notes: Note[]; warning: string | null; appended: boolean }>('/api/notes', {
+            method: 'POST',
+            body: JSON.stringify({
+              content: nextContent,
+              draftId: id,
+              timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            }),
+          })
+          const [detailResult, filesResult] = await Promise.allSettled([
+            api<NoteDetail>(`/api/note?id=${encodeURIComponent(result.note.id)}`),
+            api<BundleFile[]>('/api/files'),
+          ])
+          const updated: ViewerDocument = detailResult.status === 'fulfilled'
+            ? { ...detailResult.value, deletable: true }
+            : {
+                ...result.note,
+                content: nextContent,
+                deletable: true,
+                movable: true,
+                links: [],
+                backlinks: [],
+                suggestions: [],
+              }
+          setNotes((current) => [result.note, ...current.filter((note) => note.id !== result.note.id)])
+          if (filesResult.status === 'fulfilled') setFiles(filesResult.value)
+          setDocuments((current) => {
+            const next = { ...current }
+            delete next[id]
+            next[updated.id] = updated
+            return next
+          })
+          setDrafts((current) => {
+            const next = { ...current }
+            delete next[id]
+            return next
+          })
+          setGroups((current) => current.map((group) => {
+            const tabs = group.tabs
+              .map((tabId) => tabId === id ? updated.id : tabId)
+              .filter((tabId, index, allTabs) => allTabs.indexOf(tabId) === index)
+            return {
+              ...group,
+              tabs,
+              activeId: group.activeId === id ? updated.id : group.activeId,
+            }
+          }))
+          const refreshWarning = detailResult.status === 'rejected' || filesResult.status === 'rejected'
+            ? 'The workspace will fully refresh when the file is reopened.'
+            : ''
+          setMessage([
+            result.warning || (result.appended
+              ? 'Filed and appended to the existing concept.'
+              : 'Filed as a new concept.'),
+            refreshWarning,
+          ].filter(Boolean).join(' '))
+          return
+        }
+        const { warning, ...updated } = await api<NoteUpdateResult>(`/api/note?id=${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ content: nextContent, tags: nextTags }),
+        })
+        applyUpdatedNote(updated)
+        if (warning) setMessage(warning)
+      })
+      .catch((error) => {
+        if (isUntitledId(id)) filingDraftIds.current.delete(id)
+        setMessage(error instanceof Error ? error.message : 'Could not save note')
+      })
+      .finally(() => {
+        if (saveQueues.current[id] === save) {
+          delete saveQueues.current[id]
+          setSavingDocuments((current) => {
+            const next = new Set(current)
+            next.delete(id)
+            return next
+          })
+        }
+      })
+    saveQueues.current[id] = save
+  }
+
+  function beginEditing(groupId: string, document: ViewerDocument) {
+    if (!document.deletable || savingDocuments.has(document.id)) return
+    setDrafts((current) => ({ ...current, [document.id]: document.content }))
+    setEditingKey(`${groupId}:${document.id}`)
+  }
+
+  function finishEditing(groupId: string, document: ViewerDocument) {
+    const key = `${groupId}:${document.id}`
+    if (editingKey !== key) return
+    const content = drafts[document.id] ?? document.content
+    setEditingKey(null)
+    if (isUntitledId(document.id)) return
+    if (content !== document.content) persistDocument(document, content, document.tags)
+  }
+
+  function fileDraft(document: ViewerDocument) {
+    const content = drafts[document.id] ?? document.content
+    if (!content.trim() || savingDocuments.has(document.id)) return
+    filingDraftIds.current.add(document.id)
+    setEditingKey(null)
+    persistDocument(document, content, [])
+  }
+
+  async function toggleTaskCheckbox(document: ViewerDocument, lineNumber: number, checked: boolean) {
+    const nextContent = toggleTaskAtLine(document.content, lineNumber, checked)
+    if (nextContent) persistDocument(document, nextContent, document.tags)
   }
 
   async function searchNotes(query = searchQuery, tag = selectedTag) {
@@ -341,68 +950,32 @@ function App() {
   }
 
   function searchTag(tag: string) {
-    setMode('search')
+    setSidebarMode('search')
     setSelectedTag(tag)
     setSearchQuery('')
-    closeViewer()
     void searchNotes('', tag)
   }
 
-  async function openNote(id: string) {
-    const requestId = ++viewerRequest.current
-    setViewerId(id)
-    setSelectedDocument(null)
-    setConfirmingDelete(false)
-    setEditingNote(false)
-    setEditingPath(false)
-    setConfirmingSuggestion(null)
-    setViewerLoading(true)
-    try {
-      const note = await api<NoteDetail>(`/api/note?id=${encodeURIComponent(id)}`)
-      if (requestId !== viewerRequest.current) return
-      setSelectedDocument({ ...note, deletable: true })
-    } catch (error) {
-      if (requestId !== viewerRequest.current) return
-      closeViewer()
-      setMessage(error instanceof Error ? error.message : 'Could not open note')
-    } finally {
-      if (requestId === viewerRequest.current) setViewerLoading(false)
-    }
-  }
-
-  async function openFile(id: string) {
-    const requestId = ++viewerRequest.current
-    setViewerId(id)
-    setSelectedDocument(null)
-    setConfirmingDelete(false)
-    setEditingNote(false)
-    setEditingPath(false)
-    setConfirmingSuggestion(null)
-    setViewerLoading(true)
-    try {
-      const document = await api<ViewerDocument>(`/api/file?path=${encodeURIComponent(id)}`)
-      if (requestId !== viewerRequest.current) return
-      setViewerId(document.id)
-      setSelectedDocument(document)
-    } catch (error) {
-      if (requestId !== viewerRequest.current) return
-      closeViewer()
-      setMessage(error instanceof Error ? error.message : 'Could not open file')
-    } finally {
-      if (requestId === viewerRequest.current) setViewerLoading(false)
-    }
-  }
-
-  async function openExplorer() {
-    setMode('explore')
-    setFilesLoading(true)
+  async function askNotes() {
+    if (!question.trim() || asking) return
+    const selectedModel = status?.answerModels.includes(askModel) ? askModel : status?.answerModel
+    if (!selectedModel) return
+    setAsking(true)
     setMessage('')
+    setAnswer(null)
     try {
-      setFiles(await api<BundleFile[]>('/api/files'))
+      setAnswer(await api<AskResult>('/api/ask', {
+        method: 'POST',
+        body: JSON.stringify({
+          question,
+          model: selectedModel,
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
+      }))
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not read bundle files')
+      setMessage(error instanceof Error ? error.message : 'Could not ask your notes')
     } finally {
-      setFilesLoading(false)
+      setAsking(false)
     }
   }
 
@@ -412,15 +985,46 @@ function App() {
     setMessage('')
     try {
       const result = await api<{ notes: Note[]; errors: { id: string; error: string }[] }>('/api/reindex', { method: 'POST' })
+      const refreshedFiles = await api<BundleFile[]>('/api/files')
+      const openIds = Array.from(new Set(groups.flatMap((group) => group.tabs)))
+        .filter((id) => !isUntitledId(id))
+      const refreshedDocuments = await Promise.allSettled(openIds.map(async (id) => ({
+        oldId: id,
+        document: await api<ViewerDocument>(`/api/file?path=${encodeURIComponent(id)}`),
+      })))
+      const refreshedByOldId = new Map(refreshedDocuments.flatMap((refresh) => refresh.status === 'fulfilled'
+        ? [[refresh.value.oldId, refresh.value.document] as const]
+        : []))
       setNotes(result.notes)
+      setFiles(refreshedFiles)
+      setDocuments((current) => {
+        const next = { ...current }
+        for (const [oldId, document] of refreshedByOldId) {
+          if (document.id !== oldId) delete next[oldId]
+          next[document.id] = document
+        }
+        return next
+      })
+      if ([...refreshedByOldId].some(([oldId, document]) => oldId !== document.id)) {
+        setGroups((current) => current.map((group) => ({
+          ...group,
+          tabs: group.tabs.map((id) => refreshedByOldId.get(id)?.id || id),
+          activeId: group.activeId ? refreshedByOldId.get(group.activeId)?.id || group.activeId : null,
+        })))
+        setEditingKey((current) => {
+          if (!current) return current
+          const group = groups.find(({ id }) => current.startsWith(`${id}:`))
+          if (!group) return current
+          const documentId = current.slice(group.id.length + 1)
+          const refreshed = refreshedByOldId.get(documentId)
+          return refreshed ? `${group.id}:${refreshed.id}` : current
+        })
+      }
       setSearchResults([])
       setAnswer(null)
-      setLatest(null)
-      closeViewer()
-      await openExplorer()
       setMessage(result.errors.length
-        ? `Reindexed the bundle with ${result.errors.length} invalid Markdown file${result.errors.length === 1 ? '' : 's'} skipped.`
-        : `Reindexed ${result.notes.length} concepts from Markdown.`)
+        ? `Reindexed with ${result.errors.length} invalid Markdown file${result.errors.length === 1 ? '' : 's'} skipped.`
+        : `Reindexed ${result.notes.length} concepts.`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not reindex the bundle')
     } finally {
@@ -428,200 +1032,82 @@ function App() {
     }
   }
 
-  async function moveFile(id: string, directory: string) {
-    if (movingFileId || savingLifecycle || savingContent || deleting || !directory.trim()) return
-    const viewerRequestAtStart = viewerRequest.current
-    const source = files.find((file) => file.id === id)
-    if (source?.directory === directory.trim()) {
-      setEditingPath(false)
-      setEditingFileId(null)
-      return
-    }
+  async function moveBundleFile(id: string, directory: string) {
+    const file = files.find((item) => item.id === id)
+    const isEditing = groups.some((group) => editingKey === `${group.id}:${id}`)
+    if (!file?.movable || movingFileId || file.directory === directory || savingDocuments.has(id) || loadingDocuments.has(id) || isEditing) return
 
     setMovingFileId(id)
     setMessage('')
     try {
-      const result = await api<{ oldId: string; newId: string; note: ViewerDocument; warning: string | null }>('/api/file/move', {
+      const result = await api<FileMoveResult>('/api/file/move', {
         method: 'POST',
         body: JSON.stringify({ id, directory }),
       })
-      setNotes((current) => current.map((note) => note.id === result.oldId ? {
-        ...note,
-        id: result.newId,
-        filedBy: result.note.filedBy,
-        filedAt: result.note.filedAt,
-      } : note))
-      setFiles((current) => current.map((file) => file.id === result.oldId ? {
-        ...file,
-        id: result.newId,
-        directory: bundleDirectory(result.newId),
-        filedBy: result.note.filedBy,
-        filedAt: result.note.filedAt,
-      } : file))
-      setLatest((current) => current?.id === result.oldId ? {
-        ...current,
-        id: result.newId,
-        filedBy: result.note.filedBy,
-        filedAt: result.note.filedAt,
-      } : current)
-      if (viewerRequest.current === viewerRequestAtStart && viewerId === result.oldId) {
-        setViewerId(result.newId)
-        setSelectedDocument(result.note)
-      }
-      setEditingPath(false)
-      setPathInput('')
-      setEditingFileId(null)
-      setFilePathInput('')
-      setSearchResults([])
-      setAnswer(null)
-
-      const [notesRefresh, filesRefresh] = await Promise.allSettled([
+      const [notesResult, filesResult] = await Promise.allSettled([
         api<Note[]>('/api/notes'),
         api<BundleFile[]>('/api/files'),
       ])
-      if (notesRefresh.status === 'fulfilled') {
-        setNotes(notesRefresh.value)
-        setLatest((current) => current?.id === result.newId
-          ? notesRefresh.value.find((note) => note.id === result.newId) || current
-          : current)
-      }
-      if (filesRefresh.status === 'fulfilled') setFiles(filesRefresh.value)
-      const refreshWarning = notesRefresh.status === 'rejected' || filesRefresh.status === 'rejected'
-        ? 'The explorer lists could not be refreshed and will update when reopened.'
-        : ''
-      setMessage([result.warning || `Moved the note to ${result.newId} and updated bundle references.`, refreshWarning].filter(Boolean).join(' '))
+
+      setDocuments((current) => {
+        const next = { ...current }
+        delete next[result.oldId]
+        next[result.newId] = result.note
+        return next
+      })
+      setGroups((current) => current.map((group) => {
+        const tabs = group.tabs
+          .map((tabId) => tabId === result.oldId ? result.newId : tabId)
+          .filter((tabId, index, allTabs) => allTabs.indexOf(tabId) === index)
+        return {
+          ...group,
+          tabs,
+          activeId: group.activeId === result.oldId ? result.newId : group.activeId,
+        }
+      }))
+      setDrafts((current) => {
+        if (!(result.oldId in current)) return current
+        const next = { ...current }
+        delete next[result.oldId]
+        next[result.newId] = result.note.content
+        return next
+      })
+      setTagDrafts((current) => {
+        if (!(result.oldId in current)) return current
+        const next = { ...current }
+        delete next[result.oldId]
+        next[result.newId] = result.note.tags.join(', ')
+        return next
+      })
+      setNotes(notesResult.status === 'fulfilled'
+        ? notesResult.value
+        : (current) => current.map((note) => note.id === result.oldId ? { ...note, ...result.note } : note))
+      setFiles(filesResult.status === 'fulfilled'
+        ? filesResult.value
+        : (current) => current.map((item) => item.id === result.oldId ? {
+            ...item,
+            id: result.newId,
+            name: result.newId.split('/').at(-1) || item.name,
+            directory,
+          } : item))
+      setExpandedDirectories((current) => {
+        const next = new Set(current).add('/')
+        let path = ''
+        for (const segment of directory.split('/').filter(Boolean)) {
+          path += `/${segment}`
+          next.add(path)
+        }
+        return next
+      })
+      setSearchResults([])
+      setAnswer(null)
+      setMessage(result.warning || `Moved note to ${result.newId}.`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not move note')
     } finally {
       setMovingFileId(null)
       setDraggedFileId(null)
-      setDropDirectory(null)
-    }
-  }
-
-  async function saveLifecycle() {
-    if (!selectedDocument?.deletable || savingLifecycle) return
-    setSavingLifecycle(true)
-    setMessage('')
-    try {
-      const updated = await api<NoteDetail>(`/api/note?id=${encodeURIComponent(selectedDocument.id)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          status: selectedDocument.status,
-          staleAfter: selectedDocument.staleAfter
-            ? new Date(`${selectedDocument.staleAfter.slice(0, 10)}T00:00:00`).toISOString()
-            : null,
-        }),
-      })
-      setSelectedDocument({ ...updated, deletable: true })
-      setNotes((current) => current.map((note) => note.id === updated.id ? { ...note, ...updated } : note))
-      setMessage('Updated lifecycle and freshness metadata.')
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not update lifecycle')
-    } finally {
-      setSavingLifecycle(false)
-    }
-  }
-
-  function applyUpdatedNote(updated: NoteDetail) {
-    setSelectedDocument((current) => current?.id === updated.id ? { ...updated, deletable: true } : current)
-    setNotes((current) => current.map((note) => note.id === updated.id ? { ...note, ...updated } : note))
-    setSearchResults((current) => current.map((note) => note.id === updated.id ? {
-      ...note,
-      ...updated,
-      snippet: updated.content.replace(/\s+/g, ' ').trim().slice(0, 320),
-    } : note))
-    setLatest((current) => current?.id === updated.id ? { ...current, ...updated } : current)
-    setAnswer((current) => current ? {
-      ...current,
-      sources: current.sources.map((note) => note.id === updated.id ? { ...note, ...updated } : note),
-    } : null)
-  }
-
-  async function updateNoteContent(nextContent: string, nextTags = selectedDocument?.tags || []) {
-    if (!selectedDocument?.deletable || !nextContent.trim() || savingContent) return null
-    const noteId = selectedDocument.id
-    setSavingContent(true)
-    setMessage('')
-    try {
-      const { warning, ...updated } = await api<NoteUpdateResult>(`/api/note?id=${encodeURIComponent(noteId)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ content: nextContent, tags: nextTags }),
-      })
-      applyUpdatedNote(updated)
-      setMessage(warning || 'Updated the note and refreshed its semantic index.')
-      return updated
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not update note')
-      return null
-    } finally {
-      setSavingContent(false)
-    }
-  }
-
-  async function saveNoteContent() {
-    const updated = await updateNoteContent(editedContent, parseTags(editedTags))
-    if (!updated) return
-    setEditingNote(false)
-    setEditedContent('')
-  }
-
-  async function confirmSemanticSuggestion(id: string) {
-    if (!selectedDocument?.deletable || confirmingSuggestion) return
-    setConfirmingSuggestion(id)
-    setMessage('')
-    try {
-      const { warning, ...updated } = await api<NoteUpdateResult>(`/api/note?id=${encodeURIComponent(selectedDocument.id)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ confirmRelatedId: id }),
-      })
-      applyUpdatedNote(updated)
-      setMessage(warning || 'Added the confirmed relationship to the Markdown note.')
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not confirm relationship')
-    } finally {
-      setConfirmingSuggestion(null)
-    }
-  }
-
-  async function toggleTaskCheckbox(lineNumber: number, checked: boolean) {
-    if (!selectedDocument?.deletable || savingContent) return
-    const previousDocument = selectedDocument
-    const nextContent = toggleTaskAtLine(previousDocument.content, lineNumber, checked)
-    if (!nextContent) return
-
-    setSelectedDocument({ ...previousDocument, content: nextContent })
-    const updated = await updateNoteContent(nextContent)
-    if (!updated) {
-      setSelectedDocument((current) => current?.id === previousDocument.id ? previousDocument : current)
-    }
-  }
-
-  async function deleteSelectedNote() {
-    if (!selectedDocument?.deletable || deleting) return
-    setDeleting(true)
-    setMessage('')
-    try {
-      const result = await api<{ deletedId: string; rawId: string | null }>(`/api/note?id=${encodeURIComponent(selectedDocument.id)}`, {
-        method: 'DELETE',
-      })
-      setNotes((current) => current.filter((note) => note.id !== result.deletedId))
-      setFiles((current) => current.filter((file) => file.id !== result.deletedId))
-      setSearchResults((current) => current.filter((note) => note.id !== result.deletedId))
-      setAnswer((current) => current ? {
-        ...current,
-        sources: current.sources.filter((note) => note.id !== result.deletedId),
-      } : null)
-      setLatest((current) => current?.id === result.deletedId ? null : current)
-      closeViewer()
-      setConfirmingDelete(false)
-      setMessage(result.rawId
-        ? `Deleted the structured note. Its raw capture remains at ${result.rawId}.`
-        : 'Deleted the structured note.')
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not delete note')
-    } finally {
-      setDeleting(false)
+      setDropDirectoryPath(null)
     }
   }
 
@@ -655,6 +1141,15 @@ function App() {
     }
   }
 
+  const fileTree = buildFileTree(files)
+  const blockedFileIds = new Set([...savingDocuments, ...loadingDocuments])
+  for (const group of groups) {
+    if (editingKey?.startsWith(`${group.id}:`)) blockedFileIds.add(editingKey.slice(group.id.length + 1))
+  }
+  const localDraftDocuments = Object.values(documents)
+    .filter((document) => isUntitledId(document.id))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+  const availableTags = Array.from(new Set(notes.flatMap((note) => note.tags))).sort((left, right) => left.localeCompare(right))
   const configuredAnswerModels = status?.answerModels || []
   const missingModels = status?.missingModels || []
   const modelInstallInProgress = installingModels || Boolean(status?.installingModels.length)
@@ -664,7 +1159,6 @@ function App() {
     && selectedAnswerModel
     && !hasInstalledModel(selectedAnswerModel, status.installed),
   )
-  const answerUsesClassifier = selectedAnswerModel === status?.classifierModel
   const modelEndpoints = [
     { id: 'capture', label: 'Capture', model: status?.classifierModel },
     { id: 'search', label: 'Search', model: status?.embedModel },
@@ -682,37 +1176,17 @@ function App() {
             : 'stopped',
   }))
 
-  const filesByDirectory = files.reduce((groups, file) => {
-    const current = groups.get(file.directory) || []
-    current.push(file)
-    groups.set(file.directory, current)
-    return groups
-  }, new Map<string, BundleFile[]>())
-  const moveDirectories = [...filesByDirectory.keys()].filter((directory) => (
-    directory !== '/daily'
-    && !directory.startsWith('/references')
-  ))
-  const availableTags = Array.from(new Set(notes.flatMap((note) => note.tags))).sort((left, right) => left.localeCompare(right))
-
   return (
     <main className="shell">
       <header className="topbar">
         <div className="brand-group">
-          <a className="brand" href="#top" aria-label="Folio home">
+          <a className="brand" href="#workspace" aria-label="Folio home">
             <span className="brand-mark">F</span>
             <span>Folio</span>
           </a>
-          {versionInfo && (
-            <span className="app-version" title={`Folio ${versionInfo.version}`}>v{versionInfo.version}</span>
-          )}
+          {versionInfo && <span className="app-version">v{versionInfo.version}</span>}
           {versionInfo?.updateAvailable && (
-            <a
-              className="update-badge"
-              href={versionInfo.latestUrl}
-              target="_blank"
-              rel="noreferrer"
-              title={`Version ${versionInfo.latest} is available`}
-            >
+            <a className="update-badge" href={versionInfo.latestUrl} target="_blank" rel="noreferrer">
               Update to v{versionInfo.latest}
             </a>
           )}
@@ -742,11 +1216,7 @@ function App() {
           ) : (
             <div className="endpoint-statuses" aria-label="Ollama endpoint status">
               {modelEndpoints.map((endpoint) => (
-                <div
-                  className={`endpoint-status ${endpoint.state}`}
-                  key={endpoint.label}
-                  title={`${endpoint.label}: ${endpoint.model || 'checking'} (${endpoint.state})`}
-                >
+                <div className={`endpoint-status ${endpoint.state}`} key={endpoint.label} title={`${endpoint.label}: ${endpoint.model || 'checking'} (${endpoint.state})`}>
                   <button
                     className="model-toggle"
                     type="button"
@@ -764,647 +1234,400 @@ function App() {
         </div>
       </header>
 
-      <section className="workspace" id="top">
-        <aside className="sidebar">
-          <div>
-            <p className="eyebrow">Knowledge bundle</p>
-            <h1>Write first.<br />Organize never.</h1>
-            <p className="intro">Drop in an unfinished thought. Your local agent files it, connects it, and finds it later.</p>
-          </div>
-
-          <div className="recent">
-            <div className="section-heading">
-              <span>Recent concepts</span>
-              <span>{notes.length}</span>
-            </div>
-            <div className="note-list">
-              {notes.slice(0, 7).map((note) => (
-                <button type="button" className="note-row" key={note.id} onClick={() => openNote(note.id)}>
-                    <span className={`type-pip type-${note.type.toLowerCase().replace(/\s+/g, '-')}`} />
-                  <div>
-                    <strong>{note.title}</strong>
-                    <small>{note.type} / {formatDate(note.createdAt)}</small>
-                  </div>
-                </button>
-              ))}
-              {!notes.length && <p className="empty">Your first concepts will appear here.</p>}
-            </div>
-          </div>
-
-          <p className="storage-note">Stored locally in <code>data/bundle</code></p>
-        </aside>
-
-        <section className="desk">
-          <nav className="mode-switch" aria-label="Workspace mode">
-            <button className={mode === 'capture' ? 'active' : ''} onClick={() => setMode('capture')}>Capture</button>
-            <button className={mode === 'search' ? 'active' : ''} onClick={() => setMode('search')}>Search</button>
-            <button className={mode === 'ask' ? 'active' : ''} onClick={() => setMode('ask')}>Ask your notes</button>
-            <button className={mode === 'explore' ? 'active' : ''} onClick={openExplorer}>Explore files</button>
+      <section className="workspace" id="workspace">
+        <aside className="workbench-sidebar">
+          <nav className="sidebar-tabs" aria-label="Sidebar tools">
+            {(['explore', 'search', 'ask'] as SidebarMode[]).map((mode) => (
+              <button
+                type="button"
+                className={sidebarMode === mode ? 'active' : ''}
+                onClick={() => setSidebarMode(mode)}
+                key={mode}
+              >
+                {mode}
+              </button>
+            ))}
           </nav>
 
-          {mode === 'capture' ? (
-            <div className="panel capture-panel">
-              <div className="panel-title">
-                <div>
-                  <p className="eyebrow">New capture</p>
-                  <h2>What is on your mind?</h2>
+          <section className="sidebar-panel">
+            {sidebarMode === 'explore' ? (
+              <>
+                <div className="sidebar-heading">
+                  <span>Explorer</span>
+                   <button type="button" onClick={reindexBundle} disabled={reindexing} title="Reread Markdown and rebuild search and relationships">
+                    {reindexing ? '...' : 'Reindex'}
+                  </button>
                 </div>
-                <span>Markdown</span>
-              </div>
-              <textarea
-                autoFocus
-                value={content}
-                onChange={(event) => setContent(event.target.value)}
-                onKeyDown={(event) => {
-                  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') saveNote()
-                }}
-                placeholder={starterPrompt}
-                aria-label="Markdown note"
-              />
-              <div className="composer-footer">
-                <p>Raw capture is preserved before the agent runs.</p>
-                <button className="primary" disabled={!content.trim() || busy} onClick={saveNote}>
-                  {busy ? 'Filing...' : 'File note'} <span>⌘↵</span>
-                </button>
-              </div>
-            </div>
-          ) : mode === 'search' ? (
-            <div className="panel ask-panel">
-              <div className="panel-title">
-                <div>
-                  <p className="eyebrow">Embedding retrieval</p>
-                  <h2>Find notes by meaning.</h2>
+                <div className="tree-scroll">
+                  {filesLoading ? (
+                    <p className="sidebar-empty">Reading bundle...</p>
+                  ) : (
+                    <>
+                      {localDraftDocuments.length > 0 && (
+                        <div className="tree-branch local-drafts">
+                          <div className="tree-row tree-directory static" style={{ '--tree-depth': 0 } as React.CSSProperties}>
+                            <span className="tree-chevron">v</span>
+                            <span className="tree-folder" aria-hidden="true" />
+                            <span>Drafts</span>
+                            <small>{localDraftDocuments.length}</small>
+                          </div>
+                          {localDraftDocuments.map((draft) => (
+                            <button type="button" className="tree-row tree-file" style={{ '--tree-depth': 1 } as React.CSSProperties} onClick={() => openLocalDraft(draft.id)} title="Local draft" key={draft.id}>
+                              <span className="tree-file-mark">D</span>
+                              <span>{draftTitle(drafts[draft.id] ?? draft.content)}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <FileTree
+                        directory={fileTree}
+                        depth={0}
+                        expanded={expandedDirectories}
+                        draggedFileId={draggedFileId}
+                        dropDirectoryPath={dropDirectoryPath}
+                        movingFileId={movingFileId}
+                        blockedFileIds={blockedFileIds}
+                        onToggle={(path) => setExpandedDirectories((current) => {
+                          const next = new Set(current)
+                          if (next.has(path)) next.delete(path)
+                          else next.add(path)
+                          return next
+                        })}
+                        onOpen={(id) => void openDocument(id, 'file')}
+                        onFileDragStart={setDraggedFileId}
+                        onFileDragEnd={() => { setDraggedFileId(null); setDropDirectoryPath(null) }}
+                        onDirectoryDragOver={setDropDirectoryPath}
+                        onMove={(id, directory) => void moveBundleFile(id, directory)}
+                      />
+                    </>
+                  )}
                 </div>
-                <span>
-                  {status?.embeddingCoverage?.refreshing
-                    ? 'Indexing...'
-                    : `${status?.embeddingCoverage?.conceptsEmbedded || 0}/${status?.embeddingCoverage?.conceptsTotal || 0} notes, ${status?.embeddingCoverage?.chunksEmbedded || 0}/${status?.embeddingCoverage?.chunksTotal || 0} chunks`}
-                </span>
-              </div>
-              <div className="ask-form">
-                <input
-                  autoFocus
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  onKeyDown={(event) => event.key === 'Enter' && searchNotes()}
-                  placeholder="decisions about preserving original notes"
-                  aria-label="Search your notes"
-                />
-                <button className="primary" disabled={(!searchQuery.trim() && !selectedTag) || searching} onClick={() => searchNotes()}>
-                  {searching ? 'Searching...' : 'Search'}
-                </button>
-              </div>
-              {availableTags.length > 0 && (
-                <div className="tag-filters" aria-label="Filter by tag">
-                  <button
-                    type="button"
-                    className={!selectedTag ? 'active' : ''}
-                    onClick={() => {
+              </>
+            ) : sidebarMode === 'search' ? (
+              <>
+                <div className="sidebar-heading">
+                  <span>Search</span>
+                  <small>{status?.embeddingCoverage?.refreshing ? 'Indexing' : `${notes.length} notes`}</small>
+                </div>
+                <form className="sidebar-form" onSubmit={(event) => { event.preventDefault(); void searchNotes() }}>
+                  <input
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Search by meaning"
+                    aria-label="Search your notes"
+                  />
+                  <button type="submit" disabled={(!searchQuery.trim() && !selectedTag) || searching}>
+                    {searching ? '...' : 'Go'}
+                  </button>
+                </form>
+                {availableTags.length > 0 && (
+                  <div className="sidebar-tags" aria-label="Filter by tag">
+                    <button type="button" className={!selectedTag ? 'active' : ''} onClick={() => {
                       setSelectedTag('')
                       if (searchQuery.trim()) void searchNotes(searchQuery, '')
-                      else {
-                        searchRequest.current += 1
-                        setSearching(false)
-                        setSearchResults([])
-                      }
-                    }}
-                  >
-                    All tags
-                  </button>
-                  {availableTags.map((tag) => (
-                    <button type="button" className={selectedTag === tag ? 'active' : ''} onClick={() => searchTag(tag)} key={tag}>
-                      #{tag}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {searchResults.length ? (
-                <div className="search-results">
-                  {searchResults.map((result) => (
-                    <article className="search-result" key={result.id}>
-                      <button type="button" className="search-result-main" onClick={() => openNote(result.id)}>
-                        <div className="search-result-meta">
-                          <span>{result.type}</span>
-                          <small>{!searchQuery.trim() && selectedTag ? `#${selectedTag}` : `${Math.round(result.score * 100)}% match`}</small>
-                        </div>
-                        <strong>{result.title}</strong>
-                        <p>{result.description}</p>
-                        <blockquote>{result.snippet}</blockquote>
-                      </button>
-                      <div className="result-tags">
-                        {result.tags.map((tag) => (
-                          <button
-                            type="button"
-                            key={tag}
-                            onClick={() => searchTag(tag)}
-                          >
-                            #{tag}
-                          </button>
-                        ))}
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <div className="ask-empty">
-                  <span>⌕</span>
-                  <p>EmbeddingGemma and keyword matching return source notes directly. The heavy answer model is not loaded.</p>
-                </div>
-              )}
-            </div>
-          ) : mode === 'ask' ? (
-            <div className="panel ask-panel">
-              <div className="panel-title">
-                <div>
-                  <p className="eyebrow">Local synthesis</p>
-                  <h2>Synthesize your knowledge.</h2>
-                </div>
-                <label className="answer-model" htmlFor="answer-model">
-                  <span>Answer model</span>
-                  <select
-                    id="answer-model"
-                    value={selectedAnswerModel}
-                    onChange={(event) => {
-                      setAskModel(event.target.value)
-                      setAnswer(null)
-                    }}
-                    disabled={busy || !configuredAnswerModels.length}
-                  >
-                    {configuredAnswerModels.map((model) => {
-                      const installed = !status?.online || hasInstalledModel(model, status.installed)
-                      return (
-                        <option key={model} value={model} disabled={!installed}>
-                          {model}{installed ? '' : ' (not installed)'}
-                        </option>
-                      )
-                    })}
-                  </select>
-                </label>
-              </div>
-              <div className="ask-form">
-                <input
-                  autoFocus
-                  value={question}
-                  onChange={(event) => setQuestion(event.target.value)}
-                  onKeyDown={(event) => event.key === 'Enter' && askNotes()}
-                  placeholder="What did I decide last week, and what should I do next?"
-                  aria-label="Question for your notes"
-                />
-                <button className="primary" disabled={!question.trim() || busy || selectedAnswerModelMissing} onClick={askNotes}>
-                  {busy ? 'Asking...' : 'Ask'}
-                </button>
-              </div>
-              {answer ? (
-                <div className="answer">
-                  <p className="eyebrow">Answer / {answer.model} / {answer.retrieval}</p>
-                  <div className="answer-copy">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        a: ({ href, children }) => href?.startsWith('/') ? (
-                          <a
-                            href={conceptUrl(href)}
-                            onClick={(event) => {
-                              event.preventDefault()
-                              openNote(href)
-                            }}
-                          >
-                            {children}
-                          </a>
-                        ) : <span className="citation">{children}</span>,
-                      }}
-                    >
-                      {answer.answer}
-                    </ReactMarkdown>
-                  </div>
-                  <div className="sources">
-                    {answer.sources.map((source) => (
-                      <button type="button" onClick={() => openNote(source.id)} key={source.id}>{source.title}</button>
+                      else setSearchResults([])
+                    }}>All</button>
+                    {availableTags.map((tag) => (
+                      <button type="button" className={selectedTag === tag ? 'active' : ''} onClick={() => searchTag(tag)} key={tag}>#{tag}</button>
                     ))}
                   </div>
+                )}
+                <div className="sidebar-results">
+                  {searchResults.map((result) => (
+                    <button type="button" className="sidebar-result" onClick={() => void openDocument(result.id, 'note')} key={result.id}>
+                      <span>{result.type} / {Math.round(result.score * 100)}%</span>
+                      <strong>{result.title}</strong>
+                      <p>{result.snippet}</p>
+                    </button>
+                  ))}
+                  {!searchResults.length && <p className="sidebar-empty">Search results open as editor tabs.</p>}
                 </div>
-              ) : (
-                <div className="ask-empty">
-                  <span>?</span>
-                  <p>
-                    {answerUsesClassifier
-                      ? `OKF metadata and embeddings retrieve relevant notes. ${selectedAnswerModel} is shared with Capture and stays warm after answering.`
-                      : `OKF metadata and embeddings retrieve relevant notes. ${selectedAnswerModel || 'The selected model'} loads only when you ask, then unloads from memory.`}
-                  </p>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="panel explorer-panel">
-              <div className="panel-title">
-                <div>
-                  <p className="eyebrow">OKF bundle</p>
-                  <h2>Explore the source files.</h2>
-                </div>
-                <button className="reindex-button" type="button" disabled={reindexing} onClick={reindexBundle}>
-                  {reindexing ? 'Reindexing...' : `Reindex ${files.length} files`}
-                </button>
-              </div>
-              {filesLoading ? (
-                <div className="explorer-empty">Reading bundle...</div>
-              ) : files.length ? (
-                <div className="file-browser">
-                  {[...filesByDirectory.entries()].map(([directory, directoryFiles]) => {
-                    const acceptsDrop = moveDirectories.includes(directory)
-                    return (
-                      <section
-                        className={`file-group ${acceptsDrop && dropDirectory === directory ? 'drop-target' : ''}`}
-                        key={directory}
-                        onDragEnter={(event) => {
-                          if (!acceptsDrop) return
-                          event.preventDefault()
-                          if (draggedFileId || event.dataTransfer.types.includes('application/x-folio-file')) {
-                            setDropDirectory(directory)
-                          }
-                        }}
-                        onDragOver={(event) => {
-                          if (!acceptsDrop) return
-                          event.preventDefault()
-                          event.dataTransfer.dropEffect = 'move'
-                        }}
-                        onDrop={(event) => {
-                          if (!acceptsDrop) return
-                          event.preventDefault()
-                          const fileId = event.dataTransfer.getData('application/x-folio-file')
-                            || event.dataTransfer.getData('text/plain')
-                            || draggedFileId
-                          if (fileId) void moveFile(fileId, directory)
-                        }}
-                      >
-                        <div className="file-directory">
-                          <span>{directory}</span>
-                          <small>{acceptsDrop && dropDirectory === directory ? 'Move here' : directoryFiles.length}</small>
-                        </div>
-                        {directoryFiles.map((file) => (
-                          <div className="file-row-wrap" key={file.id}>
-                            <div
-                              className={`file-row ${movingFileId === file.id ? 'moving' : ''}`}
-                              draggable={file.movable && !movingFileId && editingFileId !== file.id}
-                              title={file.movable ? 'Drag this file to another directory' : undefined}
-                              onDragStart={(event) => {
-                                if (!file.movable) {
-                                  event.preventDefault()
-                                  return
-                                }
-                                event.dataTransfer.effectAllowed = 'move'
-                                event.dataTransfer.setData('application/x-folio-file', file.id)
-                                event.dataTransfer.setData('text/plain', file.id)
-                                setDraggedFileId(file.id)
-                              }}
-                              onDragEnd={() => {
-                                setDraggedFileId(null)
-                                setDropDirectory(null)
-                              }}
-                            >
-                              <span className="file-mark">MD</span>
-                              <button type="button" className="file-copy" onClick={() => openFile(file.id)}>
-                                <strong>{file.name}</strong>
-                                <small>{file.filedBy?.startsWith('human:') ? `${file.type} / human-filed` : file.type}</small>
-                              </button>
-                              {file.movable && (
-                                <button
-                                  type="button"
-                                  className="file-path-action"
-                                  disabled={Boolean(movingFileId)}
-                                  onClick={() => {
-                                    setEditingFileId(file.id)
-                                    setFilePathInput(file.directory)
-                                  }}
-                                  aria-label={`Edit path for ${file.name}`}
-                                >
-                                  Edit path
-                                </button>
-                              )}
-                              <button type="button" className="file-open" onClick={() => openFile(file.id)}>
-                                {movingFileId === file.id ? 'Moving' : 'Open'}
-                              </button>
-                            </div>
-                            {editingFileId === file.id && (
-                              <form
-                                className="file-path-editor"
-                                onSubmit={(event) => {
-                                  event.preventDefault()
-                                  void moveFile(file.id, filePathInput)
-                                }}
-                              >
-                                <label>
-                                  <span>Directory path</span>
-                                  <input
-                                    autoFocus
-                                    list="bundle-path-options"
-                                    value={filePathInput}
-                                    onChange={(event) => setFilePathInput(event.target.value)}
-                                    placeholder="/projects/example"
-                                    aria-label={`Directory path for ${file.name}`}
-                                  />
-                                </label>
-                                <span className="file-path-name">/{file.name}</span>
-                                <button type="button" className="secondary" onClick={() => setEditingFileId(null)}>Cancel</button>
-                                <button type="submit" className="secondary" disabled={movingFileId === file.id || !filePathInput.trim()}>
-                                  {movingFileId === file.id ? 'Moving...' : 'Move'}
-                                </button>
-                              </form>
-                            )}
-                          </div>
-                        ))}
-                      </section>
-                    )
-                  })}
-                </div>
-              ) : (
-                <div className="explorer-empty">No Markdown files found in the bundle.</div>
-              )}
-            </div>
-          )}
-
-          {(message || latest) && (
-            <div className={`result-card ${latest ? 'has-note' : ''}`}>
-              <p>{message}</p>
-              {latest && (
-                <button type="button" className="classification" onClick={() => openNote(latest.id)}>
-                  <span>{latest.type}</span>
-                  <strong>{latest.title}</strong>
-                  <p>{latest.description}</p>
-                  <div>{latest.tags.map((tag) => <small key={tag}>#{tag}</small>)}</div>
-                </button>
-              )}
-            </div>
-          )}
-        </section>
-      </section>
-
-      {viewerId && (
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              closeViewer()
-            }
-          }}
-        >
-          <section className="note-modal" role="dialog" aria-modal="true" aria-label={selectedDocument?.title || 'Loading note'}>
-            <button
-              type="button"
-              className="modal-close"
-              onClick={closeViewer}
-              aria-label="Close note"
-            >
-              Close
-            </button>
-            {viewerLoading || !selectedDocument ? (
-              <div className="modal-loading">Opening note...</div>
+              </>
             ) : (
               <>
-                <header className="modal-header">
-                  <p className="eyebrow">
-                    {selectedDocument.type} / {selectedDocument.status}{selectedDocument.stale ? ' / stale' : ''}
-                  </p>
-                  <h2>{selectedDocument.title}</h2>
-                  <p>{selectedDocument.description}</p>
-                  <div className="modal-meta">
-                    {editingPath ? (
-                      <form
-                        className="path-editor"
-                        onSubmit={(event) => {
-                          event.preventDefault()
-                          void moveFile(selectedDocument.id, pathInput)
-                        }}
-                      >
-                        <label>
-                          <span>Bundle path</span>
-                          <input
-                            aria-label="Bundle directory"
-                            autoFocus
-                            list="bundle-path-options"
-                            value={pathInput}
-                            onChange={(event) => setPathInput(event.target.value)}
-                            placeholder="/projects/example"
-                          />
-                        </label>
-                        <span className="path-filename">/{selectedDocument.id.split('/').at(-1)}</span>
-                        <button type="button" className="secondary" disabled={movingFileId === selectedDocument.id} onClick={() => setEditingPath(false)}>Cancel</button>
-                        <button type="submit" className="secondary" disabled={movingFileId === selectedDocument.id || !pathInput.trim()}>
-                          {movingFileId === selectedDocument.id ? 'Moving...' : 'Move'}
-                        </button>
-                      </form>
-                    ) : (
-                      <button
-                        type="button"
-                        className="path-button"
-                        disabled={!selectedDocument.movable || Boolean(movingFileId) || savingLifecycle || savingContent || deleting}
-                        title={selectedDocument.movable ? 'Move this note to another bundle path' : 'This OKF path is fixed'}
-                        onClick={() => {
-                          setPathInput(bundleDirectory(selectedDocument.id))
-                          setEditingPath(true)
-                          setEditingNote(false)
-                        }}
-                      >
-                        {selectedDocument.id}
-                      </button>
-                    )}
-                    <span>{formatDate(selectedDocument.createdAt)}</span>
-                    {selectedDocument.filedBy?.startsWith('human:') && selectedDocument.filedAt && (
-                      <span>Human-filed {formatDate(selectedDocument.filedAt)}</span>
-                    )}
-                    {selectedDocument.tags.map((tag) => (
-                      <button type="button" className="tag-chip" key={tag} onClick={() => searchTag(tag)}>#{tag}</button>
+                <div className="sidebar-heading">
+                  <span>Ask</span>
+                  <select value={selectedAnswerModel} onChange={(event) => { setAskModel(event.target.value); setAnswer(null) }} disabled={asking || !configuredAnswerModels.length} aria-label="Answer model">
+                    {configuredAnswerModels.map((model) => (
+                      <option key={model} value={model} disabled={Boolean(status?.online && !hasInstalledModel(model, status.installed))}>{model}</option>
                     ))}
-                  </div>
-                  {selectedDocument.deletable && !editingNote && !editingPath && !movingFileId && (
-                    <button
-                      type="button"
-                      className="secondary edit-note-button"
-                      onClick={() => {
-                        setEditedContent(selectedDocument.content)
-                        setEditedTags(selectedDocument.tags.join(', '))
-                        setEditingNote(true)
-                        setEditingPath(false)
-                        setConfirmingDelete(false)
-                      }}
-                    >
-                      Edit note
-                    </button>
-                  )}
-                </header>
-                {editingNote ? (
-                  <div className="modal-content modal-editor">
-                    <textarea
-                      aria-label="Note content"
-                      autoFocus
-                      value={editedContent}
-                      onChange={(event) => setEditedContent(event.target.value)}
-                      onKeyDown={(event) => {
-                        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                          event.preventDefault()
-                          saveNoteContent()
-                        }
-                      }}
-                    />
-                    <label className="tag-editor">
-                      <span>Tags, separated by commas</span>
-                      <input value={editedTags} onChange={(event) => setEditedTags(event.target.value)} />
-                    </label>
-                    <div className="editor-actions">
-                      <p>Edit the Markdown and its search tags directly.</p>
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={savingContent}
-                        onClick={() => {
-                          setEditingNote(false)
-                          setEditedContent('')
-                        }}
-                      >
-                        Cancel
-                      </button>
-                      <button type="button" className="primary" disabled={savingContent || !editedContent.trim()} onClick={saveNoteContent}>
-                        {savingContent ? 'Saving...' : 'Save changes'}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="modal-content">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        a: ({ href, children }) => {
-                          const linkedFile = resolveBundleLink(selectedDocument.id, href)
-                          return linkedFile ? (
-                            <a
-                              href={conceptUrl(linkedFile)}
-                              onClick={(event) => {
-                                event.preventDefault()
-                                openFile(linkedFile)
-                              }}
-                            >
-                              {children}
-                            </a>
-                          ) : <a href={href}>{children}</a>
-                        },
-                        li: ({ node, ...props }) => (
-                          <li {...props} data-source-line={node?.position?.start.line} />
-                        ),
-                        input: ({ node: _node, ...props }) => (
-                          <input
-                            {...props}
-                            disabled={props.type !== 'checkbox' || !selectedDocument.deletable || savingContent || Boolean(movingFileId)}
-                            onChange={(event) => {
-                              const lineNumber = Number(event.currentTarget.closest('li')?.dataset.sourceLine)
-                              if (lineNumber) toggleTaskCheckbox(lineNumber, event.currentTarget.checked)
-                            }}
-                          />
-                        ),
-                      }}
-                    >
-                      {selectedDocument.content}
-                    </ReactMarkdown>
-                  </div>
-                )}
-                {(selectedDocument.links.length > 0 || selectedDocument.backlinks.length > 0 || selectedDocument.suggestions.length > 0) && (
-                  <section className="relationship-panel">
-                    {selectedDocument.links.length > 0 && (
-                      <div>
-                        <p className="eyebrow">Links</p>
-                        {selectedDocument.links.map((relationship) => (
-                          <button type="button" key={`${relationship.id}-${relationship.relation}`} onClick={() => openFile(relationship.id)}>
-                            <span>{relationship.relation}</span>
-                            <strong>{relationship.title}</strong>
-                            <small>{relationship.type}</small>
-                          </button>
+                  </select>
+                </div>
+                <form className="sidebar-ask-form" onSubmit={(event) => { event.preventDefault(); void askNotes() }}>
+                  <textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask your notes..." aria-label="Question for your notes" />
+                  <button type="submit" disabled={!question.trim() || asking || selectedAnswerModelMissing}>{asking ? 'Thinking...' : 'Ask notes'}</button>
+                </form>
+                <div className="sidebar-answer">
+                  {answer ? (
+                    <>
+                      <div className="answer-copy">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            a: ({ href, children }) => href?.startsWith('/') ? (
+                              <a href={conceptUrl(href)} onClick={(event) => { event.preventDefault(); void openDocument(href, 'note') }}>{children}</a>
+                            ) : <span className="citation">{children}</span>,
+                          }}
+                        >
+                          {answer.answer}
+                        </ReactMarkdown>
+                      </div>
+                      <div className="answer-sources">
+                        {answer.sources.map((source) => (
+                          <button type="button" onClick={() => void openDocument(source.id, 'note')} key={source.id}>{source.title}</button>
                         ))}
                       </div>
-                    )}
-                    {selectedDocument.backlinks.length > 0 && (
-                      <div>
-                        <p className="eyebrow">Linked from</p>
-                        {selectedDocument.backlinks.map((relationship) => (
-                          <button type="button" key={`${relationship.id}-${relationship.relation}`} onClick={() => openFile(relationship.id)}>
-                            <span>{relationship.relation}</span>
-                            <strong>{relationship.title}</strong>
-                            <small>{relationship.type}</small>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {selectedDocument.suggestions.length > 0 && (
-                      <div>
-                        <p className="eyebrow">Suggested links</p>
-                        {selectedDocument.suggestions.map((relationship) => (
-                          <button
-                            type="button"
-                            key={relationship.id}
-                            disabled={Boolean(movingFileId) || confirmingSuggestion === relationship.id}
-                            onClick={() => confirmSemanticSuggestion(relationship.id)}
-                          >
-                            <span>{confirmingSuggestion === relationship.id ? 'Adding...' : 'Confirm link'}</span>
-                            <strong>{relationship.title}</strong>
-                            <small>{relationship.type}</small>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </section>
-                )}
-                {selectedDocument.deletable && !editingNote && !editingPath && !movingFileId && (
-                  <footer className="modal-actions">
-                    {confirmingDelete ? (
-                      <div className="delete-confirmation">
-                        <p>Delete this structured note? The immutable raw capture will be kept.</p>
-                        <div>
-                          <button type="button" className="secondary" onClick={() => setConfirmingDelete(false)}>Cancel</button>
-                          <button type="button" className="danger" disabled={deleting} onClick={deleteSelectedNote}>
-                            {deleting ? 'Deleting...' : 'Delete note'}
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="lifecycle-controls">
-                          <label>
-                            <span>Status</span>
-                            <select
-                              value={selectedDocument.status}
-                              onChange={(event) => setSelectedDocument({
-                                ...selectedDocument,
-                                status: event.target.value as ViewerDocument['status'],
-                              })}
-                            >
-                              <option value="draft">Draft</option>
-                              <option value="stable">Stable</option>
-                              <option value="deprecated">Deprecated</option>
-                            </select>
-                          </label>
-                          <label>
-                            <span>Stale after</span>
-                            <input
-                              type="date"
-                              value={selectedDocument.staleAfter?.slice(0, 10) || ''}
-                              onChange={(event) => setSelectedDocument({ ...selectedDocument, staleAfter: event.target.value || null })}
-                            />
-                          </label>
-                          <button type="button" className="secondary" disabled={savingLifecycle} onClick={saveLifecycle}>
-                            {savingLifecycle ? 'Saving...' : 'Save lifecycle'}
-                          </button>
-                        </div>
-                        <button type="button" className="danger subtle" onClick={() => setConfirmingDelete(true)}>Delete note</button>
-                      </>
-                    )}
-                  </footer>
-                )}
+                    </>
+                  ) : <p className="sidebar-empty">Answers stay here. Sources open in the editor.</p>}
+                </div>
               </>
             )}
           </section>
-        </div>
-      )}
-      <datalist id="bundle-path-options">
-        {moveDirectories.map((directory) => <option value={directory} key={directory} />)}
-      </datalist>
+
+          <section className="recent-panel">
+            <div className="sidebar-heading">
+              <span>Recent concepts</span>
+              <small>{notes.length}</small>
+            </div>
+            <div className="recent-list">
+              {notes.slice(0, 7).map((note) => (
+                <button type="button" className="recent-row" key={note.id} onClick={() => void openDocument(note.id, 'note')}>
+                  <span className={`type-pip type-${note.type.toLowerCase().replace(/\s+/g, '-')}`} />
+                  <span>
+                    <strong>{note.title}</strong>
+                    <small>{note.type} / {formatDate(note.createdAt)}</small>
+                  </span>
+                </button>
+              ))}
+              {!notes.length && <p className="sidebar-empty">No concepts yet.</p>}
+            </div>
+          </section>
+        </aside>
+
+        <section className={`editor-workspace ${groups.length === 2 ? 'is-split' : ''}`}>
+          {groups.map((group) => {
+            const document = group.activeId ? documents[group.activeId] : null
+            const isLoading = Boolean(group.activeId && loadingDocuments.has(group.activeId))
+            const editKey = document ? `${group.id}:${document.id}` : ''
+            const isEditing = editingKey === editKey
+            return (
+              <section
+                className={`editor-group ${activeGroupId === group.id ? 'active' : ''} ${dropGroupId === group.id ? 'drop-target' : ''}`}
+                onMouseDown={() => setActiveGroupId(group.id)}
+                onDragOver={(event) => {
+                  if (!draggedTab) return
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'move'
+                  setDropGroupId(group.id)
+                }}
+                onDragLeave={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropGroupId(null)
+                }}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  const payload = event.dataTransfer.getData('application/x-folio-tab')
+                  let tab = draggedTab
+                  if (payload) {
+                    try {
+                      const parsed = JSON.parse(payload) as { documentId?: unknown; groupId?: unknown }
+                      if (typeof parsed.documentId === 'string' && typeof parsed.groupId === 'string') {
+                        tab = { documentId: parsed.documentId, groupId: parsed.groupId }
+                      }
+                    } catch {
+                      tab = null
+                    }
+                  }
+                  if (tab) moveTabToGroup(tab.documentId, tab.groupId, group.id)
+                  setDraggedTab(null)
+                  setDropGroupId(null)
+                }}
+                key={group.id}
+              >
+                <div className="editor-tabs">
+                  <div className="tab-strip">
+                    {group.tabs.map((id) => (
+                      <button
+                        type="button"
+                        className={`editor-tab ${group.activeId === id ? 'active' : ''}`}
+                        onClick={() => activateTab(group.id, id)}
+                        draggable
+                        onDragStart={(event) => {
+                          const payload = { documentId: id, groupId: group.id }
+                          event.dataTransfer.effectAllowed = 'move'
+                          event.dataTransfer.setData('application/x-folio-tab', JSON.stringify(payload))
+                          setDraggedTab(payload)
+                        }}
+                        onDragEnd={() => { setDraggedTab(null); setDropGroupId(null) }}
+                        title={id}
+                        key={id}
+                      >
+                        <span className="tab-file-mark">{isUntitledId(id) ? '+' : 'M'}</span>
+                        <span>{titleForId(id)}</span>
+                        {savingDocuments.has(id) && <span className="tab-saving" title="Saving" />}
+                        <span
+                          className="tab-close"
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`Close ${titleForId(id)}`}
+                          onClick={(event) => { event.stopPropagation(); closeTab(group.id, id) }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault()
+                              event.stopPropagation()
+                              closeTab(group.id, id)
+                            }
+                          }}
+                        >x</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="group-actions">
+                    <button type="button" onClick={() => createNewTab(group.id)} title="New note (Cmd+T)" aria-label="New note">+</button>
+                    {groups.length === 1 ? (
+                      <button type="button" onClick={splitWorkspace} title="Split editor">Split</button>
+                    ) : (
+                      <button type="button" onClick={() => closeGroup(group.id)} title="Close editor group">Close group</button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="editor-surface">
+                  {isLoading ? (
+                    <div className="editor-placeholder"><span>Opening file...</span></div>
+                  ) : document ? (
+                    <article className={`document-view ${isUntitledId(document.id) ? 'untitled' : ''}`}>
+                      {!isUntitledId(document.id) && (
+                        <header className="document-heading">
+                          <p>{document.type}{document.stale ? ' / stale' : ''}</p>
+                          <h1>{document.title}</h1>
+                          {document.description && <span>{document.description}</span>}
+                        </header>
+                      )}
+                      {isEditing ? (
+                        <textarea
+                          className="document-editor"
+                          autoFocus
+                          value={drafts[document.id] ?? document.content}
+                          onChange={(event) => {
+                            const content = event.target.value
+                            setDrafts((current) => ({ ...current, [document.id]: content }))
+                            if (isUntitledId(document.id)) {
+                              setDocuments((current) => ({
+                                ...current,
+                                [document.id]: {
+                                  ...current[document.id],
+                                  content,
+                                  updatedAt: new Date().toISOString(),
+                                },
+                              }))
+                            }
+                          }}
+                          onBlur={() => finishEditing(group.id, document)}
+                          onKeyDown={(event) => {
+                            if (isUntitledId(document.id) && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                              event.preventDefault()
+                              fileDraft(document)
+                            }
+                          }}
+                          placeholder={isUntitledId(document.id) ? 'Start typing. This stays a local draft until you file it with Cmd+Enter.' : undefined}
+                          aria-label={`Edit ${document.title}`}
+                        />
+                      ) : (
+                        <div
+                          className={`document-content ${document.deletable ? 'editable' : 'read-only'}`}
+                          onClick={(event) => {
+                            if ((event.target as Element).closest('a, button, input')) return
+                            beginEditing(group.id, document)
+                          }}
+                          title={document.deletable ? 'Click to edit' : 'Read-only file'}
+                        >
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              a: ({ href, children }) => {
+                                const linkedFile = resolveBundleLink(document.id, href)
+                                return linkedFile ? (
+                                  <a href={conceptUrl(linkedFile)} onClick={(event) => { event.preventDefault(); void openDocument(linkedFile, 'file', group.id) }}>{children}</a>
+                                ) : <a href={href}>{children}</a>
+                              },
+                              li: ({ node, ...props }) => <li {...props} data-source-line={node?.position?.start.line} />,
+                              input: ({ node: _node, ...props }) => (
+                                <input
+                                  {...props}
+                                  disabled={props.type !== 'checkbox' || !document.deletable || savingDocuments.has(document.id)}
+                                  onChange={(event) => {
+                                    const lineNumber = Number(event.currentTarget.closest('li')?.dataset.sourceLine)
+                                    if (lineNumber) void toggleTaskCheckbox(document, lineNumber, event.currentTarget.checked)
+                                  }}
+                                />
+                              ),
+                            }}
+                          >
+                            {document.content}
+                          </ReactMarkdown>
+                        </div>
+                      )}
+                      <footer className="document-footer">
+                        <div className="document-footer-details">
+                          <div className="document-path" title={document.id}>
+                            <span>Path</span>
+                            <strong>{isUntitledId(document.id) ? 'Unfiled' : document.id}</strong>
+                          </div>
+                          <div className="document-tags">
+                            <span>Tags</span>
+                            {isUntitledId(document.id) ? (
+                              <strong>Assigned when filed</strong>
+                            ) : document.deletable ? (
+                              <input
+                                value={tagDrafts[document.id] ?? document.tags.join(', ')}
+                                onFocus={() => setTagDrafts((current) => ({ ...current, [document.id]: document.tags.join(', ') }))}
+                                onChange={(event) => setTagDrafts((current) => ({ ...current, [document.id]: event.target.value }))}
+                                onBlur={(event) => {
+                                  const tags = parseTags(event.target.value)
+                                  setTagDrafts((current) => {
+                                    const next = { ...current }
+                                    delete next[document.id]
+                                    return next
+                                  })
+                                  if (tags.join('\0') !== document.tags.join('\0')) persistDocument(document, document.content, tags)
+                                }}
+                                aria-label={`Tags for ${document.title}`}
+                              />
+                            ) : (
+                              <strong>{document.tags.length ? document.tags.map((tag) => `#${tag}`).join(' ') : 'None'}</strong>
+                            )}
+                          </div>
+                          <div><span>Status</span><strong>{document.status}</strong></div>
+                          <div><span>Created</span><strong>{formatDate(document.createdAt)}</strong></div>
+                          <div><span>Filing</span><strong>{isUntitledId(document.id) ? 'Pending' : document.filedBy?.startsWith('human:') ? 'Human' : 'Agent'}</strong></div>
+                        </div>
+                        <div className="save-state">
+                          <span>State</span>
+                          {isUntitledId(document.id) ? (
+                            <button type="button" onClick={() => fileDraft(document)} disabled={savingDocuments.has(document.id) || !(drafts[document.id] || '').trim()} title="Classify and add to the bundle (Cmd+Enter)">
+                              {savingDocuments.has(document.id) ? 'Filing...' : 'File note'}
+                            </button>
+                          ) : (
+                            <strong>{savingDocuments.has(document.id) ? 'Saving...' : document.deletable ? 'Saved' : 'Read only'}</strong>
+                          )}
+                        </div>
+                      </footer>
+                    </article>
+                  ) : (
+                    <div className="editor-placeholder">
+                      <span className="empty-mark">F</span>
+                      <h1>Open a note.</h1>
+                      <p>Explore the bundle, search by meaning, or ask a question. Every file opens here.</p>
+                      <button type="button" className="empty-new-note" onClick={() => createNewTab(group.id)}>New note</button>
+                    </div>
+                  )}
+                </div>
+              </section>
+            )
+          })}
+          {message && <button type="button" className="workspace-message" onClick={() => setMessage('')} title="Dismiss">{message}</button>}
+        </section>
+      </section>
     </main>
   )
 }
