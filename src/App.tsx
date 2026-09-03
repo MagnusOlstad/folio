@@ -920,7 +920,7 @@ function App() {
     const newGroupId = source.id === 'primary' ? 'secondary' : 'primary'
     setGroups((current) => [
       ...current,
-      { id: newGroupId, tabs: source.activeId ? [source.activeId] : [], activeId: source.activeId },
+      { id: newGroupId, tabs: [], activeId: null },
     ])
     setActiveGroupId(newGroupId)
   }
