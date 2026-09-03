@@ -169,6 +169,8 @@ data/
   bundle/
     index.md
     log.md
+    getting-started/
+      start-here.md
     meeting-notes/
       morning-meeting/
     daily/
@@ -180,7 +182,7 @@ data/
 
 The raw capture is written first to `data/bundle/references/inbox/`. A normal classified note is then stored whole in an agent-selected directory hierarchy and cites the raw capture as its source. Todo and daily captures are the only append operations; their immutable raw captures remain available separately.
 
-`data/` is gitignored so local notes are never committed. The packaged app ships the empty starter bundle in `seed-data/` instead, copied to `~/Documents/Folio` on first launch.
+`data/` is gitignored so local notes are never committed. The packaged app ships an onboarding bundle in `seed-data/` with guides plus Todo and Daily examples, copied to `~/Documents/Folio` on first launch.
 
 `search-index.json` is a derived cache containing note text plus concept and overlapping chunk embeddings. The Markdown bundle remains the human-readable source of truth. Folio parses full YAML frontmatter and rebuilds the cache from Markdown at startup or from the Explorer's Reindex action. Existing embeddings are retained when their source content has not changed; missing or invalidated embeddings refresh automatically when Ollama is available and can also be regenerated explicitly from Explorer.
 

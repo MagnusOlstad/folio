@@ -152,6 +152,11 @@ type EditorIntent = {
   scrollTop: number
 }
 
+type ExpandedDirectoryState = {
+  directories: Set<string>
+  restored: boolean
+}
+
 type MarkdownNode = {
   position?: {
     start: { line: number }
@@ -216,6 +221,33 @@ function hasInstalledModel(model: string, installed: string[]) {
 
 function isUntitledId(id: string) {
   return id.startsWith('untitled:')
+}
+
+function loadExpandedDirectoryState(): ExpandedDirectoryState {
+  try {
+    const stored = window.localStorage.getItem('folio:expanded-directories')
+    if (stored === null) return { directories: new Set(), restored: false }
+    const parsed = JSON.parse(stored)
+    if (!Array.isArray(parsed)) throw new Error('Invalid expanded directory state')
+    return {
+      directories: new Set(parsed.filter((path): path is string => typeof path === 'string')),
+      restored: true,
+    }
+  } catch {
+    return { directories: new Set(), restored: false }
+  }
+}
+
+function expandedPathsForFiles(files: BundleFile[]) {
+  const expanded = new Set<string>(['/'])
+  for (const file of files) {
+    let currentPath = ''
+    for (const segment of file.directory.split('/').filter(Boolean)) {
+      currentPath += `/${segment}`
+      expanded.add(currentPath)
+    }
+  }
+  return expanded
 }
 
 function toggleTaskAtLine(content: string, lineNumber: number, checked: boolean) {
@@ -573,6 +605,7 @@ function FileTree({
 }
 
 function App() {
+  const [initialExpandedDirectoryState] = useState(loadExpandedDirectoryState)
   const [documents, setDocuments] = useState<Record<string, ViewerDocument>>(() => Object.fromEntries(
     loadLocalDrafts().map((document) => [document.id, document]),
   ))
@@ -580,7 +613,8 @@ function App() {
   const [notes, setNotes] = useState<Note[]>([])
   const [files, setFiles] = useState<BundleFile[]>([])
   const [filesLoading, setFilesLoading] = useState(true)
-  const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(() => new Set())
+  const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(initialExpandedDirectoryState.directories)
+  const [expandedDirectoriesReady, setExpandedDirectoriesReady] = useState(initialExpandedDirectoryState.restored)
   const [loadingDocuments, setLoadingDocuments] = useState<Set<string>>(() => new Set())
   const [groups, setGroups] = useState<TabGroup[]>([
     { id: 'primary', tabs: [], activeId: null },
@@ -623,6 +657,7 @@ function App() {
   const saveQueues = useRef<Record<string, Promise<void>>>({})
   const draftSyncQueues = useRef<Record<string, Promise<void>>>({})
   const filingDraftIds = useRef<Set<string>>(new Set())
+  const expandedDirectoriesReadyRef = useRef(initialExpandedDirectoryState.restored)
   const editorIntents = useRef<Record<string, EditorIntent>>({})
   const readerScrollPositions = useRef<Record<string, number>>({})
   const documentsRef = useRef(documents)
@@ -655,7 +690,15 @@ function App() {
       ])
       if (cancelled) return
       if (notesResult.status === 'fulfilled') setNotes(notesResult.value)
-      if (filesResult.status === 'fulfilled') setFiles(filesResult.value)
+      if (filesResult.status === 'fulfilled') {
+        setFiles(filesResult.value)
+        if (!expandedDirectoriesReadyRef.current) {
+          const hasStarterGuides = filesResult.value.some((file) => file.id === '/getting-started/start-here.md')
+          expandedDirectoriesReadyRef.current = true
+          setExpandedDirectories(hasStarterGuides ? expandedPathsForFiles(filesResult.value) : new Set())
+          setExpandedDirectoriesReady(true)
+        }
+      }
       if (versionResult.status === 'fulfilled') setVersionInfo(versionResult.value)
       if (draftsResult.status === 'fulfilled') mergeRemoteDrafts(draftsResult.value)
       setFilesLoading(false)
@@ -702,6 +745,15 @@ function App() {
     }, 450)
     return () => window.clearTimeout(syncTimer)
   }, [documents, drafts])
+
+  useEffect(() => {
+    if (!expandedDirectoriesReady) return
+    try {
+      window.localStorage.setItem('folio:expanded-directories', JSON.stringify([...expandedDirectories]))
+    } catch {
+      // Expansion persistence is optional when browser storage is unavailable.
+    }
+  }, [expandedDirectories, expandedDirectoriesReady])
 
   useEffect(() => {
     const interval = window.setInterval(() => {
