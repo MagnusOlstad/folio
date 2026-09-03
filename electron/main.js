@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, screen, shell } from 'electron'
 
 let mainWindow = null
 let localServer = null
@@ -30,12 +30,18 @@ async function prepareDataDirectory() {
 }
 
 async function createWindow() {
+  const { workAreaSize } = screen.getPrimaryDisplay()
+  const width = Math.max(640, Math.min(1280, workAreaSize.width - 48))
+  const height = Math.max(560, Math.min(840, workAreaSize.height - 72))
+
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 840,
+    width,
+    height,
+    useContentSize: true,
+    center: true,
     minWidth: 640,
     minHeight: 560,
-    backgroundColor: '#f4f0e8',
+    backgroundColor: '#161816',
     title: 'Folio',
     webPreferences: {
       contextIsolation: true,
