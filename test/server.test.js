@@ -601,6 +601,29 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.ok(index.every((record) => record.chunks.length > 0 && record.chunks.every((chunk) => chunk.embedding)))
   assert.ok(index.find((record) => record.id === longNote.note.id).chunks.length > 6)
 
+  const longNoteDate = longNote.note.id.match(/-(\d{4}-\d{2}-\d{2})\.md$/)?.[1]
+  const renamedLongResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(longNote.note.id)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ title: 'Deep Archive', description: 'Updated archive description.' }),
+  })
+  const renamedLong = await renamedLongResponse.json()
+  assert.equal(renamedLongResponse.status, 200, JSON.stringify(renamedLong))
+  assert.equal(renamedLong.oldId, longNote.note.id)
+  assert.equal(renamedLong.newId, `/research/deep-archive-${longNoteDate}.md`)
+  assert.equal(renamedLong.id, renamedLong.newId)
+  assert.equal(renamedLong.title, 'Deep Archive')
+  assert.equal(renamedLong.description, 'Updated archive description.')
+  await assert.rejects(fs.access(path.join(dataRoot, 'bundle', longNote.note.id.slice(1))))
+  const renamedLongFile = await fs.readFile(path.join(dataRoot, 'bundle', renamedLong.newId.slice(1)), 'utf8')
+  assert.match(renamedLongFile, /title: Deep Archive/)
+  assert.match(renamedLongFile, /description: Updated archive description\./)
+  const oldLongPathResponse = await fetch(`${baseUrl}/api/file?path=${encodeURIComponent(longNote.note.id)}`)
+  assert.equal((await oldLongPathResponse.json()).id, renamedLong.newId)
+  const renamedIndex = JSON.parse(await fs.readFile(path.join(dataRoot, 'search-index.json'), 'utf8'))
+  assert.ok(renamedIndex.some((record) => record.id === renamedLong.newId && record.title === 'Deep Archive'))
+  assert.ok(embeddingInputs.some((input) => input.startsWith('title: Deep Archive | text: Updated archive description.\nLong archive')))
+
   invalidEmbeddingResponse = true
   const invalidEmbeddingResponseResult = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(semantic.note.id)}`, {
     method: 'PATCH',

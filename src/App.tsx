@@ -69,6 +69,8 @@ type NoteDetail = Note & {
 }
 
 type NoteUpdateResult = NoteDetail & {
+  oldId: string
+  newId: string
   warning: string | null
 }
 
@@ -288,6 +290,35 @@ function toggleTaskAtLine(content: string, lineNumber: number, checked: boolean)
   return lines.join('\n')
 }
 
+function continueMarkdownList(value: string, selectionStart: number, selectionEnd: number) {
+  if (selectionStart !== selectionEnd) return null
+  const lineStart = value.lastIndexOf('\n', selectionStart - 1) + 1
+  const nextBreak = value.indexOf('\n', selectionStart)
+  const lineEnd = nextBreak === -1 ? value.length : nextBreak
+  const line = value.slice(lineStart, lineEnd)
+  const match = line.match(/^((?:[ \t]*>\s*)*[ \t]*)([-+*]|\d+[.)])(\s+)(?:\[([ xX])\](\s+))?(.*)$/)
+  if (!match) return null
+
+  const [, prefix, marker, spacing, taskState, taskSpacing = '', itemContent] = match
+  const markerLength = prefix.length + marker.length + spacing.length + (taskState === undefined ? 0 : taskSpacing.length + 3)
+  if (selectionStart - lineStart < markerLength) return null
+  if (!itemContent.trim()) {
+    return {
+      value: `${value.slice(0, lineStart)}${prefix}${value.slice(lineEnd)}`,
+      caret: lineStart + prefix.length,
+    }
+  }
+
+  const nextMarker = /^\d/.test(marker)
+    ? `${Number.parseInt(marker, 10) + 1}${marker.at(-1)}`
+    : marker
+  const nextPrefix = `${prefix}${nextMarker}${spacing}${taskState === undefined ? '' : `[ ]${taskSpacing}`}`
+  return {
+    value: `${value.slice(0, selectionStart)}\n${nextPrefix}${value.slice(selectionEnd)}`,
+    caret: selectionStart + nextPrefix.length + 1,
+  }
+}
+
 async function api<T>(url: string, options?: RequestInit): Promise<T> {
   let response: Response
   try {
@@ -472,7 +503,14 @@ function NoteEditor({
         if (onFile && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {
           event.preventDefault()
           onFile()
+          return
         }
+        if (event.key !== 'Enter' || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.nativeEvent.isComposing) return
+        const edit = continueMarkdownList(value, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)
+        if (!edit) return
+        event.preventDefault()
+        onChange(edit.value)
+        window.requestAnimationFrame(() => editorRef.current?.setSelectionRange(edit.caret, edit.caret))
       }}
       aria-label={ariaLabel}
     />
@@ -689,6 +727,8 @@ function App() {
   ))
   const [pathDrafts, setPathDrafts] = useState<Record<string, string>>({})
   const [tagDrafts, setTagDrafts] = useState<Record<string, string>>({})
+  const [metadataDrafts, setMetadataDrafts] = useState<Record<string, string>>({})
+  const [editingMetadataKey, setEditingMetadataKey] = useState<string | null>(null)
   const [savingDocuments, setSavingDocuments] = useState<Set<string>>(() => new Set())
   const [deletingDraftIds, setDeletingDraftIds] = useState<Set<string>>(() => new Set())
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null)
@@ -802,6 +842,12 @@ function App() {
     }, 450)
     return () => window.clearTimeout(syncTimer)
   }, [documents, drafts])
+
+  useEffect(() => {
+    if (!message) return
+    const timeout = window.setTimeout(() => setMessage(''), 3_000)
+    return () => window.clearTimeout(timeout)
+  }, [message])
 
   useEffect(() => {
     if (!expandedDirectoriesReady) return
@@ -1251,21 +1297,122 @@ function App() {
     setEditingKey(null)
   }
 
-  function applyUpdatedNote(updated: NoteDetail) {
-    setDocuments((current) => ({
-      ...current,
-      [updated.id]: { ...current[updated.id], ...updated, deletable: true },
-    }))
-    setNotes((current) => current.map((note) => note.id === updated.id ? { ...note, ...updated } : note))
-    setSearchResults((current) => current.map((note) => note.id === updated.id ? {
+  function applyUpdatedNote(updated: NoteDetail, oldId = updated.id) {
+    const newId = updated.id
+    setDocuments((current) => {
+      const next = { ...current }
+      const previous = current[oldId] || current[newId]
+      if (oldId !== newId) delete next[oldId]
+      next[newId] = { ...previous, ...updated, deletable: true }
+      return next
+    })
+    if (oldId !== newId) {
+      setGroups((current) => current.map((group) => {
+        const tabs = group.tabs
+          .map((id) => id === oldId ? newId : id)
+          .filter((id, index, allTabs) => allTabs.indexOf(id) === index)
+        return { ...group, tabs, activeId: group.activeId === oldId ? newId : group.activeId }
+      }))
+      setDrafts((current) => {
+        if (!(oldId in current)) return current
+        const next = { ...current }
+        delete next[oldId]
+        next[newId] = updated.content
+        return next
+      })
+      setPathDrafts((current) => {
+        if (!(oldId in current)) return current
+        const next = { ...current }
+        delete next[oldId]
+        return next
+      })
+      setTagDrafts((current) => {
+        if (!(oldId in current)) return current
+        const next = { ...current }
+        delete next[oldId]
+        next[newId] = updated.tags.join(', ')
+        return next
+      })
+      setEditingKey((current) => current?.endsWith(`:${oldId}`) ? current.slice(0, -oldId.length) + newId : current)
+      delete documentRequests.current[oldId]
+      for (const positions of [editorIntents.current, readerScrollPositions.current]) {
+        for (const key of Object.keys(positions)) {
+          if (!key.endsWith(`:${oldId}`)) continue
+          positions[`${key.slice(0, -oldId.length)}${newId}`] = positions[key]
+          delete positions[key]
+        }
+      }
+    }
+    setNotes((current) => current.map((note) => note.id === oldId ? { ...note, ...updated } : note))
+    setSearchResults((current) => current.map((note) => note.id === oldId ? {
       ...note,
       ...updated,
       snippet: updated.content.replace(/\s+/g, ' ').trim().slice(0, 320),
     } : note))
     setAnswer((current) => current ? {
       ...current,
-      sources: current.sources.map((note) => note.id === updated.id ? { ...note, ...updated } : note),
+      sources: current.sources.map((note) => note.id === oldId ? { ...note, ...updated } : note),
     } : null)
+  }
+
+  function persistMetadata(document: ViewerDocument, field: 'title' | 'description', value: string) {
+    const normalized = value.trim()
+    if (field === 'title' && !normalized) {
+      setMessage('A note title cannot be empty.')
+      return
+    }
+    if (normalized === document[field]) return
+
+    const id = document.id
+    const existingQueue = saveQueues.current[id] || Promise.resolve()
+    setSavingDocuments((current) => new Set(current).add(id))
+    const save = existingQueue
+      .catch(() => undefined)
+      .then(async () => {
+        const result = await api<NoteUpdateResult>(`/api/note?id=${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ [field]: normalized }),
+        })
+        const [notesResult, filesResult] = await Promise.allSettled([
+          api<Note[]>('/api/notes'),
+          api<BundleFile[]>('/api/files'),
+        ])
+        applyUpdatedNote(result, result.oldId)
+        if (notesResult.status === 'fulfilled') setNotes(notesResult.value)
+        if (filesResult.status === 'fulfilled') setFiles(filesResult.value)
+        setSearchResults([])
+        setAnswer(null)
+        if (result.warning) setMessage(result.warning)
+      })
+      .catch((error) => setMessage(error instanceof Error ? error.message : `Could not update note ${field}`))
+      .finally(() => {
+        if (saveQueues.current[id] === save) {
+          delete saveQueues.current[id]
+          setSavingDocuments((current) => {
+            const next = new Set(current)
+            next.delete(id)
+            return next
+          })
+        }
+      })
+    saveQueues.current[id] = save
+  }
+
+  function beginMetadataEditing(groupId: string, document: ViewerDocument, field: 'title' | 'description') {
+    if (!document.deletable || savingDocuments.has(document.id) || (field === 'title' && !document.movable)) return
+    const key = `${groupId}:${document.id}:${field}`
+    setMetadataDrafts((current) => ({ ...current, [key]: document[field] }))
+    setEditingMetadataKey(key)
+  }
+
+  function finishMetadataEditing(key: string, document: ViewerDocument, field: 'title' | 'description', value: string) {
+    setEditingMetadataKey((current) => current === key ? null : current)
+    setMetadataDrafts((current) => {
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
+    persistMetadata(document, field, value)
   }
 
   function persistDocument(document: ViewerDocument, nextContent: string, nextTags: string[]) {
@@ -1344,12 +1491,12 @@ function App() {
           ].filter(Boolean).join(' '))
           return
         }
-        const { warning, ...updated } = await api<NoteUpdateResult>(`/api/note?id=${encodeURIComponent(id)}`, {
+        const updated = await api<NoteUpdateResult>(`/api/note?id=${encodeURIComponent(id)}`, {
           method: 'PATCH',
           body: JSON.stringify({ content: nextContent, tags: nextTags }),
         })
-        applyUpdatedNote(updated)
-        if (warning) setMessage(warning)
+        applyUpdatedNote(updated, updated.oldId)
+        if (updated.warning) setMessage(updated.warning)
       })
       .catch((error) => {
         if (isUntitledId(id)) filingDraftIds.current.delete(id)
@@ -1930,18 +2077,16 @@ function App() {
             const editKey = document ? `${group.id}:${document.id}` : ''
             const isEditing = editingKey === editKey
             const editorIntent = editorIntents.current[editKey]
-            const footerLinks = document
+            const frontmatterLinks = document
               ? Array.from(new Map(
                   document.links
-                    .filter((link) => link.origin === 'frontmatter')
+                    .filter((link) => link.origin === 'frontmatter' && !link.id.startsWith('/references/inbox/'))
                     .map((link) => [link.id, link]),
                 ).values())
                   .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.title.localeCompare(right.title))
-                  .slice(0, 6)
               : []
-            const frontmatterLinkCount = document
-              ? new Set(document.links.filter((link) => link.origin === 'frontmatter').map((link) => link.id)).size
-              : 0
+            const footerLinks = frontmatterLinks.slice(0, 6)
+            const frontmatterLinkCount = frontmatterLinks.length
             return (
               <Fragment key={group.id}>
                 {groupIndex === 1 && (
@@ -2060,8 +2205,60 @@ function App() {
                       {!isUntitledId(document.id) && (
                         <header className="document-heading">
                           <p>{document.type}{document.stale ? ' / stale' : ''}</p>
-                          <h1>{document.title}</h1>
-                          {document.description && <span>{document.description}</span>}
+                          {editingMetadataKey === `${group.id}:${document.id}:title` ? (
+                            <input
+                              className="document-title-editor"
+                              value={metadataDrafts[`${group.id}:${document.id}:title`] ?? document.title}
+                              onChange={(event) => setMetadataDrafts((current) => ({ ...current, [`${group.id}:${document.id}:title`]: event.target.value }))}
+                              onBlur={(event) => finishMetadataEditing(`${group.id}:${document.id}:title`, document, 'title', event.currentTarget.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') event.currentTarget.blur()
+                                if (event.key === 'Escape') {
+                                  event.preventDefault()
+                                  event.currentTarget.value = document.title
+                                  event.currentTarget.blur()
+                                }
+                              }}
+                              aria-label={`Title for ${document.title}`}
+                              autoFocus
+                            />
+                          ) : document.movable ? (
+                            <button
+                              type="button"
+                              className="document-title"
+                              onClick={() => beginMetadataEditing(group.id, document, 'title')}
+                              disabled={savingDocuments.has(document.id)}
+                              title="Click to edit title"
+                            >{document.title}</button>
+                          ) : (
+                            <h1>{document.title}</h1>
+                          )}
+                          {editingMetadataKey === `${group.id}:${document.id}:description` ? (
+                            <input
+                              className="document-description-editor"
+                              value={metadataDrafts[`${group.id}:${document.id}:description`] ?? document.description}
+                              onChange={(event) => setMetadataDrafts((current) => ({ ...current, [`${group.id}:${document.id}:description`]: event.target.value }))}
+                              onBlur={(event) => finishMetadataEditing(`${group.id}:${document.id}:description`, document, 'description', event.currentTarget.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') event.currentTarget.blur()
+                                if (event.key === 'Escape') {
+                                  event.preventDefault()
+                                  event.currentTarget.value = document.description
+                                  event.currentTarget.blur()
+                                }
+                              }}
+                              aria-label={`Description for ${document.title}`}
+                              autoFocus
+                            />
+                          ) : document.deletable ? (
+                            <button
+                              type="button"
+                              className={`document-description ${document.description ? '' : 'empty'}`}
+                              onClick={() => beginMetadataEditing(group.id, document, 'description')}
+                              disabled={savingDocuments.has(document.id)}
+                              title="Click to edit description"
+                            >{document.description || 'Add description'}</button>
+                          ) : document.description ? <span>{document.description}</span> : null}
                         </header>
                       )}
                       {isUntitledId(document.id) ? (
@@ -2285,7 +2482,7 @@ function App() {
               </Fragment>
             )
           })}
-          {message && <button type="button" className="workspace-message" onClick={() => setMessage('')} title="Dismiss">{message}</button>}
+          {message && <button type="button" className="workspace-message" onClick={() => setMessage('')} title="Dismiss" role="status" aria-live="polite">{message}</button>}
         </section>
       </section>
     </main>
