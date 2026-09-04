@@ -853,8 +853,7 @@ body.resizing-horizontal * {
 
 .document-heading h1,
 .document-title,
-.document-title-editor,
-.editor-placeholder h1 {
+.document-title-editor {
   width: 100%;
   margin: 0;
   padding: 0;
@@ -1308,7 +1307,10 @@ body.resizing-horizontal * {
 
 .editor-placeholder h1 {
   margin-top: 18px;
+  overflow-wrap: anywhere;
   color: var(--muted);
+  font: 400 clamp(30px, 4.5cqi, 46px)/1.05 'Iowan Old Style', Baskerville, Georgia, serif;
+  letter-spacing: -0.035em;
 }
 
 .editor-placeholder p {
