@@ -48,7 +48,12 @@ export function applyFormatMarker(
   const selected = value.slice(selectionStart, selectionEnd)
   const prefix = value.slice(Math.max(0, selectionStart - before.length), selectionStart)
   const suffix = value.slice(selectionEnd, Math.min(value.length, selectionEnd + after.length))
-  if (prefix === before && suffix === after) {
+  // Require the run of marker characters to end exactly here, so italic doesn't
+  // mistake the inner two characters of a "**bold**" span for its own "*" markers.
+  const markerChar = before[before.length - 1]
+  const prefixIsMarker = prefix === before && value[selectionStart - before.length - 1] !== markerChar
+  const suffixIsMarker = suffix === after && value[selectionEnd + after.length] !== markerChar
+  if (prefixIsMarker && suffixIsMarker) {
     const start = selectionStart - before.length
     return {
       value: value.slice(0, start) + selected + value.slice(selectionEnd + after.length),

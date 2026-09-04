@@ -41,9 +41,9 @@ Edit, Format, and Window menus and available while the app window is focused:
 | `Cmd/Ctrl + K` | Wrap the selection as a Markdown link |
 | `Cmd/Ctrl + F` | Focus the sidebar search field |
 
-`Cmd/Ctrl + T` and `Cmd/Ctrl + F` are reserved by most web browsers, so they
-only work reliably in the desktop app; the rest work in both the browser and
-the desktop app.
+`Cmd/Ctrl + T`, `Cmd/Ctrl + W`, and `Cmd/Ctrl + F` are reserved by most web
+browsers, so they only work reliably in the desktop app; the rest work in
+both the browser and the desktop app.
 
 ## Prerequisites
 

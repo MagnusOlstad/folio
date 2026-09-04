@@ -39,10 +39,10 @@ test('still wraps when only one marker side is present', () => {
   assert.deepEqual([result.selectionStart, result.selectionEnd], [4, 9])
 })
 
-test('unwraps the shared marker characters of an outer bold span when toggling italic', () => {
+test('does not mistake a bold span markers for italic markers, and stacks italic on top', () => {
   const result = applyFormatMarker('**bold** rest', 2, 6, 'italic')
-  assert.equal(result.value, '*bold* rest')
-  assert.deepEqual([result.selectionStart, result.selectionEnd], [1, 5])
+  assert.equal(result.value, '***bold*** rest')
+  assert.deepEqual([result.selectionStart, result.selectionEnd], [3, 7])
 })
 
 test('wraps a selected range as a markdown link with the caret at the url', () => {

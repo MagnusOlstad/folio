@@ -870,6 +870,9 @@ function App() {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
       const action = KEYBOARD_SHORTCUTS[event.key.toLowerCase()]
       if (!action) return
+      // Browsers can't have Cmd/Ctrl+W's tab-close prevented, so don't also run our
+      // own close-tab logic there; the desktop app still gets it via the menu accelerator.
+      if (action === 'close-tab' && !window.folio) return
       if (action === 'bold' || action === 'italic' || action === 'link') {
         const target = document.activeElement
         if (!(target instanceof HTMLTextAreaElement) || !target.classList.contains('document-editor')) return
@@ -883,6 +886,7 @@ function App() {
     window.addEventListener('keydown', onKeyDown)
     const unsubscribeMenuActions = window.folio?.onMenuAction?.((action) => {
       if (MENU_ACTIONS.has(action)) runShortcutRef.current?.(action as AppShortcutAction)
+      else console.warn(`Ignored unknown menu action from main process: "${action}"`)
     })
     return () => {
       window.removeEventListener('keydown', onKeyDown)

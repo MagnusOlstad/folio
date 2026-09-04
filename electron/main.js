@@ -35,7 +35,11 @@ async function prepareDataDirectory() {
 
 function sendToRenderer(action) {
   return () => {
-    mainWindow?.webContents.send('folio:menu-action', action)
+    if (!mainWindow) {
+      console.warn(`Ignored menu action "${action}": no window is open.`)
+      return
+    }
+    mainWindow.webContents.send('folio:menu-action', action)
   }
 }
 
@@ -62,7 +66,17 @@ function setApplicationMenu() {
         { label: 'Link', accelerator: 'CmdOrCtrl+K', click: sendToRenderer('link') },
       ],
     },
-    { role: 'viewMenu' },
+    {
+      label: 'View',
+      submenu: [
+        ...(app.isPackaged ? [] : [{ role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' }, { type: 'separator' }]),
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
     {
       label: 'Window',
       submenu: [
@@ -76,7 +90,11 @@ function setApplicationMenu() {
       submenu: [
         {
           label: 'Folio on GitHub',
-          click: () => void shell.openExternal('https://github.com/MagnusOlstad/folio'),
+          click: () => {
+            shell
+              .openExternal('https://github.com/MagnusOlstad/folio')
+              .catch((error) => console.error('Failed to open Folio GitHub page:', error))
+          },
         },
       ],
     },
