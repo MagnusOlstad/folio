@@ -15,6 +15,8 @@
     "dev:api": "node --watch server/index.js",
     "build": "tsc -b && vite build",
     "test": "node --test",
+    "test:e2e": "playwright test",
+    "test:e2e:local": "playwright test --config=playwright.local.config.ts",
     "desktop": "npm run build && electron .",
     "dist:mac": "npm run build && electron-builder --mac --arm64 --publish never",
     "release": "node scripts/release.mjs",
@@ -34,6 +36,7 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",

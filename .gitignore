@@ -31,3 +31,9 @@ seed-data/**/.DS_Store
 
 # Playwright MCP debug artifacts
 .playwright-mcp
+
+# Playwright test artifacts
+/test-results
+/playwright-report
+/blob-report
+/playwright/.cache
