@@ -20,7 +20,6 @@ const KEYBOARD_SHORTCUTS: Record<string, AppShortcutAction> = {
   t: 'new-note',
   w: 'close-tab',
   s: 'save',
-  f: 'search',
   b: 'bold',
   i: 'italic',
   k: 'link',
@@ -867,7 +866,14 @@ function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return
+      // Matches Obsidian: plain Cmd/Ctrl+F is left for the browser/OS's own find-in-page.
+      if (event.shiftKey) {
+        if (event.key.toLowerCase() !== 'f') return
+        event.preventDefault()
+        runShortcutRef.current?.('search')
+        return
+      }
       const action = KEYBOARD_SHORTCUTS[event.key.toLowerCase()]
       if (!action) return
       // Browsers can't have Cmd/Ctrl+W's tab-close prevented, so don't also run our

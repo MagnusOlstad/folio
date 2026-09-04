@@ -39,11 +39,13 @@ Edit, Format, and Window menus and available while the app window is focused:
 | `Cmd/Ctrl + B` | Bold the selection in the note editor |
 | `Cmd/Ctrl + I` | Italicize the selection in the note editor |
 | `Cmd/Ctrl + K` | Wrap the selection as a Markdown link |
-| `Cmd/Ctrl + F` | Focus the sidebar search field |
+| `Cmd/Ctrl + Shift + F` | Focus the sidebar search field |
 
-`Cmd/Ctrl + T`, `Cmd/Ctrl + W`, and `Cmd/Ctrl + F` are reserved by most web
-browsers, so they only work reliably in the desktop app; the rest work in
-both the browser and the desktop app.
+These match Obsidian's own shortcuts, including leaving plain `Cmd/Ctrl + F`
+free for the browser's native find-in-page instead of overloading it.
+`Cmd/Ctrl + T` and `Cmd/Ctrl + W` are reserved by most web browsers, so they
+only work reliably in the desktop app; the rest work in both the browser and
+the desktop app.
 
 ## Prerequisites
 
