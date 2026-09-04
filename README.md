@@ -23,6 +23,30 @@ Folio is a local-first personal notetaker with one Markdown capture field. It pr
 - Lifecycle controls for `draft`, `stable`, `deprecated`, and `stale_after`, with stale and deprecated concepts ranked lower in retrieval.
 - Local filesystem storage. No cloud service or account is required.
 
+## Keyboard shortcuts
+
+The macOS desktop app installs a native application menu, so standard editing
+shortcuts (copy, paste, undo, select all, minimize, quit, and so on) behave
+like any other Mac app. Folio also adds its own shortcuts, shown in the File,
+Edit, Format, and Window menus and available while the app window is focused:
+
+| Shortcut | Action |
+| --- | --- |
+| `Cmd/Ctrl + T` | Open a new note tab |
+| `Cmd/Ctrl + S` | File the active draft, or save the note being edited |
+| `Cmd/Ctrl + Enter` | File the active draft (same as Save) |
+| `Cmd/Ctrl + W` | Close the active tab, then the window |
+| `Cmd/Ctrl + B` | Bold the selection in the note editor |
+| `Cmd/Ctrl + I` | Italicize the selection in the note editor |
+| `Cmd/Ctrl + K` | Wrap the selection as a Markdown link |
+| `Cmd/Ctrl + Shift + F` | Focus the sidebar search field |
+
+These match Obsidian's own shortcuts, including leaving plain `Cmd/Ctrl + F`
+free for the browser's native find-in-page instead of overloading it.
+`Cmd/Ctrl + T` and `Cmd/Ctrl + W` are reserved by most web browsers, so they
+only work reliably in the desktop app; the rest work in both the browser and
+the desktop app.
+
 ## Prerequisites
 
 You need:

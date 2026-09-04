@@ -1,6 +1,10 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { app, BrowserWindow, screen, shell } from 'electron'
+import { fileURLToPath } from 'node:url'
+import { app, BrowserWindow, Menu, ipcMain, screen, shell } from 'electron'
+
+const isMac = process.platform === 'darwin'
+const preloadPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'preload.cjs')
 
 let mainWindow = null
 let localServer = null
@@ -29,6 +33,75 @@ async function prepareDataDirectory() {
   return dataRoot
 }
 
+function sendToRenderer(action) {
+  return () => {
+    if (!mainWindow) {
+      console.warn(`Ignored menu action "${action}": no window is open.`)
+      return
+    }
+    mainWindow.webContents.send('folio:menu-action', action)
+  }
+}
+
+function setApplicationMenu() {
+  const template = [
+    ...(isMac ? [{ role: 'appMenu' }] : []),
+    {
+      label: 'File',
+      submenu: [
+        { label: 'New Note', accelerator: 'CmdOrCtrl+T', click: sendToRenderer('new-note') },
+        { label: 'Save', accelerator: 'CmdOrCtrl+S', click: sendToRenderer('save') },
+        { type: 'separator' },
+        { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: sendToRenderer('close-tab') },
+        { label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W', role: 'close' },
+        ...(!isMac ? [{ type: 'separator' }, { role: 'quit' }] : []),
+      ],
+    },
+    { role: 'editMenu' },
+    {
+      label: 'Format',
+      submenu: [
+        { label: 'Bold', accelerator: 'CmdOrCtrl+B', click: sendToRenderer('bold') },
+        { label: 'Italic', accelerator: 'CmdOrCtrl+I', click: sendToRenderer('italic') },
+        { label: 'Link', accelerator: 'CmdOrCtrl+K', click: sendToRenderer('link') },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        ...(app.isPackaged ? [] : [{ role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' }, { type: 'separator' }]),
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        ...(isMac ? [{ type: 'separator' }, { role: 'front' }] : []),
+      ],
+    },
+    {
+      role: 'help',
+      submenu: [
+        {
+          label: 'Folio on GitHub',
+          click: () => {
+            shell
+              .openExternal('https://github.com/MagnusOlstad/folio')
+              .catch((error) => console.error('Failed to open Folio GitHub page:', error))
+          },
+        },
+      ],
+    },
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
 async function createWindow() {
   const { workAreaSize } = screen.getPrimaryDisplay()
   const width = Math.max(640, Math.min(1280, workAreaSize.width - 48))
@@ -47,6 +120,7 @@ async function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: preloadPath,
     },
   })
 
@@ -69,6 +143,11 @@ app.whenReady().then(async () => {
   const address = localServer.address()
   if (!address || typeof address === 'string') throw new Error('Could not determine the local server port.')
   localUrl = `http://127.0.0.1:${address.port}`
+
+  setApplicationMenu()
+  ipcMain.on('folio:close-window', () => {
+    mainWindow?.close()
+  })
 
   await createWindow()
 
