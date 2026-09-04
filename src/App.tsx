@@ -2,7 +2,31 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
+import { applyFormatMarker, type FormatMarker } from './markdown-format.ts'
 import './App.css'
+
+declare global {
+  interface Window {
+    folio?: {
+      onMenuAction?: (handler: (action: string) => void) => () => void
+      closeWindow?: () => void
+    }
+  }
+}
+
+type AppShortcutAction = 'new-note' | 'close-tab' | 'save' | 'search' | FormatMarker
+
+const KEYBOARD_SHORTCUTS: Record<string, AppShortcutAction> = {
+  t: 'new-note',
+  w: 'close-tab',
+  s: 'save',
+  f: 'search',
+  b: 'bold',
+  i: 'italic',
+  k: 'link',
+}
+
+const MENU_ACTIONS = new Set<string>(Object.values(KEYBOARD_SHORTCUTS))
 
 type Note = {
   id: string
@@ -382,6 +406,7 @@ function NoteEditor({
   const measureRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const initialValue = useRef(value)
+  const pendingSelection = useRef<[number, number] | null>(null)
   const [steeringHeight, setSteeringHeight] = useState(0)
   const placeholder = 'Optional: steer the title or path here. Press Enter to let the agent decide.'
   const firstLine = value.split('\n', 1)[0]
@@ -411,6 +436,30 @@ function NoteEditor({
     })
     return () => window.cancelAnimationFrame(frame)
   }, [intent])
+
+  useLayoutEffect(() => {
+    const selection = pendingSelection.current
+    if (!selection) return
+    pendingSelection.current = null
+    const editor = editorRef.current
+    if (!editor) return
+    editor.setSelectionRange(selection[0], selection[1])
+  }, [value])
+
+  useEffect(() => {
+    const editor = editorRef.current
+    if (!editor) return
+    const format = (event: Event) => {
+      const marker = (event as CustomEvent<FormatMarker>).detail
+      if (marker !== 'bold' && marker !== 'italic' && marker !== 'link') return
+      event.preventDefault()
+      const result = applyFormatMarker(editor.value, editor.selectionStart, editor.selectionEnd, marker)
+      pendingSelection.current = [result.selectionStart, result.selectionEnd]
+      onChange(result.value)
+    }
+    editor.addEventListener('folio-format', format)
+    return () => editor.removeEventListener('folio-format', format)
+  }, [onChange])
 
   const editor = (
     <textarea
@@ -665,6 +714,9 @@ function App() {
   const expandedDirectoriesReadyRef = useRef(initialExpandedDirectoryState.restored)
   const editorIntents = useRef<Record<string, EditorIntent>>({})
   const readerScrollPositions = useRef<Record<string, number>>({})
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const focusSearchPending = useRef(false)
+  const runShortcutRef = useRef<((action: AppShortcutAction) => void) | null>(null)
   const documentsRef = useRef(documents)
   const draftSnapshotRef = useRef<StoredDraft[]>([])
   const untitledCounter = useRef(0)
@@ -768,14 +820,88 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const openNewTab = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 't') return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
+      const action = KEYBOARD_SHORTCUTS[event.key.toLowerCase()]
+      if (!action) return
+      if (action === 'bold' || action === 'italic' || action === 'link') {
+        const target = document.activeElement
+        if (!(target instanceof HTMLTextAreaElement) || !target.classList.contains('document-editor')) return
+        event.preventDefault()
+        target.dispatchEvent(new CustomEvent('folio-format', { detail: action, cancelable: true }))
+        return
+      }
       event.preventDefault()
-      createNewTab()
+      runShortcutRef.current?.(action)
     }
-    window.addEventListener('keydown', openNewTab)
-    return () => window.removeEventListener('keydown', openNewTab)
-  }, [activeGroupId])
+    window.addEventListener('keydown', onKeyDown)
+    const unsubscribeMenuActions = window.folio?.onMenuAction?.((action) => {
+      if (MENU_ACTIONS.has(action)) runShortcutRef.current?.(action as AppShortcutAction)
+    })
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      unsubscribeMenuActions?.()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (sidebarMode !== 'search' || !focusSearchPending.current) return
+    focusSearchPending.current = false
+    searchInputRef.current?.focus()
+  }, [sidebarMode])
+
+  function focusSearchInput() {
+    if (sidebarMode !== 'search') {
+      focusSearchPending.current = true
+      setSidebarMode('search')
+      return
+    }
+    searchInputRef.current?.focus()
+  }
+
+  function saveActiveDocument() {
+    const group = groups.find((candidate) => candidate.id === activeGroupId)
+    const documentId = group?.activeId
+    if (!documentId) return
+    const activeDocument = documents[documentId]
+    if (!activeDocument) return
+    if (isUntitledId(documentId)) {
+      fileDraft(activeDocument)
+      return
+    }
+    if (editingKey !== `${group.id}:${documentId}`) return
+    const content = drafts[documentId] ?? activeDocument.content
+    if (content !== activeDocument.content) persistDocument(activeDocument, content, activeDocument.tags)
+  }
+
+  function runShortcut(action: AppShortcutAction) {
+    if (action === 'new-note') {
+      createNewTab()
+      return
+    }
+    if (action === 'close-tab') {
+      const group = groups.find((candidate) => candidate.id === activeGroupId)
+      if (group?.activeId) closeTab(group.id, group.activeId)
+      else window.folio?.closeWindow?.()
+      return
+    }
+    if (action === 'save') {
+      saveActiveDocument()
+      return
+    }
+    if (action === 'search') {
+      focusSearchInput()
+      return
+    }
+    const target = document.activeElement
+    if (target instanceof HTMLTextAreaElement && target.classList.contains('document-editor')) {
+      target.dispatchEvent(new CustomEvent('folio-format', { detail: action, cancelable: true }))
+    }
+  }
+
+  useLayoutEffect(() => {
+    runShortcutRef.current = runShortcut
+  })
 
   function titleForId(id: string) {
     if (isUntitledId(id)) return draftTitle(drafts[id] ?? documents[id]?.content ?? '')
@@ -1675,6 +1801,7 @@ function App() {
                 </div>
                 <form className="sidebar-form" onSubmit={(event) => { event.preventDefault(); void searchNotes() }}>
                   <input
+                    ref={searchInputRef}
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
                     placeholder="Search by meaning"
@@ -2103,7 +2230,7 @@ function App() {
                           <span>State</span>
                           <div className="save-state-controls">
                             {isUntitledId(document.id) ? (
-                              <button type="button" onClick={() => fileDraft(document)} disabled={savingDocuments.has(document.id) || !filedDraftContent(drafts[document.id] || '').trim()} title="Classify and add to the bundle (Cmd+Enter)">
+                              <button type="button" onClick={() => fileDraft(document)} disabled={savingDocuments.has(document.id) || !filedDraftContent(drafts[document.id] || '').trim()} title="Classify and add to the bundle (Cmd+Enter or Cmd+S)">
                                 {savingDocuments.has(document.id) ? 'Filing...' : 'File note'}
                               </button>
                             ) : (
