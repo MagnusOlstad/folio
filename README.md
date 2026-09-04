@@ -197,28 +197,16 @@ npm run desktop  # Build and open the Electron app
 npm run dist:mac # Build a distributable macOS .dmg and .zip
 npm run release  # Bump version, build, tag, and publish a GitHub release
 npm run lint     # Run Oxlint
-npm test         # Run unit and API tests (node --test)
-npm run test:e2e # Run Playwright e2e tests
 npm start        # Serve the built app and API
 ```
 
 ## Testing
 
-Unit and API tests (`test/*.test.js`) use Node's built-in test runner and need no setup beyond `npm install`:
-
 ```bash
-npm test
+npm test                                     # unit/API tests
+npx playwright install --with-deps chromium  # one-time, for e2e
+npm run build && npm run test:e2e            # e2e tests (against dist/, Ollama forced offline)
 ```
-
-End-to-end tests (`e2e/*.spec.ts`) use [Playwright](https://playwright.dev) to drive the built app in a real browser. `e2e/start-server.mjs` boots the Express server against a temporary data root seeded from `seed-data/`, with Ollama forced offline so runs are deterministic regardless of whether you have a local Ollama running. One-time browser install, then:
-
-```bash
-npx playwright install --with-deps chromium
-npm run build       # e2e serves dist/, not the Vite dev server
-npm run test:e2e    # add --ui for the interactive runner
-```
-
-Both suites run in CI on every pull request (see `.github/workflows/ci.yml`).
 
 ## Current limitations
 
