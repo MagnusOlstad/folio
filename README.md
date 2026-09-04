@@ -229,7 +229,8 @@ npm start        # Serve the built app and API
 ```bash
 npm test                                     # unit/API tests
 npx playwright install --with-deps chromium  # one-time, for e2e
-npm run build && npm run test:e2e            # e2e tests (against dist/, Ollama forced offline)
+npm run build && npm run test:e2e            # e2e/ci: narrow, Ollama forced offline - runs in GitHub Actions
+npm run build && npm run test:e2e:local      # e2e/local: broad, needs a real local Ollama - run manually when touching capture/search/ask
 ```
 
 ## Current limitations
