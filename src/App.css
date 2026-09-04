@@ -852,21 +852,69 @@ body.resizing-horizontal * {
 }
 
 .document-heading h1,
+.document-title,
+.document-title-editor,
 .editor-placeholder h1 {
+  width: 100%;
   margin: 0;
+  padding: 0;
+  border: 0;
   overflow-wrap: anywhere;
   color: var(--ink);
+  background: transparent;
   font: 400 clamp(30px, 4.5cqi, 46px)/1.05 'Iowan Old Style', Baskerville, Georgia, serif;
   letter-spacing: -0.035em;
+  text-align: left;
 }
 
-.document-heading > span {
+.document-title:not(:disabled) {
+  cursor: text;
+}
+
+.document-title:disabled {
+  opacity: 1;
+}
+
+.document-title:hover,
+.document-title:focus-visible,
+.document-title-editor:focus {
+  outline: none;
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+
+.document-heading > span,
+.document-description,
+.document-description-editor {
+  width: 100%;
   max-width: 760px;
   margin-top: 13px;
+  padding: 0;
   display: block;
+  border: 0;
   color: var(--muted);
+  background: transparent;
   font-size: 12px;
   line-height: 1.65;
+  text-align: left;
+}
+
+.document-description:not(:disabled) {
+  cursor: text;
+}
+
+.document-description:disabled {
+  opacity: 1;
+}
+
+.document-description.empty {
+  color: var(--dim);
+}
+
+.document-description:hover,
+.document-description:focus-visible,
+.document-description-editor:focus {
+  outline: none;
+  box-shadow: inset 0 -1px 0 var(--line);
 }
 
 .document-content,
@@ -1395,7 +1443,9 @@ body.resizing-horizontal * {
     padding: 22px 22px 18px;
   }
 
-  .document-heading h1 {
+  .document-heading h1,
+  .document-title,
+  .document-title-editor {
     font-size: clamp(28px, 7vw, 34px);
   }
 
