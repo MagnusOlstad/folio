@@ -476,7 +476,7 @@ function rewriteMarkdownLinkTargets(content, currentId, oldId, newId) {
   }).join('\n')
 }
 
-function rewriteFrontmatterYaml(yamlSource, currentId, oldId, newId, movedAt = null) {
+function rewriteFrontmatterYaml(yamlSource, currentId, oldId, newId, movedAt = null, updates = null) {
   const document = YAML.parseDocument(yamlSource, { keepSourceTokens: true })
   if (document.errors.length) throw document.errors[0]
   const frontmatter = document.toJS() || {}
@@ -515,6 +515,12 @@ function rewriteFrontmatterYaml(yamlSource, currentId, oldId, newId, movedAt = n
     })
     changed = true
   }
+  if (updates) {
+    for (const [key, value] of Object.entries(updates)) {
+      document.set(key, value)
+      changed = true
+    }
+  }
   return { yaml: document.toString({ lineWidth: 0 }).trimEnd(), changed }
 }
 
@@ -550,7 +556,7 @@ async function removeEmptyBundleDirectories(directory) {
   }
 }
 
-async function moveConceptMarkdown(oldId, directory, movedAt) {
+async function moveConceptMarkdown(oldId, directory, movedAt, options = {}) {
   const oldPath = resolveBundleMarkdownPath(oldId)
   const normalizedDirectory = normalizeMoveDirectory(directory)
   if (!oldPath || !normalizedDirectory) {
@@ -558,9 +564,15 @@ async function moveConceptMarkdown(oldId, directory, movedAt) {
     error.status = 400
     throw error
   }
+  const filename = options.filename || path.posix.basename(oldId)
+  if (path.posix.basename(filename) !== filename || path.posix.extname(filename) !== '.md') {
+    const error = new Error('Invalid destination filename.')
+    error.status = 400
+    throw error
+  }
   const newId = normalizedDirectory === '/'
-    ? `/${path.posix.basename(oldId)}`
-    : `${normalizedDirectory}/${path.posix.basename(oldId)}`
+    ? `/${filename}`
+    : `${normalizedDirectory}/${filename}`
   const newPath = resolveBundleMarkdownPath(newId)
   if (!newPath) {
     const error = new Error('Invalid destination path.')
@@ -614,6 +626,7 @@ async function moveConceptMarkdown(oldId, directory, movedAt) {
           previous_path: oldId,
           previous_paths: [oldId],
         }
+        Object.assign(parsed.frontmatter, options.frontmatter || {})
       }
       const changed = document.id === oldId || nextContent !== normalized
       return {
@@ -636,6 +649,7 @@ async function moveConceptMarkdown(oldId, directory, movedAt) {
       oldId,
       newId,
       document.id === oldId ? movedAt : null,
+      document.id === oldId ? options.frontmatter : null,
     )
     const nextBody = rewriteMarkdownLinkTargets(body, document.id, oldId, newId)
     const changed = rewrittenFrontmatter.changed || nextBody !== body
@@ -2164,10 +2178,11 @@ async function findExactConceptFile(directory, title) {
   return null
 }
 
-async function availableConceptFilename(directory, title, dateKey) {
+async function availableConceptFilename(directory, title, dateKey = null, ignoredFilename = null) {
   const slug = slugify(title)
   for (let collision = 1; ; collision += 1) {
-    const filename = `${slug}${collision === 1 ? '' : `-${collision}`}-${dateKey}.md`
+    const filename = `${slug}${collision === 1 ? '' : `-${collision}`}${dateKey ? `-${dateKey}` : ''}.md`
+    if (filename === ignoredFilename) return filename
     try {
       await fs.access(path.join(directory, filename))
     } catch (error) {
@@ -2707,15 +2722,22 @@ app.patch('/api/note', async (request, response, next) => {
     if (!filePath) return response.status(400).json({ error: 'Invalid concept path.' })
     const hasContent = Object.prototype.hasOwnProperty.call(request.body || {}, 'content')
     const hasTags = Object.prototype.hasOwnProperty.call(request.body || {}, 'tags')
+    const hasTitle = Object.prototype.hasOwnProperty.call(request.body || {}, 'title')
+    const hasDescription = Object.prototype.hasOwnProperty.call(request.body || {}, 'description')
     const content = hasContent ? normalizeMarkdownBreaks(request.body.content || '').trim() : null
     const tags = hasTags
       ? Array.from(new Set((Array.isArray(request.body.tags) ? request.body.tags : []).map(normalizeTag).filter(Boolean))).slice(0, 12)
       : null
+    const title = hasTitle ? normalizeInlineText(request.body.title || '').slice(0, 100) : null
+    const description = hasDescription ? normalizeInlineText(request.body.description || '').slice(0, 240) : null
     const status = request.body?.status
     const staleAfter = request.body?.staleAfter
     const confirmRelatedId = String(request.body?.confirmRelatedId || '')
     if (hasContent && !content) {
       return response.status(400).json({ error: 'A note cannot be empty.' })
+    }
+    if (hasTitle && !title) {
+      return response.status(400).json({ error: 'A note title cannot be empty.' })
     }
     if (status !== undefined && !['draft', 'stable', 'deprecated'].includes(status)) {
       return response.status(400).json({ error: 'Status must be draft, stable, or deprecated.' })
@@ -2724,51 +2746,104 @@ app.patch('/api/note', async (request, response, next) => {
       return response.status(400).json({ error: 'Freshness date must be a valid date.' })
     }
 
-    const mutationError = await queueMarkdownMutation(async () => {
-      const markdown = await fs.readFile(filePath, 'utf8')
-      const parsed = parseMarkdownFile(markdown, filePath)
-      if (parsed.type === 'Raw Capture') return { status: 400, error: 'Raw captures cannot be edited.' }
-      if (confirmRelatedId) {
-        const targetExists = (await readRecords()).some((record) => record.id === confirmRelatedId)
-        if (confirmRelatedId === id || !targetExists) return { status: 400, error: 'Invalid related concept.' }
+    const updateResult = await queueIndexOperation(async () => {
+      const previousRecords = await readRecords()
+      let newId = id
+      let moveTransaction = null
+      const mutationError = await queueMarkdownMutation(async () => {
+        let currentFilePath = filePath
+        let markdown = await fs.readFile(currentFilePath, 'utf8')
+        let parsed = parseMarkdownFile(markdown, currentFilePath)
+        if (parsed.type === 'Raw Capture') return { status: 400, error: 'Raw captures cannot be edited.' }
+        if (confirmRelatedId) {
+          const targetExists = previousRecords.some((record) => record.id === confirmRelatedId)
+          if (confirmRelatedId === id || !targetExists) return { status: 400, error: 'Invalid related concept.' }
+        }
+
+        const updatedAt = new Date().toISOString()
+        const titleChanged = hasTitle && title !== parsed.title
+        if (titleChanged && isMovableConceptId(id)) {
+          const currentFilename = path.posix.basename(id)
+          const dateKey = currentFilename.match(/-(\d{4}-\d{2}-\d{2})\.md$/)?.[1] || null
+          const nextFilename = await availableConceptFilename(path.dirname(filePath), title, dateKey, currentFilename)
+          if (nextFilename !== currentFilename) {
+            moveTransaction = await moveConceptMarkdown(id, path.posix.dirname(id), updatedAt, {
+              filename: nextFilename,
+              frontmatter: {
+                title,
+                ...(hasDescription ? { description } : {}),
+                generated: updatedGenerated(parsed.frontmatter, 'human:local', updatedAt),
+              },
+            })
+            newId = moveTransaction.newId
+            const hasAdditionalChanges = hasContent || hasTags || confirmRelatedId || status !== undefined || staleAfter !== undefined
+            if (!hasAdditionalChanges) return null
+            currentFilePath = resolveBundleMarkdownPath(newId)
+            markdown = await fs.readFile(currentFilePath, 'utf8')
+            parsed = parseMarkdownFile(markdown, currentFilePath)
+          }
+        }
+
+        if (hasContent) parsed.content = replaceIndexedConceptContent(parsed.content, content)
+        if (hasTags) parsed.frontmatter.tags = tags
+        if (hasTitle) parsed.frontmatter.title = title
+        if (hasDescription) parsed.frontmatter.description = description
+        if (confirmRelatedId) {
+          parsed.frontmatter.folio_related = Array.from(new Set([
+            ...(Array.isArray(parsed.frontmatter.folio_related) ? parsed.frontmatter.folio_related.map(String) : []),
+            confirmRelatedId,
+          ]))
+        }
+        if (status !== undefined) parsed.frontmatter.status = status
+        if (staleAfter) parsed.frontmatter.stale_after = new Date(staleAfter).toISOString()
+        else if (staleAfter === null || staleAfter === '') delete parsed.frontmatter.stale_after
+        parsed.frontmatter.generated = updatedGenerated(parsed.frontmatter, 'human:local', updatedAt)
+        await fs.writeFile(currentFilePath, markdownDocument(parsed.frontmatter, parsed.content))
+        return null
+      })
+      if (mutationError) return { mutationError }
+
+      if (newId !== id) {
+        try {
+          await migrateIndexedRecordsAfterMove(id, newId)
+        } catch (error) {
+          try {
+            await moveTransaction.rollback()
+            await writeRecords(previousRecords)
+          } catch (rollbackError) {
+            console.error(`Could not fully roll back title rename: ${rollbackError.message}`)
+          }
+          throw error
+        }
       }
-      if (hasContent) parsed.content = replaceIndexedConceptContent(parsed.content, content)
-      if (hasTags) parsed.frontmatter.tags = tags
-      if (confirmRelatedId) {
-        parsed.frontmatter.folio_related = Array.from(new Set([
-          ...(Array.isArray(parsed.frontmatter.folio_related) ? parsed.frontmatter.folio_related.map(String) : []),
-          confirmRelatedId,
-        ]))
+
+      const reindexed = await performReindexBundle()
+      let updated = reindexed.records.find((record) => record.id === newId)
+      if (!updated) return { notFound: true }
+      let currentRecords = reindexed.records
+      let warning = null
+      if (hasContent || hasTitle || hasDescription) {
+        try {
+          const embeddingErrors = await refreshRecordEmbeddings([updated])
+          if (embeddingErrors.length) throw new Error(embeddingErrors[0].error)
+          updated.embeddingModel = embedModel
+          updated.embeddingSchemaVersion = embeddingSchemaVersion
+          updated.embeddingInputHash = embeddingInputHash(updated)
+          currentRecords = await persistEmbeddingUpdatesNow([updated])
+          updated = currentRecords.find((record) => record.id === newId)
+          if (!updated) return { notFound: true }
+        } catch {
+          warning = 'The note was updated, but its semantic index could not be refreshed.'
+        }
       }
-      if (status !== undefined) parsed.frontmatter.status = status
-      if (staleAfter) parsed.frontmatter.stale_after = new Date(staleAfter).toISOString()
-      else if (staleAfter === null || staleAfter === '') delete parsed.frontmatter.stale_after
-      parsed.frontmatter.generated = updatedGenerated(parsed.frontmatter, 'human:local', new Date().toISOString())
-      await fs.writeFile(filePath, markdownDocument(parsed.frontmatter, parsed.content))
-      return null
+      return { newId, updated, currentRecords, warning }
     })
-    if (mutationError) return response.status(mutationError.status).json({ error: mutationError.error })
-
-    const reindexed = await reindexBundle()
-    let updated = reindexed.records.find((record) => record.id === id)
-    if (!updated) return response.status(404).json({ error: 'Note not found.' })
-    let currentRecords = reindexed.records
-
-    let warning = null
-    if (hasContent) {
-      try {
-        const embeddingErrors = await refreshRecordEmbeddings([updated])
-        if (embeddingErrors.length) throw new Error(embeddingErrors[0].error)
-        updated.embeddingModel = embedModel
-        updated.embeddingSchemaVersion = embeddingSchemaVersion
-        updated.embeddingInputHash = embeddingInputHash(updated)
-        currentRecords = await persistEmbeddingUpdates([updated])
-        updated = currentRecords.find((record) => record.id === id)
-        if (!updated) return response.status(404).json({ error: 'Note not found.' })
-      } catch {
-        warning = 'The note was updated, but its semantic index could not be refreshed.'
-      }
+    if (updateResult.mutationError) {
+      return response.status(updateResult.mutationError.status).json({ error: updateResult.mutationError.error })
     }
+    if (updateResult.notFound) return response.status(404).json({ error: 'Note not found.' })
+
+    const { newId, updated, currentRecords, warning } = updateResult
     if (warning) void refreshMissingEmbeddingsInBackground()
 
     const graph = await relationshipIndex()
@@ -2776,10 +2851,12 @@ app.patch('/api/note', async (request, response, next) => {
     response.json({
       ...publicUpdated,
       content: updated.content,
-      movable: isMovableConceptId(id),
+      oldId: id,
+      newId,
+      movable: isMovableConceptId(newId),
       stale: recordIsStale(updated),
-      links: graph.outgoing.get(id) || [],
-      backlinks: graph.incoming.get(id) || [],
+      links: graph.outgoing.get(newId) || [],
+      backlinks: graph.incoming.get(newId) || [],
       suggestions: semanticSuggestionSummaries(updated, currentRecords),
       warning,
     })
