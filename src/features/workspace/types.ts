@@ -1,0 +1,84 @@
+import type { MutableRefObject, PointerEvent } from "react";
+import type {
+  EditorIntent,
+  TabGroup,
+  ViewerDocument,
+} from "../../domain/types.ts";
+
+export type TabDrag = { documentId: string; groupId: string };
+export type MetadataField = "title" | "description";
+
+export type EditorWorkspaceModel = {
+  groups: TabGroup[];
+  splitPosition: number;
+  activeGroupId: string;
+  documents: Record<string, ViewerDocument>;
+  loadingDocuments: Set<string>;
+  savingDocuments: Set<string>;
+  editingKey: string | null;
+  editorIntents: MutableRefObject<Record<string, EditorIntent>>;
+  drafts: Record<string, string>;
+  deletingNoteId: string | null;
+  movingFileId: string | null;
+  message: string;
+};
+
+export type EditorWorkspaceActions = {
+  beginHorizontalResize: (event: PointerEvent<HTMLElement>) => void;
+  resizeSplit: (clientX: number, handle: HTMLElement) => void;
+  finishHorizontalResize: (event: PointerEvent<HTMLElement>) => void;
+  resetSplit: () => void;
+  activateGroup: (groupId: string) => void;
+  moveTabToGroup: (
+    documentId: string,
+    sourceGroupId: string,
+    targetGroupId: string,
+  ) => void;
+  titleForId: (id: string) => string;
+  activateTab: (groupId: string, documentId: string) => void;
+  createNewTab: (targetGroupId?: string) => void;
+  splitWorkspace: () => void;
+  closeGroup: (groupId: string) => void;
+  closeTab: (groupId: string, documentId: string) => void;
+  changeDraftContent: (document: ViewerDocument, content: string) => void;
+  fileDraft: (document: ViewerDocument) => void;
+  beginEditing: (
+    groupId: string,
+    document: ViewerDocument,
+    intent?: EditorIntent,
+  ) => void;
+  finishEditing: (
+    groupId: string,
+    document: ViewerDocument,
+    scrollTop?: number,
+  ) => void;
+  restoreReaderScroll: (editKey: string, element: HTMLDivElement) => void;
+  openDocument: (
+    id: string,
+    source?: "note" | "file",
+    targetGroupId?: string,
+  ) => Promise<void>;
+  toggleTaskCheckbox: (
+    document: ViewerDocument,
+    lineNumber: number,
+    checked: boolean,
+  ) => Promise<void>;
+  deleteFiledNote: (document: ViewerDocument) => Promise<void>;
+  persistDocument: (
+    document: ViewerDocument,
+    nextContent: string,
+    nextTags: string[],
+  ) => void;
+  persistMetadata: (
+    document: ViewerDocument,
+    field: MetadataField,
+    value: string,
+  ) => void;
+  moveBundleFile: (id: string, directory: string) => Promise<void>;
+  dismissMessage: () => void;
+};
+
+export type EditorWorkspaceProps = {
+  model: EditorWorkspaceModel;
+  actions: EditorWorkspaceActions;
+};
