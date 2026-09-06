@@ -33,8 +33,6 @@ type BundleActionSetters = {
   setAnswer: Dispatch<SetStateAction<AskResult | null>>;
   setMovingFileId: Dispatch<SetStateAction<string | null>>;
   setDrafts: Dispatch<SetStateAction<Record<string, string>>>;
-  setTagDrafts: Dispatch<SetStateAction<Record<string, string>>>;
-  setPathDrafts: Dispatch<SetStateAction<Record<string, string>>>;
   setExpandedDirectories: Dispatch<SetStateAction<Set<string>>>;
   setDraggedFileId: Dispatch<SetStateAction<string | null>>;
   setDropDirectoryPath: Dispatch<SetStateAction<string | null>>;
@@ -65,8 +63,6 @@ export function useWorkspaceBundleActions(
     setAnswer,
     setMovingFileId,
     setDrafts,
-    setTagDrafts,
-    setPathDrafts,
     setExpandedDirectories,
     setDraggedFileId,
     setDropDirectoryPath,
@@ -198,19 +194,6 @@ export function useWorkspaceBundleActions(
         const next = { ...current };
         delete next[result.oldId];
         next[result.newId] = result.note.content;
-        return next;
-      });
-      setTagDrafts((current) => {
-        if (!(result.oldId in current)) return current;
-        const next = { ...current };
-        delete next[result.oldId];
-        next[result.newId] = result.note.tags.join(", ");
-        return next;
-      });
-      setPathDrafts((current) => {
-        if (!(result.oldId in current)) return current;
-        const next = { ...current };
-        delete next[result.oldId];
         return next;
       });
       setNotes(

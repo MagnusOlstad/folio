@@ -15,12 +15,7 @@ import type {
   ViewerDocument,
 } from "../domain/types.ts";
 import { api } from "../lib/api.ts";
-import {
-  conceptUrl,
-  directoryForId,
-  normalizeDirectoryInput,
-  resolveBundleLink,
-} from "../lib/paths.ts";
+import { conceptUrl } from "../lib/paths.ts";
 import { buildFileTree } from "../lib/tree.ts";
 import { loadExpandedDirectoryState, loadLocalDrafts } from "../lib/storage.ts";
 import {
@@ -28,8 +23,6 @@ import {
   formatDate,
   hasInstalledModel,
   isUntitledId,
-  parseTags,
-  sourcePosition,
   storedDraftDocument,
   toggleTaskAtLine,
 } from "../lib/workspace.ts";
@@ -98,11 +91,6 @@ export function WorkspaceController() {
     resizeSplit,
   } = useWorkspaceLayout();
   const [activeGroupId, setActiveGroupId] = useState("primary");
-  const [draggedTab, setDraggedTab] = useState<{
-    documentId: string;
-    groupId: string;
-  } | null>(null);
-  const [dropGroupId, setDropGroupId] = useState<string | null>(null);
   const [draggedFileId, setDraggedFileId] = useState<string | null>(null);
   const [dropDirectoryPath, setDropDirectoryPath] = useState<string | null>(
     null,
@@ -115,14 +103,6 @@ export function WorkspaceController() {
         .filter((document) => isUntitledId(document.id))
         .map((document) => [document.id, document.content]),
     ),
-  );
-  const [pathDrafts, setPathDrafts] = useState<Record<string, string>>({});
-  const [tagDrafts, setTagDrafts] = useState<Record<string, string>>({});
-  const [metadataDrafts, setMetadataDrafts] = useState<Record<string, string>>(
-    {},
-  );
-  const [editingMetadataKey, setEditingMetadataKey] = useState<string | null>(
-    null,
   );
   const [savingDocuments, setSavingDocuments] = useState<Set<string>>(
     () => new Set(),
@@ -475,16 +455,6 @@ export function WorkspaceController() {
         delete next[result.deletedId];
         return next;
       });
-      setPathDrafts((current) => {
-        const next = { ...current };
-        delete next[result.deletedId];
-        return next;
-      });
-      setTagDrafts((current) => {
-        const next = { ...current };
-        delete next[result.deletedId];
-        return next;
-      });
       setGroups((current) =>
         current.map((group) => {
           const tabIndex = group.tabs.indexOf(result.deletedId);
@@ -706,19 +676,6 @@ export function WorkspaceController() {
         next[newId] = updated.content;
         return next;
       });
-      setPathDrafts((current) => {
-        if (!(oldId in current)) return current;
-        const next = { ...current };
-        delete next[oldId];
-        return next;
-      });
-      setTagDrafts((current) => {
-        if (!(oldId in current)) return current;
-        const next = { ...current };
-        delete next[oldId];
-        next[newId] = updated.tags.join(", ");
-        return next;
-      });
       setEditingKey((current) =>
         current?.endsWith(`:${oldId}`)
           ? current.slice(0, -oldId.length) + newId
@@ -821,37 +778,6 @@ export function WorkspaceController() {
         }
       });
     saveQueues.current[id] = save;
-  }
-
-  function beginMetadataEditing(
-    groupId: string,
-    document: ViewerDocument,
-    field: "title" | "description",
-  ) {
-    if (
-      !document.deletable ||
-      savingDocuments.has(document.id) ||
-      (field === "title" && !document.movable)
-    )
-      return;
-    const key = `${groupId}:${document.id}:${field}`;
-    setMetadataDrafts((current) => ({ ...current, [key]: document[field] }));
-    setEditingMetadataKey(key);
-  }
-
-  function finishMetadataEditing(
-    key: string,
-    document: ViewerDocument,
-    field: "title" | "description",
-    value: string,
-  ) {
-    setEditingMetadataKey((current) => (current === key ? null : current));
-    setMetadataDrafts((current) => {
-      const next = { ...current };
-      delete next[key];
-      return next;
-    });
-    persistMetadata(document, field, value);
   }
 
   function persistDocument(
@@ -989,6 +915,19 @@ export function WorkspaceController() {
     saveQueues.current[id] = save;
   }
 
+  function changeDraftContent(document: ViewerDocument, content: string) {
+    setDrafts((current) => ({ ...current, [document.id]: content }));
+    if (!isUntitledId(document.id)) return;
+    setDocuments((current) => ({
+      ...current,
+      [document.id]: {
+        ...current[document.id],
+        content,
+        updatedAt: new Date().toISOString(),
+      },
+    }));
+  }
+
   function beginEditing(
     groupId: string,
     document: ViewerDocument,
@@ -1019,6 +958,13 @@ export function WorkspaceController() {
     setEditingKey(null);
     if (content !== document.content)
       persistDocument(document, content, document.tags);
+  }
+
+  function restoreReaderScroll(editKey: string, element: HTMLDivElement) {
+    const scrollTop = readerScrollPositions.current[editKey];
+    if (scrollTop === undefined) return;
+    element.scrollTop = scrollTop;
+    delete readerScrollPositions.current[editKey];
   }
 
   function fileDraft(document: ViewerDocument) {
@@ -1098,7 +1044,7 @@ export function WorkspaceController() {
 
   const { reindexBundle, moveBundleFile } = useWorkspaceBundleActions(
     { reindexing, groups, files, editingKey, movingFileId, savingDocuments, loadingDocuments },
-    { setReindexing, setMessage, setNotes, setFiles, setDocuments, setGroups, setEditingKey, setSearchResults, setAnswer, setMovingFileId, setDrafts, setTagDrafts, setPathDrafts, setExpandedDirectories, setDraggedFileId, setDropDirectoryPath },
+    { setReindexing, setMessage, setNotes, setFiles, setDocuments, setGroups, setEditingKey, setSearchResults, setAnswer, setMovingFileId, setDrafts, setExpandedDirectories, setDraggedFileId, setDropDirectoryPath },
   );
 
   async function toggleOllamaService(service: string, model?: string) {
@@ -1299,66 +1245,45 @@ export function WorkspaceController() {
         />
 
         <EditorWorkspace
-          {...{
+          model={{
             groups,
             splitPosition,
+            activeGroupId,
+            documents,
+            loadingDocuments,
+            savingDocuments,
+            editingKey,
+            editorIntents,
+            drafts,
+            deletingNoteId,
+            movingFileId,
+            message,
+          }}
+          actions={{
             beginHorizontalResize,
             resizeSplit,
             finishHorizontalResize,
-            setSplitPosition,
-            activeGroupId,
-            dropGroupId,
-            draggedTab,
-            setActiveGroupId,
-            setDropGroupId,
+            resetSplit: () => setSplitPosition(50),
+            activateGroup: setActiveGroupId,
             moveTabToGroup,
-            setDraggedTab,
-            savingDocuments,
             titleForId,
-            isUntitledId,
             activateTab,
             createNewTab,
             splitWorkspace,
             closeGroup,
-            documents,
-            loadingDocuments,
-            editingKey,
-            editorIntents,
-            metadataDrafts,
-            setMetadataDrafts,
-            finishMetadataEditing,
-            beginMetadataEditing,
-            drafts,
-            setDrafts,
-            setDocuments,
-            fileDraft,
-            finishEditing,
-            readerScrollPositions,
-            openDocument,
-            resolveBundleLink,
-            conceptUrl,
-            sourcePosition,
-            formatDate,
-            deleteFiledNote,
-            deletingNoteId,
-            pathDrafts,
-            setPathDrafts,
-            tagDrafts,
-            setTagDrafts,
-            persistDocument,
-            editingMetadataKey,
-            setEditingMetadataKey,
-            message,
-            setMessage,
             closeTab,
+            changeDraftContent,
+            fileDraft,
             beginEditing,
+            finishEditing,
+            restoreReaderScroll,
+            openDocument,
             toggleTaskCheckbox,
-            directoryForId,
-            normalizeDirectoryInput,
-            movingFileId,
+            deleteFiledNote,
+            persistDocument,
+            persistMetadata,
             moveBundleFile,
-            parseTags,
-            filedDraftContent,
+            dismissMessage: () => setMessage(""),
           }}
         />
       </section>
