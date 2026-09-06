@@ -61,8 +61,8 @@ export function useWorkspaceCommands({
       if (action === "bold" || action === "italic" || action === "link") {
         const target = document.activeElement;
         if (
-          !(target instanceof HTMLTextAreaElement) ||
-          !target.classList.contains("document-editor")
+          !(target instanceof HTMLElement) ||
+          !target.closest(".document-editor, .live-markdown-editor")
         )
           return;
         event.preventDefault();

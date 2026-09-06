@@ -118,13 +118,10 @@ export function EditorGroup({
             groupId={group.id}
             document={document}
             editKey={editKey}
-            isEditing={model.editingKey === editKey}
-            editorIntent={model.editorIntents.current[editKey]}
             draft={model.drafts[document.id]}
             saving={saving}
             deletingNoteId={model.deletingNoteId}
             movingFileId={model.movingFileId}
-            onRestoreScroll={actions.restoreReaderScroll}
             editingMetadataKey={ui.editingMetadataKey}
             metadataDrafts={ui.metadataDrafts}
             pathDraft={ui.pathDrafts[document.id]}
@@ -155,7 +152,13 @@ export function EditorGroup({
             onBeginTagEditing={ui.beginTagEditing}
             onChangeTag={ui.changeTagDraft}
             onFinishTagEditing={(target, value) =>
-              ui.finishTagEditing(target, value, actions.persistDocument)
+              ui.finishTagEditing(target, value, (edited, _content, tags) =>
+                actions.persistDocument(
+                  edited,
+                  model.drafts[edited.id] ?? edited.content,
+                  tags,
+                ),
+              )
             }
             onDelete={actions.deleteFiledNote}
           />

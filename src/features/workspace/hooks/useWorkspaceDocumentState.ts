@@ -1,9 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type {
-  EditorIntent,
-  StoredDraft,
-  ViewerDocument,
-} from "../../../domain/types.ts";
+import type { StoredDraft, ViewerDocument } from "../../../domain/types.ts";
 import { api } from "../../../lib/api.ts";
 import { loadLocalDrafts } from "../../../lib/storage.ts";
 import {
@@ -49,8 +45,6 @@ export function useWorkspaceDocumentState({
   const saveQueues = useRef<Record<string, Promise<void>>>({});
   const draftSyncQueues = useRef<Record<string, Promise<void>>>({});
   const filingDraftIds = useRef<Set<string>>(new Set());
-  const editorIntents = useRef<Record<string, EditorIntent>>({});
-  const readerScrollPositions = useRef<Record<string, number>>({});
   const documentsRef = useRef(documents);
   const draftSnapshotRef = useRef<StoredDraft[]>([]);
 
@@ -110,13 +104,6 @@ export function useWorkspaceDocumentState({
     }));
   }
 
-  function restoreReaderScroll(editKey: string, element: HTMLDivElement) {
-    const scrollTop = readerScrollPositions.current[editKey];
-    if (scrollTop === undefined) return;
-    element.scrollTop = scrollTop;
-    delete readerScrollPositions.current[editKey];
-  }
-
   useWorkspacePersistence({
     documents,
     drafts,
@@ -153,11 +140,9 @@ export function useWorkspaceDocumentState({
     saveQueues,
     draftSyncQueues,
     filingDraftIds,
-    editorIntents,
-    readerScrollPositions,
+    documentsRef,
     mergeRemoteDrafts,
     changeDraftContent,
-    restoreReaderScroll,
   };
 }
 

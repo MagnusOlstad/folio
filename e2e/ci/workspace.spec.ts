@@ -51,27 +51,27 @@ test.describe('browser-safe keyboard shortcuts', () => {
     await page.keyboard.press('Control+t')
     const editor = page.getByLabel('Write a new note')
     await editor.fill('hello')
-    await editor.selectText()
+    await editor.press('Control+a')
     await page.keyboard.press('Control+b')
-    await expect(editor).toHaveValue('**hello**')
+    await expect(editor).toHaveText('**hello**')
   })
 
   test('Cmd/Ctrl+I italicizes the selected text', async ({ page }) => {
     await page.keyboard.press('Control+t')
     const editor = page.getByLabel('Write a new note')
     await editor.fill('hello')
-    await editor.selectText()
+    await editor.press('Control+a')
     await page.keyboard.press('Control+i')
-    await expect(editor).toHaveValue('*hello*')
+    await expect(editor).toHaveText('*hello*')
   })
 
   test('Cmd/Ctrl+K wraps the selected text as a Markdown link', async ({ page }) => {
     await page.keyboard.press('Control+t')
     const editor = page.getByLabel('Write a new note')
     await editor.fill('hello')
-    await editor.selectText()
+    await editor.press('Control+a')
     await page.keyboard.press('Control+k')
-    await expect(editor).toHaveValue('[hello]()')
+    await expect(editor).toHaveText('[hello]()')
   })
 
   test('Cmd/Ctrl+S files a new draft, degrading gracefully with Ollama offline', async ({ page }) => {

@@ -780,6 +780,108 @@ body.resizing-horizontal * {
   scrollbar-width: thin;
 }
 
+.live-markdown-editor {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--paper);
+}
+
+.live-markdown-editor .cm-editor,
+.live-markdown-editor .cm-scroller {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.live-markdown-editor .cm-scroller {
+  overflow: auto;
+  scrollbar-color: var(--line) transparent;
+  scrollbar-width: thin;
+}
+
+.live-markdown-editor .cm-content {
+  min-height: 100%;
+  padding: 32px clamp(22px, 6cqi, 64px) 60px;
+  color: var(--ink);
+  caret-color: var(--ink);
+  font: 400 18px/32px 'Iowan Old Style', Baskerville, Georgia, serif;
+  overflow-wrap: break-word;
+}
+
+.live-markdown-editor .cm-content:focus {
+  outline: none;
+}
+
+.live-markdown-editor .cm-line {
+  min-height: 32px;
+}
+
+.live-markdown-editor .cm-live-markdown-marker {
+  display: none;
+}
+
+.live-markdown-editor .cm-live-markdown-heading {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.live-markdown-editor .cm-live-markdown-strong {
+  font-weight: 700;
+}
+
+.live-markdown-editor .cm-live-markdown-emphasis {
+  font-style: italic;
+}
+
+.live-markdown-editor .cm-live-markdown-strike {
+  text-decoration: line-through;
+}
+
+.live-markdown-editor .cm-live-markdown-code {
+  color: var(--acid);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82em;
+}
+
+.live-markdown-editor .cm-live-markdown-link {
+  color: var(--acid);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.live-markdown-editor .cm-live-markdown-quote {
+  padding-left: 16px;
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+}
+
+.live-markdown-editor .cm-live-markdown-list {
+  padding-left: 22px;
+}
+
+.live-markdown-editor .cm-live-markdown-list::before {
+  position: absolute;
+  margin-left: -17px;
+  color: var(--muted);
+  content: '•';
+}
+
+.live-markdown-editor .cm-live-markdown-task {
+  width: 15px;
+  height: 15px;
+  margin: 0 8px 0 0;
+  accent-color: var(--acid);
+  vertical-align: -1px;
+}
+
+.live-markdown-editor .cm-live-markdown-table {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.88em;
+}
+
 .document-content {
   padding: 32px clamp(22px, 6cqi, 64px) 60px;
   color: var(--ink);
@@ -908,11 +1010,14 @@ body.resizing-horizontal * {
   background: var(--paper);
 }
 
-.draft-note-editor .document-editor {
+.draft-note-editor .live-markdown-editor {
   position: relative;
   z-index: 2;
-  padding-top: clamp(32px, 6cqi, 70px);
   background: repeating-linear-gradient(transparent, transparent 31px, rgba(255, 255, 255, 0.025) 32px);
+}
+
+.draft-note-editor .live-markdown-editor .cm-content {
+  padding-top: clamp(32px, 6cqi, 70px);
 }
 
 .draft-steering-band {

@@ -1,5 +1,5 @@
 import { fireEvent, render, renderHook, screen } from "@testing-library/react";
-import { act, useRef } from "react";
+import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ViewerDocument } from "../../src/domain/types.ts";
 import { DocumentFooter } from "../../src/features/workspace/components/DocumentFooter.tsx";
@@ -246,7 +246,6 @@ describe("workspace editor components", () => {
 
     function GroupHarness() {
       const ui = useWorkspaceEditorUi();
-      const editorIntents = useRef({});
       return (
         <EditorGroup
           group={{ id: "secondary", tabs: [], activeId: null }}
@@ -257,7 +256,6 @@ describe("workspace editor components", () => {
             loadingDocuments: new Set(),
             savingDocuments: new Set(),
             editingKey: null,
-            editorIntents,
             drafts: {},
             deletingNoteId: null,
             movingFileId: null,
@@ -275,7 +273,6 @@ describe("workspace editor components", () => {
             fileDraft: vi.fn(),
             beginEditing: vi.fn(),
             finishEditing: vi.fn(),
-            restoreReaderScroll: vi.fn(),
             openDocument: vi.fn().mockResolvedValue(undefined),
             toggleTaskCheckbox: vi.fn().mockResolvedValue(undefined),
             deleteFiledNote: vi.fn().mockResolvedValue(undefined),

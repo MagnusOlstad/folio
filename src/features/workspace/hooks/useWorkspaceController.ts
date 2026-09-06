@@ -10,6 +10,8 @@ import { useWorkspaceDocumentNavigation } from "./useWorkspaceDocumentNavigation
 import { useWorkspaceExplorerState } from "./useWorkspaceExplorerState.ts";
 import { useWorkspaceSidebarProps } from "./useWorkspaceSidebarProps.ts";
 import { useWorkspaceShortcutActions } from "./useWorkspaceShortcutActions.ts";
+import { useFiledDocumentAutosave } from "./useFiledDocumentAutosave.ts";
+import { isUntitledId } from "../../../lib/workspace.ts";
 
 function draftTitle(content: string) {
   const firstLine = content
@@ -46,6 +48,17 @@ export function useWorkspaceController(): WorkspaceShellProps {
     setMessage,
     clearDiscovery: explorer.discovery.clearDiscovery,
     replaceDiscoveryDocument: explorer.discovery.replaceDocument,
+  });
+  const autosave = useFiledDocumentAutosave({
+    save: async (documentId, content) => {
+      const document = documents.documentsRef.current[documentId];
+      if (!document || isUntitledId(documentId)) return;
+      if (!content.trim()) {
+        setMessage("A note cannot be empty.");
+        throw new Error("A note cannot be empty.");
+      }
+      await mutations.persistDocument(document, content, document.tags, true);
+    },
   });
   const navigation = useWorkspaceDocumentNavigation({
     documents,
@@ -87,12 +100,10 @@ export function useWorkspaceController(): WorkspaceShellProps {
     groups: tabs.groups,
     activeGroupId: tabs.activeGroupId,
     documents: documents.documents,
-    drafts: documents.drafts,
-    editingKey: documents.editingKey,
     createNewTab: tabs.createNewTab,
     closeTab: tabs.closeTab,
     fileDraft: mutations.fileDraft,
-    persistDocument: mutations.persistDocument,
+    flushDocument: autosave.flushSave,
   });
 
   const { sidebar, moveBundleFile } = useWorkspaceSidebarProps({
@@ -105,7 +116,10 @@ export function useWorkspaceController(): WorkspaceShellProps {
     draftTitle,
     openLocalDraft: tabs.openLocalDraft,
     deleteLocalDraft: navigation.deleteLocalDraft,
-    openDocument: navigation.openDocument,
+    openDocument: async (...args) => {
+      void autosave.flushAllSaves();
+      return navigation.openDocument(...args);
+    },
   });
 
   return {
@@ -136,7 +150,6 @@ export function useWorkspaceController(): WorkspaceShellProps {
         loadingDocuments: documents.loadingDocuments,
         savingDocuments: documents.savingDocuments,
         editingKey: documents.editingKey,
-        editorIntents: documents.editorIntents,
         drafts: documents.drafts,
         deletingNoteId: documents.deletingNoteId,
         movingFileId: explorer.movingFileId,
@@ -147,25 +160,54 @@ export function useWorkspaceController(): WorkspaceShellProps {
         resizeSplit: layout.resizeSplit,
         finishHorizontalResize: layout.finishHorizontalResize,
         resetSplit: () => layout.setSplitPosition(50),
-        activateGroup: tabs.setActiveGroupId,
+        activateGroup: (groupId) => {
+          if (groupId !== tabs.activeGroupId) void autosave.flushAllSaves();
+          tabs.setActiveGroupId(groupId);
+        },
         moveTabToGroup: tabs.moveTabToGroup,
         titleForId: tabs.titleForId,
-        activateTab: tabs.activateTab,
+        activateTab: (groupId, documentId) => {
+          const group = tabs.groups.find((candidate) => candidate.id === groupId);
+          if (groupId !== tabs.activeGroupId || group?.activeId !== documentId)
+            void autosave.flushAllSaves();
+          tabs.activateTab(groupId, documentId);
+        },
         createNewTab: tabs.createNewTab,
         splitWorkspace: tabs.splitWorkspace,
-        closeGroup: tabs.closeGroup,
-        closeTab: tabs.closeTab,
-        changeDraftContent: documents.changeDraftContent,
+        closeGroup: (groupId) => {
+          void autosave.flushAllSaves();
+          tabs.closeGroup(groupId);
+        },
+        closeTab: (groupId, documentId) => {
+          void autosave.flushSave(documentId);
+          tabs.closeTab(groupId, documentId);
+        },
+        changeDraftContent: (document, content) => {
+          documents.changeDraftContent(document, content);
+          if (!isUntitledId(document.id))
+            autosave.scheduleSave(document.id, content);
+        },
         fileDraft: mutations.fileDraft,
         beginEditing: mutations.beginEditing,
-        finishEditing: mutations.finishEditing,
-        restoreReaderScroll: documents.restoreReaderScroll,
-        openDocument: navigation.openDocument,
+        finishEditing: (groupId, document, scrollTop) => {
+          mutations.finishEditing(groupId, document, scrollTop);
+          if (!isUntitledId(document.id)) void autosave.flushSave(document.id);
+        },
+        openDocument: async (...args) => {
+          void autosave.flushAllSaves();
+          return navigation.openDocument(...args);
+        },
         toggleTaskCheckbox: mutations.toggleTaskCheckbox,
-        deleteFiledNote: navigation.deleteFiledNote,
+        deleteFiledNote: async (document) => {
+          await autosave.flushSave(document.id);
+          return navigation.deleteFiledNote(document);
+        },
         persistDocument: mutations.persistDocument,
         persistMetadata: mutations.persistMetadata,
-        moveBundleFile,
+        moveBundleFile: async (id, directory) => {
+          await autosave.flushSave(id);
+          return moveBundleFile(id, directory);
+        },
         dismissMessage: () => setMessage(""),
       },
     },

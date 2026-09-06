@@ -1,7 +1,4 @@
-import type {
-  EditorIntent,
-  ViewerDocument,
-} from "../../../domain/types.ts";
+import type { ViewerDocument } from "../../../domain/types.ts";
 import { isUntitledId } from "../../../lib/workspace.ts";
 import { DocumentBody } from "./DocumentBody.tsx";
 import { DocumentFooter } from "./DocumentFooter.tsx";
@@ -12,13 +9,10 @@ export type DocumentViewProps = {
   groupId: string;
   document: ViewerDocument;
   editKey: string;
-  isEditing: boolean;
-  editorIntent?: EditorIntent;
   draft: string | undefined;
   saving: boolean;
   deletingNoteId: string | null;
   movingFileId: string | null;
-  onRestoreScroll: (editKey: string, element: HTMLDivElement) => void;
   editingMetadataKey: string | null;
   metadataDrafts: Record<string, string>;
   pathDraft: string | undefined;
@@ -41,7 +35,6 @@ export type DocumentViewProps = {
   onBeginEditing: (
     groupId: string,
     document: ViewerDocument,
-    intent?: EditorIntent,
   ) => void;
   onFinishEditing: (
     groupId: string,
@@ -90,11 +83,8 @@ export function DocumentView(props: DocumentViewProps) {
         groupId={props.groupId}
         document={document}
         editKey={props.editKey}
-        isEditing={props.isEditing}
-        editorIntent={props.editorIntent}
         draft={props.draft}
         saving={props.saving}
-        onRestoreScroll={props.onRestoreScroll}
         onChangeContent={props.onChangeContent}
         onFileDraft={props.onFileDraft}
         onFinishEditing={props.onFinishEditing}
