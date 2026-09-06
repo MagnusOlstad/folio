@@ -7,6 +7,12 @@
 - Import feature modules directly; do not add barrel files or move feature logic back into a monolithic component.
 - Styles load through `src/styles/app.css`; preserve import order and the existing cascade.
 
+## Skills
+
+- Load and follow the `vercel-react-best-practices` skill before writing, reviewing, refactoring, or optimizing React frontend code.
+- Apply the skill's React guidance that is relevant to this React 19 + Vite application. Do not apply Next.js-specific guidance unless the task explicitly introduces Next.js code.
+- Repository instructions and explicit user requirements take precedence over general skill guidance.
+
 ## Compatibility
 
 - Preserve `/api` contracts, localStorage keys and recovery behavior, keyboard shortcuts, Markdown/OKF formats, and Electron/server behavior unless a task explicitly changes them.
