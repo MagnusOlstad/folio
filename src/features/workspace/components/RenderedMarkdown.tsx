@@ -3,9 +3,9 @@ import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import type { ViewerDocument } from "../../domain/types.ts";
-import { conceptUrl, resolveBundleLink } from "../../lib/paths.ts";
-import { sourcePosition } from "../../lib/workspace.ts";
+import type { ViewerDocument } from "../../../domain/types.ts";
+import { conceptUrl, resolveBundleLink } from "../../../lib/paths.ts";
+import { sourcePosition } from "../../../lib/workspace.ts";
 
 type RenderedMarkdownProps = {
   document: ViewerDocument;

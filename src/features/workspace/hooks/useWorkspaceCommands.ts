@@ -5,8 +5,8 @@ import type {
   RefObject,
   SetStateAction,
 } from "react";
-import type { FormatMarker } from "../markdown-format.ts";
-import type { SidebarMode } from "../domain/types.ts";
+import type { FormatMarker } from "../../../markdown-format.ts";
+import type { SidebarMode } from "../../../domain/types.ts";
 
 export type WorkspaceShortcutAction =
   | "new-note"

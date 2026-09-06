@@ -3,7 +3,7 @@
 ## Architecture
 
 - React 19 + Vite + TypeScript frontend, Express API, and Electron shell.
-- Keep `src/App.tsx` as composition only. Put orchestration in `src/app`, UI in `src/features`, lifecycle behavior in `src/hooks`, shared types in `src/domain`, and pure helpers/API clients in `src/lib`.
+- Keep `src/App.tsx` and `src/app` as composition only. Colocate workspace UI, hooks, and pure state transitions under `src/features/workspace/{components,hooks,model}`; reserve `src/hooks` for cross-feature lifecycle behavior, `src/domain` for shared types, and `src/lib` for pure helpers/API clients.
 - Import feature modules directly; do not add barrel files or move feature logic back into a monolithic component.
 - Styles load through `src/styles/app.css`; preserve import order and the existing cascade.
 

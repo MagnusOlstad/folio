@@ -1,13 +1,13 @@
-import type { TabGroup } from "../../domain/types.ts";
-import type { WorkspaceEditorUi } from "../../hooks/useWorkspaceEditorUi.ts";
-import { isUntitledId } from "../../lib/workspace.ts";
-import { EditorTabs } from "../tabs/EditorTabs.tsx";
+import type { TabGroup } from "../../../domain/types.ts";
+import type { WorkspaceEditorUi } from "../hooks/useWorkspaceEditorUi.ts";
+import { isUntitledId } from "../../../lib/workspace.ts";
+import { EditorTabs } from "../../tabs/EditorTabs.tsx";
 import { DocumentPane } from "./DocumentPane.tsx";
 import { DocumentView } from "./DocumentView.tsx";
 import type {
   EditorWorkspaceActions,
   EditorWorkspaceModel,
-} from "./types.ts";
+} from "../types.ts";
 
 type EditorGroupProps = {
   group: TabGroup;

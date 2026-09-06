@@ -1,11 +1,11 @@
 import { useState } from "react";
-import type { ViewerDocument } from "../domain/types.ts";
-import { directoryForId, normalizeDirectoryInput } from "../lib/paths.ts";
-import { parseTags } from "../lib/workspace.ts";
+import type { ViewerDocument } from "../../../domain/types.ts";
+import { directoryForId, normalizeDirectoryInput } from "../../../lib/paths.ts";
+import { parseTags } from "../../../lib/workspace.ts";
 import type {
   MetadataField,
   TabDrag,
-} from "../features/workspace/types.ts";
+} from "../types.ts";
 
 export function useWorkspaceEditorUi() {
   const [draggedTab, setDraggedTab] = useState<TabDrag | null>(null);

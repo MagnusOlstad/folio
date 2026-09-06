@@ -1,9 +1,9 @@
 import type {
   EditorIntent,
   ViewerDocument,
-} from "../../domain/types.ts";
-import { isUntitledId } from "../../lib/workspace.ts";
-import { NoteEditor } from "../editor/NoteEditor.tsx";
+} from "../../../domain/types.ts";
+import { isUntitledId } from "../../../lib/workspace.ts";
+import { NoteEditor } from "../../editor/NoteEditor.tsx";
 import { RenderedMarkdown } from "./RenderedMarkdown.tsx";
 
 type DocumentBodyProps = {

@@ -1,5 +1,5 @@
-import type { ViewerDocument } from "../../domain/types.ts";
-import type { MetadataField } from "./types.ts";
+import type { ViewerDocument } from "../../../domain/types.ts";
+import type { MetadataField } from "../types.ts";
 
 type DocumentHeaderProps = {
   groupId: string;

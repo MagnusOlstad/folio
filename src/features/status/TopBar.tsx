@@ -7,6 +7,17 @@ type Endpoint = {
   state: string;
 };
 
+export type TopBarProps = {
+  versionInfo: VersionInfo | null;
+  status: ModelStatus | null;
+  missingModels: string[];
+  modelInstallInProgress: boolean;
+  modelEndpoints: Endpoint[];
+  togglingService: string | null;
+  onInstall: () => void;
+  onToggle: (id: string, model?: string) => void;
+};
+
 export function TopBar({
   versionInfo,
   status,
@@ -16,16 +27,7 @@ export function TopBar({
   togglingService,
   onInstall,
   onToggle,
-}: {
-  versionInfo: VersionInfo | null;
-  status: ModelStatus | null;
-  missingModels: string[];
-  modelInstallInProgress: boolean;
-  modelEndpoints: Endpoint[];
-  togglingService: string | null;
-  onInstall: () => void;
-  onToggle: (id: string, model?: string) => void;
-}) {
+}: TopBarProps) {
   return (
     <header className="topbar">
       <div className="brand-group">

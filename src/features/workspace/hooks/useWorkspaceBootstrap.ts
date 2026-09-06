@@ -6,9 +6,9 @@ import type {
   Note,
   StoredDraft,
   VersionInfo,
-} from "../domain/types.ts";
-import { api, apiWithRetry } from "../lib/api.ts";
-import { expandedPathsForFiles } from "../lib/workspace.ts";
+} from "../../../domain/types.ts";
+import { api, apiWithRetry } from "../../../lib/api.ts";
+import { expandedPathsForFiles } from "../../../lib/workspace.ts";
 
 type UseWorkspaceBootstrapOptions = {
   setStatus: Dispatch<SetStateAction<ModelStatus | null>>;

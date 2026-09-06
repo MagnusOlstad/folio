@@ -1,15 +1,13 @@
 import type { Dispatch, SetStateAction } from "react";
 import type {
-  AskResult,
   BundleFile,
   FileMoveResult,
   Note,
-  SearchResult,
   TabGroup,
   ViewerDocument,
-} from "../domain/types.ts";
-import { api } from "../lib/api.ts";
-import { isUntitledId } from "../lib/workspace.ts";
+} from "../../../domain/types.ts";
+import { api } from "../../../lib/api.ts";
+import { isUntitledId } from "../../../lib/workspace.ts";
 
 type BundleActionState = {
   reindexing: boolean;
@@ -29,8 +27,7 @@ type BundleActionSetters = {
   setDocuments: Dispatch<SetStateAction<Record<string, ViewerDocument>>>;
   setGroups: Dispatch<SetStateAction<TabGroup[]>>;
   setEditingKey: Dispatch<SetStateAction<string | null>>;
-  setSearchResults: Dispatch<SetStateAction<SearchResult[]>>;
-  setAnswer: Dispatch<SetStateAction<AskResult | null>>;
+  clearDiscovery: () => void;
   setMovingFileId: Dispatch<SetStateAction<string | null>>;
   setDrafts: Dispatch<SetStateAction<Record<string, string>>>;
   setExpandedDirectories: Dispatch<SetStateAction<Set<string>>>;
@@ -59,8 +56,7 @@ export function useWorkspaceBundleActions(
     setDocuments,
     setGroups,
     setEditingKey,
-    setSearchResults,
-    setAnswer,
+    clearDiscovery,
     setMovingFileId,
     setDrafts,
     setExpandedDirectories,
@@ -127,8 +123,7 @@ export function useWorkspaceBundleActions(
           return refreshed ? `${group.id}:${refreshed.id}` : current;
         });
       }
-      setSearchResults([]);
-      setAnswer(null);
+      clearDiscovery();
       setMessage(
         result.errors.length
           ? `Reindexed with ${result.errors.length} invalid Markdown file${result.errors.length === 1 ? "" : "s"} skipped.`
@@ -228,8 +223,7 @@ export function useWorkspaceBundleActions(
         }
         return next;
       });
-      setSearchResults([]);
-      setAnswer(null);
+      clearDiscovery();
       setMessage(result.warning || `Moved note to ${result.newId}.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not move note");

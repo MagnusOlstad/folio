@@ -1,12 +1,12 @@
 import type {
   EditorIntent,
   ViewerDocument,
-} from "../../domain/types.ts";
-import { isUntitledId } from "../../lib/workspace.ts";
+} from "../../../domain/types.ts";
+import { isUntitledId } from "../../../lib/workspace.ts";
 import { DocumentBody } from "./DocumentBody.tsx";
 import { DocumentFooter } from "./DocumentFooter.tsx";
 import { DocumentHeader } from "./DocumentHeader.tsx";
-import type { MetadataField } from "./types.ts";
+import type { MetadataField } from "../types.ts";
 
 export type DocumentViewProps = {
   groupId: string;

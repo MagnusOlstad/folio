@@ -1,10 +1,10 @@
-import type { ViewerDocument } from "../../domain/types.ts";
-import { directoryForId } from "../../lib/paths.ts";
+import type { ViewerDocument } from "../../../domain/types.ts";
+import { directoryForId } from "../../../lib/paths.ts";
 import {
   filedDraftContent,
   formatDate,
   isUntitledId,
-} from "../../lib/workspace.ts";
+} from "../../../lib/workspace.ts";
 
 type DocumentFooterProps = {
   groupId: string;

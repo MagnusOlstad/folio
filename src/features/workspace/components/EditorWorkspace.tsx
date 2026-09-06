@@ -1,8 +1,8 @@
 import { Fragment } from "react";
 import type { CSSProperties } from "react";
-import { useWorkspaceEditorUi } from "../../hooks/useWorkspaceEditorUi.ts";
+import { useWorkspaceEditorUi } from "../hooks/useWorkspaceEditorUi.ts";
 import { EditorGroup } from "./EditorGroup.tsx";
-import type { EditorWorkspaceProps } from "./types.ts";
+import type { EditorWorkspaceProps } from "../types.ts";
 import { WorkspaceSplitHandle } from "./WorkspaceSplitHandle.tsx";
 
 export function EditorWorkspace({ model, actions }: EditorWorkspaceProps) {

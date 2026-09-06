@@ -2,13 +2,13 @@ import { fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { act, useRef } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ViewerDocument } from "../../src/domain/types.ts";
-import { DocumentFooter } from "../../src/features/workspace/DocumentFooter.tsx";
-import { DocumentHeader } from "../../src/features/workspace/DocumentHeader.tsx";
-import { DocumentPane } from "../../src/features/workspace/DocumentPane.tsx";
-import { EditorGroup } from "../../src/features/workspace/EditorGroup.tsx";
-import { RenderedMarkdown } from "../../src/features/workspace/RenderedMarkdown.tsx";
-import { WorkspaceSplitHandle } from "../../src/features/workspace/WorkspaceSplitHandle.tsx";
-import { useWorkspaceEditorUi } from "../../src/hooks/useWorkspaceEditorUi.ts";
+import { DocumentFooter } from "../../src/features/workspace/components/DocumentFooter.tsx";
+import { DocumentHeader } from "../../src/features/workspace/components/DocumentHeader.tsx";
+import { DocumentPane } from "../../src/features/workspace/components/DocumentPane.tsx";
+import { EditorGroup } from "../../src/features/workspace/components/EditorGroup.tsx";
+import { RenderedMarkdown } from "../../src/features/workspace/components/RenderedMarkdown.tsx";
+import { WorkspaceSplitHandle } from "../../src/features/workspace/components/WorkspaceSplitHandle.tsx";
+import { useWorkspaceEditorUi } from "../../src/features/workspace/hooks/useWorkspaceEditorUi.ts";
 
 const document: ViewerDocument = {
   id: "/notes/current.md",

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
-import type { StoredDraft, ViewerDocument } from "../domain/types.ts";
-import { isUntitledId } from "../lib/workspace.ts";
+import type { StoredDraft, ViewerDocument } from "../../../domain/types.ts";
+import { isUntitledId } from "../../../lib/workspace.ts";
 
 export function useWorkspacePersistence({
   documents,
