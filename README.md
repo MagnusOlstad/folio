@@ -124,13 +124,39 @@ xattr -dr com.apple.quarantine /Applications/Folio.app
 Folio uses semantic versioning from `package.json`. The running version is shown as a badge
 in the top bar and served by `GET /api/version`.
 
-Cut a release with:
+### Automated releases (GitHub Actions)
+
+Releases are cut by the `Release` workflow (`.github/workflows/release.yml`). It runs the
+unit and UI tests, builds the macOS bundle on a macOS runner, tags `vX.Y.Z`, and publishes
+a GitHub release with the `.dmg` and `.zip` plus commit-subject release notes.
+
+Two ways to trigger it:
+
+1. **Push to main with a version bump.** Change `version` in `package.json`, commit as
+   `release: vX.Y.Z`, and push. The workflow detects the version change, builds, creates
+   the tag, and publishes the release.
+2. **Manual dispatch.** Run the workflow from the Actions tab, or with:
+
+   ```bash
+   gh workflow run release -R MagnusOlstad/folio -f bump=patch   # or minor, major
+   ```
+
+   Dispatching bumps `package.json` itself, commits `release: vX.Y.Z`, pushes the commit
+   and tag to main, builds, and publishes.
+
+Commits and tags pushed by the workflow use the `github-actions[bot]` identity. The
+workflow is idempotent: when the tag and release already exist, the run exits without
+rebuilding — so a local release pushed to main does not duplicate work in CI.
+
+### Local releases
+
+The `npm run release` script cuts a release from your machine — no CI runners involved:
 
 ```bash
 npm run release -- patch     # or minor, major, or an explicit 1.4.0
 ```
 
-The script runs from your machine — no CI runners are involved. It:
+It:
 
 1. Checks that `gh` is authenticated and the working tree is clean.
 2. Bumps `package.json` (restoring it if the build then fails).
@@ -219,7 +245,7 @@ npm run dev      # Start frontend and API with reload
 npm run build    # Type-check and build the frontend
 npm run desktop  # Build and open the Electron app
 npm run dist:mac # Build a distributable macOS .dmg and .zip
-npm run release  # Bump version, build, tag, and publish a GitHub release
+npm run release  # Cut a release locally (CI does this automatically on main)
 npm run lint     # Run Oxlint
 npm start        # Serve the built app and API
 ```
