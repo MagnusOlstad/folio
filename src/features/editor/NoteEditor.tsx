@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { applyFormatMarker, type FormatMarker } from "../../markdown-format.ts";
+import { continueMarkdownList } from "./list-editing.ts";
 import type { EditorIntent } from "../../domain/types.ts";
 
 function lineStartOffset(value: string, lineNumber: number) {
@@ -10,43 +11,6 @@ function lineStartOffset(value: string, lineNumber: number) {
     offset = lineBreak + 1;
   }
   return offset;
-}
-
-function continueMarkdownList(
-  value: string,
-  selectionStart: number,
-  selectionEnd: number,
-) {
-  if (selectionStart !== selectionEnd) return null;
-  const lineStart = value.lastIndexOf("\n", selectionStart - 1) + 1;
-  const nextBreak = value.indexOf("\n", selectionStart);
-  const lineEnd = nextBreak === -1 ? value.length : nextBreak;
-  const line = value.slice(lineStart, lineEnd);
-  const match = line.match(
-    /^((?:[ \t]*>\s*)*[ \t]*)([-+*]|\d+[.)])(\s+)(?:\[([ xX])\](\s+))?(.*)$/,
-  );
-  if (!match) return null;
-  const [, prefix, marker, spacing, taskState, taskSpacing = "", itemContent] =
-    match;
-  const markerLength =
-    prefix.length +
-    marker.length +
-    spacing.length +
-    (taskState === undefined ? 0 : taskSpacing.length + 3);
-  if (selectionStart - lineStart < markerLength) return null;
-  if (!itemContent.trim())
-    return {
-      value: `${value.slice(0, lineStart)}${prefix}${value.slice(lineEnd)}`,
-      caret: lineStart + prefix.length,
-    };
-  const nextMarker = /^\d/.test(marker)
-    ? `${Number.parseInt(marker, 10) + 1}${marker.at(-1)}`
-    : marker;
-  const nextPrefix = `${prefix}${nextMarker}${spacing}${taskState === undefined ? "" : `[ ]${taskSpacing}`}`;
-  return {
-    value: `${value.slice(0, selectionStart)}\n${nextPrefix}${value.slice(selectionEnd)}`,
-    caret: selectionStart + nextPrefix.length + 1,
-  };
 }
 
 export function NoteEditor({
