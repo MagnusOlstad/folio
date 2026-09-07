@@ -124,17 +124,18 @@ xattr -dr com.apple.quarantine /Applications/Folio.app
 Folio uses semantic versioning from `package.json`. The running version is shown as a badge
 in the top bar and served by `GET /api/version`.
 
-Cut a release by dispatching the `Release` workflow from `main` (`gh workflow run release`,
-or from the Actions tab). There is nothing to type: the bump is derived from the Conventional
-Commits subjects since the previous release tag — a breaking change (`!` in the subject or a
-`BREAKING CHANGE` footer) bumps major, `feat:` bumps minor, anything else bumps patch. The
-workflow builds the mac app first, then pushes the `release: vX.Y.Z` commit and tag and
-opens a draft GitHub release with the commit subjects since the previous tag plus install
-notes. Review and publish the draft to ship. The run fails when nothing was merged since
-the last tag or the dispatch was not from `main`.
+Releases are automated with release-please. When conventional commits land on `main`, the
+`Release` workflow opens a `chore(main): release X.Y.Z` pull request that bumps
+`package.json` and updates `CHANGELOG.md`. Merging that PR is what ships a release:
+release-please tags `vX.Y.Z` and opens a draft GitHub release, the same workflow run builds
+the mac `.dmg` and `.zip` and attaches them, and you publish the draft to ship.
 
-Commit and PR titles follow Conventional Commits, and PR titles are validated in CI, so
-landed work carries the `feat:`/`fix:` subjects that drive the bump.
+The bump comes from the Conventional Commits subjects since the previous release — a
+breaking change (`!` in the subject or a `BREAKING CHANGE` footer) bumps major, `feat:`
+bumps minor, `fix:` and everything else patch. PR titles are validated against Conventional
+Commits in CI, and with squash merges the PR title becomes the commit subject on `main`.
+The draft's notes come from the changelog; the app is unsigned, so add the Gatekeeper
+install note from "The build is not code-signed" above to the draft before publishing.
 
 ### Update notifications
 
