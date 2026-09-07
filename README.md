@@ -124,28 +124,17 @@ xattr -dr com.apple.quarantine /Applications/Folio.app
 Folio uses semantic versioning from `package.json`. The running version is shown as a badge
 in the top bar and served by `GET /api/version`.
 
-Releases can also be cut from CI: dispatch the `Release` workflow with a bump type
-(`gh workflow run release -f bump=patch`, or from the Actions tab). It bumps `package.json`,
-pushes the `release: vX.Y.Z` commit and tag, and uploads the `.dmg` and `.zip` to a draft
-GitHub release with notes from the commits since the previous tag. Review and publish the
-draft to ship.
+Cut a release by dispatching the `Release` workflow from `main` (`gh workflow run release`,
+or from the Actions tab). There is nothing to type: the bump is derived from the Conventional
+Commits subjects since the previous release tag — a breaking change (`!` in the subject or a
+`BREAKING CHANGE` footer) bumps major, `feat:` bumps minor, anything else bumps patch. The
+workflow builds the mac app first, then pushes the `release: vX.Y.Z` commit and tag and
+opens a draft GitHub release with the commit subjects since the previous tag plus install
+notes. Review and publish the draft to ship. The run fails when nothing was merged since
+the last tag or the dispatch was not from `main`.
 
-Cut a release with:
-
-```bash
-npm run release -- patch     # or minor, major, or an explicit 1.4.0
-```
-
-The script runs from your machine — no CI runners are involved. It:
-
-1. Checks that `gh` is authenticated and the working tree is clean.
-2. Bumps `package.json` (restoring it if the build then fails).
-3. Runs `npm run dist:mac`.
-4. Commits `release: vX.Y.Z`, creates an annotated tag, and pushes both.
-5. Creates the GitHub release with `gh` and uploads the `.dmg` and `.zip`, using the commit
-   subjects since the previous tag as release notes.
-
-Useful flags: `--dry-run` (print every step, change nothing), `--allow-dirty`, `--no-push`.
+Commit and PR titles follow Conventional Commits, and PR titles are validated in CI, so
+landed work carries the `feat:`/`fix:` subjects that drive the bump.
 
 ### Update notifications
 
@@ -225,7 +214,6 @@ npm run dev      # Start frontend and API with reload
 npm run build    # Type-check and build the frontend
 npm run desktop  # Build and open the Electron app
 npm run dist:mac # Build a distributable macOS .dmg and .zip
-npm run release  # Bump version, build, tag, and publish a GitHub release
 npm run lint     # Run Oxlint
 npm start        # Serve the built app and API
 ```

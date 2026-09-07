@@ -2,13 +2,6 @@ name: Release
 
 on:
   workflow_dispatch:
-    inputs:
-      bump:
-        description: 'Version bump'
-        required: true
-        default: patch
-        type: choice
-        options: [patch, minor, major]
 
 permissions:
   contents: write
@@ -22,6 +15,12 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Only release from main
+        if: github.ref_name != 'main'
+        run: |
+          echo "Dispatch the Release workflow from main, not '${GITHUB_REF_NAME}'." >&2
+          exit 1
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -33,25 +32,53 @@ jobs:
 
       - run: npm ci
 
+      - name: Determine bump from conventional commits
+        run: |
+          PREVIOUS_TAG="$(git describe --tags --abbrev=0)"
+          RANGE="${PREVIOUS_TAG}..HEAD"
+          if [ "$(git rev-list --count "${RANGE}")" -eq 0 ]; then
+            echo "Nothing was merged since ${PREVIOUS_TAG}; nothing to release." >&2
+            exit 1
+          fi
+          if git log "${RANGE}" --pretty=format:%B | grep -Eq '^BREAKING[ -]CHANGE' \
+            || git log "${RANGE}" --pretty=format:%s | grep -Eq '^[a-z]+(\([a-z0-9/-]+\))?!:'; then
+            BUMP=major
+          elif git log "${RANGE}" --pretty=format:%s | grep -Eq '^feat(\([a-z0-9/-]+\))?:'; then
+            BUMP=minor
+          else
+            BUMP=patch
+          fi
+          echo "Releasing ${PREVIOUS_TAG} with a ${BUMP} bump."
+          echo "BUMP=${BUMP}" >>"${GITHUB_ENV}"
+          echo "RANGE=${RANGE}" >>"${GITHUB_ENV}"
+
       - name: Bump version
         run: |
-          case "${{ inputs.bump }}" in
-            patch|minor|major) npm version "${{ inputs.bump }}" --no-git-tag-version ;;
-            *) echo "Invalid bump: ${{ inputs.bump }}" >&2; exit 1 ;;
-          esac
+          npm version "${BUMP}" --no-git-tag-version
+          VERSION="$(node -p "require('./package.json').version")"
+          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+            echo "Tag v${VERSION} already exists." >&2
+            exit 1
+          fi
+          echo "VERSION=${VERSION}" >>"${GITHUB_ENV}"
+          echo "TAG=v${VERSION}" >>"${GITHUB_ENV}"
 
-      - name: Commit, tag, and push
+      - run: npm run dist:mac
+
+      - name: Commit, tag, and open draft release
         run: |
-          TAG="v$(node -p "require('./package.json').version")"
+          ls release/*"${VERSION}"*.dmg release/*"${VERSION}"*.zip >/dev/null
+          NOTES="release/NOTES.md"
+          {
+            git log "${RANGE}" --pretty=format:'- %s'
+            printf '\n\n## Install\n\nDownload `Folio-%s-arm64.dmg`, drag Folio to Applications, then run once:\n\n```sh\nxattr -dr com.apple.quarantine /Applications/Folio.app\n```\n\nThis build is not code-signed, so macOS Gatekeeper needs that one-time nudge.\n' "${VERSION}"
+          } >"${NOTES}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json package-lock.json
-          git commit -m "release: $TAG"
-          git tag -a "$TAG" -m "Folio $TAG"
-          git push origin "HEAD:${{ github.ref_name }}"
-          git push origin "$TAG"
-
-      - name: Build and publish draft release
-        run: |
-          npm run build
-          npx electron-builder --mac --arm64 --publish always
+          git commit -m "release: ${TAG}"
+          git tag -a "${TAG}" -m "Folio ${TAG}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "${TAG}"
+          gh release create "${TAG}" --draft --title "Folio ${TAG}" --notes-file "${NOTES}" \
+            release/*"${VERSION}"*.dmg release/*"${VERSION}"*.zip
