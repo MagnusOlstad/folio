@@ -42,6 +42,24 @@ describe("NoteEditor markdown interactions", () => {
     expect(onChange).toHaveBeenCalledWith("- [x] done\n- [ ] ");
   });
 
+  it("renumbers the following items when Enter splits a numbered list", () => {
+    const onChange = vi.fn();
+    render(
+      <NoteEditor
+        value={"1. one\n2. two\n3. three"}
+        onChange={onChange}
+        onBlur={vi.fn()}
+        ariaLabel="Note editor"
+      />,
+    );
+    const editor = screen.getByLabelText("Note editor") as HTMLTextAreaElement;
+    editor.setSelectionRange(13, 13);
+
+    fireEvent.keyDown(editor, { key: "Enter" });
+
+    expect(onChange).toHaveBeenCalledWith("1. one\n2. two\n3. \n4. three");
+  });
+
   it("files a draft when Cmd/Ctrl+Enter is used", () => {
     const onFile = vi.fn();
     render(
