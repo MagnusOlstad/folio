@@ -93,6 +93,9 @@
     "dmg": {
       "artifactName": "${productName}-${version}-${arch}.dmg"
     },
-    "publish": null
+    "publish": {
+      "provider": "github",
+      "releaseType": "draft"
+    }
   }
 }

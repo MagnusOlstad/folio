@@ -126,27 +126,26 @@ in the top bar and served by `GET /api/version`.
 
 ### Automated releases (GitHub Actions)
 
-Releases are cut by the `Release` workflow (`.github/workflows/release.yml`). It runs the
-unit and UI tests, builds the macOS bundle on a macOS runner, tags `vX.Y.Z`, and publishes
-a GitHub release with the `.dmg` and `.zip` plus commit-subject release notes.
+Releases are cut by the `Release` workflow (`.github/workflows/release.yml`). Run it from
+the Actions tab, or with:
 
-Two ways to trigger it:
+```bash
+gh workflow run release -R MagnusOlstad/folio -f bump=patch   # or minor, major
+```
 
-1. **Push to main with a version bump.** Change `version` in `package.json`, commit as
-   `release: vX.Y.Z`, and push. The workflow detects the version change, builds, creates
-   the tag, and publishes the release.
-2. **Manual dispatch.** Run the workflow from the Actions tab, or with:
+Dispatching on main:
 
-   ```bash
-   gh workflow run release -R MagnusOlstad/folio -f bump=patch   # or minor, major
-   ```
+1. Bumps `package.json` by the chosen amount.
+2. Commits `release: vX.Y.Z`, creates the annotated tag, and pushes both (as
+   `github-actions[bot]`).
+3. Builds the macOS bundle and uploads the `.dmg` and `.zip` to a **draft** GitHub release
+   for the tag, with release notes generated from the commits since the previous tag.
 
-   Dispatching bumps `package.json` itself, commits `release: vX.Y.Z`, pushes the commit
-   and tag to main, builds, and publishes.
+Review the draft on the Releases page and publish it — publishing is the manual go/no-go
+moment. Until then the release is invisible to the app's update check. The commit and tag
+already exist, so publishing just flips the release live.
 
-Commits and tags pushed by the workflow use the `github-actions[bot]` identity. The
-workflow is idempotent: when the tag and release already exist, the run exits without
-rebuilding — so a local release pushed to main does not duplicate work in CI.
+Commits and tags pushed by the workflow use the `github-actions[bot]` identity.
 
 ### Local releases
 

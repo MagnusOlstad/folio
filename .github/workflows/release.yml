@@ -1,8 +1,6 @@
 name: Release
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       bump:
@@ -17,41 +15,9 @@ permissions:
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false
 
 jobs:
-  check:
-    # Cheap gate for push events: only continue when package.json version changed.
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      changed: ${{ steps.version.outputs.changed }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - id: version
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          BASE="${{ github.event.before }}"
-          if [ -z "$BASE" ] || ! git cat-file -e "$BASE" 2>/dev/null; then
-            BASE="HEAD^"
-          fi
-          PREVIOUS=$(git show "$BASE:package.json" \
-            | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{console.log(JSON.parse(d).version||'')}catch{console.log('')}})")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" = "$VERSION" ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "Version unchanged ($VERSION) - no release."
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Version changed: ${PREVIOUS:-<none>} -> $VERSION"
-          fi
-
   release:
-    needs: check
-    if: github.event_name == 'workflow_dispatch' || needs.check.outputs.changed == 'true'
     runs-on: macos-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -60,12 +26,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Releases must be cut from main
-        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
-        run: |
-          echo "Dispatched on ${{ github.ref }}. Run the Release workflow from main."
-          exit 1
-
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -73,72 +33,16 @@ jobs:
 
       - run: npm ci
 
-      - name: Bump version (dispatch)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Bump version
         run: |
-          BUMP="${{ inputs.bump }}"
-          case "$BUMP" in
-            patch|minor|major) ;;
-            *) echo "Invalid bump '$BUMP'." >&2; exit 1 ;;
+          case "${{ inputs.bump }}" in
+            patch|minor|major) npm version "${{ inputs.bump }}" --no-git-tag-version ;;
+            *) echo "Invalid bump: ${{ inputs.bump }}" >&2; exit 1 ;;
           esac
-          npm version "$BUMP" --no-git-tag-version
-          echo "VERSION=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
 
-      - name: Resolve version (push)
-        if: github.event_name == 'push'
-        run: echo "VERSION=${{ needs.check.outputs.version }}" >> "$GITHUB_ENV"
-
-      - name: Resolve tag
+      - name: Commit, tag, and push
         run: |
-          echo "TAG=v$VERSION" >> "$GITHUB_ENV"
-          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null 2>&1 \
-            && gh release view "v$VERSION" >/dev/null 2>&1; then
-            echo "ALREADY_RELEASED=true" >> "$GITHUB_ENV"
-            echo "v$VERSION is already tagged and released - nothing to do."
-          else
-            echo "ALREADY_RELEASED=false" >> "$GITHUB_ENV"
-          fi
-
-      - name: Run unit and UI tests
-        if: env.ALREADY_RELEASED == 'false'
-        run: |
-          npm test
-          npm run test:ui
-
-      - name: Build macOS bundle
-        if: env.ALREADY_RELEASED == 'false'
-        run: npm run dist:mac
-
-      - name: Collect artifacts
-        if: env.ALREADY_RELEASED == 'false'
-        run: |
-          shopt -s nullglob
-          artifacts=()
-          for f in release/*.dmg release/*.zip; do
-            artifacts+=("$f")
-          done
-          if [ "${#artifacts[@]}" -eq 0 ]; then
-            echo "No .dmg or .zip for $VERSION found in release/." >&2
-            exit 1
-          fi
-          echo "ARTIFACTS=${artifacts[*]}" >> "$GITHUB_ENV"
-
-      - name: Write release notes
-        if: env.ALREADY_RELEASED == 'false'
-        run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
-          RANGE="${PREV_TAG:+$PREV_TAG..}HEAD"
-          {
-            git log --pretty=format:'- %s' "$RANGE"
-            printf '\n\n## Install\n\n'
-            printf 'Download `Folio-%s-arm64.dmg`, drag Folio to Applications, then run once:\n\n' "$VERSION"
-            printf '```sh\nxattr -dr com.apple.quarantine /Applications/Folio.app\n```\n\n'
-            printf 'This build is not code-signed, so macOS Gatekeeper needs that one-time nudge.\n'
-          } > NOTES.md
-
-      - name: Commit, tag, and push (dispatch)
-        if: github.event_name == 'workflow_dispatch' && env.ALREADY_RELEASED == 'false'
-        run: |
+          TAG="v$(node -p "require('./package.json').version")"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json package-lock.json
@@ -147,22 +51,7 @@ jobs:
           git push origin "HEAD:${{ github.ref_name }}"
           git push origin "$TAG"
 
-      - name: Tag and push (push)
-        if: github.event_name == 'push' && env.ALREADY_RELEASED == 'false'
+      - name: Build and publish draft release
         run: |
-          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then
-            git tag -a "$TAG" -m "Folio $TAG"
-            git push origin "$TAG"
-          else
-            echo "Tag $TAG already exists."
-          fi
-
-      - name: Create GitHub release
-        if: env.ALREADY_RELEASED == 'false'
-        run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists - uploading missing assets."
-            gh release upload "$TAG" $ARTIFACTS --clobber
-          else
-            gh release create "$TAG" --title "Folio $TAG" --notes-file NOTES.md $ARTIFACTS
-          fi
+          npm run build
+          npx electron-builder --mac --arm64 --publish always
