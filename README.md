@@ -124,38 +124,19 @@ xattr -dr com.apple.quarantine /Applications/Folio.app
 Folio uses semantic versioning from `package.json`. The running version is shown as a badge
 in the top bar and served by `GET /api/version`.
 
-### Automated releases (GitHub Actions)
+Releases can also be cut from CI: dispatch the `Release` workflow with a bump type
+(`gh workflow run release -f bump=patch`, or from the Actions tab). It bumps `package.json`,
+pushes the `release: vX.Y.Z` commit and tag, and uploads the `.dmg` and `.zip` to a draft
+GitHub release with notes from the commits since the previous tag. Review and publish the
+draft to ship.
 
-Releases are cut by the `Release` workflow (`.github/workflows/release.yml`). Run it from
-the Actions tab, or with:
-
-```bash
-gh workflow run release -R MagnusOlstad/folio -f bump=patch   # or minor, major
-```
-
-Dispatching on main:
-
-1. Bumps `package.json` by the chosen amount.
-2. Commits `release: vX.Y.Z`, creates the annotated tag, and pushes both (as
-   `github-actions[bot]`).
-3. Builds the macOS bundle and uploads the `.dmg` and `.zip` to a **draft** GitHub release
-   for the tag, with release notes generated from the commits since the previous tag.
-
-Review the draft on the Releases page and publish it — publishing is the manual go/no-go
-moment. Until then the release is invisible to the app's update check. The commit and tag
-already exist, so publishing just flips the release live.
-
-Commits and tags pushed by the workflow use the `github-actions[bot]` identity.
-
-### Local releases
-
-The `npm run release` script cuts a release from your machine — no CI runners involved:
+Cut a release with:
 
 ```bash
 npm run release -- patch     # or minor, major, or an explicit 1.4.0
 ```
 
-It:
+The script runs from your machine — no CI runners are involved. It:
 
 1. Checks that `gh` is authenticated and the working tree is clean.
 2. Bumps `package.json` (restoring it if the build then fails).
@@ -244,7 +225,7 @@ npm run dev      # Start frontend and API with reload
 npm run build    # Type-check and build the frontend
 npm run desktop  # Build and open the Electron app
 npm run dist:mac # Build a distributable macOS .dmg and .zip
-npm run release  # Cut a release locally (CI does this automatically on main)
+npm run release  # Bump version, build, tag, and publish a GitHub release
 npm run lint     # Run Oxlint
 npm start        # Serve the built app and API
 ```
