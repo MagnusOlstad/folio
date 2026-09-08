@@ -21,13 +21,18 @@ jobs:
     # "ship it" action, so tagging + building right then needs no second
     # dispatch. Every other PR merge fires this trigger too but no-ops here,
     # by design: routine merges should never kick off a release on their own.
-    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'release-please--branches--main')
+    # Identify the release PR by its autorelease label, not by branch name: the
+    # branch name varies with the configured component and silently never matched.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+      contains(github.event.pull_request.labels.*.name, 'autorelease: pending'))
     runs-on: ubuntu-latest
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         id: release
         with:
           config-file: release-please-config.json
