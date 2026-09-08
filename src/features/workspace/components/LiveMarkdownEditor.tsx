@@ -104,6 +104,7 @@ export function LiveMarkdownEditor({
   const onBlurRef = useRef(onBlur);
   const onFocusRef = useRef(onFocus);
   const onFileRef = useRef(onFile);
+  const ariaLabelRef = useRef(ariaLabel);
   const ariaLabelCompartment = useRef(new Compartment());
   const callbacksRef = useRef<LiveMarkdownCallbacks>({
     onOpenLink,
@@ -116,8 +117,9 @@ export function LiveMarkdownEditor({
     onBlurRef.current = onBlur;
     onFocusRef.current = onFocus;
     onFileRef.current = onFile;
+    ariaLabelRef.current = ariaLabel;
     callbacksRef.current = { onOpenLink, onToggleTask };
-  }, [onBlur, onChange, onFile, onFocus, onOpenLink, onToggleTask, value]);
+  }, [ariaLabel, onBlur, onChange, onFile, onFocus, onOpenLink, onToggleTask, value]);
 
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -136,7 +138,7 @@ export function LiveMarkdownEditor({
           EditorView.scrollMargins.of(() => ({ bottom: 80 })),
           EditorView.lineWrapping,
           ariaLabelCompartment.current.of(
-            EditorView.contentAttributes.of({ "aria-label": ariaLabel }),
+            EditorView.contentAttributes.of({ "aria-label": ariaLabelRef.current }),
           ),
           keymap.of([
             { key: "Mod-a", run: selectAll },

@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
@@ -39,6 +46,21 @@ export function RenderedMarkdown({
   const activeMatchRef = useRef(0);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
+  const [findLayer, setFindLayer] = useState<HTMLElement | null>(null);
+
+  const updateActiveMatch = useCallback((index: number) => {
+    const matches = matchesRef.current;
+    for (const [matchIndex, match] of matches.entries())
+      match.classList.toggle("active", matchIndex === index);
+    const result = findResultRef.current;
+    if (result)
+      result.textContent = matches.length
+        ? `${index + 1} of ${matches.length}`
+        : findQuery
+          ? "No matches"
+          : "";
+    matches[index]?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [findQuery]);
 
   useEffect(() => {
     const content = contentRef.current;
@@ -46,6 +68,11 @@ export function RenderedMarkdown({
     const openFind = () => {
       findScrollTopRef.current =
         content.closest<HTMLElement>("[data-document-scroll]")?.scrollTop ?? 0;
+      setFindLayer(
+        content
+          .closest(".document-view")
+          ?.querySelector<HTMLElement>("[data-document-find-layer]") ?? null,
+      );
       setFindOpen(true);
     };
     content.addEventListener("folio-find", openFind);
@@ -106,21 +133,7 @@ export function RenderedMarkdown({
       node.replaceWith(fragment);
     }
     updateActiveMatch(0);
-  }, [document.content, findOpen, findQuery]);
-
-  function updateActiveMatch(index: number) {
-    const matches = matchesRef.current;
-    for (const [matchIndex, match] of matches.entries())
-      match.classList.toggle("active", matchIndex === index);
-    const result = findResultRef.current;
-    if (result)
-      result.textContent = matches.length
-        ? `${index + 1} of ${matches.length}`
-        : findQuery
-          ? "No matches"
-          : "";
-    matches[index]?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }
+  }, [document.content, findOpen, findQuery, updateActiveMatch]);
 
   function moveMatch(direction: 1 | -1) {
     const count = matchesRef.current.length;
@@ -221,10 +234,6 @@ export function RenderedMarkdown({
       </button>
     </form>
   ) : null;
-  const findLayer = contentRef.current
-    ?.closest(".document-view")
-    ?.querySelector<HTMLElement>("[data-document-find-layer]");
-
   return (
     <div ref={contentRef} data-readonly-markdown="">
       {findPanel && findLayer ? createPortal(findPanel, findLayer) : findPanel}
