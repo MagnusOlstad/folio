@@ -174,7 +174,7 @@ export function DocumentFooter({
                   type="button"
                   className="document-delete"
                   onClick={() => void onDelete(document)}
-                  disabled={deleteInProgress || saving}
+                  disabled={deleteInProgress}
                   title={`Delete ${document.title}`}
                 >
                   Delete

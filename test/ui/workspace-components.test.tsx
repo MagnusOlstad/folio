@@ -148,6 +148,7 @@ describe("workspace editor components", () => {
     expect(screen.getByRole("button", { name: "Current note" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Description" })).toBeEnabled();
     expect(screen.getByLabelText("Path for Current note")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled();
     expect(screen.queryByText("Saving...")).not.toBeInTheDocument();
   });
 
