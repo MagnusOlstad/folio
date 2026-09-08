@@ -1,6 +1,5 @@
-import type { MutableRefObject, PointerEvent } from "react";
+import type { PointerEvent } from "react";
 import type {
-  EditorIntent,
   TabGroup,
   ViewerDocument,
 } from "../../domain/types.ts";
@@ -16,7 +15,6 @@ export type EditorWorkspaceModel = {
   loadingDocuments: Set<string>;
   savingDocuments: Set<string>;
   editingKey: string | null;
-  editorIntents: MutableRefObject<Record<string, EditorIntent>>;
   drafts: Record<string, string>;
   deletingNoteId: string | null;
   movingFileId: string | null;
@@ -45,14 +43,12 @@ export type EditorWorkspaceActions = {
   beginEditing: (
     groupId: string,
     document: ViewerDocument,
-    intent?: EditorIntent,
   ) => void;
   finishEditing: (
     groupId: string,
     document: ViewerDocument,
     scrollTop?: number,
   ) => void;
-  restoreReaderScroll: (editKey: string, element: HTMLDivElement) => void;
   openDocument: (
     id: string,
     source?: "note" | "file",

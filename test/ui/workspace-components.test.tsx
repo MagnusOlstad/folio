@@ -1,5 +1,5 @@
 import { fireEvent, render, renderHook, screen } from "@testing-library/react";
-import { act, useRef } from "react";
+import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ViewerDocument } from "../../src/domain/types.ts";
 import { DocumentFooter } from "../../src/features/workspace/components/DocumentFooter.tsx";
@@ -72,7 +72,6 @@ describe("workspace editor components", () => {
       <DocumentHeader
         groupId="primary"
         document={document}
-        saving={false}
         editingKey="primary:/notes/current.md:title"
         drafts={{ "primary:/notes/current.md:title": "Changed" }}
         onBeginEditing={vi.fn()}
@@ -93,7 +92,6 @@ describe("workspace editor components", () => {
       <DocumentHeader
         groupId="primary"
         document={document}
-        saving={false}
         editingKey="primary:/notes/current.md:description"
         drafts={{ "primary:/notes/current.md:description": "Changed" }}
         onBeginEditing={vi.fn()}
@@ -109,6 +107,49 @@ describe("workspace editor components", () => {
       "description",
       "Description",
     );
+  });
+
+  it("keeps editing controls available and quiet during autosave", () => {
+    render(
+      <>
+        <DocumentHeader
+          groupId="primary"
+          document={document}
+          editingKey={null}
+          drafts={{}}
+          onBeginEditing={vi.fn()}
+          onChangeDraft={vi.fn()}
+          onFinishEditing={vi.fn()}
+        />
+        <DocumentFooter
+          groupId="primary"
+          document={document}
+          draft={undefined}
+          pathDraft={undefined}
+          tagDraft={undefined}
+          saving
+          deleting={false}
+          deleteInProgress={false}
+          moving={false}
+          onBeginPathEditing={vi.fn()}
+          onChangePath={vi.fn()}
+          onFinishPathEditing={vi.fn()}
+          onResetPath={vi.fn()}
+          onBeginTagEditing={vi.fn()}
+          onChangeTag={vi.fn()}
+          onFinishTagEditing={vi.fn()}
+          onFileDraft={vi.fn()}
+          onDelete={vi.fn().mockResolvedValue(undefined)}
+          onOpenDocument={vi.fn().mockResolvedValue(undefined)}
+        />
+      </>,
+    );
+
+    expect(screen.getByRole("button", { name: "Current note" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Description" })).toBeEnabled();
+    expect(screen.getByLabelText("Path for Current note")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled();
+    expect(screen.queryByText("Saving...")).not.toBeInTheDocument();
   });
 
   it("renders loading and empty pane states without mounting a document", () => {
@@ -161,6 +202,26 @@ describe("workspace editor components", () => {
       "secondary",
     );
     expect(onToggle).toHaveBeenCalledWith(document, 3, true);
+  });
+
+  it("renders GFM strikethrough and heading levels", () => {
+    render(
+      <RenderedMarkdown
+        document={{
+          ...document,
+          content: "# First\n\n## Second\n\n### Third\n\n~~Removed~~",
+        }}
+        groupId="secondary"
+        saving={false}
+        onOpenDocument={vi.fn().mockResolvedValue(undefined)}
+        onToggleTask={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "First", level: 1 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Second", level: 2 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Third", level: 3 })).toBeTruthy();
+    expect(screen.getByText("Removed").tagName).toBe("DEL");
   });
 
   it("forwards document path, tag, delete, and related-link actions", () => {
@@ -246,7 +307,6 @@ describe("workspace editor components", () => {
 
     function GroupHarness() {
       const ui = useWorkspaceEditorUi();
-      const editorIntents = useRef({});
       return (
         <EditorGroup
           group={{ id: "secondary", tabs: [], activeId: null }}
@@ -257,7 +317,6 @@ describe("workspace editor components", () => {
             loadingDocuments: new Set(),
             savingDocuments: new Set(),
             editingKey: null,
-            editorIntents,
             drafts: {},
             deletingNoteId: null,
             movingFileId: null,
@@ -275,7 +334,6 @@ describe("workspace editor components", () => {
             fileDraft: vi.fn(),
             beginEditing: vi.fn(),
             finishEditing: vi.fn(),
-            restoreReaderScroll: vi.fn(),
             openDocument: vi.fn().mockResolvedValue(undefined),
             toggleTaskCheckbox: vi.fn().mockResolvedValue(undefined),
             deleteFiledNote: vi.fn().mockResolvedValue(undefined),
@@ -317,7 +375,6 @@ describe("workspace editor components", () => {
         "primary",
         document,
         "title",
-        false,
       );
       result.current.beginPathEditing(document);
       result.current.beginTagEditing(document);

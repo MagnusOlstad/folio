@@ -78,7 +78,7 @@ export function DocumentFooter({
           {document.movable ? (
             <input
               value={pathDraft ?? directoryForId(document.id)}
-              disabled={moving || saving || deleting}
+              disabled={moving || deleting}
               onFocus={() => onBeginPathEditing(document)}
               onChange={(event) =>
                 onChangePath(document.id, event.target.value)
@@ -163,20 +163,18 @@ export function DocumentFooter({
           ) : (
             <>
               <strong>
-                {saving
-                  ? "Saving..."
-                  : deleting
-                    ? "Deleting..."
-                    : document.deletable
-                      ? "Saved"
-                      : "Read only"}
+                {deleting
+                  ? "Deleting..."
+                  : document.deletable
+                    ? "Saved"
+                    : "Read only"}
               </strong>
               {document.deletable && (
                 <button
                   type="button"
                   className="document-delete"
                   onClick={() => void onDelete(document)}
-                  disabled={deleteInProgress || saving}
+                  disabled={deleteInProgress}
                   title={`Delete ${document.title}`}
                 >
                   Delete

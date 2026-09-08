@@ -30,9 +30,10 @@ export function useWorkspacePersistence({
         createdAt: document.createdAt,
         updatedAt: document.updatedAt || document.createdAt,
       }));
-    draftSnapshotRef.current = localDrafts;
+    const nonemptyDrafts = localDrafts.filter((draft) => draft.content.trim());
+    draftSnapshotRef.current = nonemptyDrafts;
     try {
-      window.localStorage.setItem("folio:drafts", JSON.stringify(localDrafts));
+      window.localStorage.setItem("folio:drafts", JSON.stringify(nonemptyDrafts));
     } catch {
       /* server copy remains authoritative */
     }

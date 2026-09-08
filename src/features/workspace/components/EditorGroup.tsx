@@ -1,3 +1,4 @@
+import { useCallback, useRef } from "react";
 import type { TabGroup } from "../../../domain/types.ts";
 import type { WorkspaceEditorUi } from "../hooks/useWorkspaceEditorUi.ts";
 import { isUntitledId } from "../../../lib/workspace.ts";
@@ -31,6 +32,14 @@ export function EditorGroup({
   actions,
   ui,
 }: EditorGroupProps) {
+  const scrollPositionsRef = useRef<Record<string, number>>({});
+  const getScrollTop = useCallback(
+    (documentId: string) => scrollPositionsRef.current[documentId] ?? 0,
+    [],
+  );
+  const rememberScrollTop = useCallback((documentId: string, scrollTop: number) => {
+    scrollPositionsRef.current[documentId] = scrollTop;
+  }, []);
   const document = group.activeId ? model.documents[group.activeId] : null;
   const loading = Boolean(
     group.activeId && model.loadingDocuments.has(group.activeId),
@@ -84,7 +93,6 @@ export function EditorGroup({
       <EditorTabs
         group={group}
         groupCount={groupCount}
-        savingDocumentIds={model.savingDocuments}
         titleForId={actions.titleForId}
         isUntitledId={isUntitledId}
         onActivate={actions.activateTab}
@@ -118,17 +126,16 @@ export function EditorGroup({
             groupId={group.id}
             document={document}
             editKey={editKey}
-            isEditing={model.editingKey === editKey}
-            editorIntent={model.editorIntents.current[editKey]}
             draft={model.drafts[document.id]}
             saving={saving}
             deletingNoteId={model.deletingNoteId}
             movingFileId={model.movingFileId}
-            onRestoreScroll={actions.restoreReaderScroll}
             editingMetadataKey={ui.editingMetadataKey}
             metadataDrafts={ui.metadataDrafts}
             pathDraft={ui.pathDrafts[document.id]}
             tagDraft={ui.tagDrafts[document.id]}
+            getScrollTop={getScrollTop}
+            onScroll={rememberScrollTop}
             onBeginMetadataEditing={ui.beginMetadataEditing}
             onChangeMetadataDraft={ui.changeMetadataDraft}
             onFinishMetadataEditing={(key, target, field, value) =>
@@ -155,7 +162,13 @@ export function EditorGroup({
             onBeginTagEditing={ui.beginTagEditing}
             onChangeTag={ui.changeTagDraft}
             onFinishTagEditing={(target, value) =>
-              ui.finishTagEditing(target, value, actions.persistDocument)
+              ui.finishTagEditing(target, value, (edited, _content, tags) =>
+                actions.persistDocument(
+                  edited,
+                  model.drafts[edited.id] ?? edited.content,
+                  tags,
+                ),
+              )
             }
             onDelete={actions.deleteFiledNote}
           />

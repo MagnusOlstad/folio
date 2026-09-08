@@ -1,7 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import type {
   BundleFile,
-  EditorIntent,
   Note,
   NoteDetail,
   NoteUpdateResult,
@@ -70,16 +69,6 @@ export function useWorkspaceDocumentMutations({
           : current,
       );
       delete state.documentRequests.current[oldId];
-      for (const positions of [
-        state.editorIntents.current,
-        state.readerScrollPositions.current,
-      ]) {
-        for (const key of Object.keys(positions)) {
-          if (!key.endsWith(`:${oldId}`)) continue;
-          positions[`${key.slice(0, -oldId.length)}${newId}`] = positions[key];
-          delete positions[key];
-        }
-      }
     }
     setNotes((current) =>
       current.map((note) =>
@@ -147,13 +136,15 @@ export function useWorkspaceDocumentMutations({
     document: ViewerDocument,
     nextContent: string,
     nextTags: string[],
+    propagateError = false,
+    refreshEmbeddings = true,
   ) {
-    if (!document.deletable || !nextContent.trim()) return;
+    if (!document.deletable || !nextContent.trim()) return Promise.resolve();
     const id = document.id;
     const filedContent = isUntitledId(id)
       ? filedDraftContent(nextContent)
       : nextContent;
-    if (!filedContent.trim()) return;
+    if (!filedContent.trim()) return Promise.resolve();
     const existingQueue = state.saveQueues.current[id] || Promise.resolve();
     state.setDocuments((current) => ({
       ...current,
@@ -250,7 +241,11 @@ export function useWorkspaceDocumentMutations({
           `/api/note?id=${encodeURIComponent(id)}`,
           {
             method: "PATCH",
-            body: JSON.stringify({ content: nextContent, tags: nextTags }),
+            body: JSON.stringify({
+              content: nextContent,
+              tags: nextTags,
+              refreshEmbeddings,
+            }),
           },
         );
         applyUpdatedNote(updated, updated.oldId);
@@ -259,6 +254,7 @@ export function useWorkspaceDocumentMutations({
       .catch((error) => {
         if (isUntitledId(id)) state.filingDraftIds.current.delete(id);
         setMessage(error instanceof Error ? error.message : "Could not save note");
+        if (propagateError) throw error;
       })
       .finally(() => {
         if (state.saveQueues.current[id] === save) {
@@ -271,24 +267,46 @@ export function useWorkspaceDocumentMutations({
         }
       });
     state.saveQueues.current[id] = save;
+    return save;
+  }
+
+  async function refreshDocumentEmbedding(id: string) {
+    const document = state.documentsRef.current[id];
+    if (!document?.deletable || isUntitledId(id)) return false;
+    try {
+      const updated = await api<NoteUpdateResult>(
+        `/api/note?id=${encodeURIComponent(id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ refreshEmbeddings: true }),
+        },
+      );
+      applyUpdatedNote(updated, updated.oldId);
+      if (updated.warning) setMessage(updated.warning);
+      return !updated.warning;
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not refresh note embeddings",
+      );
+      return false;
+    }
   }
 
   function beginEditing(
     groupId: string,
     document: ViewerDocument,
-    intent?: EditorIntent,
   ) {
     if (
       !document.deletable ||
-      state.savingDocuments.has(document.id) ||
       state.deletingNoteId === document.id
     )
       return;
     const key = `${groupId}:${document.id}`;
-    if (intent) state.editorIntents.current[key] = intent;
     state.setDrafts((current) => ({
       ...current,
-      [document.id]: document.content,
+      [document.id]: current[document.id] ?? document.content,
     }));
     state.setEditingKey(key);
   }
@@ -296,16 +314,12 @@ export function useWorkspaceDocumentMutations({
   function finishEditing(
     groupId: string,
     document: ViewerDocument,
-    scrollTop = 0,
+    _scrollTop = 0,
   ) {
     const key = `${groupId}:${document.id}`;
     if (state.editingKey !== key) return;
-    const content = state.drafts[document.id] ?? document.content;
     if (isUntitledId(document.id)) return;
-    state.readerScrollPositions.current[key] = scrollTop;
     state.setEditingKey(null);
-    if (content !== document.content)
-      persistDocument(document, content, document.tags);
   }
 
   function fileDraft(document: ViewerDocument) {
@@ -332,6 +346,7 @@ export function useWorkspaceDocumentMutations({
   return {
     persistMetadata,
     persistDocument,
+    refreshDocumentEmbedding,
     beginEditing,
     finishEditing,
     fileDraft,

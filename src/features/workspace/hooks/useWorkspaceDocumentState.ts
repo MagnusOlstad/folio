@@ -1,9 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type {
-  EditorIntent,
-  StoredDraft,
-  ViewerDocument,
-} from "../../../domain/types.ts";
+import type { StoredDraft, ViewerDocument } from "../../../domain/types.ts";
 import { api } from "../../../lib/api.ts";
 import { loadLocalDrafts } from "../../../lib/storage.ts";
 import {
@@ -49,8 +45,6 @@ export function useWorkspaceDocumentState({
   const saveQueues = useRef<Record<string, Promise<void>>>({});
   const draftSyncQueues = useRef<Record<string, Promise<void>>>({});
   const filingDraftIds = useRef<Set<string>>(new Set());
-  const editorIntents = useRef<Record<string, EditorIntent>>({});
-  const readerScrollPositions = useRef<Record<string, number>>({});
   const documentsRef = useRef(documents);
   const draftSnapshotRef = useRef<StoredDraft[]>([]);
 
@@ -63,8 +57,8 @@ export function useWorkspaceDocumentState({
       .then(async () => {
         if (filingDraftIds.current.has(draft.id)) return;
         await api<StoredDraft>(`/api/draft?id=${encodeURIComponent(draft.id)}`, {
-          method: "PUT",
-          body: JSON.stringify(draft),
+          method: draft.content.trim() ? "PUT" : "DELETE",
+          ...(draft.content.trim() ? { body: JSON.stringify(draft) } : {}),
         });
       })
       .catch(() => undefined)
@@ -79,6 +73,7 @@ export function useWorkspaceDocumentState({
   function mergeRemoteDrafts(remoteDrafts: StoredDraft[]) {
     const currentDocuments = documentsRef.current;
     const acceptedDrafts = remoteDrafts.filter((draft) => {
+      if (!draft.content.trim() || filingDraftIds.current.has(draft.id)) return false;
       const local = currentDocuments[draft.id];
       return !local || draft.updatedAt > (local.updatedAt || local.createdAt);
     });
@@ -108,13 +103,6 @@ export function useWorkspaceDocumentState({
         updatedAt: new Date().toISOString(),
       },
     }));
-  }
-
-  function restoreReaderScroll(editKey: string, element: HTMLDivElement) {
-    const scrollTop = readerScrollPositions.current[editKey];
-    if (scrollTop === undefined) return;
-    element.scrollTop = scrollTop;
-    delete readerScrollPositions.current[editKey];
   }
 
   useWorkspacePersistence({
@@ -153,11 +141,9 @@ export function useWorkspaceDocumentState({
     saveQueues,
     draftSyncQueues,
     filingDraftIds,
-    editorIntents,
-    readerScrollPositions,
+    documentsRef,
     mergeRemoteDrafts,
     changeDraftContent,
-    restoreReaderScroll,
   };
 }
 

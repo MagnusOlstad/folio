@@ -27,16 +27,11 @@ type Options = {
   groups: TabGroup[];
   activeGroupId: string;
   documents: Record<string, ViewerDocument>;
-  drafts: Record<string, string>;
-  editingKey: string | null;
   createNewTab: () => void;
+  activateTab: (groupId: string, documentId: string) => void;
   closeTab: (groupId: string, documentId: string) => void;
   fileDraft: (document: ViewerDocument) => void;
-  persistDocument: (
-    document: ViewerDocument,
-    content: string,
-    tags: string[],
-  ) => void;
+  flushDocument: (documentId: string) => Promise<void>;
 };
 
 export function useWorkspaceShortcutActions(options: Options) {
@@ -56,14 +51,32 @@ export function useWorkspaceShortcutActions(options: Options) {
       options.fileDraft(activeDocument);
       return;
     }
-    if (options.editingKey !== `${group.id}:${documentId}`) return;
-    const content = options.drafts[documentId] ?? activeDocument.content;
-    if (content !== activeDocument.content)
-      options.persistDocument(activeDocument, content, activeDocument.tags);
+    void options.flushDocument(documentId);
   }
 
   function runShortcut(action: WorkspaceShortcutAction) {
     if (action === "new-note") return options.createNewTab();
+    if (action === "find-in-note") {
+      const editor = document.querySelector<HTMLElement>(
+        ".editor-group.active [data-live-markdown-editor]",
+      );
+      const readOnlyDocument = document.querySelector<HTMLElement>(
+        ".editor-group.active [data-readonly-markdown]",
+      );
+      (editor ?? readOnlyDocument)?.dispatchEvent(
+        new CustomEvent("folio-find", { bubbles: true }),
+      );
+      return;
+    }
+    if (action.startsWith("switch-tab-")) {
+      const index = Number(action.slice("switch-tab-".length)) - 1;
+      const group = options.groups.find(
+        (candidate) => candidate.id === options.activeGroupId,
+      );
+      const documentId = group?.tabs[index];
+      if (group && documentId) options.activateTab(group.id, documentId);
+      return;
+    }
     if (action === "close-tab") {
       const group = options.groups.find(
         (candidate) => candidate.id === options.activeGroupId,
@@ -76,8 +89,8 @@ export function useWorkspaceShortcutActions(options: Options) {
     if (action === "search") return focusSearchInput();
     const target = document.activeElement;
     if (
-      target instanceof HTMLTextAreaElement &&
-      target.classList.contains("document-editor")
+      target instanceof HTMLElement &&
+      target.closest(".document-editor, .live-markdown-editor")
     ) {
       target.dispatchEvent(
         new CustomEvent("folio-format", { detail: action, cancelable: true }),

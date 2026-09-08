@@ -1,4 +1,12 @@
-import { useMemo } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
@@ -30,6 +38,111 @@ export function RenderedMarkdown({
   onOpenDocument,
   onToggleTask,
 }: RenderedMarkdownProps) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const findInputRef = useRef<HTMLInputElement>(null);
+  const findResultRef = useRef<HTMLSpanElement>(null);
+  const findScrollTopRef = useRef(0);
+  const matchesRef = useRef<HTMLElement[]>([]);
+  const activeMatchRef = useRef(0);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findLayer, setFindLayer] = useState<HTMLElement | null>(null);
+
+  const updateActiveMatch = useCallback((index: number) => {
+    const matches = matchesRef.current;
+    for (const [matchIndex, match] of matches.entries())
+      match.classList.toggle("active", matchIndex === index);
+    const result = findResultRef.current;
+    if (result)
+      result.textContent = matches.length
+        ? `${index + 1} of ${matches.length}`
+        : findQuery
+          ? "No matches"
+          : "";
+    matches[index]?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [findQuery]);
+
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    const openFind = () => {
+      findScrollTopRef.current =
+        content.closest<HTMLElement>("[data-document-scroll]")?.scrollTop ?? 0;
+      setFindLayer(
+        content
+          .closest(".document-view")
+          ?.querySelector<HTMLElement>("[data-document-find-layer]") ?? null,
+      );
+      setFindOpen(true);
+    };
+    content.addEventListener("folio-find", openFind);
+    return () => content.removeEventListener("folio-find", openFind);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!findOpen) return;
+    const scroll = contentRef.current?.closest<HTMLElement>(
+      "[data-document-scroll]",
+    );
+    findInputRef.current?.focus({ preventScroll: true });
+    findInputRef.current?.select();
+    if (scroll) scroll.scrollTop = findScrollTopRef.current;
+  }, [findOpen]);
+
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    for (const mark of content.querySelectorAll("mark.readonly-search-match")) {
+      const parent = mark.parentElement;
+      mark.replaceWith(window.document.createTextNode(mark.textContent ?? ""));
+      parent?.normalize();
+    }
+    matchesRef.current = [];
+    activeMatchRef.current = 0;
+    if (!findQuery) {
+      updateActiveMatch(0);
+      return;
+    }
+
+    const query = findQuery.toLocaleLowerCase();
+    const textNodes: Text[] = [];
+    const walker = window.document.createTreeWalker(
+      content,
+      NodeFilter.SHOW_TEXT,
+    );
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.nodeValue?.toLocaleLowerCase().includes(query))
+        textNodes.push(node as Text);
+    }
+    for (const node of textNodes) {
+      const text = node.nodeValue ?? "";
+      const lowercase = text.toLocaleLowerCase();
+      const fragment = window.document.createDocumentFragment();
+      let offset = 0;
+      for (let match = lowercase.indexOf(query, offset); match !== -1; ) {
+        fragment.append(text.slice(offset, match));
+        const highlight = window.document.createElement("mark");
+        highlight.className = "readonly-search-match";
+        highlight.textContent = text.slice(match, match + findQuery.length);
+        fragment.append(highlight);
+        matchesRef.current.push(highlight);
+        offset = match + findQuery.length;
+        match = lowercase.indexOf(query, offset);
+      }
+      fragment.append(text.slice(offset));
+      node.replaceWith(fragment);
+    }
+    updateActiveMatch(0);
+  }, [document.content, findOpen, findQuery, updateActiveMatch]);
+
+  function moveMatch(direction: 1 | -1) {
+    const count = matchesRef.current.length;
+    if (!count) return;
+    activeMatchRef.current =
+      (activeMatchRef.current + direction + count) % count;
+    updateActiveMatch(activeMatchRef.current);
+  }
+
   const components = useMemo<Components>(
     () => ({
       a: ({ href, children }) => {
@@ -84,9 +197,49 @@ export function RenderedMarkdown({
     [document, groupId, onOpenDocument, onToggleTask, saving],
   );
 
+  const findPanel = findOpen ? (
+    <form
+      className="readonly-find-panel"
+      onSubmit={(event) => {
+        event.preventDefault();
+        moveMatch(1);
+      }}
+    >
+      <input
+        aria-label="Find in current note"
+        ref={findInputRef}
+        value={findQuery}
+        onChange={(event) => {
+          activeMatchRef.current = 0;
+          setFindQuery(event.target.value);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            setFindOpen(false);
+          }
+          if (event.key === "Enter" && event.shiftKey) {
+            event.preventDefault();
+            moveMatch(-1);
+          }
+        }}
+      />
+      <span ref={findResultRef} aria-live="polite" />
+      <button type="button" onClick={() => moveMatch(-1)}>
+        Previous
+      </button>
+      <button type="submit">Next</button>
+      <button type="button" onClick={() => setFindOpen(false)}>
+        Close
+      </button>
+    </form>
+  ) : null;
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
-      {document.content}
-    </ReactMarkdown>
+    <div ref={contentRef} data-readonly-markdown="">
+      {findPanel && findLayer ? createPortal(findPanel, findLayer) : findPanel}
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
+        {document.content}
+      </ReactMarkdown>
+    </div>
   );
 }

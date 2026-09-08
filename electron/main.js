@@ -57,7 +57,23 @@ function setApplicationMenu() {
         ...(!isMac ? [{ type: 'separator' }, { role: 'quit' }] : []),
       ],
     },
-    { role: 'editMenu' },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
+        { role: 'delete' },
+        { role: 'selectAll' },
+        { type: 'separator' },
+        { label: 'Find in Current Note', accelerator: 'CmdOrCtrl+F', click: sendToRenderer('find-in-note') },
+        { label: 'Search Workspace', accelerator: 'CmdOrCtrl+Shift+F', click: sendToRenderer('search') },
+      ],
+    },
     {
       label: 'Format',
       submenu: [
@@ -82,6 +98,12 @@ function setApplicationMenu() {
       submenu: [
         { role: 'minimize' },
         { role: 'zoom' },
+        { type: 'separator' },
+        ...Array.from({ length: 9 }, (_, index) => ({
+          label: `Switch to Tab ${index + 1}`,
+          accelerator: `CmdOrCtrl+${index + 1}`,
+          click: sendToRenderer(`switch-tab-${index + 1}`),
+        })),
         ...(isMac ? [{ type: 'separator' }, { role: 'front' }] : []),
       ],
     },
