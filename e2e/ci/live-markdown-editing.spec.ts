@@ -155,6 +155,24 @@ test("renders heading levels and GFM strikethrough distinctly", async ({ page })
   );
 });
 
+test("renders one clickable control for a task-list marker", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTitle("New note (Cmd+T)").click();
+  const editor = page.getByLabel("Write a new note");
+  await editor.fill("- [ ] Task\nBelow");
+
+  const task = page.getByRole("checkbox", {
+    name: "Toggle task on line 1",
+  });
+  const taskLine = editor.locator(".cm-line").first();
+  await expect(task).toBeVisible();
+  await expect(taskLine).not.toContainText("•");
+
+  await task.click();
+
+  await expect(task).toBeChecked();
+});
+
 test("keeps the caret on a newly inserted line", async ({ page }) => {
   await page.goto("/");
   await page.getByTitle("New note (Cmd+T)").click();

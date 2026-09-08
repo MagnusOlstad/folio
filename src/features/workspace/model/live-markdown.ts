@@ -104,7 +104,10 @@ class TaskCheckboxWidget extends WidgetType {
   }
 
   ignoreEvent() {
-    return false;
+    // Let the native control receive pointer/click events instead of letting
+    // CodeMirror turn the click into a selection update first. That update can
+    // reveal the source syntax and replace this widget before the click lands.
+    return true;
   }
 }
 
@@ -240,6 +243,9 @@ function buildDecorations(
     const headingLevel = headingLevels.get(lineNumber);
     const quote = /^(\s*>\s?)+/.exec(text);
     const list = /^(\s*)([-+*]|\d+[.)])(\s+)/.exec(text);
+    const task = list
+      ? /^(?:\s*(?:[-+*]|\d+[.)])\s+)\[([ xX])\](?=\s|$)/.exec(text)
+      : null;
     const listMarker = list?.[2];
     const listPreview = Boolean(list && !reveal(line.from, line.to));
     const listIndent = list
@@ -271,32 +277,31 @@ function buildDecorations(
       const markerStart = line.from + list[1].length;
       const markerEnd = markerStart + list[2].length + list[3].length;
       if (listPreview) {
-        ranges.push(
-          Decoration.replace({
-            widget: new ListMarkerWidget(list[2], listIndent >= 2),
-          }).range(markerStart, markerEnd),
-        );
+        if (task) {
+          // Task syntax belongs to the list marker. Replacing both ranges with
+          // one widget prevents the dash from becoming a second bullet.
+          ranges.push(
+            Decoration.replace({
+              widget: new TaskCheckboxWidget(
+                task[1].toLowerCase() === "x",
+                lineNumber,
+                configuration.callbacks,
+              ),
+            }).range(markerStart, line.from + task[0].length),
+          );
+        } else {
+          ranges.push(
+            Decoration.replace({
+              widget: new ListMarkerWidget(list[2], listIndent >= 2),
+            }).range(markerStart, markerEnd),
+          );
+        }
       } else {
         ranges.push(
           Decoration.mark({ class: "cm-live-markdown-list-source" }).range(
             markerStart,
             markerEnd,
           ),
-        );
-      }
-    }
-    const task = /\[([ xX])\]/.exec(text);
-    if (task) {
-      const taskFrom = line.from + (task.index ?? 0);
-      if (!reveal(line.from, line.to)) {
-        ranges.push(
-          Decoration.replace({
-            widget: new TaskCheckboxWidget(
-              task[1].toLowerCase() === "x",
-              lineNumber,
-              configuration.callbacks,
-            ),
-          }).range(taskFrom, taskFrom + task[0].length),
         );
       }
     }

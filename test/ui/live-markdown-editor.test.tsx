@@ -196,7 +196,10 @@ describe("LiveMarkdownEditor", () => {
         ariaLabel="Edit tasks"
       />,
     );
-    fireEvent.click(screen.getByLabelText("Toggle task on line 1"));
+    const task = screen.getByLabelText("Toggle task on line 1");
+    expect(task.closest(".cm-line")).not.toHaveTextContent("•");
+    fireEvent.mouseDown(task);
+    fireEvent.click(task);
 
     expect(onToggleTask).toHaveBeenCalledWith(1, true);
   });
