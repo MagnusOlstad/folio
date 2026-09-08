@@ -9,9 +9,9 @@
 
 ## Agent Use
 
-- Prefer GPT-5.6 Sol for scoping, orchestration, review, and final validation; prefer GPT-5.6 Terra at medium reasoning for bounded, substantive implementation. This is advisory: use one agent for small or tightly coupled changes and adjust model or effort when risk warrants it.
+- Codex agents only: prefer GPT-5.6 Sol for scoping, orchestration, review, and final validation; prefer GPT-5.6 Terra at medium reasoning for bounded, substantive implementation. This is advisory: use one agent for small or tightly coupled changes and adjust model or effort when risk warrants it. Other agents should ignore this model-selection guidance.
 - Default to one implementer. Parallelize only independent, non-overlapping work. Delegate relevant paths, constraints, and acceptance criteria instead of full conversation history.
-- Handoffs should list changed files, decisions, checks, and unresolved issues without passing logs. Sol should review the diff and focused evidence without repeating discovery or passing checks; use focused follow-ups for rework.
+- Handoffs should list changed files, decisions, checks, and unresolved issues without passing logs. In Codex workflows, Sol should review the diff and focused evidence without repeating discovery or passing checks; use focused follow-ups for rework.
 
 ## Skills
 
