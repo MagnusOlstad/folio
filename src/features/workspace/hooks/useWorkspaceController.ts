@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { WorkspaceShellProps } from "../components/WorkspaceShell.tsx";
 import { useWorkspaceBootstrap } from "./useWorkspaceBootstrap.ts";
 import { useWorkspaceLayout } from "./useWorkspaceLayout.ts";
@@ -23,6 +23,8 @@ function draftTitle(content: string) {
 
 export function useWorkspaceController(): WorkspaceShellProps {
   const [message, setMessage] = useState("");
+  const embeddingRevisionsRef = useRef(new Map<string, number>());
+  const embeddingFinalizationsRef = useRef(new Map<string, Promise<void>>());
   const explorer = useWorkspaceExplorerState(setMessage);
   const documents = useWorkspaceDocumentState({
     expandedDirectories: explorer.expandedDirectories,
@@ -57,9 +59,57 @@ export function useWorkspaceController(): WorkspaceShellProps {
         setMessage("A note cannot be empty.");
         throw new Error("A note cannot be empty.");
       }
-      await mutations.persistDocument(document, content, document.tags, true);
+      await mutations.persistDocument(
+        document,
+        content,
+        document.tags,
+        true,
+        false,
+      );
     },
   });
+
+  function markEmbeddingDirty(documentId: string) {
+    embeddingRevisionsRef.current.set(
+      documentId,
+      (embeddingRevisionsRef.current.get(documentId) ?? 0) + 1,
+    );
+  }
+
+  function finalizeFiledDocument(documentId: string): Promise<void> {
+    const existing = embeddingFinalizationsRef.current.get(documentId);
+    if (existing) {
+      return existing.then(() => {
+        if (embeddingRevisionsRef.current.has(documentId))
+          return finalizeFiledDocument(documentId);
+      });
+    }
+    const finalization = (async () => {
+      while (true) {
+        const revision = embeddingRevisionsRef.current.get(documentId);
+        if (revision === undefined) return;
+        await autosave.flushSave(documentId);
+        if (autosave.isDirty(documentId)) return;
+        const refreshed = await mutations.refreshDocumentEmbedding(documentId);
+        if (!refreshed) return;
+        if (embeddingRevisionsRef.current.get(documentId) === revision) {
+          embeddingRevisionsRef.current.delete(documentId);
+          return;
+        }
+      }
+    })().finally(() => {
+      if (embeddingFinalizationsRef.current.get(documentId) === finalization)
+        embeddingFinalizationsRef.current.delete(documentId);
+    });
+    embeddingFinalizationsRef.current.set(documentId, finalization);
+    return finalization;
+  }
+
+  function finalizeAllFiledDocuments() {
+    return Promise.all(
+      Array.from(embeddingRevisionsRef.current.keys(), finalizeFiledDocument),
+    );
+  }
   const navigation = useWorkspaceDocumentNavigation({
     documents,
     groups: tabs.groups,
@@ -80,7 +130,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       void navigation.deleteLocalDraft(documentId);
       return;
     }
-    void autosave.flushSave(documentId);
+    if (!isUntitledId(documentId)) void finalizeFiledDocument(documentId);
     tabs.closeTab(groupId, documentId);
   }
 
@@ -114,12 +164,12 @@ export function useWorkspaceController(): WorkspaceShellProps {
     activateTab: (groupId, documentId) => {
       const group = tabs.groups.find((candidate) => candidate.id === groupId);
       if (groupId !== tabs.activeGroupId || group?.activeId !== documentId)
-        void autosave.flushAllSaves();
+        void finalizeAllFiledDocuments();
       tabs.activateTab(groupId, documentId);
     },
     closeTab: closeDocumentTab,
     fileDraft: mutations.fileDraft,
-    flushDocument: autosave.flushSave,
+    flushDocument: finalizeFiledDocument,
   });
 
   const { sidebar, moveBundleFile } = useWorkspaceSidebarProps({
@@ -133,7 +183,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
     openLocalDraft: tabs.openLocalDraft,
     deleteLocalDraft: navigation.deleteLocalDraft,
     openDocument: async (...args) => {
-      void autosave.flushAllSaves();
+      void finalizeAllFiledDocuments();
       return navigation.openDocument(...args);
     },
   });
@@ -177,7 +227,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
         finishHorizontalResize: layout.finishHorizontalResize,
         resetSplit: () => layout.setSplitPosition(50),
         activateGroup: (groupId) => {
-          if (groupId !== tabs.activeGroupId) void autosave.flushAllSaves();
+          if (groupId !== tabs.activeGroupId)
+            void finalizeAllFiledDocuments();
           tabs.setActiveGroupId(groupId);
         },
         moveTabToGroup: tabs.moveTabToGroup,
@@ -185,29 +236,32 @@ export function useWorkspaceController(): WorkspaceShellProps {
         activateTab: (groupId, documentId) => {
           const group = tabs.groups.find((candidate) => candidate.id === groupId);
           if (groupId !== tabs.activeGroupId || group?.activeId !== documentId)
-            void autosave.flushAllSaves();
+            void finalizeAllFiledDocuments();
           tabs.activateTab(groupId, documentId);
         },
         createNewTab: tabs.createNewTab,
         splitWorkspace: tabs.splitWorkspace,
         closeGroup: (groupId) => {
-          void autosave.flushAllSaves();
+          void finalizeAllFiledDocuments();
           tabs.closeGroup(groupId);
         },
         closeTab: closeDocumentTab,
         changeDraftContent: (document, content) => {
           documents.changeDraftContent(document, content);
-          if (!isUntitledId(document.id))
+          if (!isUntitledId(document.id)) {
+            markEmbeddingDirty(document.id);
             autosave.scheduleSave(document.id, content);
+          }
         },
         fileDraft: mutations.fileDraft,
         beginEditing: mutations.beginEditing,
         finishEditing: (groupId, document, scrollTop) => {
           mutations.finishEditing(groupId, document, scrollTop);
-          if (!isUntitledId(document.id)) void autosave.flushSave(document.id);
+          if (!isUntitledId(document.id))
+            void finalizeFiledDocument(document.id);
         },
         openDocument: async (...args) => {
-          void autosave.flushAllSaves();
+          void finalizeAllFiledDocuments();
           return navigation.openDocument(...args);
         },
         toggleTaskCheckbox: mutations.toggleTaskCheckbox,
@@ -218,7 +272,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
         persistDocument: mutations.persistDocument,
         persistMetadata: mutations.persistMetadata,
         moveBundleFile: async (id, directory) => {
-          await autosave.flushSave(id);
+          await finalizeFiledDocument(id);
           return moveBundleFile(id, directory);
         },
         dismissMessage: () => setMessage(""),

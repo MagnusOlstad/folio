@@ -50,6 +50,21 @@ async function visibleSurfaceText(surface: Locator) {
   );
 }
 
+async function caretLineIndex(editor: Locator) {
+  return editor.evaluate((element) => {
+    const selection = element.ownerDocument.getSelection();
+    const anchor = selection?.anchorNode;
+    const lines = Array.from(element.querySelectorAll(".cm-line"));
+    return lines.findIndex(
+      (line) =>
+        line === anchor ||
+        (anchor
+          ? (line as { contains(node: unknown): boolean }).contains(anchor)
+          : false),
+    );
+  });
+}
+
 function isContentSave(request: { method(): string; url(): string; postData(): string | null }) {
   return request.method() === "PATCH" &&
     new URL(request.url()).pathname === "/api/note" &&
@@ -156,7 +171,46 @@ test("keeps the caret on a newly inserted line", async ({ page }) => {
   );
 });
 
-test("autosaves after an idle edit and flushes later edits on blur and Cmd/Ctrl+S", async ({ page }) => {
+test("keeps the caret after two newlines at the end of a note", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTitle("New note (Cmd+T)").click();
+  const editor = page.getByLabel("Write a new note");
+  await editor.fill("# First");
+
+  await editor.press("Enter");
+  await editor.press("Enter");
+
+  await expect(editor.locator(".cm-line")).toHaveCount(3);
+  await expect.poll(() => caretLineIndex(editor)).toBe(2);
+
+  await editor.type("Tail");
+  await expect(editor.locator(".cm-line").nth(2)).toHaveText("Tail");
+});
+
+test("keeps the caret after two newlines at the end of a filed note", async ({ page }) => {
+  await openSeededNote(page, "ollama.md", "Set Up Ollama");
+  const editor = liveEditor(page, "Set Up Ollama");
+  const lines = editor.locator(".cm-line");
+  const save = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      new URL(response.url()).pathname === "/api/note",
+  );
+  await editor.press(
+    process.platform === "darwin" ? "Meta+ArrowDown" : "Control+End",
+  );
+
+  await editor.press("Enter");
+  await editor.press("Enter");
+  await save;
+
+  const lineCount = await lines.count();
+  await expect.poll(() => caretLineIndex(editor)).toBe(lineCount - 1);
+  await editor.type("Tail");
+  await expect(lines.last()).toHaveText("Tail");
+});
+
+test("autosaves quickly and reembeds on blur and Cmd/Ctrl+S", async ({ page }) => {
   await openSeededNote(page, "2026-09-03.md", "Daily 2026-09-03");
 
   const editor = liveEditor(page, "Daily 2026-09-03");
@@ -168,30 +222,88 @@ test("autosaves after an idle edit and flushes later edits on blur and Cmd/Ctrl+
 
   const idleMarker = " e2e-idle-save";
   let sawIdleSave = false;
-  const idleSave = page.waitForRequest(isContentSave).then(() => {
+  const idleSave = page.waitForRequest(isContentSave).then((request) => {
     sawIdleSave = true;
+    return request;
   });
   await editor.type(idleMarker);
   await page.waitForTimeout(250);
   expect(sawIdleSave, "content should not save before the 500 ms idle debounce").toBeFalsy();
-  await idleSave;
+  expect((await idleSave).postDataJSON()).toMatchObject({
+    refreshEmbeddings: false,
+  });
 
   const blurMarker = " e2e-blur-save";
   const blurSave = page.waitForRequest((request) =>
     isContentSave(request) && Boolean(request.postData()?.includes(blurMarker)),
   );
+  const blurEmbedding = page.waitForRequest((request) => {
+    if (request.method() !== "PATCH") return false;
+    if (new URL(request.url()).pathname !== "/api/note") return false;
+    const body = request.postDataJSON();
+    return body.refreshEmbeddings === true && !("content" in body);
+  });
   await editor.type(blurMarker);
   await page.getByRole("link", { name: "Folio home" }).focus();
-  await blurSave;
+  expect((await blurSave).postDataJSON()).toMatchObject({
+    refreshEmbeddings: false,
+  });
+  await blurEmbedding;
 
   await editor.focus();
   const shortcutMarker = " e2e-shortcut-save";
   const shortcutSave = page.waitForRequest((request) =>
     isContentSave(request) && Boolean(request.postData()?.includes(shortcutMarker)),
   );
+  const shortcutEmbedding = page.waitForRequest((request) => {
+    if (request.method() !== "PATCH") return false;
+    if (new URL(request.url()).pathname !== "/api/note") return false;
+    const body = request.postDataJSON();
+    return body.refreshEmbeddings === true && !("content" in body);
+  });
   await editor.type(shortcutMarker);
   await page.keyboard.press(`${modifier}+s`);
-  await shortcutSave;
+  expect((await shortcutSave).postDataJSON()).toMatchObject({
+    refreshEmbeddings: false,
+  });
+  await shortcutEmbedding;
+});
+
+test("flushes and reembeds a filed note when its tab closes", async ({ page }) => {
+  await openSeededNote(
+    page,
+    "capture-and-organize.md",
+    "Capture and Organize Notes",
+  );
+
+  const editor = liveEditor(page, "Capture and Organize Notes");
+  await editor.press(
+    process.platform === "darwin" ? "Meta+ArrowDown" : "Control+End",
+  );
+
+  const marker = " e2e-close-save";
+  const contentSave = page.waitForRequest((request) =>
+    isContentSave(request) && Boolean(request.postData()?.includes(marker)),
+  );
+  const embeddingRefresh = page.waitForRequest((request) => {
+    if (request.method() !== "PATCH") return false;
+    if (new URL(request.url()).pathname !== "/api/note") return false;
+    const body = request.postDataJSON();
+    return body.refreshEmbeddings === true && !("content" in body);
+  });
+
+  await editor.type(marker);
+  await page
+    .getByRole("button", {
+      name: "Close Capture and Organize Notes",
+      exact: true,
+    })
+    .click();
+
+  expect((await contentSave).postDataJSON()).toMatchObject({
+    refreshEmbeddings: false,
+  });
+  await embeddingRefresh;
 });
 
 test("keeps the outer document scroll stable when a rendered construct is activated", async ({ page }) => {

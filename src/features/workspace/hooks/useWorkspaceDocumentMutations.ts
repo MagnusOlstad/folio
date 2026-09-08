@@ -137,6 +137,7 @@ export function useWorkspaceDocumentMutations({
     nextContent: string,
     nextTags: string[],
     propagateError = false,
+    refreshEmbeddings = true,
   ) {
     if (!document.deletable || !nextContent.trim()) return Promise.resolve();
     const id = document.id;
@@ -240,15 +241,14 @@ export function useWorkspaceDocumentMutations({
           `/api/note?id=${encodeURIComponent(id)}`,
           {
             method: "PATCH",
-            body: JSON.stringify({ content: nextContent, tags: nextTags }),
+            body: JSON.stringify({
+              content: nextContent,
+              tags: nextTags,
+              refreshEmbeddings,
+            }),
           },
         );
         applyUpdatedNote(updated, updated.oldId);
-        state.setDrafts((current) => {
-          if (current[id] !== nextContent || updated.content === nextContent)
-            return current;
-          return { ...current, [updated.id]: updated.content };
-        });
         if (updated.warning) setMessage(updated.warning);
       })
       .catch((error) => {
@@ -268,6 +268,30 @@ export function useWorkspaceDocumentMutations({
       });
     state.saveQueues.current[id] = save;
     return save;
+  }
+
+  async function refreshDocumentEmbedding(id: string) {
+    const document = state.documentsRef.current[id];
+    if (!document?.deletable || isUntitledId(id)) return false;
+    try {
+      const updated = await api<NoteUpdateResult>(
+        `/api/note?id=${encodeURIComponent(id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ refreshEmbeddings: true }),
+        },
+      );
+      applyUpdatedNote(updated, updated.oldId);
+      if (updated.warning) setMessage(updated.warning);
+      return !updated.warning;
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not refresh note embeddings",
+      );
+      return false;
+    }
   }
 
   function beginEditing(
@@ -322,6 +346,7 @@ export function useWorkspaceDocumentMutations({
   return {
     persistMetadata,
     persistDocument,
+    refreshDocumentEmbedding,
     beginEditing,
     finishEditing,
     fileDraft,
