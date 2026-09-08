@@ -949,6 +949,20 @@ body.resizing-horizontal * {
   font-size: 17px;
 }
 
+.live-markdown-editor .cm-live-markdown-horizontal-rule {
+  position: relative;
+}
+
+.live-markdown-editor .cm-live-markdown-horizontal-rule::after {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: 0;
+  border-top: 1px solid var(--line);
+  content: "";
+  pointer-events: none;
+}
+
 .live-markdown-editor .cm-live-markdown-strong {
   font-weight: 700;
 }
@@ -1249,7 +1263,10 @@ body.resizing-horizontal * {
 }
 
 .draft-steering-placeholder {
-  z-index: 3;
+  /* Keep the placeholder below CodeMirror so its text cannot paint over the
+     insertion caret at the start of an empty steering line. */
+  z-index: 1;
+  transform: translateX(3px);
   color: var(--dim);
   pointer-events: none;
 }

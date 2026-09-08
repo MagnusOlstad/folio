@@ -131,7 +131,14 @@ export function LiveMarkdownEditor({
       state: EditorState.create({
         doc: valueRef.current,
         extensions: [
-          markdown({ base: markdownLanguage }),
+          markdown({
+            base: markdownLanguage,
+            // A hyphen-only line should remain available for a list or a
+            // horizontal rule. Setext headings would otherwise make the
+            // previous line jump to H2 size as soon as its first dash is
+            // typed, and also take precedence over `---` as a rule.
+            extensions: { remove: ["SetextHeading"] },
+          }),
           history(),
           search({ top: true, createPanel: createNoteSearchPanel }),
           panels(findLayer ? { topContainer: findLayer } : undefined),
