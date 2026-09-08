@@ -104,6 +104,7 @@ export function LiveMarkdownEditor({
   const onBlurRef = useRef(onBlur);
   const onFocusRef = useRef(onFocus);
   const onFileRef = useRef(onFile);
+  const pendingLocalValuesRef = useRef<string[]>([]);
   const ariaLabelRef = useRef(ariaLabel);
   const ariaLabelCompartment = useRef(new Compartment());
   const callbacksRef = useRef<LiveMarkdownCallbacks>({
@@ -112,14 +113,13 @@ export function LiveMarkdownEditor({
   });
 
   useLayoutEffect(() => {
-    valueRef.current = value;
     onChangeRef.current = onChange;
     onBlurRef.current = onBlur;
     onFocusRef.current = onFocus;
     onFileRef.current = onFile;
     ariaLabelRef.current = ariaLabel;
     callbacksRef.current = { onOpenLink, onToggleTask };
-  }, [ariaLabel, onBlur, onChange, onFile, onFocus, onOpenLink, onToggleTask, value]);
+  }, [ariaLabel, onBlur, onChange, onFile, onFocus, onOpenLink, onToggleTask]);
 
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -188,6 +188,7 @@ export function LiveMarkdownEditor({
             const nextValue = update.state.doc.toString();
             if (nextValue === valueRef.current) return;
             valueRef.current = nextValue;
+            pendingLocalValuesRef.current.push(nextValue);
             onChangeRef.current(nextValue);
           }),
         ],
@@ -255,7 +256,20 @@ export function LiveMarkdownEditor({
 
   useEffect(() => {
     const view = viewRef.current;
-    if (!view || view.state.doc.toString() === value) return;
+    if (!view) return;
+    const pendingValues = pendingLocalValuesRef.current;
+    const localValueIndex = pendingValues.lastIndexOf(value);
+    if (localValueIndex !== -1) {
+      pendingValues.splice(0, localValueIndex + 1);
+      return;
+    }
+    if (view.state.doc.toString() === value) {
+      pendingValues.length = 0;
+      valueRef.current = value;
+      return;
+    }
+    pendingValues.length = 0;
+    valueRef.current = value;
     const selection = view.state.selection.main;
     const maxPosition = value.length;
     view.dispatch({

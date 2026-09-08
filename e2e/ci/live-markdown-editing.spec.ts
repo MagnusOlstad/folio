@@ -140,6 +140,22 @@ test("renders heading levels and GFM strikethrough distinctly", async ({ page })
   );
 });
 
+test("keeps the caret on a newly inserted line", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTitle("New note (Cmd+T)").click();
+  const editor = page.getByLabel("Write a new note");
+  await editor.fill("# First\nSecond");
+  await editor.press("ArrowUp");
+  await editor.press("End");
+
+  await editor.press("Enter");
+  await editor.type("Middle");
+
+  await expect.poll(() => visibleSurfaceText(liveSurface(page))).toBe(
+    "First\nMiddle\nSecond",
+  );
+});
+
 test("autosaves after an idle edit and flushes later edits on blur and Cmd/Ctrl+S", async ({ page }) => {
   await openSeededNote(page, "2026-09-03.md", "Daily 2026-09-03");
 

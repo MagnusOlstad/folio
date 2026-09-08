@@ -1,4 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { EditorView } from "@codemirror/view";
+import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { LiveMarkdownEditor } from "../../src/features/workspace/components/LiveMarkdownEditor.tsx";
@@ -210,5 +212,51 @@ describe("LiveMarkdownEditor", () => {
 
     expect(document.querySelector("[data-live-markdown-editor]")).toBe(root);
     expect(screen.getByLabelText("Edit note").textContent).toContain("Second");
+  });
+
+  it("does not apply stale controlled echoes over a newer local edit", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <LiveMarkdownEditor value="First" onChange={onChange} ariaLabel="Edit note" />,
+    );
+    const editor = screen.getByLabelText("Edit note");
+    const view = EditorView.findFromDOM(editor);
+
+    act(() => {
+      view.dispatch({ changes: { from: 5, insert: "\n" }, selection: { anchor: 6 } });
+      view.dispatch({ changes: { from: 6, insert: "\n" }, selection: { anchor: 7 } });
+    });
+    expect(onChange.mock.calls.map(([value]) => value)).toEqual([
+      "First\n",
+      "First\n\n",
+    ]);
+
+    rerender(
+      <LiveMarkdownEditor
+        value={"First\n"}
+        onChange={onChange}
+        ariaLabel="Edit note"
+      />,
+    );
+
+    expect(view.state.doc.toString()).toBe("First\n\n");
+    expect(view.state.selection.main.head).toBe(7);
+
+    rerender(
+      <LiveMarkdownEditor
+        value={"First\n\n"}
+        onChange={onChange}
+        ariaLabel="Edit note"
+      />,
+    );
+    rerender(
+      <LiveMarkdownEditor
+        value="External"
+        onChange={onChange}
+        ariaLabel="Edit note"
+      />,
+    );
+
+    expect(view.state.doc.toString()).toBe("External");
   });
 });
