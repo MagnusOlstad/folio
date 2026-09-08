@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from "react";
 import type { ViewerDocument } from "../../../domain/types.ts";
 import { isUntitledId } from "../../../lib/workspace.ts";
 import { DocumentBody } from "./DocumentBody.tsx";
@@ -17,6 +18,8 @@ export type DocumentViewProps = {
   metadataDrafts: Record<string, string>;
   pathDraft: string | undefined;
   tagDraft: string | undefined;
+  getScrollTop: (documentId: string) => number;
+  onScroll: (documentId: string, scrollTop: number) => void;
   onBeginMetadataEditing: (
     groupId: string,
     document: ViewerDocument,
@@ -62,12 +65,26 @@ export type DocumentViewProps = {
 };
 
 export function DocumentView(props: DocumentViewProps) {
-  const { document } = props;
+  const { document, getScrollTop, onScroll } = props;
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const scroll = scrollRef.current;
+    if (scroll) scroll.scrollTop = getScrollTop(document.id);
+  }, [document.id, getScrollTop]);
+
   return (
     <article
       className={`document-view ${isUntitledId(document.id) ? "untitled" : ""}`}
     >
-      <div className="document-scroll" data-document-scroll>
+      <div
+        className="document-scroll"
+        data-document-scroll
+        ref={scrollRef}
+        onScroll={(event) =>
+          onScroll(document.id, event.currentTarget.scrollTop)
+        }
+      >
         {!isUntitledId(document.id) && (
           <DocumentHeader
             groupId={props.groupId}
@@ -94,6 +111,7 @@ export function DocumentView(props: DocumentViewProps) {
           onToggleTask={props.onToggleTask}
         />
       </div>
+      <div className="document-find-layer" data-document-find-layer />
       <DocumentFooter
         groupId={props.groupId}
         document={document}

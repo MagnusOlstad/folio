@@ -28,6 +28,22 @@ async function stableY(locator: Locator) {
   return box!.y;
 }
 
+async function textX(locator: Locator, text: string) {
+  return locator.evaluate((element, target) => {
+    const ownerDocument = element.ownerDocument;
+    const walker = ownerDocument.createTreeWalker(element, 4);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const offset = node.textContent?.indexOf(target) ?? -1;
+      if (offset === -1) continue;
+      const range = ownerDocument.createRange();
+      range.setStart(node, offset);
+      range.setEnd(node, offset + target.length);
+      return range.getBoundingClientRect().x;
+    }
+    throw new Error(`Could not find ${target}`);
+  }, text);
+}
+
 async function visibleSurfaceText(surface: Locator) {
   return surface.evaluate(
     (element) => (element as unknown as E2eElement).innerText ?? "",
@@ -145,6 +161,31 @@ test("keeps the outer document scroll stable when a rendered construct is activa
   expect(Math.abs((await stableY(followingLine)) - yBefore)).toBeLessThanOrEqual(1);
 });
 
+test("restores each note scroll position when switching tabs", async ({ page }) => {
+  await openSeededNote(page, "start-here.md", "Start Here");
+
+  const scroller = scrollSurface(page);
+  await scroller.evaluate((element) => {
+    element.scrollTop = element.scrollHeight - element.clientHeight;
+  });
+  const startHereScroll = await scroller.evaluate((element) => element.scrollTop);
+  expect(startHereScroll).toBeGreaterThan(0);
+
+  await page.getByRole("button", { name: "todo-list.md" }).click();
+  await expect(liveEditor(page, "Todo List")).toBeVisible();
+  expect(await scroller.evaluate((element) => element.scrollTop)).toBe(0);
+
+  await page.locator(".editor-tab").filter({ hasText: "Start Here" }).click();
+  await expect(liveEditor(page, "Start Here")).toBeVisible();
+  await expect
+    .poll(() => scroller.evaluate((element) => element.scrollTop))
+    .toBe(startHereScroll);
+
+  await page.locator(".editor-tab").filter({ hasText: "Todo List" }).click();
+  await expect(liveEditor(page, "Todo List")).toBeVisible();
+  expect(await scroller.evaluate((element) => element.scrollTop)).toBe(0);
+});
+
 test("draft notes use live line rendering and list-aware Tab indentation", async ({ page }) => {
   await page.goto("/");
   await page.getByTitle("New note (Cmd+T)").click();
@@ -158,13 +199,26 @@ test("draft notes use live line rendering and list-aware Tab indentation", async
 
   await editor.press("Tab");
   await expect.poll(() => visibleSurfaceText(surface)).toBe(
-    "Draft heading\nparent\n  - child",
+    "Draft heading\n•parent\n  - child",
   );
   await expect(editor).toBeFocused();
 
+  const childLine = surface.locator(".cm-line").filter({ hasText: "child" });
+  const rawChildX = await textX(childLine, "child");
+  const lineBox = await childLine.boundingBox();
+  const rawMarkerBox = await childLine
+    .locator(".cm-live-markdown-list-source")
+    .boundingBox();
+  expect(rawMarkerBox!.x).toBeGreaterThan(lineBox!.x);
+
+  await editor.press("ArrowUp");
+  await expect(childLine.locator(".cm-live-markdown-list-marker-nested")).toBeVisible();
+  expect(Math.abs((await textX(childLine, "child")) - rawChildX)).toBeLessThanOrEqual(1);
+
+  await editor.press("ArrowDown");
   await editor.press("Shift+Tab");
   await expect.poll(() => visibleSurfaceText(surface)).toBe(
-    "Draft heading\nparent\n- child",
+    "Draft heading\n•parent\n- child",
   );
 });
 
@@ -172,18 +226,43 @@ test("draft Find stays over the editor and reports match progress", async ({ pag
   await page.goto("/");
   await page.getByTitle("New note (Cmd+T)").click();
   const editor = page.getByLabel("Write a new note");
-  await editor.fill("alpha beta alpha\nalpha");
+  const filler = Array.from({ length: 80 }, (_, index) => `filler ${index}`).join("\n");
+  await editor.fill(`alpha beta alpha\n${filler}\nalpha`);
   const steeringBand = page.locator(".draft-steering-band");
+  const scroller = scrollSurface(page);
+  await scroller.evaluate((element) => {
+    element.scrollTop = 500;
+  });
+  await scroller.evaluate(
+    (element) =>
+      new Promise<void>((resolve) => {
+        const requestFrame = element.ownerDocument.defaultView?.requestAnimationFrame;
+        if (!requestFrame) return resolve();
+        requestFrame(() => requestFrame(() => resolve()));
+      }),
+  );
+  const scrollBefore = await scroller.evaluate((element) => element.scrollTop);
   const before = await steeringBand.boundingBox();
 
   await page.keyboard.press(`${modifier}+f`);
   const find = page.getByRole("searchbox", { name: "Find in note" });
   await expect(find).toBeFocused();
+  await expect
+    .poll(() => scroller.evaluate((element) => element.scrollTop))
+    .toBe(scrollBefore);
+  const afterOpen = await steeringBand.boundingBox();
+  expect(afterOpen?.y).toBe(before?.y);
+  expect(afterOpen?.height).toBe(before?.height);
+  const noteBox = await page.locator(".document-view").boundingBox();
+  const findBox = await find.locator("xpath=..").boundingBox();
+  expect(Math.abs(findBox!.y - noteBox!.y - 10)).toBeLessThanOrEqual(1);
+  expect(
+    Math.abs(noteBox!.x + noteBox!.width - findBox!.x - findBox!.width - 12),
+  ).toBeLessThanOrEqual(1);
   await find.fill("alpha");
 
   await expect(page.getByText("3 results")).toBeVisible();
   const after = await steeringBand.boundingBox();
-  expect(after?.y).toBe(before?.y);
   expect(after?.height).toBe(before?.height);
 
   await page.getByRole("button", { name: "Next match" }).click();

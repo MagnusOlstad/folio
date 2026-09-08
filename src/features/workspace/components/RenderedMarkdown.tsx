@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
@@ -31,7 +32,9 @@ export function RenderedMarkdown({
   onToggleTask,
 }: RenderedMarkdownProps) {
   const contentRef = useRef<HTMLDivElement>(null);
+  const findInputRef = useRef<HTMLInputElement>(null);
   const findResultRef = useRef<HTMLSpanElement>(null);
+  const findScrollTopRef = useRef(0);
   const matchesRef = useRef<HTMLElement[]>([]);
   const activeMatchRef = useRef(0);
   const [findOpen, setFindOpen] = useState(false);
@@ -41,11 +44,23 @@ export function RenderedMarkdown({
     const content = contentRef.current;
     if (!content) return;
     const openFind = () => {
+      findScrollTopRef.current =
+        content.closest<HTMLElement>("[data-document-scroll]")?.scrollTop ?? 0;
       setFindOpen(true);
     };
     content.addEventListener("folio-find", openFind);
     return () => content.removeEventListener("folio-find", openFind);
   }, []);
+
+  useLayoutEffect(() => {
+    if (!findOpen) return;
+    const scroll = contentRef.current?.closest<HTMLElement>(
+      "[data-document-scroll]",
+    );
+    findInputRef.current?.focus({ preventScroll: true });
+    findInputRef.current?.select();
+    if (scroll) scroll.scrollTop = findScrollTopRef.current;
+  }, [findOpen]);
 
   useLayoutEffect(() => {
     const content = contentRef.current;
@@ -169,45 +184,50 @@ export function RenderedMarkdown({
     [document, groupId, onOpenDocument, onToggleTask, saving],
   );
 
+  const findPanel = findOpen ? (
+    <form
+      className="readonly-find-panel"
+      onSubmit={(event) => {
+        event.preventDefault();
+        moveMatch(1);
+      }}
+    >
+      <input
+        aria-label="Find in current note"
+        ref={findInputRef}
+        value={findQuery}
+        onChange={(event) => {
+          activeMatchRef.current = 0;
+          setFindQuery(event.target.value);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            setFindOpen(false);
+          }
+          if (event.key === "Enter" && event.shiftKey) {
+            event.preventDefault();
+            moveMatch(-1);
+          }
+        }}
+      />
+      <span ref={findResultRef} aria-live="polite" />
+      <button type="button" onClick={() => moveMatch(-1)}>
+        Previous
+      </button>
+      <button type="submit">Next</button>
+      <button type="button" onClick={() => setFindOpen(false)}>
+        Close
+      </button>
+    </form>
+  ) : null;
+  const findLayer = contentRef.current
+    ?.closest(".document-view")
+    ?.querySelector<HTMLElement>("[data-document-find-layer]");
+
   return (
     <div ref={contentRef} data-readonly-markdown="">
-      {findOpen && (
-        <form
-          className="readonly-find-panel"
-          onSubmit={(event) => {
-            event.preventDefault();
-            moveMatch(1);
-          }}
-        >
-          <input
-            aria-label="Find in current note"
-            autoFocus
-            value={findQuery}
-            onChange={(event) => {
-              activeMatchRef.current = 0;
-              setFindQuery(event.target.value);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                setFindOpen(false);
-              }
-              if (event.key === "Enter" && event.shiftKey) {
-                event.preventDefault();
-                moveMatch(-1);
-              }
-            }}
-          />
-          <span ref={findResultRef} aria-live="polite" />
-          <button type="button" onClick={() => moveMatch(-1)}>
-            Previous
-          </button>
-          <button type="submit">Next</button>
-          <button type="button" onClick={() => setFindOpen(false)}>
-            Close
-          </button>
-        </form>
-      )}
+      {findPanel && findLayer ? createPortal(findPanel, findLayer) : findPanel}
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
         {document.content}
       </ReactMarkdown>

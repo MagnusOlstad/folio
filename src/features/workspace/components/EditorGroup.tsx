@@ -1,3 +1,4 @@
+import { useCallback, useRef } from "react";
 import type { TabGroup } from "../../../domain/types.ts";
 import type { WorkspaceEditorUi } from "../hooks/useWorkspaceEditorUi.ts";
 import { isUntitledId } from "../../../lib/workspace.ts";
@@ -31,6 +32,14 @@ export function EditorGroup({
   actions,
   ui,
 }: EditorGroupProps) {
+  const scrollPositionsRef = useRef<Record<string, number>>({});
+  const getScrollTop = useCallback(
+    (documentId: string) => scrollPositionsRef.current[documentId] ?? 0,
+    [],
+  );
+  const rememberScrollTop = useCallback((documentId: string, scrollTop: number) => {
+    scrollPositionsRef.current[documentId] = scrollTop;
+  }, []);
   const document = group.activeId ? model.documents[group.activeId] : null;
   const loading = Boolean(
     group.activeId && model.loadingDocuments.has(group.activeId),
@@ -126,6 +135,8 @@ export function EditorGroup({
             metadataDrafts={ui.metadataDrafts}
             pathDraft={ui.pathDrafts[document.id]}
             tagDraft={ui.tagDrafts[document.id]}
+            getScrollTop={getScrollTop}
+            onScroll={rememberScrollTop}
             onBeginMetadataEditing={ui.beginMetadataEditing}
             onChangeMetadataDraft={ui.changeMetadataDraft}
             onFinishMetadataEditing={(key, target, field, value) =>

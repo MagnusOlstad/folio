@@ -103,7 +103,7 @@ export function createNoteSearchPanel(view: EditorView): Panel {
     dom,
     top: true,
     mount() {
-      input.focus();
+      input.focus({ preventScroll: true });
       input.select();
     },
     update(update: ViewUpdate) {

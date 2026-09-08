@@ -95,6 +95,38 @@ class TaskCheckboxWidget extends WidgetType {
   }
 }
 
+class ListMarkerWidget extends WidgetType {
+  private readonly marker: string;
+  private readonly nested: boolean;
+
+  constructor(marker: string, nested: boolean) {
+    super();
+    this.marker = marker;
+    this.nested = nested;
+  }
+
+  eq(other: ListMarkerWidget) {
+    return other.marker === this.marker && other.nested === this.nested;
+  }
+
+  toDOM() {
+    const marker = document.createElement("span");
+    marker.className = [
+      "cm-live-markdown-list-marker",
+      this.nested && "cm-live-markdown-list-marker-nested",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    marker.textContent = /^\d/.test(this.marker)
+      ? this.marker
+      : this.nested
+        ? "◦"
+        : "•";
+    marker.setAttribute("aria-hidden", "true");
+    return marker;
+  }
+}
+
 function addInlineDecorations(
   ranges: Array<Range<Decoration>>,
   line: string,
@@ -208,7 +240,6 @@ function buildDecorations(
     const listIndent = list
       ? list[1].match(/[ \t]*$/)?.[0].replaceAll("\t", "  ").length ?? 0
       : 0;
-    const listOffset = 22 + Math.floor(listIndent / 2) * 20;
     const isTable = /^\|.*\|\s*$/.test(text);
     const lineClasses = [
       heading && `cm-live-markdown-heading cm-live-markdown-heading-${heading[1].length}`,
@@ -225,14 +256,7 @@ function buildDecorations(
           class: lineClasses.join(" "),
           attributes: heading
             ? { role: "heading", "aria-level": String(heading[1].length) }
-            : list
-              ? {
-                  ...(listPreview && listMarker && /^\d/.test(listMarker)
-                    ? { "data-live-markdown-list-marker": listMarker }
-                    : {}),
-                  style: `--live-markdown-list-offset: ${listOffset}px`,
-                }
-              : undefined,
+            : undefined,
         }).range(line.from),
       );
     if (heading) {
@@ -245,11 +269,15 @@ function buildDecorations(
       const markerStart = line.from + list[1].length;
       const markerEnd = markerStart + list[2].length + list[3].length;
       if (listPreview) {
-        addHidden(ranges, line.from, markerEnd, true);
+        ranges.push(
+          Decoration.replace({
+            widget: new ListMarkerWidget(list[2], listIndent >= 2),
+          }).range(markerStart, markerEnd),
+        );
       } else {
         ranges.push(
           Decoration.mark({ class: "cm-live-markdown-list-source" }).range(
-            line.from,
+            markerStart,
             markerEnd,
           ),
         );

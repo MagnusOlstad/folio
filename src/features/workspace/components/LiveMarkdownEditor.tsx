@@ -8,7 +8,7 @@ import {
   selectAll,
 } from "@codemirror/commands";
 import { Compartment, EditorSelection, EditorState } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, keymap, panels } from "@codemirror/view";
 import {
   useEffect,
   useLayoutEffect,
@@ -122,6 +122,9 @@ export function LiveMarkdownEditor({
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    const findLayer = host
+      .closest(".document-view")
+      ?.querySelector<HTMLElement>("[data-document-find-layer]");
     const view = new EditorView({
       state: EditorState.create({
         doc: valueRef.current,
@@ -129,6 +132,7 @@ export function LiveMarkdownEditor({
           markdown({ base: markdownLanguage }),
           history(),
           search({ top: true, createPanel: createNoteSearchPanel }),
+          panels(findLayer ? { topContainer: findLayer } : undefined),
           EditorView.scrollMargins.of(() => ({ bottom: 80 })),
           EditorView.lineWrapping,
           ariaLabelCompartment.current.of(
@@ -201,9 +205,21 @@ export function LiveMarkdownEditor({
       );
     const focus = () => onFocusRef.current?.();
     const find = () => {
+      const documentScroll = host.closest<HTMLElement>("[data-document-scroll]");
+      const scrollTop = documentScroll?.scrollTop;
+      const restoreDocumentScroll = () => {
+        if (documentScroll && scrollTop !== undefined)
+          documentScroll.scrollTop = scrollTop;
+      };
       openSearchPanel(view);
+      restoreDocumentScroll();
       window.requestAnimationFrame(() => {
-        view.dom.querySelector<HTMLInputElement>("[main-field]")?.focus();
+        view.dom
+          .closest(".document-view")
+          ?.querySelector<HTMLInputElement>("[main-field]")
+          ?.focus({ preventScroll: true });
+        restoreDocumentScroll();
+        window.requestAnimationFrame(restoreDocumentScroll);
       });
     };
     view.contentDOM.addEventListener("folio-format", format);

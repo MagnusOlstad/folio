@@ -120,15 +120,10 @@ describe("LiveMarkdownEditor", () => {
 
     const lines = document.querySelectorAll<HTMLElement>(".cm-live-markdown-list");
     expect(lines).toHaveLength(2);
-    expect(lines[0].style.getPropertyValue("--live-markdown-list-offset")).toBe(
-      "22px",
-    );
-    expect(lines[1].style.getPropertyValue("--live-markdown-list-offset")).toBe(
-      "42px",
-    );
     expect(
-      lines[1].querySelector(".cm-live-markdown-marker")?.textContent,
-    ).toBe("  - ");
+      lines[1].querySelector(".cm-live-markdown-list-marker")?.textContent,
+    ).toBe("◦");
+    expect(lines[1].textContent?.startsWith("  ◦child")).toBe(true);
 
     fireEvent.focus(screen.getByLabelText("Edit nested list"));
 
@@ -136,9 +131,6 @@ describe("LiveMarkdownEditor", () => {
       ".cm-live-markdown-list-source",
     );
     expect(revealedPrefix?.textContent).toBe("- ");
-    expect(lines[0].style.getPropertyValue("--live-markdown-list-offset")).toBe(
-      "22px",
-    );
   });
 
   it("finishes the presentation of an unclosed fenced code block", () => {
