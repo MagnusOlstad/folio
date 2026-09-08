@@ -8,7 +8,10 @@ async function openWorkspace(page: Page) {
 test("closing a blank new draft removes its server copy", async ({ page, request }) => {
   await openWorkspace(page);
   await page.getByTitle("New note (Cmd+T)").click();
-  const close = page.getByRole("button", { name: "Close Untitled" });
+  const close = page.getByRole("button", {
+    name: "Close Untitled",
+    exact: true,
+  });
   const deletion = page.waitForResponse(
     (response) =>
       response.request().method() === "DELETE" &&
@@ -39,9 +42,13 @@ test("closing a nonempty new draft preserves its server copy", async ({ page, re
   await editor.fill(content);
   const response = await saved;
   const id = new URL(response.url()).searchParams.get("id");
-  await page.getByRole("button", { name: "Close Untitled" }).click();
+  const close = page.getByRole("button", {
+    name: `Close ${content}`,
+    exact: true,
+  });
+  await close.click();
 
-  await expect(page.getByRole("button", { name: "Close Untitled" })).toHaveCount(0);
+  await expect(close).toHaveCount(0);
   const drafts = await (await request.get("/api/drafts")).json();
   expect(drafts).toContainEqual(expect.objectContaining({ id, content }));
 });

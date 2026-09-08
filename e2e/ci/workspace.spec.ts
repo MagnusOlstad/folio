@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+const modifier = process.platform === 'darwin' ? 'Meta' : 'Control'
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/')
   // Keyboard-shortcut tests dispatch keys with no element to auto-wait on, so make
@@ -51,8 +53,8 @@ test.describe('browser-safe keyboard shortcuts', () => {
     await page.keyboard.press('Control+t')
     const editor = page.getByLabel('Write a new note')
     await editor.fill('hello')
-    await editor.press('Control+a')
-    await page.keyboard.press('Control+b')
+    await editor.press(`${modifier}+a`)
+    await page.keyboard.press(`${modifier}+b`)
     await expect(editor).toHaveText('**hello**')
   })
 
@@ -60,8 +62,8 @@ test.describe('browser-safe keyboard shortcuts', () => {
     await page.keyboard.press('Control+t')
     const editor = page.getByLabel('Write a new note')
     await editor.fill('hello')
-    await editor.press('Control+a')
-    await page.keyboard.press('Control+i')
+    await editor.press(`${modifier}+a`)
+    await page.keyboard.press(`${modifier}+i`)
     await expect(editor).toHaveText('*hello*')
   })
 
@@ -69,8 +71,8 @@ test.describe('browser-safe keyboard shortcuts', () => {
     await page.keyboard.press('Control+t')
     const editor = page.getByLabel('Write a new note')
     await editor.fill('hello')
-    await editor.press('Control+a')
-    await page.keyboard.press('Control+k')
+    await editor.press(`${modifier}+a`)
+    await page.keyboard.press(`${modifier}+k`)
     await expect(editor).toHaveText('[hello]()')
   })
 

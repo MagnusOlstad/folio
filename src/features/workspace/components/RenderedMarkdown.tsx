@@ -31,7 +31,6 @@ export function RenderedMarkdown({
   onToggleTask,
 }: RenderedMarkdownProps) {
   const contentRef = useRef<HTMLDivElement>(null);
-  const findInputRef = useRef<HTMLInputElement>(null);
   const findResultRef = useRef<HTMLSpanElement>(null);
   const matchesRef = useRef<HTMLElement[]>([]);
   const activeMatchRef = useRef(0);
@@ -43,7 +42,6 @@ export function RenderedMarkdown({
     if (!content) return;
     const openFind = () => {
       setFindOpen(true);
-      window.requestAnimationFrame(() => findInputRef.current?.focus());
     };
     content.addEventListener("folio-find", openFind);
     return () => content.removeEventListener("folio-find", openFind);
@@ -182,8 +180,8 @@ export function RenderedMarkdown({
           }}
         >
           <input
-            ref={findInputRef}
             aria-label="Find in current note"
+            autoFocus
             value={findQuery}
             onChange={(event) => {
               activeMatchRef.current = 0;

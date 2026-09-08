@@ -920,6 +920,27 @@ body.resizing-horizontal * {
   font-size: 0.82em;
 }
 
+.live-markdown-editor .cm-live-markdown-code-block {
+  padding-inline: 16px;
+  background: #1a1c19;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.88em;
+}
+
+.live-markdown-editor .cm-live-markdown-code-block-first {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.live-markdown-editor .cm-live-markdown-code-block-last {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.live-markdown-editor .cm-live-markdown-code-fence-hidden {
+  display: none;
+}
+
 .live-markdown-editor .cm-live-markdown-link {
   color: var(--acid);
   cursor: pointer;
@@ -949,6 +970,11 @@ body.resizing-horizontal * {
 
 .live-markdown-editor .cm-live-markdown-list-bullet::before {
   content: '•';
+}
+
+.live-markdown-editor .cm-live-markdown-list-bullet.cm-live-markdown-list-nested::before {
+  content: '◦';
+  font-size: 1.2em;
 }
 
 .live-markdown-editor .cm-live-markdown-list-ordered::before {
@@ -1034,6 +1060,17 @@ body.resizing-horizontal * {
 .document-content ol {
   margin-top: 0;
   margin-bottom: 32px;
+}
+
+.document-content li > ul,
+.document-content li > ol {
+  margin-top: 0;
+  margin-bottom: 0;
+  padding-left: 20px;
+}
+
+.document-content ul ul {
+  list-style-type: circle;
 }
 
 .document-content table {

@@ -36,6 +36,15 @@ type SourceRange = { from: number; to: number };
 
 const setLiveMarkdownFocus = StateEffect.define<boolean>();
 
+function isClosingCodeFence(line: string, openingMarker: string) {
+  const closingMarker = /^\s*(`+|~+)\s*$/.exec(line)?.[1];
+  return Boolean(
+    closingMarker &&
+      closingMarker[0] === openingMarker[0] &&
+      closingMarker.length >= openingMarker.length,
+  );
+}
+
 function addHidden(
   ranges: Array<Range<Decoration>>,
   from: number,
@@ -140,10 +149,15 @@ function buildDecorations(
   focused: boolean,
 ): DecorationSet {
   const codeRanges: SourceRange[] = [];
+  const fencedCodeRanges: SourceRange[] = [];
   syntaxTree(state).iterate({
     enter: (node) => {
-      if (node.name === "FencedCode" || node.name === "InlineCode")
+      if (node.name === "FencedCode") {
+        fencedCodeRanges.push({ from: node.from, to: node.to });
         codeRanges.push({ from: node.from, to: node.to });
+      } else if (node.name === "InlineCode") {
+        codeRanges.push({ from: node.from, to: node.to });
+      }
     },
   });
   const reveal = (from: number, to: number) => {
@@ -157,8 +171,35 @@ function buildDecorations(
   for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber += 1) {
     const line = state.doc.line(lineNumber);
     const text = line.text;
-    if (codeRanges.some((range) => line.from >= range.from && line.to <= range.to))
+    const fencedCode = fencedCodeRanges.find(
+      (range) => line.from >= range.from && line.to <= range.to,
+    );
+    if (fencedCode) {
+      const openingLine = state.doc.lineAt(fencedCode.from);
+      const openingMarker = /^\s*(`{3,}|~{3,})/.exec(openingLine.text)?.[1] ?? "```";
+      const endLine = state.doc.lineAt(fencedCode.to);
+      const hasClosingFence =
+        endLine.number > openingLine.number &&
+        isClosingCodeFence(endLine.text, openingMarker);
+      const fenceLine =
+        lineNumber === openingLine.number ||
+        (hasClosingFence && lineNumber === endLine.number);
+      const fenceHidden = fenceLine && !reveal(line.from, line.to);
+      const firstContentLine = openingLine.number + 1;
+      const lastContentLine = endLine.number - (hasClosingFence ? 1 : 0);
+      const codeClasses = [
+        "cm-live-markdown-code-block",
+        fenceLine && "cm-live-markdown-code-fence",
+        fenceHidden && "cm-live-markdown-code-fence-hidden",
+        lineNumber === firstContentLine && "cm-live-markdown-code-block-first",
+        lineNumber === lastContentLine && "cm-live-markdown-code-block-last",
+      ].filter((className): className is string => Boolean(className));
+      ranges.push(
+        Decoration.line({ class: codeClasses.join(" ") }).range(line.from),
+      );
+      addHidden(ranges, line.from, line.to, fenceHidden);
       continue;
+    }
     const heading = /^(#{1,6})\s+/.exec(text);
     const quote = /^(\s*>\s?)+/.exec(text);
     const list = /^(\s*)([-+*]|\d+[.)])(\s+)/.exec(text);
@@ -174,6 +215,7 @@ function buildDecorations(
       listPreview && "cm-live-markdown-list",
       listPreview && listMarker && /^\d/.test(listMarker) && "cm-live-markdown-list-ordered",
       listPreview && listMarker && !/^\d/.test(listMarker) && "cm-live-markdown-list-bullet",
+      listPreview && listIndent >= 2 && "cm-live-markdown-list-nested",
       isTable && "cm-live-markdown-table",
     ].filter((className): className is string => Boolean(className));
     if (lineClasses.length)

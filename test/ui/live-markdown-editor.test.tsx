@@ -93,6 +93,36 @@ describe("LiveMarkdownEditor", () => {
     expect(editor).toHaveTextContent("[ ]");
   });
 
+  it("presents fenced code and nested list bullets when inactive", () => {
+    render(
+      <LiveMarkdownEditor
+        value={"```ts\nconst answer = 42;\n```\n- parent\n  - child"}
+        onChange={vi.fn()}
+        ariaLabel="Edit code and lists"
+      />,
+    );
+
+    expect(document.querySelectorAll(".cm-live-markdown-code-block")).toHaveLength(3);
+    expect(
+      document.querySelectorAll(".cm-live-markdown-code-fence-hidden"),
+    ).toHaveLength(2);
+    expect(document.querySelector(".cm-live-markdown-list-nested")).toBeTruthy();
+  });
+
+  it("finishes the presentation of an unclosed fenced code block", () => {
+    render(
+      <LiveMarkdownEditor
+        value={"```ts\nconst answer = 42;"}
+        onChange={vi.fn()}
+        ariaLabel="Edit unclosed code"
+      />,
+    );
+
+    expect(document.querySelector(".cm-live-markdown-code-block-last")).toHaveTextContent(
+      "const answer = 42;",
+    );
+  });
+
   it("keeps task controls interactive on inactive lines", () => {
     const onToggleTask = vi.fn();
     render(
