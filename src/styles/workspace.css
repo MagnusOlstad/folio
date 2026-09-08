@@ -599,7 +599,7 @@ body.resizing-horizontal * {
   height: 38px;
   padding: 0 8px 0 11px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 7px;
   align-items: center;
   border: 0;
@@ -620,13 +620,6 @@ body.resizing-horizontal * {
   color: var(--ink);
   background: var(--paper);
   box-shadow: inset 0 1px 0 var(--acid);
-}
-
-.tab-saving {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--orange);
 }
 
 .tab-close {

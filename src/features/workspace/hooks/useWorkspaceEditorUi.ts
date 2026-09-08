@@ -23,13 +23,8 @@ export function useWorkspaceEditorUi() {
     groupId: string,
     document: ViewerDocument,
     field: MetadataField,
-    saving: boolean,
   ) {
-    if (
-      !document.deletable ||
-      saving ||
-      (field === "title" && !document.movable)
-    )
+    if (!document.deletable || (field === "title" && !document.movable))
       return;
     const key = `${groupId}:${document.id}:${field}`;
     setMetadataDrafts((current) => ({ ...current, [key]: document[field] }));

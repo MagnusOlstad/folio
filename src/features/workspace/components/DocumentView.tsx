@@ -24,7 +24,6 @@ export type DocumentViewProps = {
     groupId: string,
     document: ViewerDocument,
     field: MetadataField,
-    saving: boolean,
   ) => void;
   onChangeMetadataDraft: (key: string, value: string) => void;
   onFinishMetadataEditing: (
@@ -89,7 +88,6 @@ export function DocumentView(props: DocumentViewProps) {
           <DocumentHeader
             groupId={props.groupId}
             document={document}
-            saving={props.saving}
             editingKey={props.editingMetadataKey}
             drafts={props.metadataDrafts}
             onBeginEditing={props.onBeginMetadataEditing}

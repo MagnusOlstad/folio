@@ -72,7 +72,6 @@ describe("workspace editor components", () => {
       <DocumentHeader
         groupId="primary"
         document={document}
-        saving={false}
         editingKey="primary:/notes/current.md:title"
         drafts={{ "primary:/notes/current.md:title": "Changed" }}
         onBeginEditing={vi.fn()}
@@ -93,7 +92,6 @@ describe("workspace editor components", () => {
       <DocumentHeader
         groupId="primary"
         document={document}
-        saving={false}
         editingKey="primary:/notes/current.md:description"
         drafts={{ "primary:/notes/current.md:description": "Changed" }}
         onBeginEditing={vi.fn()}
@@ -109,6 +107,48 @@ describe("workspace editor components", () => {
       "description",
       "Description",
     );
+  });
+
+  it("keeps editing controls available and quiet during autosave", () => {
+    render(
+      <>
+        <DocumentHeader
+          groupId="primary"
+          document={document}
+          editingKey={null}
+          drafts={{}}
+          onBeginEditing={vi.fn()}
+          onChangeDraft={vi.fn()}
+          onFinishEditing={vi.fn()}
+        />
+        <DocumentFooter
+          groupId="primary"
+          document={document}
+          draft={undefined}
+          pathDraft={undefined}
+          tagDraft={undefined}
+          saving
+          deleting={false}
+          deleteInProgress={false}
+          moving={false}
+          onBeginPathEditing={vi.fn()}
+          onChangePath={vi.fn()}
+          onFinishPathEditing={vi.fn()}
+          onResetPath={vi.fn()}
+          onBeginTagEditing={vi.fn()}
+          onChangeTag={vi.fn()}
+          onFinishTagEditing={vi.fn()}
+          onFileDraft={vi.fn()}
+          onDelete={vi.fn().mockResolvedValue(undefined)}
+          onOpenDocument={vi.fn().mockResolvedValue(undefined)}
+        />
+      </>,
+    );
+
+    expect(screen.getByRole("button", { name: "Current note" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Description" })).toBeEnabled();
+    expect(screen.getByLabelText("Path for Current note")).toBeEnabled();
+    expect(screen.queryByText("Saving...")).not.toBeInTheDocument();
   });
 
   it("renders loading and empty pane states without mounting a document", () => {
@@ -334,7 +374,6 @@ describe("workspace editor components", () => {
         "primary",
         document,
         "title",
-        false,
       );
       result.current.beginPathEditing(document);
       result.current.beginTagEditing(document);

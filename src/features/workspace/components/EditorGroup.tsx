@@ -93,7 +93,6 @@ export function EditorGroup({
       <EditorTabs
         group={group}
         groupCount={groupCount}
-        savingDocumentIds={model.savingDocuments}
         titleForId={actions.titleForId}
         isUntitledId={isUntitledId}
         onActivate={actions.activateTab}

@@ -4,14 +4,12 @@ import type { MetadataField } from "../types.ts";
 type DocumentHeaderProps = {
   groupId: string;
   document: ViewerDocument;
-  saving: boolean;
   editingKey: string | null;
   drafts: Record<string, string>;
   onBeginEditing: (
     groupId: string,
     document: ViewerDocument,
     field: MetadataField,
-    saving: boolean,
   ) => void;
   onChangeDraft: (key: string, value: string) => void;
   onFinishEditing: (
@@ -25,7 +23,6 @@ type DocumentHeaderProps = {
 export function DocumentHeader({
   groupId,
   document,
-  saving,
   editingKey,
   drafts,
   onBeginEditing,
@@ -70,9 +67,8 @@ export function DocumentHeader({
           type="button"
           className="document-title"
           onClick={() =>
-            onBeginEditing(groupId, document, "title", saving)
+            onBeginEditing(groupId, document, "title")
           }
-          disabled={saving}
           title="Click to edit title"
         >
           {document.title}
@@ -111,9 +107,8 @@ export function DocumentHeader({
           type="button"
           className={`document-description ${document.description ? "" : "empty"}`}
           onClick={() =>
-            onBeginEditing(groupId, document, "description", saving)
+            onBeginEditing(groupId, document, "description")
           }
-          disabled={saving}
           title="Click to edit description"
         >
           {document.description || "Add description"}
