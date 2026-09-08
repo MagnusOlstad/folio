@@ -134,7 +134,9 @@ and `.zip` in the same run — no second dispatch needed. Publish the draft to s
 
 The bump comes from the Conventional Commits subjects since the previous release — a
 breaking change (`!` in the subject or a `BREAKING CHANGE` footer) bumps major, `feat:`
-bumps minor, `fix:` and everything else patch. PR titles are validated against Conventional
+bumps minor, `fix:` bumps patch. Infrastructure types — `chore:`, `ci:`, `refactor:`,
+`test:`, `build:`, `style:` — release nothing, and a range containing only those opens no
+release PR at all, silently. PR titles are validated against Conventional
 Commits in CI, and with squash merges the PR title becomes the commit subject on `main`.
 The draft's notes are the changelog plus an "Install" section the workflow appends
 automatically — the same Gatekeeper `xattr` step from "The build is not code-signed" above,
