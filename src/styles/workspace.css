@@ -923,13 +923,37 @@ body.resizing-horizontal * {
   min-height: 32px;
 }
 
-.live-markdown-editor .cm-live-markdown-marker {
-  display: none;
-}
-
 .live-markdown-editor .cm-live-markdown-heading {
   color: var(--ink);
   font-weight: 600;
+}
+
+.live-markdown-editor .cm-live-markdown-heading-1 {
+  font-size: 30px;
+  line-height: 40px;
+}
+
+.live-markdown-editor .cm-live-markdown-heading-2 {
+  font-size: 26px;
+  line-height: 36px;
+}
+
+.live-markdown-editor .cm-live-markdown-heading-3 {
+  font-size: 22px;
+  line-height: 32px;
+}
+
+.live-markdown-editor .cm-live-markdown-heading-4 {
+  font-size: 20px;
+}
+
+.live-markdown-editor .cm-live-markdown-heading-5 {
+  font-size: 18px;
+}
+
+.live-markdown-editor .cm-live-markdown-heading-6 {
+  color: var(--muted);
+  font-size: 17px;
 }
 
 .live-markdown-editor .cm-live-markdown-strong {
@@ -1039,12 +1063,22 @@ body.resizing-horizontal * {
   margin: 0 0 32px;
 }
 
-.document-content h1,
-.document-content h2,
-.document-content h3 {
-  margin: 32px 0;
+.document-content h1 {
+  margin: 40px 0 24px;
   color: var(--ink);
-  font: 400 22px/32px ui-sans-serif, system-ui, sans-serif;
+  font: 600 30px/40px ui-sans-serif, system-ui, sans-serif;
+}
+
+.document-content h2 {
+  margin: 36px 0 24px;
+  color: var(--ink);
+  font: 600 26px/36px ui-sans-serif, system-ui, sans-serif;
+}
+
+.document-content h3 {
+  margin: 32px 0 20px;
+  color: var(--ink);
+  font: 600 22px/32px ui-sans-serif, system-ui, sans-serif;
 }
 
 .document-content h4,
@@ -1052,6 +1086,10 @@ body.resizing-horizontal * {
 .document-content h6 {
   margin: 32px 0;
   font: 600 18px/32px ui-sans-serif, system-ui, sans-serif;
+}
+
+.document-content del {
+  text-decoration: line-through;
 }
 
 .document-content a {

@@ -163,6 +163,26 @@ describe("workspace editor components", () => {
     expect(onToggle).toHaveBeenCalledWith(document, 3, true);
   });
 
+  it("renders GFM strikethrough and heading levels", () => {
+    render(
+      <RenderedMarkdown
+        document={{
+          ...document,
+          content: "# First\n\n## Second\n\n### Third\n\n~~Removed~~",
+        }}
+        groupId="secondary"
+        saving={false}
+        onOpenDocument={vi.fn().mockResolvedValue(undefined)}
+        onToggleTask={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "First", level: 1 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Second", level: 2 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Third", level: 3 })).toBeTruthy();
+    expect(screen.getByText("Removed").tagName).toBe("DEL");
+  });
+
   it("forwards document path, tag, delete, and related-link actions", () => {
     const linkedDocument = {
       ...document,

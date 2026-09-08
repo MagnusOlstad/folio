@@ -20,12 +20,49 @@ describe("LiveMarkdownEditor", () => {
     expect(document.querySelector("[data-live-markdown-scroll]")).toBeTruthy();
 
     expect(document.querySelector(".cm-live-markdown-heading")).toBeTruthy();
-    expect(document.querySelector(".cm-live-markdown-marker")).toBeTruthy();
+    expect(editor).not.toHaveTextContent("# Heading");
     fireEvent.focus(editor);
     expect(document.querySelector(".cm-live-markdown-heading")).toBeTruthy();
-    expect(document.querySelector(".cm-live-markdown-marker")).toBeNull();
+    expect(editor).toHaveTextContent("# Heading");
     fireEvent.blur(editor);
-    expect(document.querySelector(".cm-live-markdown-marker")).toBeTruthy();
+    expect(editor).not.toHaveTextContent("# Heading");
+  });
+
+  it("uses the CodeMirror GFM syntax tree for nested strikethrough", () => {
+    render(
+      <LiveMarkdownEditor
+        value={"~~removed **strong**~~\n\\~~literal~~"}
+        onChange={vi.fn()}
+        ariaLabel="Edit formatting"
+      />,
+    );
+
+    const strike = document.querySelector(".cm-live-markdown-strike");
+    expect(strike).toHaveTextContent("removed strong");
+    expect(strike?.querySelector(".cm-live-markdown-strong")).toHaveTextContent(
+      "strong",
+    );
+    expect(document.querySelectorAll(".cm-live-markdown-strike")).toHaveLength(1);
+  });
+
+  it("recognizes ATX and setext heading levels from the Markdown parser", () => {
+    render(
+      <LiveMarkdownEditor
+        value={"# First\n## Second\nThird\n---"}
+        onChange={vi.fn()}
+        ariaLabel="Edit headings"
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "First", level: 1 })).toHaveClass(
+      "cm-live-markdown-heading-1",
+    );
+    expect(screen.getByRole("heading", { name: "Second", level: 2 })).toHaveClass(
+      "cm-live-markdown-heading-2",
+    );
+    expect(screen.getByRole("heading", { name: "Third", level: 2 })).toHaveClass(
+      "cm-live-markdown-heading-2",
+    );
   });
 
   it("uses the existing folio-format event contract", () => {

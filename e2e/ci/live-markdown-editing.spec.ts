@@ -101,6 +101,45 @@ test("moving off a line restores its Markdown presentation and reveals the next 
   await page.keyboard.press(`${modifier}+z`);
 });
 
+test("ArrowUp enters a heading line instead of skipping it", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTitle("New note (Cmd+T)").click();
+  const editor = page.getByLabel("Write a new note");
+  const surface = liveSurface(page);
+  await editor.fill("Above\n# Heading\nBelow");
+
+  await editor.press("ArrowUp");
+
+  await expect.poll(() => visibleSurfaceText(surface)).toBe(
+    "Above\n# Heading\nBelow",
+  );
+});
+
+test("renders heading levels and GFM strikethrough distinctly", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTitle("New note (Cmd+T)").click();
+  const editor = page.getByLabel("Write a new note");
+  const surface = liveSurface(page);
+  await editor.fill("# First\n## Second\n### Third\n~~Removed~~");
+
+  await expect(surface.locator(".cm-live-markdown-heading-1")).toHaveCSS(
+    "font-size",
+    "30px",
+  );
+  await expect(surface.locator(".cm-live-markdown-heading-2")).toHaveCSS(
+    "font-size",
+    "26px",
+  );
+  await expect(surface.locator(".cm-live-markdown-heading-3")).toHaveCSS(
+    "font-size",
+    "22px",
+  );
+  await expect(surface.locator(".cm-live-markdown-strike")).toHaveCSS(
+    "text-decoration-line",
+    "line-through",
+  );
+});
+
 test("autosaves after an idle edit and flushes later edits on blur and Cmd/Ctrl+S", async ({ page }) => {
   await openSeededNote(page, "2026-09-03.md", "Daily 2026-09-03");
 

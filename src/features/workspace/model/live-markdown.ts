@@ -34,6 +34,19 @@ type LiveMarkdownConfiguration = {
 type SourceLink = { from: number; to: number; href: string };
 type SourceRange = { from: number; to: number };
 
+const inlineSyntaxClasses: Readonly<Record<string, string>> = {
+  StrongEmphasis: "cm-live-markdown-strong",
+  Emphasis: "cm-live-markdown-emphasis",
+  Strikethrough: "cm-live-markdown-strike",
+  InlineCode: "cm-live-markdown-code",
+};
+
+const inlineMarkerNodes = new Set([
+  "EmphasisMark",
+  "StrikethroughMark",
+  "CodeMark",
+]);
+
 const setLiveMarkdownFocus = StateEffect.define<boolean>();
 
 function isClosingCodeFence(line: string, openingMarker: string) {
@@ -53,7 +66,7 @@ function addHidden(
 ) {
   if (!hidden) return;
   if (from < to)
-    ranges.push(Decoration.mark({ class: "cm-live-markdown-marker" }).range(from, to));
+    ranges.push(Decoration.replace({}).range(from, to));
 }
 
 class TaskCheckboxWidget extends WidgetType {
@@ -127,41 +140,12 @@ class ListMarkerWidget extends WidgetType {
   }
 }
 
-function addInlineDecorations(
+function addLinkDecorations(
   ranges: Array<Range<Decoration>>,
   line: string,
   offset: number,
   reveal: (from: number, to: number) => boolean,
-  codeRanges: SourceRange[],
 ) {
-  const pairs: Array<{ expression: RegExp; className: string; markerLength: number }> = [
-    { expression: /(\*\*|__)(.+?)\1/g, className: "cm-live-markdown-strong", markerLength: 2 },
-    { expression: /~~(.+?)~~/g, className: "cm-live-markdown-strike", markerLength: 2 },
-    { expression: /`([^`]+)`/g, className: "cm-live-markdown-code", markerLength: 1 },
-    { expression: /(?<!\*)\*([^*]+)\*(?!\*)/g, className: "cm-live-markdown-emphasis", markerLength: 1 },
-    { expression: /(?<!_)_([^_]+)_(?!_)/g, className: "cm-live-markdown-emphasis", markerLength: 1 },
-  ];
-  for (const { expression, className, markerLength } of pairs) {
-    for (const match of line.matchAll(expression)) {
-      const start = offset + (match.index ?? 0);
-      const end = start + match[0].length;
-      if (
-        className !== "cm-live-markdown-code" &&
-        codeRanges.some((range) => start >= range.from && end <= range.to)
-      )
-        continue;
-      const markersAreHidden = !reveal(start, end);
-      addHidden(ranges, start, start + markerLength, markersAreHidden);
-      addHidden(ranges, end - markerLength, end, markersAreHidden);
-      ranges.push(
-        Decoration.mark({ class: className }).range(
-          start + markerLength,
-          end - markerLength,
-        ),
-      );
-    }
-  }
-
   for (const match of line.matchAll(/\[([^\]]+)\]\(([^)\s]+)(?:\s+[^)]*)?\)/g)) {
     const start = offset + (match.index ?? 0);
     const textStart = start + 1;
@@ -180,18 +164,6 @@ function buildDecorations(
   configuration: LiveMarkdownConfiguration,
   focused: boolean,
 ): DecorationSet {
-  const codeRanges: SourceRange[] = [];
-  const fencedCodeRanges: SourceRange[] = [];
-  syntaxTree(state).iterate({
-    enter: (node) => {
-      if (node.name === "FencedCode") {
-        fencedCodeRanges.push({ from: node.from, to: node.to });
-        codeRanges.push({ from: node.from, to: node.to });
-      } else if (node.name === "InlineCode") {
-        codeRanges.push({ from: node.from, to: node.to });
-      }
-    },
-  });
   const reveal = (from: number, to: number) => {
     if (!focused) return false;
     return state.selection.ranges.some((range) => {
@@ -200,6 +172,39 @@ function buildDecorations(
     });
   };
   const ranges: Array<Range<Decoration>> = [];
+  const fencedCodeRanges: SourceRange[] = [];
+  const headingLevels = new Map<number, number>();
+  syntaxTree(state).iterate({
+    enter: (node) => {
+      if (node.name === "FencedCode")
+        fencedCodeRanges.push({ from: node.from, to: node.to });
+
+      const heading = /^(?:ATX|Setext)Heading([1-6])$/.exec(node.name);
+      if (heading)
+        headingLevels.set(state.doc.lineAt(node.from).number, Number(heading[1]));
+
+      if (node.name === "HeaderMark" && node.node.parent?.name.startsWith("ATXHeading")) {
+        const parent = node.node.parent;
+        const line = state.doc.lineAt(node.from);
+        let from = node.from;
+        let to = node.to;
+        if (!node.node.prevSibling) {
+          from = line.from;
+          while (to < line.to && /\s/.test(state.sliceDoc(to, to + 1))) to += 1;
+        }
+        addHidden(ranges, from, to, !reveal(parent.from, parent.to));
+      }
+
+      const className = inlineSyntaxClasses[node.name];
+      if (className && node.from < node.to)
+        ranges.push(Decoration.mark({ class: className }).range(node.from, node.to));
+
+      if (!inlineMarkerNodes.has(node.name)) return;
+      const parent = node.node.parent;
+      if (parent)
+        addHidden(ranges, node.from, node.to, !reveal(parent.from, parent.to));
+    },
+  });
   for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber += 1) {
     const line = state.doc.line(lineNumber);
     const text = line.text;
@@ -232,7 +237,7 @@ function buildDecorations(
       addHidden(ranges, line.from, line.to, fenceHidden);
       continue;
     }
-    const heading = /^(#{1,6})\s+/.exec(text);
+    const headingLevel = headingLevels.get(lineNumber);
     const quote = /^(\s*>\s?)+/.exec(text);
     const list = /^(\s*)([-+*]|\d+[.)])(\s+)/.exec(text);
     const listMarker = list?.[2];
@@ -242,7 +247,7 @@ function buildDecorations(
       : 0;
     const isTable = /^\|.*\|\s*$/.test(text);
     const lineClasses = [
-      heading && `cm-live-markdown-heading cm-live-markdown-heading-${heading[1].length}`,
+      headingLevel && `cm-live-markdown-heading cm-live-markdown-heading-${headingLevel}`,
       quote && "cm-live-markdown-quote",
       list && "cm-live-markdown-list",
       listPreview && listMarker && /^\d/.test(listMarker) && "cm-live-markdown-list-ordered",
@@ -254,14 +259,11 @@ function buildDecorations(
       ranges.push(
         Decoration.line({
           class: lineClasses.join(" "),
-          attributes: heading
-            ? { role: "heading", "aria-level": String(heading[1].length) }
+          attributes: headingLevel
+            ? { role: "heading", "aria-level": String(headingLevel) }
             : undefined,
         }).range(line.from),
       );
-    if (heading) {
-      addHidden(ranges, line.from, line.from + heading[0].length, !reveal(line.from, line.to));
-    }
     if (quote) {
       addHidden(ranges, line.from, line.from + quote[0].length, !reveal(line.from, line.to));
     }
@@ -299,7 +301,7 @@ function buildDecorations(
       }
     }
     if (/^```/.test(text)) addHidden(ranges, line.from, line.to, !reveal(line.from, line.to));
-    addInlineDecorations(ranges, text, line.from, reveal, codeRanges);
+    addLinkDecorations(ranges, text, line.from, reveal);
   }
   return Decoration.set(ranges, true);
 }
