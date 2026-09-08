@@ -824,7 +824,7 @@ body.resizing-horizontal * {
 }
 
 /* Keep CodeMirror's native Find controls consistent with the workspace. */
-.live-markdown-editor .cm-panels {
+:is(.live-markdown-editor, .document-find-layer) .cm-panels {
   color: var(--ink);
   background: var(--paper);
   border-color: var(--line);

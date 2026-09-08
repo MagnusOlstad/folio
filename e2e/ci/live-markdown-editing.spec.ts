@@ -255,6 +255,16 @@ test("draft Find stays over the editor and reports match progress", async ({ pag
   expect(afterOpen?.height).toBe(before?.height);
   const noteBox = await page.locator(".document-view").boundingBox();
   const findBox = await find.locator("xpath=..").boundingBox();
+  const findPanel = find.locator("xpath=../..");
+  await expect
+    .poll(() =>
+      findPanel.evaluate(
+        (element) =>
+          element.ownerDocument.defaultView?.getComputedStyle(element)
+            .backgroundColor,
+      ),
+    )
+    .toBe("rgb(32, 35, 31)");
   expect(Math.abs(findBox!.y - noteBox!.y - 10)).toBeLessThanOrEqual(1);
   expect(
     Math.abs(noteBox!.x + noteBox!.width - findBox!.x - findBox!.width - 12),
