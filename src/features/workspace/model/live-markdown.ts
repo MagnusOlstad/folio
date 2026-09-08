@@ -1,9 +1,10 @@
 import {
-  EditorSelection,
+  EditorState,
   type Range,
   StateEffect,
   StateField,
 } from "@codemirror/state";
+import { syntaxTree } from "@codemirror/language";
 import {
   Decoration,
   EditorView,
@@ -31,34 +32,17 @@ type LiveMarkdownConfiguration = {
 };
 
 type SourceLink = { from: number; to: number; href: string };
+type SourceRange = { from: number; to: number };
 
 const setLiveMarkdownFocus = StateEffect.define<boolean>();
 
-function selectionLineNumbers(selection: EditorSelection, document: string) {
-  const activeLines = new Set<number>();
-  const lineStarts = [0];
-  for (let offset = 0; offset < document.length; offset += 1) {
-    if (document[offset] === "\n") lineStarts.push(offset + 1);
-  }
-  const lineAt = (position: number) => {
-    let low = 0;
-    let high = lineStarts.length;
-    while (low < high) {
-      const middle = Math.floor((low + high) / 2);
-      if (lineStarts[middle] <= position) low = middle + 1;
-      else high = middle;
-    }
-    return low;
-  };
-  for (const range of selection.ranges) {
-    const start = lineAt(range.from);
-    const end = lineAt(range.to);
-    for (let line = start; line <= end; line += 1) activeLines.add(line);
-  }
-  return activeLines;
-}
-
-function addHidden(ranges: Array<Range<Decoration>>, from: number, to: number) {
+function addHidden(
+  ranges: Array<Range<Decoration>>,
+  from: number,
+  to: number,
+  hidden: boolean,
+) {
+  if (!hidden) return;
   if (from < to)
     ranges.push(Decoration.mark({ class: "cm-live-markdown-marker" }).range(from, to));
 }
@@ -106,6 +90,8 @@ function addInlineDecorations(
   ranges: Array<Range<Decoration>>,
   line: string,
   offset: number,
+  reveal: (from: number, to: number) => boolean,
+  codeRanges: SourceRange[],
 ) {
   const pairs: Array<{ expression: RegExp; className: string; markerLength: number }> = [
     { expression: /(\*\*|__)(.+?)\1/g, className: "cm-live-markdown-strong", markerLength: 2 },
@@ -118,8 +104,14 @@ function addInlineDecorations(
     for (const match of line.matchAll(expression)) {
       const start = offset + (match.index ?? 0);
       const end = start + match[0].length;
-      addHidden(ranges, start, start + markerLength);
-      addHidden(ranges, end - markerLength, end);
+      if (
+        className !== "cm-live-markdown-code" &&
+        codeRanges.some((range) => start >= range.from && end <= range.to)
+      )
+        continue;
+      const markersAreHidden = !reveal(start, end);
+      addHidden(ranges, start, start + markerLength, markersAreHidden);
+      addHidden(ranges, end - markerLength, end, markersAreHidden);
       ranges.push(
         Decoration.mark({ class: className }).range(
           start + markerLength,
@@ -133,8 +125,9 @@ function addInlineDecorations(
     const start = offset + (match.index ?? 0);
     const textStart = start + 1;
     const textEnd = textStart + match[1].length;
-    addHidden(ranges, start, textStart);
-    addHidden(ranges, textEnd, start + match[0].length);
+    const markersAreHidden = !reveal(start, start + match[0].length);
+    addHidden(ranges, start, textStart, markersAreHidden);
+    addHidden(ranges, textEnd, start + match[0].length, markersAreHidden);
     ranges.push(
       Decoration.mark({ class: "cm-live-markdown-link" }).range(textStart, textEnd),
     );
@@ -142,34 +135,45 @@ function addInlineDecorations(
 }
 
 function buildDecorations(
-  state: {
-    doc: {
-      toString: () => string;
-      lines: number;
-      line: (number: number) => { from: number; to: number; text: string };
-    };
-    selection: EditorSelection;
-  },
+  state: EditorState,
   configuration: LiveMarkdownConfiguration,
   focused: boolean,
 ): DecorationSet {
-  const source = state.doc.toString();
-  const activeLines = focused
-    ? selectionLineNumbers(state.selection, source)
-    : new Set<number>();
+  const codeRanges: SourceRange[] = [];
+  syntaxTree(state).iterate({
+    enter: (node) => {
+      if (node.name === "FencedCode" || node.name === "InlineCode")
+        codeRanges.push({ from: node.from, to: node.to });
+    },
+  });
+  const reveal = (from: number, to: number) => {
+    if (!focused) return false;
+    return state.selection.ranges.some((range) => {
+      if (range.empty) return range.from >= from && range.from <= to;
+      return range.from < to && range.to > from;
+    });
+  };
   const ranges: Array<Range<Decoration>> = [];
   for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber += 1) {
-    if (activeLines.has(lineNumber)) continue;
     const line = state.doc.line(lineNumber);
     const text = line.text;
+    if (codeRanges.some((range) => line.from >= range.from && line.to <= range.to))
+      continue;
     const heading = /^(#{1,6})\s+/.exec(text);
     const quote = /^(\s*>\s?)+/.exec(text);
     const list = /^(\s*)([-+*]|\d+[.)])(\s+)/.exec(text);
+    const listMarker = list?.[2];
+    const listPreview = Boolean(list && !reveal(line.from, line.to));
+    const listIndent = list
+      ? list[1].match(/[ \t]*$/)?.[0].replaceAll("\t", "  ").length ?? 0
+      : 0;
     const isTable = /^\|.*\|\s*$/.test(text);
     const lineClasses = [
       heading && `cm-live-markdown-heading cm-live-markdown-heading-${heading[1].length}`,
       quote && "cm-live-markdown-quote",
-      list && "cm-live-markdown-list",
+      listPreview && "cm-live-markdown-list",
+      listPreview && listMarker && /^\d/.test(listMarker) && "cm-live-markdown-list-ordered",
+      listPreview && listMarker && !/^\d/.test(listMarker) && "cm-live-markdown-list-bullet",
       isTable && "cm-live-markdown-table",
     ].filter((className): className is string => Boolean(className));
     if (lineClasses.length)
@@ -178,35 +182,44 @@ function buildDecorations(
           class: lineClasses.join(" "),
           attributes: heading
             ? { role: "heading", "aria-level": String(heading[1].length) }
-            : undefined,
+            : listPreview
+              ? {
+                  ...(listMarker && /^\d/.test(listMarker)
+                    ? { "data-live-markdown-list-marker": listMarker }
+                    : {}),
+                  style: `padding-left: ${22 + Math.floor(listIndent / 2) * 20}px`,
+                }
+              : undefined,
         }).range(line.from),
       );
     if (heading) {
-      addHidden(ranges, line.from, line.from + heading[0].length);
+      addHidden(ranges, line.from, line.from + heading[0].length, !reveal(line.from, line.to));
     }
     if (quote) {
-      addHidden(ranges, line.from, line.from + quote[0].length);
+      addHidden(ranges, line.from, line.from + quote[0].length, !reveal(line.from, line.to));
     }
     if (list) {
       const markerStart = line.from + list[1].length;
       const markerEnd = markerStart + list[2].length + list[3].length;
-      addHidden(ranges, markerStart, markerEnd);
+      addHidden(ranges, markerStart, markerEnd, !reveal(line.from, line.to));
     }
     const task = /\[([ xX])\]/.exec(text);
     if (task) {
       const taskFrom = line.from + (task.index ?? 0);
-      ranges.push(
-        Decoration.replace({
-          widget: new TaskCheckboxWidget(
-            task[1].toLowerCase() === "x",
-            lineNumber,
-            configuration.callbacks,
-          ),
-        }).range(taskFrom, taskFrom + task[0].length),
-      );
+      if (!reveal(line.from, line.to)) {
+        ranges.push(
+          Decoration.replace({
+            widget: new TaskCheckboxWidget(
+              task[1].toLowerCase() === "x",
+              lineNumber,
+              configuration.callbacks,
+            ),
+          }).range(taskFrom, taskFrom + task[0].length),
+        );
+      }
     }
-    if (/^```/.test(text)) addHidden(ranges, line.from, line.to);
-    addInlineDecorations(ranges, text, line.from);
+    if (/^```/.test(text)) addHidden(ranges, line.from, line.to, !reveal(line.from, line.to));
+    addInlineDecorations(ranges, text, line.from, reveal, codeRanges);
   }
   return Decoration.set(ranges, true);
 }
@@ -258,13 +271,11 @@ export function liveMarkdownExtensions(configuration: LiveMarkdownConfiguration)
         return false;
       },
       mousedown: (event, view) => {
+        if (!(event.metaKey || event.ctrlKey)) return false;
         const position = view.posAtCoords({ x: event.clientX, y: event.clientY });
         if (position === null) return false;
         const link = sourceLinkAt(view.state.doc.toString(), position);
         if (!link) return false;
-        const line = view.state.doc.lineAt(position).number;
-        const activeLines = selectionLineNumbers(view.state.selection, view.state.doc.toString());
-        if (view.hasFocus && activeLines.has(line)) return false;
         event.preventDefault();
         configuration.callbacks.current.onOpenLink?.(link.href);
         return true;
@@ -291,13 +302,72 @@ export function continueLiveMarkdownList(
   const markerLength = prefix.length + marker.length + spacing.length + (taskState === undefined ? 0 : taskSpacing.length + 3);
   if (selectionStart - lineStart < markerLength) return null;
   if (!itemContent.trim())
-    return { value: `${value.slice(0, lineStart)}${prefix}${value.slice(lineEnd)}`, caret: lineStart + prefix.length };
-  const nextMarker = /^\d/.test(marker) ? `${Number.parseInt(marker, 10) + 1}${marker.at(-1)}` : marker;
+    return {
+      value: `${value.slice(0, lineStart)}${prefix}${value.slice(lineEnd)}`,
+      caret: lineStart + prefix.length,
+    };
+  const nextMarker = /^\d/.test(marker)
+    ? `${Number.parseInt(marker, 10) + 1}${marker.at(-1)}`
+    : marker;
   const nextPrefix = `${prefix}${nextMarker}${spacing}${taskState === undefined ? "" : `[ ]${taskSpacing}`}`;
+  let nextValue = `${value.slice(0, selectionStart)}\n${nextPrefix}${value.slice(selectionEnd)}`;
+  const caret = selectionStart + nextPrefix.length + 1;
+  if (/^\d/.test(marker))
+    nextValue = renumberFollowingOrderedSiblings(
+      nextValue,
+      caret,
+      prefix,
+      Number.parseInt(marker, 10) + 2,
+    );
   return {
-    value: `${value.slice(0, selectionStart)}\n${nextPrefix}${value.slice(selectionEnd)}`,
-    caret: selectionStart + nextPrefix.length + 1,
+    value: nextValue,
+    caret,
   };
+}
+
+type ParsedListItem = { prefix: string; marker: string };
+
+function parseListItem(line: string): ParsedListItem | null {
+  const match = /^((?:[ \t]*>\s*)*[ \t]*)([-+*]|\d+[.)])[ \t]+/.exec(line);
+  return match ? { prefix: match[1], marker: match[2] } : null;
+}
+
+/**
+ * Keep the direct ordered-list siblings after a newly inserted item in order.
+ * Nested list items remain untouched, and another list type ends the sequence.
+ */
+function renumberFollowingOrderedSiblings(
+  value: string,
+  caret: number,
+  prefix: string,
+  nextNumber: number,
+) {
+  const firstBreak = value.indexOf("\n", caret);
+  if (firstBreak === -1) return value;
+  let lineStart = firstBreak + 1;
+  let nextValue = value;
+  while (lineStart <= nextValue.length) {
+    const lineBreak = nextValue.indexOf("\n", lineStart);
+    const lineEnd = lineBreak === -1 ? nextValue.length : lineBreak;
+    const line = nextValue.slice(lineStart, lineEnd);
+    const item = parseListItem(line);
+    if (!item) break;
+    if (item.prefix !== prefix) {
+      if (item.prefix.startsWith(prefix)) {
+        lineStart = lineBreak === -1 ? nextValue.length + 1 : lineBreak + 1;
+        continue;
+      }
+      break;
+    }
+    if (!/^\d/.test(item.marker)) break;
+    const markerStart = lineStart + prefix.length;
+    const replacement = `${nextNumber}${item.marker.at(-1)}`;
+    nextValue = `${nextValue.slice(0, markerStart)}${replacement}${nextValue.slice(markerStart + item.marker.length)}`;
+    const lengthChange = replacement.length - item.marker.length;
+    nextNumber += 1;
+    lineStart = lineBreak === -1 ? nextValue.length + 1 : lineBreak + 1 + lengthChange;
+  }
+  return nextValue;
 }
 
 type ListIndentEdit = { from: number; to: number; insert: string };

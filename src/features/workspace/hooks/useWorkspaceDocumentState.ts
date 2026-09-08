@@ -57,8 +57,8 @@ export function useWorkspaceDocumentState({
       .then(async () => {
         if (filingDraftIds.current.has(draft.id)) return;
         await api<StoredDraft>(`/api/draft?id=${encodeURIComponent(draft.id)}`, {
-          method: "PUT",
-          body: JSON.stringify(draft),
+          method: draft.content.trim() ? "PUT" : "DELETE",
+          ...(draft.content.trim() ? { body: JSON.stringify(draft) } : {}),
         });
       })
       .catch(() => undefined)
@@ -73,6 +73,7 @@ export function useWorkspaceDocumentState({
   function mergeRemoteDrafts(remoteDrafts: StoredDraft[]) {
     const currentDocuments = documentsRef.current;
     const acceptedDrafts = remoteDrafts.filter((draft) => {
+      if (!draft.content.trim() || filingDraftIds.current.has(draft.id)) return false;
       const local = currentDocuments[draft.id];
       return !local || draft.updatedAt > (local.updatedAt || local.createdAt);
     });

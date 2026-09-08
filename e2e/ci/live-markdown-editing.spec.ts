@@ -12,7 +12,7 @@ function liveSurface(page: Page) {
 }
 
 function scrollSurface(page: Page) {
-  return page.locator("[data-live-markdown-scroll]");
+  return page.locator("[data-document-scroll]");
 }
 
 async function openSeededNote(page: Page, filename: string, title: string) {
@@ -123,7 +123,7 @@ test("autosaves after an idle edit and flushes later edits on blur and Cmd/Ctrl+
   await shortcutSave;
 });
 
-test("does not change scroll position or downstream line geometry when a line becomes raw", async ({ page }) => {
+test("keeps the outer document scroll stable when a rendered construct is activated", async ({ page }) => {
   await openSeededNote(page, "start-here.md", "Start Here");
 
   const scroller = scrollSurface(page);
@@ -166,4 +166,29 @@ test("draft notes use live line rendering and list-aware Tab indentation", async
   await expect.poll(() => visibleSurfaceText(surface)).toBe(
     "Draft heading\nparent\n- child",
   );
+});
+
+test("draft Find stays over the editor and reports match progress", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTitle("New note (Cmd+T)").click();
+  const editor = page.getByLabel("Write a new note");
+  await editor.fill("alpha beta alpha\nalpha");
+  const steeringBand = page.locator(".draft-steering-band");
+  const before = await steeringBand.boundingBox();
+
+  await page.keyboard.press(`${modifier}+f`);
+  const find = page.getByRole("searchbox", { name: "Find in note" });
+  await expect(find).toBeFocused();
+  await find.fill("alpha");
+
+  await expect(page.getByText("3 results")).toBeVisible();
+  const after = await steeringBand.boundingBox();
+  expect(after?.y).toBe(before?.y);
+  expect(after?.height).toBe(before?.height);
+
+  await page.getByRole("button", { name: "Next match" }).click();
+  await expect(page.getByText("1 of 3 results")).toBeVisible();
+  const closeBox = await page.getByRole("button", { name: "Close Find" }).boundingBox();
+  expect(closeBox?.width).toBeGreaterThanOrEqual(32);
+  expect(closeBox?.height).toBeGreaterThanOrEqual(32);
 });

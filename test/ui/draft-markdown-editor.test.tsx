@@ -41,4 +41,21 @@ describe("DraftMarkdownEditor", () => {
 
     expect(onFile).toHaveBeenCalledOnce();
   });
+
+  it("keeps rendered draft task controls interactive", () => {
+    const onToggleTask = vi.fn();
+    render(
+      <DraftMarkdownEditor
+        value="- [ ] Draft task"
+        onChange={vi.fn()}
+        onFile={vi.fn()}
+        onToggleTask={onToggleTask}
+        ariaLabel="Write a new note"
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText("Toggle task on line 1"));
+
+    expect(onToggleTask).toHaveBeenCalledWith(1, true);
+  });
 });

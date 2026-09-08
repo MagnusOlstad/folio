@@ -20,8 +20,12 @@ describe("LiveMarkdownEditor", () => {
     expect(document.querySelector("[data-live-markdown-scroll]")).toBeTruthy();
 
     expect(document.querySelector(".cm-live-markdown-heading")).toBeTruthy();
+    expect(document.querySelector(".cm-live-markdown-marker")).toBeTruthy();
     fireEvent.focus(editor);
-    expect(document.querySelector(".cm-live-markdown-heading")).toBeNull();
+    expect(document.querySelector(".cm-live-markdown-heading")).toBeTruthy();
+    expect(document.querySelector(".cm-live-markdown-marker")).toBeNull();
+    fireEvent.blur(editor);
+    expect(document.querySelector(".cm-live-markdown-marker")).toBeTruthy();
   });
 
   it("uses the existing folio-format event contract", () => {
@@ -42,11 +46,51 @@ describe("LiveMarkdownEditor", () => {
     expect(onChange).toHaveBeenCalledWith("****hello");
   });
 
+  it("opens a compact Find panel with the current and total match count", () => {
+    render(
+      <LiveMarkdownEditor
+        value="first match, second match"
+        onChange={vi.fn()}
+        ariaLabel="Edit note"
+      />,
+    );
+
+    document
+      .querySelector("[data-live-markdown-editor]")
+      ?.dispatchEvent(new CustomEvent("folio-find"));
+    const input = screen.getByRole("searchbox", { name: "Find in note" });
+    fireEvent.input(input, { target: { value: "match" } });
+
+    expect(screen.getByText("2 results")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next match" }));
+    expect(screen.getByText("1 of 2 results")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close Find" })).toHaveTextContent("×");
+  });
+
   it("continues task lists with Enter", () => {
     expect(continueLiveMarkdownList("- [x] done", 10, 10)).toEqual({
       value: "- [x] done\n- [ ] ",
       caret: 17,
     });
+  });
+
+  it("reveals only the task syntax under the cursor", () => {
+    render(
+      <LiveMarkdownEditor
+        value="- [ ] Next"
+        onChange={vi.fn()}
+        ariaLabel="Edit tasks"
+      />,
+    );
+
+    const editor = screen.getByLabelText("Edit tasks");
+    fireEvent.focus(editor);
+    fireEvent.keyDown(editor, { key: "ArrowRight" });
+    fireEvent.keyDown(editor, { key: "ArrowRight" });
+    fireEvent.keyDown(editor, { key: "ArrowRight" });
+
+    expect(screen.queryByLabelText("Toggle task on line 1")).toBeNull();
+    expect(editor).toHaveTextContent("[ ]");
   });
 
   it("keeps task controls interactive on inactive lines", () => {

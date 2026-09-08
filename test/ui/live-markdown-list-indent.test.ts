@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { changeLiveMarkdownListIndentation } from "../../src/features/workspace/model/live-markdown.ts";
+import { continueLiveMarkdownList } from "../../src/features/workspace/model/live-markdown.ts";
 
 describe("changeLiveMarkdownListIndentation", () => {
   it("indents the current unordered list item by two spaces and preserves its caret", () => {
@@ -55,5 +56,29 @@ describe("changeLiveMarkdownListIndentation", () => {
     expect(
       changeLiveMarkdownListIndentation("- item", { from: 2, to: 2 }, "outdent"),
     ).toBeNull();
+  });
+});
+
+describe("continueLiveMarkdownList", () => {
+  it("renumbers direct ordered siblings after inserting a list item", () => {
+    expect(continueLiveMarkdownList("1. first\n2. second", 8, 8)).toEqual({
+      value: "1. first\n2. \n3. second",
+      caret: 12,
+    });
+  });
+
+  it("keeps nested ordered lists intact while renumbering their parent siblings", () => {
+    const value = "1. first\n   1. nested\n2. second";
+    expect(continueLiveMarkdownList(value, 8, 8)).toEqual({
+      value: "1. first\n2. \n   1. nested\n3. second",
+      caret: 12,
+    });
+  });
+
+  it("exits an empty task item on the second Enter", () => {
+    expect(continueLiveMarkdownList("- [ ] ", 6, 6)).toEqual({
+      value: "",
+      caret: 0,
+    });
   });
 });

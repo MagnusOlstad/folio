@@ -54,6 +54,18 @@ export function DocumentBody({
         value={draft ?? document.content}
         onChange={(content) => onChangeContent(document, content)}
         onFile={() => onFileDraft(document)}
+        onOpenLink={(href) => {
+          const linkedFile = resolveBundleLink(document.id, href);
+          if (linkedFile) {
+            void onOpenDocument(linkedFile, "file", groupId);
+            return;
+          }
+          window.open(href, "_blank", "noopener,noreferrer");
+        }}
+        onToggleTask={(lineNumber, checked) => {
+          const content = toggleTaskAtLine(draft ?? document.content, lineNumber, checked);
+          if (content) onChangeContent(document, content);
+        }}
         ariaLabel="Write a new note"
       />
     );

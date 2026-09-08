@@ -1,18 +1,19 @@
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { markdown, markdownKeymap, markdownLanguage } from "@codemirror/lang-markdown";
+import { syntaxTree } from "@codemirror/language";
+import { openSearchPanel, search, searchKeymap } from "@codemirror/search";
 import {
   defaultKeymap,
   history,
   historyKeymap,
   selectAll,
 } from "@codemirror/commands";
-import { EditorSelection, EditorState } from "@codemirror/state";
+import { Compartment, EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import {
   useEffect,
   useLayoutEffect,
   useRef,
 } from "react";
-import type { EditorIntent } from "../../../domain/types.ts";
 import { applyFormatMarker, type FormatMarker } from "../../../markdown-format.ts";
 import {
   changeLiveMarkdownListIndentation,
@@ -20,6 +21,7 @@ import {
   liveMarkdownExtensions,
   type LiveMarkdownCallbacks,
 } from "../model/live-markdown.ts";
+import { createNoteSearchPanel } from "../model/note-search-panel.ts";
 
 export type LiveMarkdownEditorProps = {
   value: string;
@@ -29,20 +31,9 @@ export type LiveMarkdownEditorProps = {
   onFile?: () => void;
   onOpenLink?: (href: string) => void;
   onToggleTask?: (lineNumber: number, checked: boolean) => void | Promise<void>;
-  intent?: EditorIntent;
   autoFocus?: boolean;
   ariaLabel: string;
 };
-
-function lineStartOffset(value: string, lineNumber: number) {
-  let offset = 0;
-  for (let line = 1; line < lineNumber; line += 1) {
-    const lineBreak = value.indexOf("\n", offset);
-    if (lineBreak === -1) return value.length;
-    offset = lineBreak + 1;
-  }
-  return offset;
-}
 
 function applyFormat(view: EditorView, marker: FormatMarker) {
   const selection = view.state.selection.main;
@@ -55,6 +46,7 @@ function applyFormat(view: EditorView, marker: FormatMarker) {
   view.dispatch({
     changes: { from: 0, to: view.state.doc.length, insert: result.value },
     selection: EditorSelection.range(result.selectionStart, result.selectionEnd),
+    scrollIntoView: true,
   });
 }
 
@@ -62,6 +54,7 @@ function changeListIndentation(
   view: EditorView,
   direction: "indent" | "outdent",
 ) {
+  if (isInsideMarkdownCode(view)) return false;
   const selection = view.state.selection.main;
   const result = changeLiveMarkdownListIndentation(
     view.state.doc.toString(),
@@ -75,8 +68,22 @@ function changeListIndentation(
       result.selection.from,
       result.selection.to,
     ),
+    scrollIntoView: true,
   });
   return true;
+}
+
+function isInsideMarkdownCode(view: EditorView) {
+  const initialNode = syntaxTree(view.state).resolveInner(
+    view.state.selection.main.from,
+    -1,
+  );
+  let node: typeof initialNode | null = initialNode;
+  while (node) {
+    if (node.name === "FencedCode" || node.name === "InlineCode") return true;
+    node = node.parent;
+  }
+  return false;
 }
 
 export function LiveMarkdownEditor({
@@ -87,7 +94,6 @@ export function LiveMarkdownEditor({
   onFile,
   onOpenLink,
   onToggleTask,
-  intent,
   autoFocus = false,
   ariaLabel,
 }: LiveMarkdownEditorProps) {
@@ -98,7 +104,7 @@ export function LiveMarkdownEditor({
   const onBlurRef = useRef(onBlur);
   const onFocusRef = useRef(onFocus);
   const onFileRef = useRef(onFile);
-  const lastIntentRef = useRef<string | null>(null);
+  const ariaLabelCompartment = useRef(new Compartment());
   const callbacksRef = useRef<LiveMarkdownCallbacks>({
     onOpenLink,
     onToggleTask,
@@ -122,8 +128,12 @@ export function LiveMarkdownEditor({
         extensions: [
           markdown({ base: markdownLanguage }),
           history(),
+          search({ top: true, createPanel: createNoteSearchPanel }),
+          EditorView.scrollMargins.of(() => ({ bottom: 80 })),
           EditorView.lineWrapping,
-          EditorView.contentAttributes.of({ "aria-label": ariaLabel }),
+          ariaLabelCompartment.current.of(
+            EditorView.contentAttributes.of({ "aria-label": ariaLabel }),
+          ),
           keymap.of([
             { key: "Mod-a", run: selectAll },
             {
@@ -145,6 +155,7 @@ export function LiveMarkdownEditor({
             {
               key: "Enter",
               run: (editor) => {
+                if (isInsideMarkdownCode(editor)) return false;
                 const selection = editor.state.selection.main;
                 const edit = continueLiveMarkdownList(
                   editor.state.doc.toString(),
@@ -155,12 +166,15 @@ export function LiveMarkdownEditor({
                 editor.dispatch({
                   changes: { from: 0, to: editor.state.doc.length, insert: edit.value },
                   selection: { anchor: edit.caret },
+                  scrollIntoView: true,
                 });
                 return true;
               },
             },
+            ...markdownKeymap,
             ...defaultKeymap,
             ...historyKeymap,
+            ...searchKeymap,
           ]),
           liveMarkdownExtensions({ callbacks: callbacksRef }),
           EditorView.updateListener.of((update) => {
@@ -181,11 +195,21 @@ export function LiveMarkdownEditor({
       event.preventDefault();
       applyFormat(view, marker);
     };
-    const blur = () => onBlurRef.current?.(view.scrollDOM.scrollTop);
+    const blur = () =>
+      onBlurRef.current?.(
+        host.closest<HTMLElement>("[data-document-scroll]")?.scrollTop ?? 0,
+      );
     const focus = () => onFocusRef.current?.();
+    const find = () => {
+      openSearchPanel(view);
+      window.requestAnimationFrame(() => {
+        view.dom.querySelector<HTMLInputElement>("[main-field]")?.focus();
+      });
+    };
     view.contentDOM.addEventListener("folio-format", format);
     view.contentDOM.addEventListener("blur", blur);
     view.contentDOM.addEventListener("focus", focus);
+    host.addEventListener("folio-find", find);
     viewRef.current = view;
     const focusFrame = autoFocus
       ? window.requestAnimationFrame(() => view.focus())
@@ -195,10 +219,21 @@ export function LiveMarkdownEditor({
       view.contentDOM.removeEventListener("folio-format", format);
       view.contentDOM.removeEventListener("blur", blur);
       view.contentDOM.removeEventListener("focus", focus);
+      host.removeEventListener("folio-find", find);
       view.destroy();
       viewRef.current = null;
     };
-  }, [ariaLabel, autoFocus, callbacksRef]);
+  }, [autoFocus]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: ariaLabelCompartment.current.reconfigure(
+        EditorView.contentAttributes.of({ "aria-label": ariaLabel }),
+      ),
+    });
+  }, [ariaLabel]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -211,26 +246,9 @@ export function LiveMarkdownEditor({
         Math.min(selection.from, maxPosition),
         Math.min(selection.to, maxPosition),
       ),
+      scrollIntoView: true,
     });
   }, [value]);
-
-  useLayoutEffect(() => {
-    if (!intent) return;
-    const key = `${intent.lineNumber}:${intent.scrollTop}`;
-    if (lastIntentRef.current === key) return;
-    lastIntentRef.current = key;
-    const view = viewRef.current;
-    if (!view) return;
-    const frame = window.requestAnimationFrame(() => {
-      const currentView = viewRef.current;
-      if (currentView !== view) return;
-      const offset = lineStartOffset(currentView.state.doc.toString(), intent.lineNumber);
-      currentView.focus();
-      currentView.dispatch({ selection: { anchor: offset } });
-      currentView.scrollDOM.scrollTop = intent.scrollTop;
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [intent]);
 
   return (
     <div

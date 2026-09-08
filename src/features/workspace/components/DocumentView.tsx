@@ -67,31 +67,33 @@ export function DocumentView(props: DocumentViewProps) {
     <article
       className={`document-view ${isUntitledId(document.id) ? "untitled" : ""}`}
     >
-      {!isUntitledId(document.id) && (
-        <DocumentHeader
+      <div className="document-scroll" data-document-scroll>
+        {!isUntitledId(document.id) && (
+          <DocumentHeader
+            groupId={props.groupId}
+            document={document}
+            saving={props.saving}
+            editingKey={props.editingMetadataKey}
+            drafts={props.metadataDrafts}
+            onBeginEditing={props.onBeginMetadataEditing}
+            onChangeDraft={props.onChangeMetadataDraft}
+            onFinishEditing={props.onFinishMetadataEditing}
+          />
+        )}
+        <DocumentBody
           groupId={props.groupId}
           document={document}
+          editKey={props.editKey}
+          draft={props.draft}
           saving={props.saving}
-          editingKey={props.editingMetadataKey}
-          drafts={props.metadataDrafts}
-          onBeginEditing={props.onBeginMetadataEditing}
-          onChangeDraft={props.onChangeMetadataDraft}
-          onFinishEditing={props.onFinishMetadataEditing}
+          onChangeContent={props.onChangeContent}
+          onFileDraft={props.onFileDraft}
+          onFinishEditing={props.onFinishEditing}
+          onBeginEditing={props.onBeginEditing}
+          onOpenDocument={props.onOpenDocument}
+          onToggleTask={props.onToggleTask}
         />
-      )}
-      <DocumentBody
-        groupId={props.groupId}
-        document={document}
-        editKey={props.editKey}
-        draft={props.draft}
-        saving={props.saving}
-        onChangeContent={props.onChangeContent}
-        onFileDraft={props.onFileDraft}
-        onFinishEditing={props.onFinishEditing}
-        onBeginEditing={props.onBeginEditing}
-        onOpenDocument={props.onOpenDocument}
-        onToggleTask={props.onToggleTask}
-      />
+      </div>
       <DocumentFooter
         groupId={props.groupId}
         document={document}

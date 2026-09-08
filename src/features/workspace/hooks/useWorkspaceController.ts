@@ -74,6 +74,16 @@ export function useWorkspaceController(): WorkspaceShellProps {
     removeDiscoveryDocument: explorer.discovery.removeDocument,
   });
 
+  function closeDocumentTab(groupId: string, documentId: string) {
+    const content = documents.drafts[documentId] ?? documents.documents[documentId]?.content ?? "";
+    if (isUntitledId(documentId) && !content.trim()) {
+      void navigation.deleteLocalDraft(documentId);
+      return;
+    }
+    void autosave.flushSave(documentId);
+    tabs.closeTab(groupId, documentId);
+  }
+
   useWorkspaceBootstrap({
     setStatus: models.setStatus,
     setFilesLoading: explorer.setFilesLoading,
@@ -101,7 +111,13 @@ export function useWorkspaceController(): WorkspaceShellProps {
     activeGroupId: tabs.activeGroupId,
     documents: documents.documents,
     createNewTab: tabs.createNewTab,
-    closeTab: tabs.closeTab,
+    activateTab: (groupId, documentId) => {
+      const group = tabs.groups.find((candidate) => candidate.id === groupId);
+      if (groupId !== tabs.activeGroupId || group?.activeId !== documentId)
+        void autosave.flushAllSaves();
+      tabs.activateTab(groupId, documentId);
+    },
+    closeTab: closeDocumentTab,
     fileDraft: mutations.fileDraft,
     flushDocument: autosave.flushSave,
   });
@@ -178,10 +194,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
           void autosave.flushAllSaves();
           tabs.closeGroup(groupId);
         },
-        closeTab: (groupId, documentId) => {
-          void autosave.flushSave(documentId);
-          tabs.closeTab(groupId, documentId);
-        },
+        closeTab: closeDocumentTab,
         changeDraftContent: (document, content) => {
           documents.changeDraftContent(document, content);
           if (!isUntitledId(document.id))
