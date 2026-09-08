@@ -136,8 +136,10 @@ The bump comes from the Conventional Commits subjects since the previous release
 breaking change (`!` in the subject or a `BREAKING CHANGE` footer) bumps major, `feat:`
 bumps minor, `fix:` and everything else patch. PR titles are validated against Conventional
 Commits in CI, and with squash merges the PR title becomes the commit subject on `main`.
-The draft's notes come from the changelog; the app is unsigned, so add the Gatekeeper
-install note from "The build is not code-signed" above to the draft before publishing.
+The draft's notes are the changelog plus an "Install" section the workflow appends
+automatically — the same Gatekeeper `xattr` step from "The build is not code-signed" above,
+since the app is still unsigned. Publishing is the one thing left to a human: it's the
+checkpoint to confirm the artifacts attached and the notes read right before going live.
 
 ### Update notifications
 

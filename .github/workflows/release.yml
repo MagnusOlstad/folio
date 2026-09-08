@@ -52,3 +52,26 @@ jobs:
       - run: npm run dist:mac
 
       - run: gh release upload "${{ needs.release-please.outputs.tag_name }}" release/*.dmg release/*.zip --clobber
+
+      # release-please's notes are just the changelog — append the install
+      # step by hand, same as the old scripts/release.mjs always did, so a
+      # draft never ships without it.
+      - name: Append install instructions
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          dmg=$(basename release/*.dmg)
+          gh release view "$TAG" --json body -q .body > notes.md
+          cat >> notes.md <<EOF
+
+          ## Install
+
+          Download \`$dmg\`, drag Folio to Applications, then run once:
+
+          \`\`\`sh
+          xattr -dr com.apple.quarantine /Applications/Folio.app
+          \`\`\`
+
+          This build is not code-signed, so macOS Gatekeeper needs that one-time nudge.
+          EOF
+          gh release edit "$TAG" --notes-file notes.md
