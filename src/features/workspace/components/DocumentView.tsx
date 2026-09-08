@@ -1,7 +1,5 @@
-import type {
-  EditorIntent,
-  ViewerDocument,
-} from "../../../domain/types.ts";
+import { useLayoutEffect, useRef } from "react";
+import type { ViewerDocument } from "../../../domain/types.ts";
 import { isUntitledId } from "../../../lib/workspace.ts";
 import { DocumentBody } from "./DocumentBody.tsx";
 import { DocumentFooter } from "./DocumentFooter.tsx";
@@ -12,22 +10,20 @@ export type DocumentViewProps = {
   groupId: string;
   document: ViewerDocument;
   editKey: string;
-  isEditing: boolean;
-  editorIntent?: EditorIntent;
   draft: string | undefined;
   saving: boolean;
   deletingNoteId: string | null;
   movingFileId: string | null;
-  onRestoreScroll: (editKey: string, element: HTMLDivElement) => void;
   editingMetadataKey: string | null;
   metadataDrafts: Record<string, string>;
   pathDraft: string | undefined;
   tagDraft: string | undefined;
+  getScrollTop: (documentId: string) => number;
+  onScroll: (documentId: string, scrollTop: number) => void;
   onBeginMetadataEditing: (
     groupId: string,
     document: ViewerDocument,
     field: MetadataField,
-    saving: boolean,
   ) => void;
   onChangeMetadataDraft: (key: string, value: string) => void;
   onFinishMetadataEditing: (
@@ -41,7 +37,6 @@ export type DocumentViewProps = {
   onBeginEditing: (
     groupId: string,
     document: ViewerDocument,
-    intent?: EditorIntent,
   ) => void;
   onFinishEditing: (
     groupId: string,
@@ -69,39 +64,52 @@ export type DocumentViewProps = {
 };
 
 export function DocumentView(props: DocumentViewProps) {
-  const { document } = props;
+  const { document, getScrollTop, onScroll } = props;
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const scroll = scrollRef.current;
+    if (scroll) scroll.scrollTop = getScrollTop(document.id);
+  }, [document.id, getScrollTop]);
+
   return (
     <article
       className={`document-view ${isUntitledId(document.id) ? "untitled" : ""}`}
     >
-      {!isUntitledId(document.id) && (
-        <DocumentHeader
+      <div
+        className="document-scroll"
+        data-document-scroll
+        ref={scrollRef}
+        onScroll={(event) =>
+          onScroll(document.id, event.currentTarget.scrollTop)
+        }
+      >
+        {!isUntitledId(document.id) && (
+          <DocumentHeader
+            groupId={props.groupId}
+            document={document}
+            editingKey={props.editingMetadataKey}
+            drafts={props.metadataDrafts}
+            onBeginEditing={props.onBeginMetadataEditing}
+            onChangeDraft={props.onChangeMetadataDraft}
+            onFinishEditing={props.onFinishMetadataEditing}
+          />
+        )}
+        <DocumentBody
           groupId={props.groupId}
           document={document}
+          editKey={props.editKey}
+          draft={props.draft}
           saving={props.saving}
-          editingKey={props.editingMetadataKey}
-          drafts={props.metadataDrafts}
-          onBeginEditing={props.onBeginMetadataEditing}
-          onChangeDraft={props.onChangeMetadataDraft}
-          onFinishEditing={props.onFinishMetadataEditing}
+          onChangeContent={props.onChangeContent}
+          onFileDraft={props.onFileDraft}
+          onFinishEditing={props.onFinishEditing}
+          onBeginEditing={props.onBeginEditing}
+          onOpenDocument={props.onOpenDocument}
+          onToggleTask={props.onToggleTask}
         />
-      )}
-      <DocumentBody
-        groupId={props.groupId}
-        document={document}
-        editKey={props.editKey}
-        isEditing={props.isEditing}
-        editorIntent={props.editorIntent}
-        draft={props.draft}
-        saving={props.saving}
-        onRestoreScroll={props.onRestoreScroll}
-        onChangeContent={props.onChangeContent}
-        onFileDraft={props.onFileDraft}
-        onFinishEditing={props.onFinishEditing}
-        onBeginEditing={props.onBeginEditing}
-        onOpenDocument={props.onOpenDocument}
-        onToggleTask={props.onToggleTask}
-      />
+      </div>
+      <div className="document-find-layer" data-document-find-layer />
       <DocumentFooter
         groupId={props.groupId}
         document={document}

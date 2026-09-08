@@ -318,10 +318,11 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
 
   const editedInput = 'Morning meeting\nDiscussed the revised launch plan.<br/>Decision: ship Monday.'
   const editedContent = 'Morning meeting\nDiscussed the revised launch plan.  \nDecision: ship Monday.'
+  const embeddingCountBeforeEdit = embeddingInputs.length
   const editResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(meetingResult.note.id)}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ content: editedInput }),
+    body: JSON.stringify({ content: editedInput, refreshEmbeddings: false }),
   })
   const editedMeeting = await editResponse.json()
   assert.equal(editResponse.status, 200, JSON.stringify(editedMeeting))
@@ -330,9 +331,21 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal(classificationRequests, 1)
   assert.match(classificationPrompts[0], /No existing filing options yet/)
   assert.match(classificationPrompts[0], /No relevant existing tag candidates found/)
+  assert.equal(embeddingInputs.length, embeddingCountBeforeEdit)
+  const editedMeetingPath = path.join(dataRoot, 'bundle', meetingResult.note.id.slice(1))
+  const fileBeforeReembed = await fs.readFile(editedMeetingPath, 'utf8')
+  const reembedResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(meetingResult.note.id)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ refreshEmbeddings: true }),
+  })
+  const reembeddedMeeting = await reembedResponse.json()
+  assert.equal(reembedResponse.status, 200, JSON.stringify(reembeddedMeeting))
+  assert.equal(reembeddedMeeting.content, editedContent)
   assert.ok(embeddingInputs.includes(`title: Morning launch meeting | text: The morning meeting covered the launch and its follow-up.\n${editedContent}`))
   assert.ok(embeddingInputs.some((input) => input.startsWith('title: Morning launch meeting | text: ')))
-  const editedMeetingFile = await fs.readFile(path.join(dataRoot, 'bundle', meetingResult.note.id.slice(1)), 'utf8')
+  const editedMeetingFile = await fs.readFile(editedMeetingPath, 'utf8')
+  assert.equal(editedMeetingFile, fileBeforeReembed)
   assert.match(editedMeetingFile, /# Captured note\n\nMorning meeting\nDiscussed the revised launch plan\.  \nDecision: ship Monday\./)
   assert.match(editedMeetingFile, /generated:\n  by: human:local\n  at: /)
   assert.ok(editedMeeting.createdAt >= meetingResult.note.createdAt)

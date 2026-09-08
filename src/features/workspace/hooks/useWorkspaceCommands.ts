@@ -13,6 +13,8 @@ export type WorkspaceShortcutAction =
   | "close-tab"
   | "save"
   | "search"
+  | "find-in-note"
+  | `switch-tab-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`
   | FormatMarker;
 
 const KEYBOARD_SHORTCUTS: Record<string, WorkspaceShortcutAction> = {
@@ -24,7 +26,27 @@ const KEYBOARD_SHORTCUTS: Record<string, WorkspaceShortcutAction> = {
   k: "link",
 };
 
-const MENU_ACTIONS = new Set<string>(Object.values(KEYBOARD_SHORTCUTS));
+const TAB_SHORTCUTS: Record<
+  string,
+  Extract<WorkspaceShortcutAction, `switch-tab-${number}`>
+> = {
+  1: "switch-tab-1",
+  2: "switch-tab-2",
+  3: "switch-tab-3",
+  4: "switch-tab-4",
+  5: "switch-tab-5",
+  6: "switch-tab-6",
+  7: "switch-tab-7",
+  8: "switch-tab-8",
+  9: "switch-tab-9",
+};
+
+const MENU_ACTIONS = new Set<string>([
+  ...Object.values(KEYBOARD_SHORTCUTS),
+  "search",
+  "find-in-note",
+  ...Object.values(TAB_SHORTCUTS),
+]);
 
 type UseWorkspaceCommandsOptions = {
   sidebarMode: SidebarMode;
@@ -46,11 +68,16 @@ export function useWorkspaceCommands({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
-      // Matches Obsidian: plain Cmd/Ctrl+F is left for the browser/OS's own find-in-page.
-      if (event.shiftKey) {
-        if (event.key.toLowerCase() !== "f") return;
+      if (event.key.toLowerCase() === "f") {
         event.preventDefault();
-        runShortcutRef.current?.("search");
+        runShortcutRef.current?.(event.shiftKey ? "search" : "find-in-note");
+        return;
+      }
+      if (event.shiftKey) return;
+      const tabAction = TAB_SHORTCUTS[event.key];
+      if (tabAction) {
+        event.preventDefault();
+        runShortcutRef.current?.(tabAction);
         return;
       }
       const action = KEYBOARD_SHORTCUTS[event.key.toLowerCase()];
@@ -61,8 +88,8 @@ export function useWorkspaceCommands({
       if (action === "bold" || action === "italic" || action === "link") {
         const target = document.activeElement;
         if (
-          !(target instanceof HTMLTextAreaElement) ||
-          !target.classList.contains("document-editor")
+          !(target instanceof HTMLElement) ||
+          !target.closest(".document-editor, .live-markdown-editor")
         )
           return;
         event.preventDefault();
@@ -74,7 +101,7 @@ export function useWorkspaceCommands({
       event.preventDefault();
       runShortcutRef.current?.(action);
     };
-    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
     const unsubscribeMenuActions = window.folio?.onMenuAction?.((action) => {
       if (MENU_ACTIONS.has(action))
         runShortcutRef.current?.(action as WorkspaceShortcutAction);
@@ -84,7 +111,7 @@ export function useWorkspaceCommands({
         );
     });
     return () => {
-      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keydown", onKeyDown, true);
       unsubscribeMenuActions?.();
     };
   }, [runShortcutRef]);

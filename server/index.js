@@ -2724,6 +2724,7 @@ app.patch('/api/note', async (request, response, next) => {
     const hasTags = Object.prototype.hasOwnProperty.call(request.body || {}, 'tags')
     const hasTitle = Object.prototype.hasOwnProperty.call(request.body || {}, 'title')
     const hasDescription = Object.prototype.hasOwnProperty.call(request.body || {}, 'description')
+    const refreshEmbeddings = request.body?.refreshEmbeddings
     const content = hasContent ? normalizeMarkdownBreaks(request.body.content || '').trim() : null
     const tags = hasTags
       ? Array.from(new Set((Array.isArray(request.body.tags) ? request.body.tags : []).map(normalizeTag).filter(Boolean))).slice(0, 12)
@@ -2759,6 +2760,10 @@ app.patch('/api/note', async (request, response, next) => {
           const targetExists = previousRecords.some((record) => record.id === confirmRelatedId)
           if (confirmRelatedId === id || !targetExists) return { status: 400, error: 'Invalid related concept.' }
         }
+
+        const hasMarkdownChanges = hasContent || hasTags || hasTitle || hasDescription
+          || confirmRelatedId || status !== undefined || staleAfter !== undefined
+        if (!hasMarkdownChanges) return null
 
         const updatedAt = new Date().toISOString()
         const titleChanged = hasTitle && title !== parsed.title
@@ -2822,7 +2827,9 @@ app.patch('/api/note', async (request, response, next) => {
       if (!updated) return { notFound: true }
       let currentRecords = reindexed.records
       let warning = null
-      if (hasContent || hasTitle || hasDescription) {
+      const shouldRefreshEmbeddings = refreshEmbeddings === true
+        || (refreshEmbeddings !== false && (hasContent || hasTitle || hasDescription))
+      if (shouldRefreshEmbeddings) {
         try {
           const embeddingErrors = await refreshRecordEmbeddings([updated])
           if (embeddingErrors.length) throw new Error(embeddingErrors[0].error)

@@ -3,7 +3,6 @@ import type { TabGroup } from "../../domain/types.ts";
 export type EditorTabsProps = {
   group: TabGroup;
   groupCount: number;
-  savingDocumentIds: Set<string>;
   titleForId: (id: string) => string;
   isUntitledId: (id: string) => boolean;
   onActivate: (groupId: string, id: string) => void;
@@ -22,7 +21,6 @@ export type EditorTabsProps = {
 export function EditorTabs({
   group,
   groupCount,
-  savingDocumentIds,
   titleForId,
   isUntitledId,
   onActivate,
@@ -51,9 +49,6 @@ export function EditorTabs({
               {isUntitledId(id) ? "+" : "M"}
             </span>
             <span>{titleForId(id)}</span>
-            {savingDocumentIds.has(id) && (
-              <span className="tab-saving" title="Saving" />
-            )}
             <span
               className="tab-close"
               role="button"

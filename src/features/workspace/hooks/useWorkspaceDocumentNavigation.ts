@@ -150,14 +150,6 @@ export function useWorkspaceDocumentNavigation({
       );
       removeDiscoveryDocument(result.deletedId);
       delete state.documentRequests.current[result.deletedId];
-      for (const key of Object.keys(state.editorIntents.current)) {
-        if (key.endsWith(`:${result.deletedId}`))
-          delete state.editorIntents.current[key];
-      }
-      for (const key of Object.keys(state.readerScrollPositions.current)) {
-        if (key.endsWith(`:${result.deletedId}`))
-          delete state.readerScrollPositions.current[key];
-      }
       setMessage(
         `Deleted ${document.title}.${result.rawId ? " The raw capture was retained." : ""}`,
       );

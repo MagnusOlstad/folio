@@ -1,20 +1,16 @@
-import type {
-  EditorIntent,
-  ViewerDocument,
-} from "../../../domain/types.ts";
-import { isUntitledId } from "../../../lib/workspace.ts";
-import { NoteEditor } from "../../editor/NoteEditor.tsx";
+import type { ViewerDocument } from "../../../domain/types.ts";
+import { resolveBundleLink } from "../../../lib/paths.ts";
+import { isUntitledId, toggleTaskAtLine } from "../../../lib/workspace.ts";
+import { DraftMarkdownEditor } from "./DraftMarkdownEditor.tsx";
+import { LiveMarkdownEditor } from "./LiveMarkdownEditor.tsx";
 import { RenderedMarkdown } from "./RenderedMarkdown.tsx";
 
 type DocumentBodyProps = {
   groupId: string;
   document: ViewerDocument;
   editKey: string;
-  isEditing: boolean;
-  editorIntent?: EditorIntent;
   draft: string | undefined;
   saving: boolean;
-  onRestoreScroll: (editKey: string, element: HTMLDivElement) => void;
   onChangeContent: (document: ViewerDocument, content: string) => void;
   onFileDraft: (document: ViewerDocument) => void;
   onFinishEditing: (
@@ -25,7 +21,6 @@ type DocumentBodyProps = {
   onBeginEditing: (
     groupId: string,
     document: ViewerDocument,
-    intent?: EditorIntent,
   ) => void;
   onOpenDocument: (
     id: string,
@@ -43,11 +38,8 @@ export function DocumentBody({
   groupId,
   document,
   editKey,
-  isEditing,
-  editorIntent,
   draft,
   saving,
-  onRestoreScroll,
   onChangeContent,
   onFileDraft,
   onFinishEditing,
@@ -57,28 +49,51 @@ export function DocumentBody({
 }: DocumentBodyProps) {
   if (isUntitledId(document.id)) {
     return (
-      <NoteEditor
+      <DraftMarkdownEditor
         key={editKey}
         value={draft ?? document.content}
         onChange={(content) => onChangeContent(document, content)}
-        onBlur={() => undefined}
         onFile={() => onFileDraft(document)}
-        steered
+        onOpenLink={(href) => {
+          const linkedFile = resolveBundleLink(document.id, href);
+          if (linkedFile) {
+            void onOpenDocument(linkedFile, "file", groupId);
+            return;
+          }
+          window.open(href, "_blank", "noopener,noreferrer");
+        }}
+        onToggleTask={(lineNumber, checked) => {
+          const content = toggleTaskAtLine(draft ?? document.content, lineNumber, checked);
+          if (content) onChangeContent(document, content);
+        }}
         ariaLabel="Write a new note"
       />
     );
   }
 
-  if (isEditing) {
+  if (document.deletable) {
+    const value = draft ?? document.content;
     return (
-      <NoteEditor
+      <LiveMarkdownEditor
         key={editKey}
-        value={draft ?? document.content}
+        value={value}
         onChange={(content) => onChangeContent(document, content)}
+        onFocus={() => onBeginEditing(groupId, document)}
         onBlur={(scrollTop) =>
           onFinishEditing(groupId, document, scrollTop)
         }
-        intent={editorIntent}
+        onOpenLink={(href) => {
+          const linkedFile = resolveBundleLink(document.id, href);
+          if (linkedFile) {
+            void onOpenDocument(linkedFile, "file", groupId);
+            return;
+          }
+          window.open(href, "_blank", "noopener,noreferrer");
+        }}
+        onToggleTask={(lineNumber, checked) => {
+          const content = toggleTaskAtLine(value, lineNumber, checked);
+          if (content) onChangeContent(document, content);
+        }}
         ariaLabel={`Edit ${document.title}`}
       />
     );
@@ -86,36 +101,8 @@ export function DocumentBody({
 
   return (
     <div
-      className={`document-content ${document.deletable ? "editable" : "read-only"}`}
-      ref={(element) => {
-        if (!element) return;
-        onRestoreScroll(editKey, element);
-      }}
-      onClick={(event) => {
-        if ((event.target as Element).closest("a, button, input")) return;
-        const source = (event.target as Element).closest<HTMLElement>(
-          "[data-source-line]",
-        );
-        const startLine = Number(source?.dataset.sourceLine) || 1;
-        const endLine = Number(source?.dataset.sourceEndLine) || startLine;
-        const lineHeight = source
-          ? Number.parseFloat(window.getComputedStyle(source).lineHeight) || 32
-          : 32;
-        const visualLine = source
-          ? Math.max(
-              0,
-              Math.floor(
-                (event.clientY - source.getBoundingClientRect().top) /
-                  lineHeight,
-              ),
-            )
-          : 0;
-        onBeginEditing(groupId, document, {
-          lineNumber: Math.min(endLine, startLine + visualLine),
-          scrollTop: event.currentTarget.scrollTop,
-        });
-      }}
-      title={document.deletable ? "Click to edit" : "Read-only file"}
+      className="document-content read-only"
+      title="Read-only file"
     >
       <RenderedMarkdown
         document={document}
