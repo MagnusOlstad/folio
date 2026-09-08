@@ -124,11 +124,14 @@ xattr -dr com.apple.quarantine /Applications/Folio.app
 Folio uses semantic versioning from `package.json`. The running version is shown as a badge
 in the top bar and served by `GET /api/version`.
 
-Releases are automated with release-please. When conventional commits land on `main`, the
-`Release` workflow opens a `chore(main): release X.Y.Z` pull request that bumps
-`package.json` and updates `CHANGELOG.md`. Merging that PR is what ships a release:
-release-please tags `vX.Y.Z` and opens a draft GitHub release, the same workflow run builds
-the mac `.dmg` and `.zip` and attaches them, and you publish the draft to ship.
+Releases are automated with release-please, cut manually via the `Release` workflow's
+"Run workflow" button — nothing fires on every push. Dispatch it when you're ready to cut a
+release: it opens (or updates) a `chore(main): release X.Y.Z` pull request that bumps
+`package.json` and updates `CHANGELOG.md` from the conventional commits landed on `main`
+since the last release. Merging that PR is what ships a release, but only once you dispatch
+the workflow again afterwards: on that run release-please tags `vX.Y.Z` and opens a draft
+GitHub release, and the same run builds the mac `.dmg` and `.zip` and attaches them. Publish
+the draft to ship.
 
 The bump comes from the Conventional Commits subjects since the previous release — a
 breaking change (`!` in the subject or a `BREAKING CHANGE` footer) bumps major, `feat:`
