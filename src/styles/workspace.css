@@ -881,7 +881,7 @@ body.resizing-horizontal * {
   padding: 32px clamp(22px, 6cqi, 64px) max(120px, 25vh);
   color: var(--ink);
   caret-color: var(--ink);
-  font: 400 18px/32px 'Iowan Old Style', Baskerville, Georgia, serif;
+  font: 400 18px/32px ui-sans-serif, system-ui, sans-serif;
   overflow-wrap: break-word;
 }
 
@@ -971,7 +971,7 @@ body.resizing-horizontal * {
 .document-content {
   padding: 32px clamp(22px, 6cqi, 64px) max(120px, 25vh);
   color: var(--ink);
-  font: 400 18px/32px 'Iowan Old Style', Baskerville, Georgia, serif;
+  font: 400 18px/32px ui-sans-serif, system-ui, sans-serif;
   overflow-wrap: break-word;
 }
 
@@ -1000,14 +1000,14 @@ body.resizing-horizontal * {
 .document-content h3 {
   margin: 32px 0;
   color: var(--ink);
-  font: 400 22px/32px 'Iowan Old Style', Baskerville, Georgia, serif;
+  font: 400 22px/32px ui-sans-serif, system-ui, sans-serif;
 }
 
 .document-content h4,
 .document-content h5,
 .document-content h6 {
   margin: 32px 0;
-  font: 600 18px/32px 'Iowan Old Style', Baskerville, Georgia, serif;
+  font: 600 18px/32px ui-sans-serif, system-ui, sans-serif;
 }
 
 .document-content a {
@@ -1156,7 +1156,7 @@ body.resizing-horizontal * {
   position: absolute;
   inset: 0 0 auto;
   padding: clamp(32px, 6cqi, 70px) clamp(22px, 6cqi, 64px) 0;
-  font: 400 18px/32px 'Iowan Old Style', Baskerville, Georgia, serif;
+  font: 400 18px/32px ui-sans-serif, system-ui, sans-serif;
   overflow-wrap: break-word;
   white-space: pre-wrap;
 }
