@@ -208,11 +208,12 @@ function buildDecorations(
     const listIndent = list
       ? list[1].match(/[ \t]*$/)?.[0].replaceAll("\t", "  ").length ?? 0
       : 0;
+    const listOffset = 22 + Math.floor(listIndent / 2) * 20;
     const isTable = /^\|.*\|\s*$/.test(text);
     const lineClasses = [
       heading && `cm-live-markdown-heading cm-live-markdown-heading-${heading[1].length}`,
       quote && "cm-live-markdown-quote",
-      listPreview && "cm-live-markdown-list",
+      list && "cm-live-markdown-list",
       listPreview && listMarker && /^\d/.test(listMarker) && "cm-live-markdown-list-ordered",
       listPreview && listMarker && !/^\d/.test(listMarker) && "cm-live-markdown-list-bullet",
       listPreview && listIndent >= 2 && "cm-live-markdown-list-nested",
@@ -224,12 +225,12 @@ function buildDecorations(
           class: lineClasses.join(" "),
           attributes: heading
             ? { role: "heading", "aria-level": String(heading[1].length) }
-            : listPreview
+            : list
               ? {
-                  ...(listMarker && /^\d/.test(listMarker)
+                  ...(listPreview && listMarker && /^\d/.test(listMarker)
                     ? { "data-live-markdown-list-marker": listMarker }
                     : {}),
-                  style: `padding-left: ${22 + Math.floor(listIndent / 2) * 20}px`,
+                  style: `--live-markdown-list-offset: ${listOffset}px`,
                 }
               : undefined,
         }).range(line.from),
@@ -243,7 +244,16 @@ function buildDecorations(
     if (list) {
       const markerStart = line.from + list[1].length;
       const markerEnd = markerStart + list[2].length + list[3].length;
-      addHidden(ranges, markerStart, markerEnd, !reveal(line.from, line.to));
+      if (listPreview) {
+        addHidden(ranges, line.from, markerEnd, true);
+      } else {
+        ranges.push(
+          Decoration.mark({ class: "cm-live-markdown-list-source" }).range(
+            line.from,
+            markerEnd,
+          ),
+        );
+      }
     }
     const task = /\[([ xX])\]/.exec(text);
     if (task) {

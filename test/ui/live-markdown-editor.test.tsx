@@ -109,6 +109,38 @@ describe("LiveMarkdownEditor", () => {
     expect(document.querySelector(".cm-live-markdown-list-nested")).toBeTruthy();
   });
 
+  it("keeps list content in the same gutter when source markers are revealed", () => {
+    render(
+      <LiveMarkdownEditor
+        value={"- parent\n  - child"}
+        onChange={vi.fn()}
+        ariaLabel="Edit nested list"
+      />,
+    );
+
+    const lines = document.querySelectorAll<HTMLElement>(".cm-live-markdown-list");
+    expect(lines).toHaveLength(2);
+    expect(lines[0].style.getPropertyValue("--live-markdown-list-offset")).toBe(
+      "22px",
+    );
+    expect(lines[1].style.getPropertyValue("--live-markdown-list-offset")).toBe(
+      "42px",
+    );
+    expect(
+      lines[1].querySelector(".cm-live-markdown-marker")?.textContent,
+    ).toBe("  - ");
+
+    fireEvent.focus(screen.getByLabelText("Edit nested list"));
+
+    const revealedPrefix = lines[0].querySelector(
+      ".cm-live-markdown-list-source",
+    );
+    expect(revealedPrefix?.textContent).toBe("- ");
+    expect(lines[0].style.getPropertyValue("--live-markdown-list-offset")).toBe(
+      "22px",
+    );
+  });
+
   it("finishes the presentation of an unclosed fenced code block", () => {
     render(
       <LiveMarkdownEditor

@@ -955,7 +955,14 @@ body.resizing-horizontal * {
 }
 
 .live-markdown-editor .cm-live-markdown-list {
-  padding-left: 22px;
+  padding-left: var(--live-markdown-list-offset);
+}
+
+.live-markdown-editor .cm-live-markdown-list-source {
+  display: inline-block;
+  box-sizing: border-box;
+  width: var(--live-markdown-list-offset);
+  margin-left: calc(-1 * var(--live-markdown-list-offset));
 }
 
 .live-markdown-editor .cm-live-markdown-list-bullet::before,
