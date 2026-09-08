@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: release-please
+
+jobs:
+  release-please:
+    # Manual dispatch opens/refreshes the release PR. Merging that PR is the
+    # only pull_request case we act on — that merge is already the deliberate
+    # "ship it" action, so tagging + building right then needs no second
+    # dispatch. Every other PR merge fires this trigger too but no-ops here,
+    # by design: routine merges should never kick off a release on their own.
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'release-please--branches--main')
+    runs-on: ubuntu-latest
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  upload-artifacts:
+    needs: release-please
+    if: needs.release-please.outputs.releases_created == 'true'
+    runs-on: macos-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # The release-please tag, not GITHUB_REF: on the pull_request(closed) path that
+      # would be refs/pull/<N>/merge, which GitHub stops maintaining the moment the PR
+      # merges — the exact moment this job starts.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run dist:mac
+
+      - run: gh release upload "${{ needs.release-please.outputs.tag_name }}" release/*.dmg release/*.zip --clobber
+
+      # release-please's notes are just the changelog — append the install
+      # step by hand, same as the old scripts/release.mjs always did, so a
+      # draft never ships without it.
+      - name: Append install instructions
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          dmg=$(basename release/*.dmg)
+          gh release view "$TAG" --json body -q .body > notes.md
+          cat >> notes.md <<EOF
+
+          ## Install
+
+          Download \`$dmg\`, drag Folio to Applications, then run once:
+
+          \`\`\`sh
+          xattr -dr com.apple.quarantine /Applications/Folio.app
+          \`\`\`
+
+          This build is not code-signed, so macOS Gatekeeper needs that one-time nudge.
+          EOF
+          gh release edit "$TAG" --notes-file notes.md

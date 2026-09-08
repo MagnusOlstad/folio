@@ -124,22 +124,24 @@ xattr -dr com.apple.quarantine /Applications/Folio.app
 Folio uses semantic versioning from `package.json`. The running version is shown as a badge
 in the top bar and served by `GET /api/version`.
 
-Cut a release with:
+Releases are automated with release-please, started manually via the `Release` workflow's
+"Run workflow" button — nothing fires on every push. Dispatch it when you're ready to cut a
+release: it opens (or updates) a `chore(main): release X.Y.Z` pull request that bumps
+`package.json` and updates `CHANGELOG.md` from the conventional commits landed on `main`
+since the last release. Merging that PR is what ships it: the workflow also runs on that
+merge, tags `vX.Y.Z`, opens a draft GitHub release, and builds and attaches the mac `.dmg`
+and `.zip` in the same run — no second dispatch needed. Publish the draft to ship.
 
-```bash
-npm run release -- patch     # or minor, major, or an explicit 1.4.0
-```
-
-The script runs from your machine — no CI runners are involved. It:
-
-1. Checks that `gh` is authenticated and the working tree is clean.
-2. Bumps `package.json` (restoring it if the build then fails).
-3. Runs `npm run dist:mac`.
-4. Commits `release: vX.Y.Z`, creates an annotated tag, and pushes both.
-5. Creates the GitHub release with `gh` and uploads the `.dmg` and `.zip`, using the commit
-   subjects since the previous tag as release notes.
-
-Useful flags: `--dry-run` (print every step, change nothing), `--allow-dirty`, `--no-push`.
+The bump comes from the Conventional Commits subjects since the previous release — a
+breaking change (`!` in the subject or a `BREAKING CHANGE` footer) bumps major, `feat:`
+bumps minor, `fix:` bumps patch. Infrastructure types — `chore:`, `ci:`, `refactor:`,
+`test:`, `build:`, `style:` — release nothing, and a range containing only those opens no
+release PR at all, silently. PR titles are validated against Conventional
+Commits in CI, and with squash merges the PR title becomes the commit subject on `main`.
+The draft's notes are the changelog plus an "Install" section the workflow appends
+automatically — the same Gatekeeper `xattr` step from "The build is not code-signed" above,
+since the app is still unsigned. Publishing is the one thing left to a human: it's the
+checkpoint to confirm the artifacts attached and the notes read right before going live.
 
 ### Update notifications
 
@@ -219,7 +221,6 @@ npm run dev      # Start frontend and API with reload
 npm run build    # Type-check and build the frontend
 npm run desktop  # Build and open the Electron app
 npm run dist:mac # Build a distributable macOS .dmg and .zip
-npm run release  # Bump version, build, tag, and publish a GitHub release
 npm run lint     # Run Oxlint
 npm start        # Serve the built app and API
 ```
