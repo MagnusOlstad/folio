@@ -184,6 +184,66 @@ describe("LiveMarkdownEditor", () => {
     expect(revealedPrefix?.textContent).toBe("- ");
   });
 
+  it("shows multi-digit markers intact and nested ordered markers as letters", () => {
+    render(
+      <LiveMarkdownEditor
+        value={"10. tenth\n  1. nested\n  2. another"}
+        onChange={vi.fn()}
+        ariaLabel="Edit ordered list"
+      />,
+    );
+
+    const markers = document.querySelectorAll(".cm-live-markdown-list-marker");
+    expect([...markers].map((marker) => marker.textContent)).toEqual([
+      "10.",
+      "a.",
+      "b.",
+    ]);
+  });
+
+  it("renumbers ordered items after a deletion and preserves the caret", () => {
+    const onChange = vi.fn();
+    render(
+      <LiveMarkdownEditor
+        value={"1. first\n2. second\n3. third"}
+        onChange={onChange}
+        ariaLabel="Edit numbered list"
+      />,
+    );
+    const view = EditorView.findFromDOM(screen.getByLabelText("Edit numbered list"));
+
+    act(() => {
+      view.dispatch({
+        changes: { from: 9, to: 19 },
+        selection: { anchor: 9 },
+      });
+    });
+
+    expect(view.state.doc.toString()).toBe("1. first\n2. third");
+    expect(view.state.selection.main.head).toBe(9);
+    expect(onChange).toHaveBeenLastCalledWith("1. first\n2. third");
+  });
+
+  it("uses Shift+Enter for a continuation line inside an ordered item", () => {
+    const onChange = vi.fn();
+    render(
+      <LiveMarkdownEditor
+        value="10. tenth"
+        onChange={onChange}
+        ariaLabel="Edit list continuation"
+      />,
+    );
+    const editor = screen.getByLabelText("Edit list continuation");
+    const view = EditorView.findFromDOM(editor);
+    act(() => view.dispatch({ selection: { anchor: view.state.doc.length } }));
+
+    fireEvent.keyDown(editor, { key: "Enter", shiftKey: true });
+
+    expect(view.state.doc.toString()).toBe("10. tenth\n    ");
+    expect(view.state.selection.main.head).toBe(14);
+    expect(onChange).toHaveBeenLastCalledWith("10. tenth\n    ");
+  });
+
   it("finishes the presentation of an unclosed fenced code block", () => {
     render(
       <LiveMarkdownEditor
