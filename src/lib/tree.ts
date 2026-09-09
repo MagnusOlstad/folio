@@ -1,4 +1,5 @@
 import type { BundleFile, TreeDirectory } from "../domain/types.ts";
+import { isInternalBundlePath } from "./paths.ts";
 
 export function buildFileTree(files: BundleFile[]): TreeDirectory {
   type MutableTree = Omit<TreeDirectory, "directories"> & {
@@ -11,6 +12,7 @@ export function buildFileTree(files: BundleFile[]): TreeDirectory {
     files: [],
   };
   for (const file of files) {
+    if (isInternalBundlePath(file.id)) continue;
     const parts = file.id.split("/").filter(Boolean);
     parts.pop();
     let current = root;

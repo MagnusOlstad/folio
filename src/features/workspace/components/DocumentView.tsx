@@ -5,6 +5,8 @@ import { DocumentBody } from "./DocumentBody.tsx";
 import { DocumentFooter } from "./DocumentFooter.tsx";
 import { DocumentHeader } from "./DocumentHeader.tsx";
 import type { MetadataField } from "../types.ts";
+import type { FilingFields, FilingQueueEntry } from "../model/filing.ts";
+import { FilingConfirmation } from "./FilingConfirmation.tsx";
 
 export type DocumentViewProps = {
   groupId: string;
@@ -14,6 +16,7 @@ export type DocumentViewProps = {
   saving: boolean;
   deletingNoteId: string | null;
   movingFileId: string | null;
+  filingDirectories: string[];
   editingMetadataKey: string | null;
   metadataDrafts: Record<string, string>;
   pathDraft: string | undefined;
@@ -61,6 +64,12 @@ export type DocumentViewProps = {
   onChangeTag: (documentId: string, value: string) => void;
   onFinishTagEditing: (document: ViewerDocument, value: string) => void;
   onDelete: (document: ViewerDocument) => Promise<void>;
+  filing: FilingQueueEntry | undefined;
+  focusFiling: boolean;
+  onChangeFilingFields: (documentId: string, fields: FilingFields) => void;
+  onRevealStandaloneFiling: (documentId: string) => void;
+  onConfirmFiling: (groupId: string, documentId: string, action: "accept" | "standalone") => void;
+  onDismissFiling: (groupId: string, documentId: string) => void;
 };
 
 export function DocumentView(props: DocumentViewProps) {
@@ -109,6 +118,18 @@ export function DocumentView(props: DocumentViewProps) {
           onToggleTask={props.onToggleTask}
         />
       </div>
+      {props.filing && (
+        <FilingConfirmation
+          entry={props.filing}
+          directories={props.filingDirectories}
+          autoFocus={props.focusFiling}
+          onChange={(fields) => props.onChangeFilingFields(document.id, fields)}
+          onAccept={() => props.onConfirmFiling(props.groupId, document.id, "accept")}
+          onStandalone={() => props.onConfirmFiling(props.groupId, document.id, "standalone")}
+          onDismiss={() => props.onDismissFiling(props.groupId, document.id)}
+          onRevealStandalone={() => props.onRevealStandaloneFiling(document.id)}
+        />
+      )}
       <div className="document-find-layer" data-document-find-layer />
       <DocumentFooter
         groupId={props.groupId}

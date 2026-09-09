@@ -42,7 +42,7 @@ export function EditorTabs({
             draggable
             onDragStart={(event) => onDragStart(event, id, group.id)}
             onDragEnd={onDragEnd}
-            title={id}
+            title={titleForId(id)}
             key={id}
           >
             <span className="tab-file-mark">

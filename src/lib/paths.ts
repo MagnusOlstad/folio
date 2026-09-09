@@ -32,3 +32,7 @@ export function normalizeDirectoryInput(value: string) {
   const parts = value.trim().replaceAll("\\", "/").split("/").filter(Boolean);
   return parts.length ? `/${parts.join("/")}` : "/";
 }
+
+export function isInternalBundlePath(value: string) {
+  return value === "/references" || value.startsWith("/references/");
+}

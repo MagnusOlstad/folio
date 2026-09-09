@@ -28,7 +28,7 @@ projects/website - Launch decision
 We agreed to publish the new site on Monday.
 ```
 
-Press Enter immediately if you want Folio to decide the title and path. Press `Cmd/Ctrl + Enter` or select **File note** when the capture is ready.
+Press `Cmd/Ctrl + Enter` or select **File note** when the capture is ready. Folio shows its filing proposal inside the note; press `Enter` to accept it, or adjust the path, title, description, and tags first. The path is the destination folder; Folio manages the filename internally. For an append proposal, select **File separately** to reveal a separate proposal instead.
 
 ## Drafts
 
@@ -36,7 +36,7 @@ Unfiled notes stay under **Drafts**. Open a draft to continue writing, or use th
 
 ## Filing and merging
 
-Folio keeps each capture as one note and stores the original text as an immutable raw capture. If the classified directory and exact title match an existing note, the new capture is appended to that note regardless of its filename or date.
+Folio keeps each capture as one note and stores the original text as an immutable raw capture. If the classified directory and exact title match an existing note, the new capture is appended to that note.
 
 ## Edit and maintain a filed note
 
@@ -46,7 +46,7 @@ Folio keeps each capture as one note and stores the original text as an immutabl
 - Follow related notes from the second footer row.
 - Use **Delete** to remove the filed note. Its raw capture is retained.
 
-New filenames place the readable title first, for example `launch-decision-2026-09-03.md`.
+Under the hood, Folio gives each concept one readable filename when it is created and keeps that filename for the concept's lifetime.
 
 ## Special captures
 

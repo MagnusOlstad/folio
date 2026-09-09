@@ -1,5 +1,14 @@
 import type { TreeDirectory } from "../../domain/types.ts";
 
+const EXPLORER_TITLE_LIMIT = 48;
+
+function explorerTitle(title: string) {
+  const characters = Array.from(title);
+  return characters.length <= EXPLORER_TITLE_LIMIT
+    ? title
+    : `${characters.slice(0, EXPLORER_TITLE_LIMIT - 1).join("")}…`;
+}
+
 export function FileTree({
   directory,
   depth,
@@ -104,15 +113,16 @@ export function FileTree({
                 onFileDragStart(file.id);
               }}
               onDragEnd={onFileDragEnd}
+              aria-label={file.title}
               title={
                 file.movable
-                  ? `${file.id} - drag onto a folder to move`
-                  : `${file.id} - fixed OKF path`
+                  ? `${file.title} - drag onto a folder to move`
+                  : `${file.title} - fixed OKF path`
               }
               key={file.id}
             >
               <span className="tree-file-mark">M</span>
-              <span>{file.name}</span>
+              <span>{explorerTitle(file.title)}</span>
             </button>
           ))}
         </div>

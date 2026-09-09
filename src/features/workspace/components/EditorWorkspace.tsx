@@ -4,9 +4,15 @@ import { useWorkspaceEditorUi } from "../hooks/useWorkspaceEditorUi.ts";
 import { EditorGroup } from "./EditorGroup.tsx";
 import type { EditorWorkspaceProps } from "../types.ts";
 import { WorkspaceSplitHandle } from "./WorkspaceSplitHandle.tsx";
+import { filingOwnerGroupIds } from "../model/filing.ts";
 
 export function EditorWorkspace({ model, actions }: EditorWorkspaceProps) {
   const ui = useWorkspaceEditorUi();
+  const owners = filingOwnerGroupIds(
+    model.groups,
+    model.activeGroupId,
+    model.filingQueues,
+  );
   const groupModel = {
     activeGroupId: model.activeGroupId,
     documents: model.documents,
@@ -16,6 +22,9 @@ export function EditorWorkspace({ model, actions }: EditorWorkspaceProps) {
     drafts: model.drafts,
     deletingNoteId: model.deletingNoteId,
     movingFileId: model.movingFileId,
+    filingDirectories: model.filingDirectories,
+    filingQueues: model.filingQueues,
+    filingOwnerGroupIds: owners,
   };
   const groupActions = {
     activateGroup: actions.activateGroup,
@@ -28,6 +37,10 @@ export function EditorWorkspace({ model, actions }: EditorWorkspaceProps) {
     closeTab: actions.closeTab,
     changeDraftContent: actions.changeDraftContent,
     fileDraft: actions.fileDraft,
+    changeFilingFields: actions.changeFilingFields,
+    revealStandaloneFiling: actions.revealStandaloneFiling,
+    confirmFiling: actions.confirmFiling,
+    dismissFiling: actions.dismissFiling,
     beginEditing: actions.beginEditing,
     finishEditing: actions.finishEditing,
     openDocument: actions.openDocument,

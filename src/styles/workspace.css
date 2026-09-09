@@ -713,6 +713,311 @@ body.resizing-horizontal * {
   scrollbar-width: thin;
 }
 
+.filing-confirmation-layer {
+  position: absolute;
+  z-index: 20;
+  inset: 0;
+  padding: 24px;
+  display: grid;
+  place-items: center;
+  background: rgba(16, 18, 16, 0.48);
+  backdrop-filter: blur(2px);
+}
+
+.filing-confirmation {
+  width: min(540px, 100%);
+  max-height: min(680px, calc(100% - 16px));
+  padding: 22px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-top-color: var(--acid);
+  color: var(--ink);
+  background: var(--paper-raised);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.filing-confirmation header,
+.filing-actions,
+.filing-destination,
+.filing-actions > div {
+  display: flex;
+  align-items: center;
+}
+
+.filing-confirmation header {
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.filing-confirmation header > div,
+.filing-destination > div {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.filing-confirmation header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.filing-confirmation header > div > span,
+.filing-destination span,
+.filing-confirmation label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.filing-status {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid rgba(183, 216, 146, 0.32);
+  color: var(--acid);
+  background: rgba(183, 216, 146, 0.08);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.filing-confirmation form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  margin: 18px 0 20px;
+}
+
+.filing-confirmation label {
+  display: grid;
+  gap: 7px;
+}
+
+.filing-directory-field {
+  position: relative;
+}
+
+.filing-confirmation label:nth-child(3),
+.filing-confirmation label:nth-child(4),
+.filing-confirmation label:nth-child(5) {
+  grid-column: 1 / -1;
+}
+
+.filing-confirmation input {
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  outline: none;
+  color: var(--ink);
+  background: var(--paper);
+  font: 12px/1.4 ui-sans-serif, system-ui, sans-serif;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.filing-confirmation input:hover {
+  border-color: var(--dim);
+}
+
+.filing-confirmation input:focus {
+  border-color: var(--acid);
+  box-shadow: 0 0 0 2px rgba(183, 216, 146, 0.1);
+}
+
+.filing-directory-suggestions {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  max-height: 168px;
+  margin: 0;
+  padding: 4px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: var(--paper-raised);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.26);
+  list-style: none;
+}
+
+.filing-directory-suggestions button {
+  width: 100%;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+  font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: left;
+}
+
+.filing-directory-suggestions [aria-selected="true"] button,
+.filing-directory-suggestions button:hover,
+.filing-directory-suggestions button:focus-visible {
+  color: var(--ink);
+  background: rgba(183, 216, 146, 0.12);
+  outline: none;
+}
+
+.filing-destination {
+  min-height: 88px;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 18px 0 20px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.filing-destination strong {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.filing-destination small {
+  color: var(--muted);
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.filing-actions {
+  justify-content: space-between;
+  gap: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.filing-actions > span {
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.filing-actions > div {
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.filing-button {
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  font: 600 10px/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.filing-button-primary {
+  border-color: var(--acid);
+  color: var(--paper);
+  background: var(--acid);
+}
+
+.filing-button-primary:hover,
+.filing-button-primary:focus-visible {
+  border-color: var(--ink);
+  background: var(--ink);
+  outline: none;
+}
+
+.filing-button-secondary {
+  color: var(--muted);
+  background: transparent;
+}
+
+.filing-button-secondary:hover,
+.filing-button-secondary:focus-visible {
+  border-color: var(--muted);
+  color: var(--ink);
+  outline: none;
+}
+
+.filing-button-danger {
+  border-color: var(--orange);
+  color: #161816;
+  background: var(--orange);
+}
+
+.filing-button-danger:hover,
+.filing-button-danger:focus-visible {
+  border-color: var(--ink);
+  background: var(--ink);
+  outline: none;
+}
+
+.filing-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.filing-error {
+  margin: 0 0 14px;
+  padding: 9px 11px;
+  border-left: 2px solid var(--orange);
+  color: var(--ink);
+  background: rgba(217, 133, 95, 0.1);
+  font-size: 11px;
+}
+
+.note-delete-confirmation {
+  width: min(480px, 100%);
+}
+
+.note-delete-status {
+  border-color: rgba(217, 133, 95, 0.4);
+  color: var(--orange);
+  background: rgba(217, 133, 95, 0.08);
+}
+
+.note-delete-description {
+  margin: 20px 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.filing-confirmation-preparing {
+  width: auto;
+  min-width: 260px;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.filing-confirmation-preparing strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.filing-confirmation-preparing p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.filing-spinner {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 2px solid var(--line);
+  border-top-color: var(--acid);
+  border-radius: 50%;
+  animation: filing-spin 800ms linear infinite;
+}
+
+@keyframes filing-spin {
+  to { transform: rotate(360deg); }
+}
+
 .document-heading {
   padding: clamp(20px, 3cqi, 32px) clamp(22px, 6cqi, 64px) 18px;
   border-bottom: 1px solid rgba(55, 59, 53, 0.65);

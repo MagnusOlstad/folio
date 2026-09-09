@@ -15,10 +15,10 @@ function scrollSurface(page: Page) {
   return page.locator("[data-document-scroll]");
 }
 
-async function openSeededNote(page: Page, filename: string, title: string) {
+async function openSeededNote(page: Page, title: string) {
   await page.goto("/");
   await expect(page.getByRole("link", { name: "Folio home" })).toBeVisible();
-  await page.getByRole("button", { name: filename }).click();
+  await page.getByRole("button", { name: title, exact: true }).click();
   await expect(liveEditor(page, title)).toBeVisible();
 }
 
@@ -72,7 +72,7 @@ function isContentSave(request: { method(): string; url(): string; postData(): s
 }
 
 test("activating a rendered line keeps one editor mounted and preserves layout", async ({ page }) => {
-  await openSeededNote(page, "todo-list.md", "Todo List");
+  await openSeededNote(page, "Todo List");
 
   const surface = liveSurface(page);
   const editor = liveEditor(page, "Todo List");
@@ -95,7 +95,7 @@ test("activating a rendered line keeps one editor mounted and preserves layout",
 });
 
 test("moving off a line restores its Markdown presentation and reveals the next line", async ({ page }) => {
-  await openSeededNote(page, "todo-list.md", "Todo List");
+  await openSeededNote(page, "Todo List");
 
   const surface = liveSurface(page);
   const editor = liveEditor(page, "Todo List");
@@ -206,7 +206,7 @@ test("keeps the caret after two newlines at the end of a note", async ({ page })
 });
 
 test("keeps the caret after two newlines at the end of a filed note", async ({ page }) => {
-  await openSeededNote(page, "ollama.md", "Set Up Ollama");
+  await openSeededNote(page, "Set Up Ollama");
   const editor = liveEditor(page, "Set Up Ollama");
   const lines = editor.locator(".cm-line");
   const save = page.waitForResponse(
@@ -229,7 +229,7 @@ test("keeps the caret after two newlines at the end of a filed note", async ({ p
 });
 
 test("autosaves quickly and reembeds on blur and Cmd/Ctrl+S", async ({ page }) => {
-  await openSeededNote(page, "2026-09-03.md", "Daily 2026-09-03");
+  await openSeededNote(page, "Daily 2026-09-03");
 
   const editor = liveEditor(page, "Daily 2026-09-03");
   await page
@@ -290,7 +290,6 @@ test("autosaves quickly and reembeds on blur and Cmd/Ctrl+S", async ({ page }) =
 test("flushes and reembeds a filed note when its tab closes", async ({ page }) => {
   await openSeededNote(
     page,
-    "capture-and-organize.md",
     "Capture and Organize Notes",
   );
 
@@ -325,7 +324,7 @@ test("flushes and reembeds a filed note when its tab closes", async ({ page }) =
 });
 
 test("keeps the outer document scroll stable when a rendered construct is activated", async ({ page }) => {
-  await openSeededNote(page, "start-here.md", "Start Here");
+  await openSeededNote(page, "Start Here");
 
   const scroller = scrollSurface(page);
   const target = page.getByText("The desktop app stores its writable bundle", { exact: false });
@@ -347,7 +346,7 @@ test("keeps the outer document scroll stable when a rendered construct is activa
 });
 
 test("restores each note scroll position when switching tabs", async ({ page }) => {
-  await openSeededNote(page, "start-here.md", "Start Here");
+  await openSeededNote(page, "Start Here");
 
   const scroller = scrollSurface(page);
   await scroller.evaluate((element) => {
@@ -356,7 +355,7 @@ test("restores each note scroll position when switching tabs", async ({ page }) 
   const startHereScroll = await scroller.evaluate((element) => element.scrollTop);
   expect(startHereScroll).toBeGreaterThan(0);
 
-  await page.getByRole("button", { name: "todo-list.md" }).click();
+  await page.getByRole("button", { name: "Todo List", exact: true }).click();
   await expect(liveEditor(page, "Todo List")).toBeVisible();
   expect(await scroller.evaluate((element) => element.scrollTop)).toBe(0);
 

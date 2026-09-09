@@ -224,7 +224,7 @@ export function useWorkspaceBundleActions(
         return next;
       });
       clearDiscovery();
-      setMessage(result.warning || `Moved note to ${result.newId}.`);
+      setMessage(result.warning || `Moved ${file.title} to ${directory}.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not move note");
     } finally {

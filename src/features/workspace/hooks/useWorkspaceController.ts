@@ -12,6 +12,7 @@ import { useWorkspaceSidebarProps } from "./useWorkspaceSidebarProps.ts";
 import { useWorkspaceShortcutActions } from "./useWorkspaceShortcutActions.ts";
 import { useFiledDocumentAutosave } from "./useFiledDocumentAutosave.ts";
 import { isUntitledId } from "../../../lib/workspace.ts";
+import { bundleDirectories } from "../model/directory-suggestions.ts";
 
 function draftTitle(content: string) {
   const firstLine = content
@@ -219,6 +220,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
         drafts: documents.drafts,
         deletingNoteId: documents.deletingNoteId,
         movingFileId: explorer.movingFileId,
+        filingDirectories: bundleDirectories(explorer.files),
+        filingQueues: documents.filingQueues,
         message,
       },
       actions: {
@@ -254,6 +257,10 @@ export function useWorkspaceController(): WorkspaceShellProps {
           }
         },
         fileDraft: mutations.fileDraft,
+        changeFilingFields: mutations.changeFilingFields,
+        revealStandaloneFiling: mutations.revealStandaloneFiling,
+        confirmFiling: mutations.confirmFiling,
+        dismissFiling: mutations.dismissFiling,
         beginEditing: mutations.beginEditing,
         finishEditing: (groupId, document, scrollTop) => {
           mutations.finishEditing(groupId, document, scrollTop);

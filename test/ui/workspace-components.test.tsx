@@ -5,10 +5,12 @@ import type { ViewerDocument } from "../../src/domain/types.ts";
 import { DocumentFooter } from "../../src/features/workspace/components/DocumentFooter.tsx";
 import { DocumentHeader } from "../../src/features/workspace/components/DocumentHeader.tsx";
 import { DocumentPane } from "../../src/features/workspace/components/DocumentPane.tsx";
+import { FilingConfirmation } from "../../src/features/workspace/components/FilingConfirmation.tsx";
 import { EditorGroup } from "../../src/features/workspace/components/EditorGroup.tsx";
 import { RenderedMarkdown } from "../../src/features/workspace/components/RenderedMarkdown.tsx";
 import { WorkspaceSplitHandle } from "../../src/features/workspace/components/WorkspaceSplitHandle.tsx";
 import { useWorkspaceEditorUi } from "../../src/features/workspace/hooks/useWorkspaceEditorUi.ts";
+import type { FilingQueueEntry } from "../../src/features/workspace/model/filing.ts";
 
 const document: ViewerDocument = {
   id: "/notes/current.md",
@@ -31,6 +33,251 @@ const document: ViewerDocument = {
 };
 
 describe("workspace editor components", () => {
+  it("moves from preparing to a ready filing dialog without changing hook order", () => {
+    const entry = {
+      filing: {
+        id: "filing-preparing",
+        draftId: "untitled-preparing",
+        mode: "new",
+        destinationId: null,
+        actor: "agent",
+        proposal: { directory: "/projects", filename: "prepared.md", title: "Prepared", description: "", tags: [] },
+      },
+      fields: { directory: "/projects", title: "Prepared", description: "", tags: [] },
+      standalone: false,
+      status: "preparing",
+      error: null,
+    } satisfies FilingQueueEntry;
+    const props = {
+      directories: ["/", "/projects"],
+      onChange: vi.fn(), onAccept: vi.fn(), onStandalone: vi.fn(), onDismiss: vi.fn(), onRevealStandalone: vi.fn(),
+    };
+    const { rerender } = render(<FilingConfirmation entry={entry} {...props} />);
+
+    expect(screen.getByText("Filing note…")).toBeInTheDocument();
+    rerender(<FilingConfirmation entry={{ ...entry, status: "ready" }} {...props} />);
+    expect(screen.getByRole("heading", { name: "Review filing" })).toBeInTheDocument();
+  });
+
+  it("confirms filing proposals in the note and exposes independent fields", () => {
+    const onChange = vi.fn();
+    const onAccept = vi.fn();
+    const onDismiss = vi.fn();
+    render(
+      <FilingConfirmation
+        directories={["/", "/projects", "/projects/website", "/projects/writing"]}
+        entry={{
+          filing: {
+            id: "filing-1",
+            draftId: "untitled-1",
+            mode: "new",
+            destinationId: null,
+            actor: "agent",
+            proposal: {
+              directory: "/projects",
+              filename: "launch.md",
+              title: "Launch plan",
+              description: "Publish it",
+              tags: ["project"],
+            },
+          },
+          fields: {
+            directory: "/projects",
+            title: "Launch plan",
+            description: "Publish it",
+            tags: ["project"],
+          },
+          standalone: false,
+          status: "ready",
+          error: null,
+        }}
+        onChange={onChange}
+        onAccept={onAccept}
+        onStandalone={vi.fn()}
+        onDismiss={onDismiss}
+        onRevealStandalone={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Accept" })).toHaveFocus();
+    expect(screen.queryByLabelText("Filename")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Title"), {
+      target: { value: "Published plan" },
+    });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      directory: "/projects",
+      title: "Published plan",
+      description: "Publish it",
+      tags: ["project"],
+    }));
+    expect(screen.getByRole("combobox", { name: "Path" })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByLabelText("Title"), { key: "Enter" });
+    expect(onAccept).toHaveBeenCalledOnce();
+    fireEvent.keyDown(window.document, { key: "Escape" });
+    expect(onDismiss).toHaveBeenCalledOnce();
+    fireEvent.pointerDown(window.document.body);
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it("keeps filing dialogs independent across notes", () => {
+    const firstDismiss = vi.fn();
+    const secondDismiss = vi.fn();
+    const sharedEntry = {
+      filing: {
+        id: "filing-shared",
+        draftId: "untitled-shared",
+        mode: "new" as const,
+        destinationId: null,
+        actor: "agent",
+        proposal: { directory: "/projects", filename: "note.md", title: "Note", description: "", tags: [] },
+      },
+      fields: { directory: "/projects", title: "Note", description: "", tags: [] },
+      standalone: false,
+      status: "ready" as const,
+      error: null,
+    };
+
+    render(
+      <>
+        <FilingConfirmation
+          entry={sharedEntry}
+          directories={["/", "/projects"]}
+          autoFocus={false}
+          onChange={vi.fn()}
+          onAccept={vi.fn()}
+          onStandalone={vi.fn()}
+          onDismiss={firstDismiss}
+          onRevealStandalone={vi.fn()}
+        />
+        <FilingConfirmation
+          entry={{ ...sharedEntry, filing: { ...sharedEntry.filing, id: "filing-active" } }}
+          directories={["/", "/projects"]}
+          onChange={vi.fn()}
+          onAccept={vi.fn()}
+          onStandalone={vi.fn()}
+          onDismiss={secondDismiss}
+          onRevealStandalone={vi.fn()}
+        />
+      </>,
+    );
+
+    const pathInputs = screen.getAllByRole("combobox", { name: "Path" });
+    expect(pathInputs[0].getAttribute("aria-controls")).not.toBe(pathInputs[1].getAttribute("aria-controls"));
+    fireEvent.keyDown(window.document, { key: "Escape" });
+    expect(firstDismiss).not.toHaveBeenCalled();
+    expect(secondDismiss).toHaveBeenCalledOnce();
+  });
+
+  it("selects a depth-scoped path suggestion with the keyboard", () => {
+    const onChange = vi.fn();
+    render(
+      <FilingConfirmation
+        directories={["/", "/projects", "/projects/website", "/projects/writing", "/references"]}
+        entry={{
+          filing: {
+            id: "filing-path",
+            draftId: "untitled-path",
+            mode: "new",
+            destinationId: null,
+            actor: "agent",
+            proposal: { directory: "/projects/we", filename: "launch.md", title: "Launch", description: "", tags: [] },
+          },
+          fields: { directory: "/projects/we", title: "Launch", description: "", tags: [] },
+          standalone: false,
+          status: "ready",
+          error: null,
+        }}
+        onChange={onChange}
+        onAccept={vi.fn()}
+        onStandalone={vi.fn()}
+        onDismiss={vi.fn()}
+        onRevealStandalone={vi.fn()}
+      />,
+    );
+
+    const pathInput = screen.getByRole("combobox", { name: "Path" });
+    pathInput.focus();
+    pathInput.setSelectionRange(12, 12);
+    fireEvent.click(pathInput);
+
+    expect(screen.getByRole("option", { name: "/projects/website" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "/references" })).not.toBeInTheDocument();
+    fireEvent.keyDown(pathInput, { key: "Tab" });
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      directory: "/projects/website",
+    }));
+    expect(screen.queryByRole("button", { name: "Keep agent filing" })).not.toBeInTheDocument();
+  });
+
+  it("prevents filing into the internal references directory", () => {
+    const onAccept = vi.fn();
+    render(
+      <FilingConfirmation
+        directories={["/", "/projects"]}
+        entry={{
+          filing: {
+            id: "filing-reserved",
+            draftId: "untitled-reserved",
+            mode: "new",
+            destinationId: null,
+            actor: "agent",
+            proposal: { directory: "/references/inbox", filename: "note.md", title: "Note", description: "", tags: [] },
+          },
+          fields: { directory: "/references/inbox", title: "Note", description: "", tags: [] },
+          standalone: false,
+          status: "ready",
+          error: null,
+        }}
+        onChange={vi.fn()}
+        onAccept={onAccept}
+        onStandalone={vi.fn()}
+        onDismiss={vi.fn()}
+        onRevealStandalone={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("References is an internal folder");
+    expect(screen.getByRole("combobox", { name: "Path" })).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("button", { name: "Accept" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Path" }), { key: "Enter" });
+    expect(onAccept).not.toHaveBeenCalled();
+  });
+
+  it("offers a separate proposal for append filing", () => {
+    const onReveal = vi.fn();
+    render(
+      <FilingConfirmation
+        directories={["/", "/projects"]}
+        entry={{
+          filing: {
+            id: "filing-append",
+            draftId: "untitled-2",
+            mode: "existing",
+            destinationId: "/projects/launch.md",
+            actor: "agent",
+            proposal: { directory: "/projects", filename: "launch.md", title: "Launch", description: "", tags: [] },
+            standaloneProposal: { directory: "/projects", filename: "separate.md", title: "Separate", description: "", tags: [] },
+          },
+          fields: { directory: "/projects", title: "Launch", description: "", tags: [] },
+          standalone: false,
+          status: "ready",
+          error: null,
+        }}
+        onChange={vi.fn()}
+        onAccept={vi.fn()}
+        onStandalone={vi.fn()}
+        onDismiss={vi.fn()}
+        onRevealStandalone={onReveal}
+      />,
+    );
+    expect(screen.getByText("Launch")).toBeInTheDocument();
+    expect(screen.getByText("/projects")).toBeInTheDocument();
+    expect(screen.queryByText("/projects/launch.md")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "File separately" }));
+    expect(onReveal).toHaveBeenCalledOnce();
+  });
+
   it("resizes split groups from the keyboard and resets on double click", () => {
     const onResize = vi.fn();
     const onReset = vi.fn();
@@ -309,6 +556,11 @@ describe("workspace editor components", () => {
     fireEvent.change(tags, { target: { value: "one, two" } });
     fireEvent.blur(tags);
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Delete note" })).toHaveTextContent(
+      "The raw capture will be retained",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Delete note" }));
     fireEvent.click(screen.getByRole("button", { name: /Linked note/ }));
 
     expect(move).toHaveBeenCalledWith(document.id, "/archive");

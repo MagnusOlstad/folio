@@ -47,9 +47,8 @@ export function useWorkspaceTabs({
     return (
       documents[id]?.title ||
       notes.find((note) => note.id === id)?.title ||
-      files.find((file) => file.id === id)?.name.replace(/\.md$/i, "") ||
-      id.split("/").at(-1)?.replace(/\.md$/i, "") ||
-      id
+      files.find((file) => file.id === id)?.title ||
+      "Untitled note"
     );
   }
 

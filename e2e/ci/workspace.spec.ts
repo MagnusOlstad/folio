@@ -11,8 +11,9 @@ test.beforeEach(async ({ page }) => {
 
 test('loads the workspace shell with the seeded bundle', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'Folio home' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'todo-list.md' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'start-here.md' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Todo List', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Start Here', exact: true })).toBeVisible()
+  await expect(page.getByText('todo-list.md')).toHaveCount(0)
 })
 
 test('reports Ollama as offline when no local model server is running', async ({ page }) => {
@@ -20,7 +21,7 @@ test('reports Ollama as offline when no local model server is running', async ({
 })
 
 test('opens a seeded note and shows its content', async ({ page }) => {
-  await page.getByRole('button', { name: 'todo-list.md' }).click()
+  await page.getByRole('button', { name: 'Todo List', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Todo List', level: 1 }).first()).toBeVisible()
   await expect(page.getByText('Add your first task')).toBeVisible()
 })
@@ -76,11 +77,29 @@ test.describe('browser-safe keyboard shortcuts', () => {
     await expect(editor).toHaveText('[hello]()')
   })
 
-  test('Cmd/Ctrl+S files a new draft, degrading gracefully with Ollama offline', async ({ page }) => {
+  test('Cmd/Ctrl+S starts in-note filing and Enter accepts the proposal', async ({ page }) => {
     await page.keyboard.press('Control+t')
     const editor = page.getByLabel('Write a new note')
     await editor.fill('note: quick capture via Ctrl+S')
     await page.keyboard.press('Control+s')
-    await expect(page.getByRole('status')).toContainText('Ollama was unavailable')
+    await expect(page.getByLabel('Filing confirmation')).toContainText('Review filing')
+    await expect(page.getByLabel('Filing confirmation').getByLabel('Filename')).toHaveCount(0)
+    await page.getByRole('button', { name: 'search', exact: true }).click()
+    await expect(page.getByLabel('Filing confirmation')).toContainText('Review filing')
+    await page.getByRole('button', { name: 'explore', exact: true }).click()
+    const pathInput = page.getByRole('combobox', { name: 'Path' })
+    await pathInput.fill('/getting-st')
+    await pathInput.press('Tab')
+    await expect(pathInput).toHaveValue('/getting-started')
+    await page.keyboard.press('Enter')
+    await expect(page.getByLabel('Filing confirmation')).toHaveCount(0)
+
+    await page.keyboard.press('Control+t')
+    const dismissedEditor = page.getByLabel('Write a new note')
+    await dismissedEditor.fill('note: keep the agent filing on Escape')
+    await page.keyboard.press('Control+s')
+    await expect(page.getByLabel('Filing confirmation')).toContainText('Review filing')
+    await page.keyboard.press('Escape')
+    await expect(page.getByLabel('Filing confirmation')).toHaveCount(0)
   })
 })

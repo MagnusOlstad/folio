@@ -7,6 +7,7 @@ import {
   storedDraftDocument,
 } from "../../../lib/workspace.ts";
 import { useWorkspacePersistence } from "./useWorkspacePersistence.ts";
+import type { FilingQueueEntry } from "../model/filing.ts";
 
 type UseWorkspaceDocumentStateOptions = {
   expandedDirectories: Set<string>;
@@ -41,6 +42,9 @@ export function useWorkspaceDocumentState({
     () => new Set(),
   );
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
+  const [filingQueues, setFilingQueues] = useState<
+    Record<string, FilingQueueEntry[]>
+  >({});
   const documentRequests = useRef<Record<string, number>>({});
   const saveQueues = useRef<Record<string, Promise<void>>>({});
   const draftSyncQueues = useRef<Record<string, Promise<void>>>({});
@@ -137,6 +141,8 @@ export function useWorkspaceDocumentState({
     setDeletingDraftIds,
     deletingNoteId,
     setDeletingNoteId,
+    filingQueues,
+    setFilingQueues,
     documentRequests,
     saveQueues,
     draftSyncQueues,

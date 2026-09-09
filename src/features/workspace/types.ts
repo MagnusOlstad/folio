@@ -3,6 +3,7 @@ import type {
   TabGroup,
   ViewerDocument,
 } from "../../domain/types.ts";
+import type { FilingFields, FilingQueueEntry } from "./model/filing.ts";
 
 export type TabDrag = { documentId: string; groupId: string };
 export type MetadataField = "title" | "description";
@@ -18,6 +19,8 @@ export type EditorWorkspaceModel = {
   drafts: Record<string, string>;
   deletingNoteId: string | null;
   movingFileId: string | null;
+  filingDirectories: string[];
+  filingQueues: Record<string, FilingQueueEntry[]>;
   message: string;
 };
 
@@ -40,6 +43,10 @@ export type EditorWorkspaceActions = {
   closeTab: (groupId: string, documentId: string) => void;
   changeDraftContent: (document: ViewerDocument, content: string) => void;
   fileDraft: (document: ViewerDocument) => void;
+  changeFilingFields: (documentId: string, fields: FilingFields) => void;
+  revealStandaloneFiling: (documentId: string) => void;
+  confirmFiling: (groupId: string, documentId: string, action: "accept" | "standalone") => void;
+  dismissFiling: (groupId: string, documentId: string) => void;
   beginEditing: (
     groupId: string,
     document: ViewerDocument,
