@@ -27,6 +27,7 @@
 
 ## Workflow
 
+- Pull request titles are validated by `amannn/action-semantic-pull-request@v6`. Use a conventional-commit prefix: `feat:`, `fix:`, `docs:`, `style:`, `refactor:`, `perf:`, `test:`, `build:`, `ci:`, `chore:`, or `revert:`.
 - Use the smallest meaningful verification set. Broaden only when affected boundaries, failures, unresolved risk, or the user justify it.
 - Run `npm ci` only when dependencies are missing or `package.json`/`package-lock.json` changed.
 - Documentation-only changes need review plus `git diff --check`, not application tests. For localized code changes, run the nearest Node or Vitest files and lint affected paths when practical.

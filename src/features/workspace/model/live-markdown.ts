@@ -177,10 +177,14 @@ function buildDecorations(
   const ranges: Array<Range<Decoration>> = [];
   const fencedCodeRanges: SourceRange[] = [];
   const headingLevels = new Map<number, number>();
+  const horizontalRuleLines = new Set<number>();
   syntaxTree(state).iterate({
     enter: (node) => {
       if (node.name === "FencedCode")
         fencedCodeRanges.push({ from: node.from, to: node.to });
+
+      if (node.name === "HorizontalRule")
+        horizontalRuleLines.add(state.doc.lineAt(node.from).number);
 
       const heading = /^(?:ATX|Setext)Heading([1-6])$/.exec(node.name);
       if (heading)
@@ -241,6 +245,7 @@ function buildDecorations(
       continue;
     }
     const headingLevel = headingLevels.get(lineNumber);
+    const horizontalRule = horizontalRuleLines.has(lineNumber);
     const quote = /^(\s*>\s?)+/.exec(text);
     const list = /^(\s*)([-+*]|\d+[.)])(\s+)/.exec(text);
     const task = list
@@ -254,6 +259,7 @@ function buildDecorations(
     const isTable = /^\|.*\|\s*$/.test(text);
     const lineClasses = [
       headingLevel && `cm-live-markdown-heading cm-live-markdown-heading-${headingLevel}`,
+      horizontalRule && "cm-live-markdown-horizontal-rule",
       quote && "cm-live-markdown-quote",
       list && "cm-live-markdown-list",
       listPreview && listMarker && /^\d/.test(listMarker) && "cm-live-markdown-list-ordered",
@@ -270,6 +276,8 @@ function buildDecorations(
             : undefined,
         }).range(line.from),
       );
+    if (horizontalRule)
+      addHidden(ranges, line.from, line.to, !reveal(line.from, line.to));
     if (quote) {
       addHidden(ranges, line.from, line.from + quote[0].length, !reveal(line.from, line.to));
     }

@@ -14,6 +14,7 @@ import remarkGfm from "remark-gfm";
 import type { ViewerDocument } from "../../../domain/types.ts";
 import { conceptUrl, resolveBundleLink } from "../../../lib/paths.ts";
 import { sourcePosition } from "../../../lib/workspace.ts";
+import { folioMarkdown } from "../model/folio-markdown.ts";
 
 type RenderedMarkdownProps = {
   document: ViewerDocument;
@@ -237,7 +238,10 @@ export function RenderedMarkdown({
   return (
     <div ref={contentRef} data-readonly-markdown="">
       {findPanel && findLayer ? createPortal(findPanel, findLayer) : findPanel}
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={[folioMarkdown, remarkGfm, remarkBreaks]}
+        components={components}
+      >
         {document.content}
       </ReactMarkdown>
     </div>

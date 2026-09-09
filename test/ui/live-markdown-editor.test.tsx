@@ -47,7 +47,7 @@ describe("LiveMarkdownEditor", () => {
     expect(document.querySelectorAll(".cm-live-markdown-strike")).toHaveLength(1);
   });
 
-  it("recognizes ATX and setext heading levels from the Markdown parser", () => {
+  it("recognizes ATX heading levels without treating hyphen underlines as headings", () => {
     render(
       <LiveMarkdownEditor
         value={"# First\n## Second\nThird\n---"}
@@ -62,9 +62,21 @@ describe("LiveMarkdownEditor", () => {
     expect(screen.getByRole("heading", { name: "Second", level: 2 })).toHaveClass(
       "cm-live-markdown-heading-2",
     );
-    expect(screen.getByRole("heading", { name: "Third", level: 2 })).toHaveClass(
-      "cm-live-markdown-heading-2",
+    expect(screen.queryByRole("heading", { name: "Third" })).toBeNull();
+    expect(document.querySelector(".cm-live-markdown-horizontal-rule")).toBeTruthy();
+  });
+
+  it("does not resize the preceding sentence when a single dash is typed", () => {
+    render(
+      <LiveMarkdownEditor
+        value={"A sentence\n-"}
+        onChange={vi.fn()}
+        ariaLabel="Edit note"
+      />,
     );
+
+    expect(screen.queryByRole("heading", { name: "A sentence" })).toBeNull();
+    expect(document.querySelector(".cm-live-markdown-heading")).toBeNull();
   });
 
   it("uses the existing folio-format event contract", () => {
