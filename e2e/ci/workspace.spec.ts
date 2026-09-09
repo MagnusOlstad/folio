@@ -76,11 +76,25 @@ test.describe('browser-safe keyboard shortcuts', () => {
     await expect(editor).toHaveText('[hello]()')
   })
 
-  test('Cmd/Ctrl+S files a new draft, degrading gracefully with Ollama offline', async ({ page }) => {
+  test('Cmd/Ctrl+S starts in-note filing and Enter accepts the proposal', async ({ page }) => {
     await page.keyboard.press('Control+t')
     const editor = page.getByLabel('Write a new note')
     await editor.fill('note: quick capture via Ctrl+S')
     await page.keyboard.press('Control+s')
-    await expect(page.getByRole('status')).toContainText('Ollama was unavailable')
+    await expect(page.getByLabel('Filing confirmation')).toContainText('Review filing')
+    const pathInput = page.getByRole('combobox', { name: 'Path' })
+    await pathInput.fill('/getting-st')
+    await pathInput.press('Tab')
+    await expect(pathInput).toHaveValue('/getting-started')
+    await page.keyboard.press('Enter')
+    await expect(page.getByLabel('Filing confirmation')).toHaveCount(0)
+
+    await page.keyboard.press('Control+t')
+    const dismissedEditor = page.getByLabel('Write a new note')
+    await dismissedEditor.fill('note: keep the agent filing on Escape')
+    await page.keyboard.press('Control+s')
+    await expect(page.getByLabel('Filing confirmation')).toContainText('Review filing')
+    await page.keyboard.press('Escape')
+    await expect(page.getByLabel('Filing confirmation')).toHaveCount(0)
   })
 })

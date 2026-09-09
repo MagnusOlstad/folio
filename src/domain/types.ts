@@ -38,6 +38,32 @@ export type NoteUpdateResult = NoteDetail & {
   newId: string;
   warning: string | null;
 };
+export type FilingMode = "new" | "existing" | "todo" | "daily";
+export type FilingProposal = {
+  directory: string;
+  filename: string;
+  title: string;
+  description: string;
+  tags: string[];
+};
+export type Filing = {
+  id: string;
+  draftId: string;
+  mode: FilingMode;
+  destinationId: string | null;
+  actor: string;
+  proposal: FilingProposal;
+  standaloneProposal?: FilingProposal;
+};
+export type FilingConfirmResult = {
+  note: Note;
+  notes: Note[];
+  warning: string | null;
+  oldId: string;
+  newId: string;
+  appended: boolean;
+  sourceRemoved?: boolean;
+};
 export type ViewerDocument = {
   id: string;
   title: string;

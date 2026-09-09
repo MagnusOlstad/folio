@@ -4,7 +4,7 @@ Folio is a local-first personal notetaker with one Markdown capture field. It pr
 
 ## What is implemented
 
-- Plain Markdown capture with `Cmd/Ctrl + Enter` submission.
+- Plain Markdown capture with `Cmd/Ctrl + Enter` filing proposals and an in-note confirmation.
 - Immutable raw captures stored as OKF `Raw Capture` concepts.
 - Whole-note classification with `llama3.2:3b`: every capture remains one note and is never split into extracted concepts.
 - Open-ended hierarchical filing based on the whole note, with opening labels and headings treated as strong routing guidance.
@@ -34,7 +34,7 @@ Edit, Format, and Window menus and available while the app window is focused:
 | --- | --- |
 | `Cmd/Ctrl + T` | Open a new note tab |
 | `Cmd/Ctrl + S` | File the active draft, or save the note being edited |
-| `Cmd/Ctrl + Enter` | File the active draft (same as Save) |
+| `Cmd/Ctrl + Enter` | Start filing the active draft; then press `Enter` to accept the proposal |
 | `Cmd/Ctrl + W` | Close the active tab, then the window |
 | `Cmd/Ctrl + B` | Bold the selection in the note editor |
 | `Cmd/Ctrl + I` | Italicize the selection in the note editor |

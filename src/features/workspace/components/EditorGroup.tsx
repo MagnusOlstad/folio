@@ -13,7 +13,9 @@ import type {
 type EditorGroupProps = {
   group: TabGroup;
   groupCount: number;
-  model: Omit<EditorWorkspaceModel, "groups" | "splitPosition" | "message">;
+  model: Omit<EditorWorkspaceModel, "groups" | "splitPosition" | "message"> & {
+    filingOwnerGroupIds: Record<string, string>;
+  };
   actions: Omit<
     EditorWorkspaceActions,
     | "beginHorizontalResize"
@@ -130,6 +132,7 @@ export function EditorGroup({
             saving={saving}
             deletingNoteId={model.deletingNoteId}
             movingFileId={model.movingFileId}
+            filingDirectories={model.filingDirectories}
             editingMetadataKey={ui.editingMetadataKey}
             metadataDrafts={ui.metadataDrafts}
             pathDraft={ui.pathDrafts[document.id]}
@@ -171,6 +174,16 @@ export function EditorGroup({
               )
             }
             onDelete={actions.deleteFiledNote}
+            filing={
+              model.filingOwnerGroupIds[document.id] === group.id
+                ? model.filingQueues[document.id]?.[0]
+                : undefined
+            }
+            focusFiling={model.activeGroupId === group.id}
+            onChangeFilingFields={actions.changeFilingFields}
+            onRevealStandaloneFiling={actions.revealStandaloneFiling}
+            onConfirmFiling={actions.confirmFiling}
+            onDismissFiling={actions.dismissFiling}
           />
         )}
       </DocumentPane>

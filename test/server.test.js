@@ -4,6 +4,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import YAML from 'yaml'
 
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -27,9 +28,15 @@ async function jsonRequest(url, body) {
   return result
 }
 
+function markdownFrontmatter(markdown) {
+  const end = markdown.indexOf('\n---\n', 4)
+  return YAML.parse(markdown.slice(4, end))
+}
+
 test('files whole notes hierarchically and appends todo and daily captures', async (context) => {
   const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-test-'))
   let classificationRequests = 0
+  let classificationOffline = false
   const classificationPrompts = []
   let invalidEmbeddingResponse = false
   const embeddingInputs = []
@@ -60,6 +67,11 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
 
     if (request.url === '/api/chat') {
       classificationRequests += 1
+      if (classificationOffline) {
+        response.statusCode = 503
+        response.end(JSON.stringify({ error: 'offline' }))
+        return
+      }
       const note = body.messages?.at(-1)?.content || ''
       classificationPrompts.push(note)
       const concept = note.includes('Project Aurora details')
@@ -98,6 +110,12 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
                 description: 'A separate concept with similar meaning.',
                 tags: ['idé', 'søk'],
               }
+            : note.includes('Attribution description')
+              ? { kind: 'note', path: ['attribution'], title: 'Attribution Description', type: 'Note', description: 'Agent description.', tags: ['agent'] }
+              : note.includes('Attribution title')
+                ? { kind: 'note', path: ['attribution'], title: 'Attribution Title', type: 'Note', description: 'Agent title.', tags: ['agent'] }
+                : note.includes('Attribution path')
+                  ? { kind: 'note', path: ['attribution'], title: 'Attribution Path', type: 'Note', description: 'Agent path.', tags: ['agent'] }
             : {
                 kind: 'note',
                 path: ['meeting-notes', 'morning-meeting'],
@@ -306,6 +324,30 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const archivedMeetingDraft = archivedDrafts.find((draft) => draft.id === meetingDraftId)
   assert.equal(archivedMeetingDraft.content, meetingCapture)
   assert.equal(archivedMeetingDraft.filedId, meetingResult.note.id)
+  assert.equal(meetingResult.filing.draftId, meetingDraftId)
+  assert.equal(meetingResult.filing.mode, 'new')
+  assert.equal(meetingResult.filing.actor, 'okf-notetaker/llama3.2:3b')
+  assert.equal(meetingResult.filing.proposal.filename, path.posix.basename(meetingResult.note.id))
+  const forbiddenNewStandalone = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: meetingResult.filing.id, action: 'standalone' }),
+  })
+  assert.equal(forbiddenNewStandalone.status, 400)
+  const quickConfirmation = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ confirmationId: meetingResult.filing.id, action: 'accept', fields: meetingResult.filing.proposal }),
+  })
+  assert.equal(quickConfirmation.status, 200)
+  const repeatedConfirmation = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ confirmationId: meetingResult.filing.id, action: 'accept', fields: meetingResult.filing.proposal }),
+  })
+  assert.equal((await repeatedConfirmation.json()).idempotent, true)
+  const invalidConfirmation = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ confirmationId: meetingResult.filing.id, action: 'accept', fields: { ...meetingResult.filing.proposal, filename: '../bad.md' } }),
+  })
+  assert.equal(invalidConfirmation.status, 200, 'completed confirmations remain idempotent')
   const repeatedFilingResponse = await fetch(`${baseUrl}/api/notes`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -592,6 +634,13 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal(conflictMoveResponse.status, 409)
   assert.equal(await fs.readFile(conflictPath, 'utf8'), conflictMarkdown)
   await fs.access(path.join(dataRoot, 'bundle', movedId.slice(1)))
+  const internalMoveResponse = await fetch(`${baseUrl}/api/file/move`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: movedId, directory: '/references/inbox' }),
+  })
+  assert.equal(internalMoveResponse.status, 400)
+  await fs.access(path.join(dataRoot, 'bundle', movedId.slice(1)))
   await fs.unlink(conflictPath)
   await fs.rmdir(conflictDirectory)
 
@@ -658,14 +707,31 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal(rootMoved.newId, '/Odd (File).md')
   await fs.access(path.join(dataRoot, 'bundle', 'Odd (File).md'))
 
+  const soleTodo = await jsonRequest(`${baseUrl}/api/notes`, { content: 'todo: File separately', timeZone: 'America/New_York' })
+  assert.equal(soleTodo.appended, false)
+  const soleTodoConfirmation = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: soleTodo.filing.id, action: 'standalone', fields: soleTodo.filing.standaloneProposal }),
+  })
+  assert.equal(soleTodoConfirmation.status, 200)
+  await assert.rejects(fs.access(path.join(dataRoot, 'bundle', 'todo-list.md')), { code: 'ENOENT' })
+
+  const soleDaily = await jsonRequest(`${baseUrl}/api/notes`, { content: 'daily: File separately', timeZone: 'America/New_York' })
+  assert.equal(soleDaily.appended, false)
+  const soleDailyConfirmation = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: soleDaily.filing.id, action: 'standalone', fields: soleDaily.filing.standaloneProposal }),
+  })
+  assert.equal(soleDailyConfirmation.status, 200)
+  await assert.rejects(fs.access(path.join(dataRoot, 'bundle', soleDaily.note.id.slice(1))), { code: 'ENOENT' })
+
   const [firstTodo, secondTodo] = await Promise.all([
     jsonRequest(`${baseUrl}/api/notes`, { content: 'todo: Buy milk', timeZone: 'America/New_York' }),
     jsonRequest(`${baseUrl}/api/notes`, { content: 'TODO - chores route only\nCall Sam', filedContent: 'Call Sam', timeZone: 'America/New_York' }),
   ])
   assert.equal(firstTodo.note.id, '/todo-list.md')
-  assert.equal(firstTodo.appended, false)
   assert.equal(secondTodo.note.id, '/todo-list.md')
-  assert.equal(secondTodo.appended, true)
+  assert.deepEqual([firstTodo.appended, secondTodo.appended].sort(), [false, true])
   const todoFile = await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')
   assert.match(todoFile, /- \[ \] Buy milk/)
   assert.match(todoFile, /- \[ \] Call Sam/)
@@ -714,7 +780,169 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     .map((filename) => fs.readFile(path.join(dataRoot, 'bundle', 'references', 'inbox', filename), 'utf8')))
   assert.ok(dailyRawCaptures.some((rawCapture) => /release route only/.test(rawCapture)))
 
+  const todoMetadataBeforeAccept = (await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g)
+  const dailyMetadataBeforeAccept = (await fs.readFile(path.join(dataRoot, 'bundle', firstDaily.note.id.slice(1)), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g)
+  for (const filing of [secondTodo.filing, secondDaily.filing]) {
+    const accepted = await fetch(`${baseUrl}/api/filing/confirm`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filingId: filing.id, action: 'accept', fields: filing.proposal }),
+    })
+    const acceptedBody = await accepted.json()
+    assert.equal(accepted.status, 200, JSON.stringify(acceptedBody))
+    assert.equal(acceptedBody.newId, filing.destinationId)
+    assert.ok(acceptedBody.notes.length >= 8)
+  }
+  assert.deepEqual((await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g), todoMetadataBeforeAccept)
+  assert.deepEqual((await fs.readFile(path.join(dataRoot, 'bundle', firstDaily.note.id.slice(1)), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g), dailyMetadataBeforeAccept)
+
+  const existingAppend = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: 'Project Aurora details\nA third capture that must stay appended.',
+    timeZone: 'America/New_York',
+  })
+  assert.equal(existingAppend.appended, true)
+  const existingMetadataBeforeAccept = (await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g)
+  const acceptedExisting = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: existingAppend.filing.id, action: 'accept', fields: existingAppend.filing.proposal }),
+  })
+  const acceptedExistingBody = await acceptedExisting.json()
+  assert.equal(acceptedExisting.status, 200, JSON.stringify(acceptedExistingBody))
+  assert.equal(acceptedExistingBody.newId, auroraId)
+  assert.deepEqual((await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g), existingMetadataBeforeAccept)
+
+  await fs.writeFile(path.join(dataRoot, 'bundle', 'linked.md'), `---\ntitle: Linked\ntype: Note\n---\n\n[Semantic](${semantic.note.id})\n`)
+  await fetch(`${baseUrl}/api/reindex`, { method: 'POST' })
+  const movedSemantic = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: semantic.filing.id, action: 'accept', fields: { ...semantic.filing.proposal, directory: '/ideas', filename: 'semantic-renamed.md' } }),
+  })
+  const movedSemanticBody = await movedSemantic.json()
+  assert.equal(movedSemantic.status, 200, JSON.stringify(movedSemanticBody))
+  assert.equal(movedSemanticBody.newId, '/ideas/semantic-renamed.md')
+  assert.match(await fs.readFile(path.join(dataRoot, 'bundle', 'linked.md'), 'utf8'), /\]\(\/ideas\/semantic-renamed\.md\)/)
+
+  const invalidStandalone = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ confirmationId: mergedAurora.filing.id, action: 'standalone', fields: { ...mergedAurora.filing.standaloneProposal, filename: '../bad.md' } }),
+  })
+  assert.equal(invalidStandalone.status, 400)
+  const internalStandalone = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ confirmationId: mergedAurora.filing.id, action: 'standalone', fields: { ...mergedAurora.filing.standaloneProposal, directory: '/references/inbox' } }),
+  })
+  assert.equal(internalStandalone.status, 400)
+  assert.match(await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8'), /The launch budget was approved\./)
+  const standaloneAuroraResponse = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ confirmationId: mergedAurora.filing.id, action: 'standalone', fields: mergedAurora.filing.standaloneProposal }),
+  })
+  assert.equal(standaloneAuroraResponse.status, 200)
+  const standaloneAurora = await standaloneAuroraResponse.json()
+  assert.equal(standaloneAurora.note.id, `${mergedAurora.filing.standaloneProposal.directory}/${mergedAurora.filing.standaloneProposal.filename}`)
+  assert.equal(standaloneAurora.notes.length, 12)
+  assert.equal(standaloneAurora.note.type, 'Project')
+  assert.match(await fs.readFile(path.join(dataRoot, 'bundle', standaloneAurora.note.id.slice(1)), 'utf8'), /filing:\n  by: human:local/)
+  assert.match(await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8'), /The launch remains confidential\./)
+  assert.doesNotMatch(await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8'), /The launch budget was approved\./)
+  assert.match(await fs.readFile(path.join(dataRoot, 'bundle', standaloneAurora.note.id.slice(1)), 'utf8'), /The launch budget was approved\./)
+
+  const orderedTargetPath = path.join(dataRoot, 'bundle', auroraId.slice(1))
+  const orderedBase = markdownFrontmatter(await fs.readFile(orderedTargetPath, 'utf8'))
+  const orderedFirst = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: 'Project Aurora details\nOlder pending metadata contribution.',
+    timeZone: 'America/New_York',
+  })
+  const orderedSecond = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: 'Project Aurora details\nNewer pending metadata contribution.',
+    timeZone: 'America/New_York',
+  })
+  const newestGenerated = markdownFrontmatter(await fs.readFile(orderedTargetPath, 'utf8')).generated
+  const separateOrderedFirst = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: orderedFirst.filing.id, action: 'standalone', fields: orderedFirst.filing.standaloneProposal }),
+  })
+  assert.equal(separateOrderedFirst.status, 200)
+  const afterFirstRemoval = markdownFrontmatter(await fs.readFile(orderedTargetPath, 'utf8'))
+  assert.deepEqual(afterFirstRemoval.tags, orderedBase.tags)
+  assert.deepEqual(afterFirstRemoval.generated, newestGenerated)
+  const separateOrderedSecond = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: orderedSecond.filing.id, action: 'standalone', fields: orderedSecond.filing.standaloneProposal }),
+  })
+  assert.equal(separateOrderedSecond.status, 200)
+  const afterBothRemovals = markdownFrontmatter(await fs.readFile(orderedTargetPath, 'utf8'))
+  assert.deepEqual(afterBothRemovals.tags, orderedBase.tags)
+  assert.deepEqual(afterBothRemovals.generated, orderedBase.generated)
+
+  let freshDaily
+  for (const zone of ['Pacific/Kiritimati', 'Pacific/Honolulu']) {
+    const candidate = await jsonRequest(`${baseUrl}/api/notes`, {
+      content: `daily: Temporary standalone entry for ${zone}.`,
+      timeZone: zone,
+    })
+    if (!candidate.appended) {
+      freshDaily = candidate
+      break
+    }
+    await fetch(`${baseUrl}/api/filing/confirm`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filingId: candidate.filing.id, action: 'accept', fields: candidate.filing.proposal }),
+    })
+  }
+  assert.ok(freshDaily, 'the extreme time zones must provide an unused daily date')
+  const separatedFreshDailyResponse = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: freshDaily.filing.id, action: 'standalone', fields: freshDaily.filing.standaloneProposal }),
+  })
+  const separatedFreshDaily = await separatedFreshDailyResponse.json()
+  assert.equal(separatedFreshDailyResponse.status, 200, JSON.stringify(separatedFreshDaily))
+  assert.equal(separatedFreshDaily.sourceRemoved, true)
+  await assert.rejects(fs.access(path.join(dataRoot, 'bundle', freshDaily.note.id.slice(1))))
+
+  const attributionCases = [
+    {
+      content: 'Attribution description',
+      fields: (filing) => ({ ...filing.proposal, description: 'Human description.' }),
+      generated: 'human:local', filing: 'okf-notetaker/llama3.2:3b',
+    },
+    {
+      content: 'Attribution title',
+      fields: (filing) => ({ ...filing.proposal, title: 'Human title' }),
+      generated: 'human:local', filing: 'human:local',
+    },
+    {
+      content: 'Attribution path',
+      fields: (filing) => ({ ...filing.proposal, directory: '/corrected', filename: 'path-only.md' }),
+      generated: 'okf-notetaker/llama3.2:3b', filing: 'human:local',
+    },
+  ]
+  for (const attribution of attributionCases) {
+    const captured = await jsonRequest(`${baseUrl}/api/notes`, { content: attribution.content, timeZone: 'America/New_York' })
+    const confirmed = await fetch(`${baseUrl}/api/filing/confirm`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filingId: captured.filing.id, action: 'accept', fields: attribution.fields(captured.filing) }),
+    })
+    const confirmedBody = await confirmed.json()
+    assert.equal(confirmed.status, 200, JSON.stringify(confirmedBody))
+    const filed = await fs.readFile(path.join(dataRoot, 'bundle', confirmedBody.newId.slice(1)), 'utf8')
+    assert.match(filed, new RegExp(`generated:\\n  by: ${attribution.generated}`))
+    assert.match(filed, new RegExp(`filing:\\n  by: ${attribution.filing}`))
+  }
+
+  const concurrentCapture = await jsonRequest(`${baseUrl}/api/notes`, { content: 'Concurrent confirmation capture', timeZone: 'America/New_York' })
+  const concurrentResponses = await Promise.all([0, 1].map(() => fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: concurrentCapture.filing.id, action: 'accept', fields: concurrentCapture.filing.proposal }),
+  }).then(async (result) => ({ status: result.status, body: await result.json() }))))
+  assert.deepEqual(concurrentResponses.map((result) => result.status), [200, 200])
+  assert.equal(concurrentResponses.filter((result) => result.body.idempotent).length, 1)
+
+  classificationOffline = true
+  const offline = await jsonRequest(`${baseUrl}/api/notes`, { content: 'Offline capture', timeZone: 'America/New_York' })
+  assert.equal(offline.filing.actor, 'process:folio-fallback')
+  assert.match(await fs.readFile(path.join(dataRoot, 'bundle', offline.note.id.slice(1)), 'utf8'), /filing:\n  by: process:folio-fallback/)
+
   const notesResponse = await fetch(`${baseUrl}/api/notes`)
   const notes = await notesResponse.json()
-  assert.equal(notes.length, 8)
+  assert.ok(notes.length >= 19)
 })

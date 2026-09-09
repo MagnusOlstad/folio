@@ -28,7 +28,7 @@ projects/website - Launch decision
 We agreed to publish the new site on Monday.
 ```
 
-Press Enter immediately if you want Folio to decide the title and path. Press `Cmd/Ctrl + Enter` or select **File note** when the capture is ready.
+Press `Cmd/Ctrl + Enter` or select **File note** when the capture is ready. Folio shows its filing proposal inside the note; press `Enter` to accept it, or adjust the path, filename, title, description, and tags first. Title and filename are independent. For an append proposal, select **File separately** to reveal a separate proposal instead.
 
 ## Drafts
 

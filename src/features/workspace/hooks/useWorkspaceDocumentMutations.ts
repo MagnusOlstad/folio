@@ -1,6 +1,8 @@
 import type { Dispatch, SetStateAction } from "react";
 import type {
   BundleFile,
+  Filing,
+  FilingConfirmResult,
   Note,
   NoteDetail,
   NoteUpdateResult,
@@ -14,6 +16,15 @@ import {
   toggleTaskAtLine,
 } from "../../../lib/workspace.ts";
 import type { WorkspaceDocumentState } from "./useWorkspaceDocumentState.ts";
+import {
+  filingEntry,
+  applyStandaloneFilingTabs,
+  advanceFilingQueue,
+  dismissFailedPreparation,
+  proposalFields,
+  rekeyFilingQueue,
+  type FilingFields,
+} from "../model/filing.ts";
 
 type UseWorkspaceDocumentMutationsOptions = {
   documents: WorkspaceDocumentState;
@@ -34,6 +45,148 @@ export function useWorkspaceDocumentMutations({
   clearDiscovery,
   replaceDiscoveryDocument,
 }: UseWorkspaceDocumentMutationsOptions) {
+  function updateFilingEntry(
+    documentId: string,
+    update: (entry: ReturnType<typeof filingEntry>) => ReturnType<typeof filingEntry>,
+  ) {
+    state.setFilingQueues((current) => {
+      const queue = current[documentId];
+      if (!queue?.length) return current;
+      return { ...current, [documentId]: [update(queue[0]), ...queue.slice(1)] };
+    });
+  }
+
+  function changeFilingFields(documentId: string, fields: FilingFields) {
+    updateFilingEntry(documentId, (entry) => ({ ...entry, fields }));
+  }
+
+  function revealStandaloneFiling(documentId: string) {
+    updateFilingEntry(documentId, (entry) => {
+      if (!entry.filing.standaloneProposal) return entry;
+      return {
+        ...entry,
+        standalone: true,
+        fields: proposalFields(entry.filing.standaloneProposal),
+        status: "ready",
+        error: null,
+      };
+    });
+  }
+
+  function submitFiling(
+    groupId: string,
+    documentId: string,
+    action: "accept" | "standalone",
+    fields: FilingFields,
+  ) {
+    const entry = state.filingQueues[documentId]?.[0];
+    if (!entry) return;
+    updateFilingEntry(documentId, (current) => ({ ...current, status: "submitting", error: null }));
+    void api<FilingConfirmResult>("/api/filing/confirm", {
+      method: "POST",
+      body: JSON.stringify({ id: entry.filing.id, action, fields }),
+    }).then(async (result) => {
+      const [detailResult, sourceDetailResult, filesResult] = await Promise.allSettled([
+        api<NoteDetail>(`/api/note?id=${encodeURIComponent(result.newId)}`),
+        action === "standalone" && !result.sourceRemoved
+          ? api<NoteDetail>(`/api/note?id=${encodeURIComponent(documentId)}`)
+          : Promise.resolve(null),
+        api<BundleFile[]>("/api/files"),
+      ]);
+      if (action === "standalone") {
+        const standalone: ViewerDocument = detailResult.status === "fulfilled"
+          ? { ...detailResult.value, deletable: true }
+          : {
+              ...result.note,
+              content: "",
+              deletable: true,
+              movable: true,
+              links: [],
+              backlinks: [],
+              suggestions: [],
+            };
+        state.setDocuments((current) => {
+          const next = { ...current, [result.newId]: standalone };
+          if (result.sourceRemoved) delete next[documentId];
+          else if (sourceDetailResult.status === "fulfilled" && sourceDetailResult.value)
+            next[documentId] = { ...sourceDetailResult.value, deletable: true };
+          return next;
+        });
+        setGroups((current) => applyStandaloneFilingTabs(
+          current,
+          groupId,
+          documentId,
+          result.newId,
+          Boolean(result.sourceRemoved),
+        ));
+        clearDiscovery();
+      } else if (detailResult.status === "fulfilled") {
+        applyUpdatedNote(detailResult.value, result.oldId);
+      } else {
+        const updated: ViewerDocument = {
+          ...result.note,
+          content: state.documentsRef.current[documentId]?.content ?? "",
+          deletable: true,
+          movable: true,
+          links: [],
+          backlinks: [],
+          suggestions: [],
+        };
+        state.setDocuments((current) => {
+          const next = { ...current, [result.newId]: updated };
+          if (result.oldId !== result.newId) delete next[result.oldId];
+          return next;
+        });
+        if (result.oldId !== result.newId) {
+          setGroups((current) => current.map((group) => ({
+            ...group,
+            tabs: group.tabs
+              .map((id) => (id === result.oldId ? result.newId : id))
+              .filter((id, index, tabs) => tabs.indexOf(id) === index),
+            activeId: group.activeId === result.oldId ? result.newId : group.activeId,
+          })));
+        }
+      }
+      setNotes(result.notes);
+      if (filesResult.status === "fulfilled") setFiles(filesResult.value);
+      state.setFilingQueues((current) =>
+        advanceFilingQueue(current, documentId, result.newId, action),
+      );
+      if (result.warning) setMessage(result.warning);
+    }).catch((error) => {
+      updateFilingEntry(documentId, (current) => ({
+        ...current,
+        status: "error",
+        error: error instanceof Error ? error.message : "Could not confirm filing.",
+      }));
+    });
+  }
+
+  function confirmFiling(groupId: string, documentId: string, action: "accept" | "standalone") {
+    const entry = state.filingQueues[documentId]?.[0];
+    if (!entry || entry.status === "preparing" || entry.status === "submitting") return;
+    if (entry.filing.id === documentId && isUntitledId(documentId)) {
+      const draft = state.documentsRef.current[documentId];
+      if (draft) fileDraft(draft);
+      return;
+    }
+    submitFiling(groupId, documentId, action, entry.fields);
+  }
+
+  function dismissFiling(groupId: string, documentId: string) {
+    const entry = state.filingQueues[documentId]?.[0];
+    if (!entry || entry.status === "preparing" || entry.status === "submitting") return;
+    if (entry.filing.id === documentId && isUntitledId(documentId)) {
+      if (entry.status === "error") {
+        state.setFilingQueues((current) => dismissFailedPreparation(current, documentId));
+        return;
+      }
+      const draft = state.documentsRef.current[documentId];
+      if (draft) fileDraft(draft);
+      return;
+    }
+    submitFiling(groupId, documentId, "accept", proposalFields(entry.filing.proposal));
+  }
   function applyUpdatedNote(updated: NoteDetail, oldId = updated.id) {
     const newId = updated.id;
     state.setDocuments((current) => {
@@ -164,6 +317,7 @@ export function useWorkspaceDocumentMutations({
             notes: Note[];
             warning: string | null;
             appended: boolean;
+            filing: Filing;
           }>("/api/notes", {
             method: "POST",
             body: JSON.stringify({
@@ -224,17 +378,11 @@ export function useWorkspaceDocumentMutations({
             filesResult.status === "rejected"
               ? "The workspace will fully refresh when the file is reopened."
               : "";
-          setMessage(
-            [
-              result.warning ||
-                (result.appended
-                  ? "Filed and appended to the existing concept."
-                  : "Filed as a new concept."),
-              refreshWarning,
-            ]
-              .filter(Boolean)
-              .join(" "),
+          const queueEntry = filingEntry(result.filing);
+          state.setFilingQueues((current) =>
+            rekeyFilingQueue(current, id, updated.id, queueEntry),
           );
+          if (refreshWarning) setMessage(refreshWarning);
           return;
         }
         const updated = await api<NoteUpdateResult>(
@@ -252,7 +400,14 @@ export function useWorkspaceDocumentMutations({
         if (updated.warning) setMessage(updated.warning);
       })
       .catch((error) => {
-        if (isUntitledId(id)) state.filingDraftIds.current.delete(id);
+        if (isUntitledId(id)) {
+          state.filingDraftIds.current.delete(id);
+          updateFilingEntry(id, (entry) => ({
+            ...entry,
+            status: "error",
+            error: error instanceof Error ? error.message : "Could not prepare filing.",
+          }));
+        }
         setMessage(error instanceof Error ? error.message : "Could not save note");
         if (propagateError) throw error;
       })
@@ -331,6 +486,23 @@ export function useWorkspaceDocumentMutations({
       return;
     state.filingDraftIds.current.add(document.id);
     state.setEditingKey(null);
+    state.setFilingQueues((current) => ({
+      ...current,
+      [document.id]: [{
+        filing: {
+          id: document.id,
+          draftId: document.id,
+          mode: "new",
+          destinationId: null,
+          actor: "agent",
+          proposal: { directory: "", filename: "", title: "", description: "", tags: [] },
+        },
+        fields: { directory: "", filename: "", title: "", description: "", tags: [] },
+        standalone: false,
+        status: "preparing",
+        error: null,
+      }],
+    }));
     persistDocument(document, content, []);
   }
 
@@ -350,6 +522,10 @@ export function useWorkspaceDocumentMutations({
     beginEditing,
     finishEditing,
     fileDraft,
+    changeFilingFields,
+    revealStandaloneFiling,
+    confirmFiling,
+    dismissFiling,
     toggleTaskCheckbox,
   };
 }

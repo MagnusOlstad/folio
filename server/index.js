@@ -60,6 +60,7 @@ let embeddingRefresh = null
 let reindexQueue = Promise.resolve()
 let markdownMutationQueue = Promise.resolve()
 let draftMutationQueue = Promise.resolve()
+let filingConfirmationQueue = Promise.resolve()
 const ollamaServiceToggles = new Map()
 const ollamaModelInstalls = new Map()
 const ollamaServices = {
@@ -341,6 +342,108 @@ function updatedGenerated(frontmatter, by, at) {
     ? frontmatter.generated
     : {}
   return { ...generated, by, at }
+}
+
+function captureMarker(captureId, edge) {
+  return `<!-- folio:capture:${captureId}:${edge} -->`
+}
+
+function captureContribution(captureId, content) {
+  return `${captureMarker(captureId, 'start')}\n${content.trim()}\n${captureMarker(captureId, 'end')}`
+}
+
+function captureMetadata(
+  previousTags,
+  previousGenerated,
+  appliedTags,
+  appliedGenerated,
+  captureTags,
+  createdAggregate = false,
+) {
+  return {
+    previous_tags: previousTags,
+    previous_generated: previousGenerated || null,
+    applied_tags: appliedTags,
+    applied_generated: appliedGenerated || null,
+    capture_tags: captureTags,
+    ...(createdAggregate ? { created_aggregate: true } : {}),
+  }
+}
+
+function restoreCaptureMetadata(frontmatter, source, allSources) {
+  const metadata = source?.capture_metadata
+  if (!metadata) return
+  const captures = (Array.isArray(allSources) ? allSources : [])
+    .filter((item) => item?.capture_metadata)
+  const remaining = captures.filter((item) => item !== source)
+  const firstMetadata = captures[0]?.capture_metadata
+  if (!firstMetadata) return
+  const currentTags = Array.isArray(frontmatter.tags) ? frontmatter.tags.map(normalizeTag).filter(Boolean) : []
+  const baseTags = Array.isArray(firstMetadata.previous_tags) ? firstMetadata.previous_tags : []
+  const captureTags = (item) => Array.isArray(item.capture_metadata.capture_tags)
+    ? item.capture_metadata.capture_tags
+    : []
+  const knownTags = new Set([...baseTags, ...captures.flatMap(captureTags)])
+  const humanTags = currentTags.filter((tag) => !knownTags.has(tag))
+  frontmatter.tags = Array.from(new Set([...baseTags, ...remaining.flatMap(captureTags), ...humanTags]))
+
+  const currentGenerated = frontmatter.generated || null
+  const knownGenerated = captures.map((item) => item.capture_metadata.applied_generated || null)
+  if (knownGenerated.some((generated) => JSON.stringify(generated) === JSON.stringify(currentGenerated))) {
+    const latest = remaining.at(-1)?.capture_metadata
+    const restored = latest ? latest.applied_generated : firstMetadata.previous_generated
+    if (restored) frontmatter.generated = restored
+    else delete frontmatter.generated
+  }
+
+  const createdAggregate = captures.some((item) => item.capture_metadata.created_aggregate)
+  let previousTags = Array.from(new Set([...baseTags, ...humanTags]))
+  let previousGenerated = firstMetadata.previous_generated || null
+  for (const [index, item] of remaining.entries()) {
+    const entry = item.capture_metadata
+    const appliedTags = Array.from(new Set([...previousTags, ...captureTags(item)]))
+    entry.previous_tags = previousTags
+    entry.previous_generated = previousGenerated
+    entry.applied_tags = appliedTags
+    if (createdAggregate && index === 0) entry.created_aggregate = true
+    else delete entry.created_aggregate
+    previousTags = appliedTags
+    previousGenerated = entry.applied_generated || null
+  }
+}
+
+function filingActor(classifiedByModel) {
+  return classifiedByModel ? `okf-notetaker/${classifierModel}` : 'process:folio-fallback'
+}
+
+function confirmationIdFor(rawId) {
+  return `confirmation:${crypto.createHash('sha256').update(rawId).digest('hex').slice(0, 24)}`
+}
+
+function safeConfirmationFilename(value) {
+  const name = String(value || '').trim()
+  if (!/^[a-z0-9][a-z0-9._-]{0,100}\.md$/i.test(name)) return null
+  if (name === 'index.md' || name === 'log.md' || name === 'todo-list.md') return null
+  return name
+}
+
+function normalizeConfirmationFields(value, fallback) {
+  const requestedDirectory = value?.directory ?? fallback.directory
+  const directory = normalizeMoveDirectory(requestedDirectory)
+    || (requestedDirectory === fallback.directory && requestedDirectory === '/daily' ? '/daily' : null)
+  const requestedFilename = value?.filename ?? fallback.filename
+  const filename = safeConfirmationFilename(requestedFilename)
+    || (requestedFilename === fallback.filename && ['todo-list.md'].includes(requestedFilename) ? requestedFilename : null)
+  const title = normalizeInlineText(value?.title ?? fallback.title).slice(0, 100)
+  const description = normalizeInlineText(value?.description ?? fallback.description).slice(0, 240)
+  const tags = Array.from(new Set((Array.isArray(value?.tags) ? value.tags : fallback.tags)
+    .map(normalizeTag).filter(Boolean))).slice(0, 12)
+  if (!directory || !filename || !title) return null
+  return { directory, filename, title, description, tags }
+}
+
+function destinationFor(id) {
+  return { id, directory: path.posix.dirname(id), filename: path.posix.basename(id) }
 }
 
 function resolveMarkdownLink(currentId, target) {
@@ -892,6 +995,8 @@ function stripGeneratedRelatedSection(content) {
 
 function indexedConceptContent(content) {
   return stripGeneratedRelatedSection(normalizeMarkdownBreaks(content))
+    .replace(/\n?<!-- folio:capture:confirmation:[a-f0-9]{24}:start -->[\s\S]*?<!-- folio:capture:confirmation:[a-f0-9]{24}:end -->\n?/g, (capture) => capture
+      .replace(/<!-- folio:capture:confirmation:[a-f0-9]{24}:(?:start|end) -->\n?/g, ''))
     .replace(/^# (?:Captured note|Summary)\s*\n+/i, '')
     .trim()
 }
@@ -2131,7 +2236,7 @@ async function recalculateGeneratedRelationships(records, documents) {
   }
 }
 
-function conceptDocument(classification, rawId, createdAt, relatedConcepts, content, classifiedByModel) {
+function conceptDocument(classification, rawId, createdAt, relatedConcepts, content, classifiedByModel, captureId) {
   const related = classification.relationships
     .map((relationship) => ({ ...relationship, concept: relatedConcepts.get(relationship.id) }))
     .filter((relationship) => relationship.concept)
@@ -2145,14 +2250,18 @@ function conceptDocument(classification, rawId, createdAt, relatedConcepts, cont
     description: classification.description,
     tags: classification.tags,
     status: 'draft',
-    generated: { by: classifiedByModel ? `okf-notetaker/${classifierModel}` : 'human:local', at: createdAt },
+    generated: { by: filingActor(classifiedByModel), at: createdAt },
+    filing: { by: filingActor(classifiedByModel), at: createdAt },
     sources: [{
       id: 'raw-capture',
       resource: rawId,
       title: 'Raw inbox capture',
       author: 'human:local',
+      capture_id: captureId,
+      filing_by: filingActor(classifiedByModel),
+      capture_content: content,
     }],
-  }, lines.join('\n'))
+  }, lines.join('\n').replace(content, captureContribution(captureId, content)))
 }
 
 async function findExactConceptFile(directory, title) {
@@ -2178,11 +2287,18 @@ async function findExactConceptFile(directory, title) {
   return null
 }
 
-async function availableConceptFilename(directory, title, dateKey = null, ignoredFilename = null) {
+async function availableConceptFilename(
+  directory,
+  title,
+  dateKey = null,
+  ignoredFilename = null,
+  reservedFilenames = new Set(),
+) {
   const slug = slugify(title)
   for (let collision = 1; ; collision += 1) {
     const filename = `${slug}${collision === 1 ? '' : `-${collision}`}${dateKey ? `-${dateKey}` : ''}.md`
     if (filename === ignoredFilename) return filename
+    if (reservedFilenames.has(filename)) continue
     try {
       await fs.access(path.join(directory, filename))
     } catch (error) {
@@ -2192,29 +2308,40 @@ async function availableConceptFilename(directory, title, dateKey = null, ignore
   }
 }
 
-async function appendConceptDocument({ filePath, classification, rawId, content, createdAt, generatedBy }) {
+async function appendConceptDocument({ filePath, classification, rawId, content, createdAt, captureId, filingBy }) {
   const parsed = parseMarkdownFile(await fs.readFile(filePath, 'utf8'), filePath)
   const existingContent = stripGeneratedRelatedSection(parsed.content).trim()
   const nextCapture = content.trim()
-  const combinedContent = indexedConceptContent(parsed.content) === nextCapture
+  const combinedContent = parsed.content.includes(captureMarker(captureId, 'start'))
     ? existingContent
-    : `${existingContent}\n\n---\n\n${nextCapture}`.trim()
+    : `${existingContent}\n\n---\n\n${captureContribution(captureId, nextCapture)}`.trim()
   const sources = Array.isArray(parsed.frontmatter.sources) ? [...parsed.frontmatter.sources] : []
   sources.push({
     id: `raw-capture-${sources.length + 1}`,
     resource: rawId,
     title: 'Raw inbox capture',
     author: 'human:local',
+    capture_id: captureId,
+    filing_by: filingBy,
+    capture_content: content,
   })
   const tags = Array.from(new Set([
     ...parsed.tags.map(normalizeTag),
     ...classification.tags,
   ].filter(Boolean)))
+  const generated = updatedGenerated(parsed.frontmatter, filingBy, createdAt)
+  sources[sources.length - 1].capture_metadata = captureMetadata(
+    parsed.tags,
+    parsed.frontmatter.generated,
+    tags,
+    generated,
+    classification.tags,
+  )
   await fs.writeFile(filePath, markdownDocument({
     ...parsed.frontmatter,
     tags,
     sources,
-    generated: updatedGenerated(parsed.frontmatter, generatedBy, createdAt),
+    generated,
   }, combinedContent))
 }
 
@@ -2228,7 +2355,7 @@ function localTimeLabel(value, timeZone, includeDate = false) {
   }).format(value).replace(',', '')
 }
 
-async function appendAggregateDocument({ filePath, id, kind, rawId, content, createdAt, timeZone, classifiedByModel }) {
+async function appendAggregateDocument({ filePath, id, kind, rawId, content, createdAt, timeZone, classifiedByModel, captureId }) {
   let parsed = null
   try {
     parsed = parseMarkdownFile(await fs.readFile(filePath, 'utf8'), filePath)
@@ -2243,13 +2370,16 @@ async function appendAggregateDocument({ filePath, id, kind, rawId, content, cre
   const description = isDaily ? `Daily notes captured on ${dateKey}.` : 'Master list of captured todos.'
   const sectionTitle = localTimeLabel(new Date(createdAt), timeZone, !isDaily)
   const existingContent = parsed?.content.trim() || `# ${title}`
-  const aggregateContent = `${existingContent}\n\n## ${sectionTitle}\n\n${aggregateEntryContent(content, kind)}`
+  const aggregateContent = `${existingContent}\n\n${captureMarker(captureId, 'start')}\n## ${sectionTitle}\n\n${aggregateEntryContent(content, kind)}\n${captureMarker(captureId, 'end')}`
   const sources = Array.isArray(parsed?.frontmatter.sources) ? [...parsed.frontmatter.sources] : []
   sources.push({
     id: `raw-capture-${sources.length + 1}`,
     resource: rawId,
     title: 'Raw inbox capture',
     author: 'human:local',
+    capture_id: captureId,
+    filing_by: filingActor(classifiedByModel),
+    capture_content: content,
   })
 
   const frontmatter = {
@@ -2259,12 +2389,20 @@ async function appendAggregateDocument({ filePath, id, kind, rawId, content, cre
     description,
     tags: isDaily ? ['daily'] : ['todo'],
     status: parsed?.frontmatter.status || 'draft',
-    generated: {
-      by: classifiedByModel ? `okf-notetaker/${classifierModel}` : 'human:local',
-      at: createdAt,
-    },
+    generated: parsed
+      ? updatedGenerated(parsed.frontmatter, filingActor(classifiedByModel), createdAt)
+      : { by: filingActor(classifiedByModel), at: createdAt },
+    ...(parsed ? {} : { filing: { by: filingActor(classifiedByModel), at: createdAt } }),
     sources,
   }
+  sources[sources.length - 1].capture_metadata = captureMetadata(
+    parsed?.tags || [],
+    parsed?.frontmatter.generated,
+    frontmatter.tags,
+    frontmatter.generated,
+    frontmatter.tags,
+    !parsed,
+  )
   await fs.mkdir(path.dirname(filePath), { recursive: true })
   await fs.writeFile(filePath, markdownDocument(frontmatter, aggregateContent))
   return { id, appended: Boolean(parsed) }
@@ -2889,6 +3027,7 @@ app.post('/api/notes', async (request, response, next) => {
             notes: [existingNote],
             warning: null,
             appended: Boolean(archivedDraft.appended),
+            filing: archivedDraft.filing || archivedDraft.confirmation || null,
           })
         }
       }
@@ -2906,6 +3045,7 @@ app.post('/api/notes', async (request, response, next) => {
     const rawTitle = normalizeInlineText(content.split('\n').find((line) => line.trim())?.replace(/^#+\s*/, '') || 'Untitled note').slice(0, 100)
     const rawFile = `${stamp}-${slugify(rawTitle)}-${suffix}.md`
     const rawId = `/references/inbox/${rawFile}`
+    const confirmationId = confirmationIdFor(rawId)
     await queueMarkdownMutation(() => (
       fs.writeFile(path.join(rawRoot, rawFile), rawDocument(rawTitle, content, createdAt), { flag: 'wx' })
     ))
@@ -2935,6 +3075,7 @@ app.post('/api/notes', async (request, response, next) => {
     }
 
     const classification = normalizeClassification(result, content, records)
+    const captureActor = filingActor(classifiedByModel)
     let noteEmbedding = null
     if (classification.kind === 'note') {
       try {
@@ -2961,6 +3102,7 @@ app.post('/api/notes', async (request, response, next) => {
         createdAt,
         timeZone,
         classifiedByModel,
+        captureId: confirmationId,
       }))
       appended = aggregate.appended
     } else {
@@ -2981,7 +3123,8 @@ app.post('/api/notes', async (request, response, next) => {
             rawId,
             content: conceptContent,
             createdAt,
-            generatedBy: classifiedByModel ? `okf-notetaker/${classifierModel}` : 'human:local',
+            captureId: confirmationId,
+            filingBy: captureActor,
           })
           appended = true
           return
@@ -2990,7 +3133,7 @@ app.post('/api/notes', async (request, response, next) => {
         classification.id = `/${folder}/${filename}`
         await fs.writeFile(
           path.join(targetFolder, filename),
-          conceptDocument(classification, rawId, createdAt, relatedConcepts, conceptContent, classifiedByModel),
+          conceptDocument(classification, rawId, createdAt, relatedConcepts, conceptContent, classifiedByModel, confirmationId),
           { flag: 'wx' },
         )
       })
@@ -3031,6 +3174,61 @@ app.post('/api/notes', async (request, response, next) => {
     }
     if (warning) void refreshMissingEmbeddingsInBackground()
     const createdNote = publicRecord(createdRecord)
+    const mode = classification.kind === 'todo' || classification.kind === 'daily'
+      ? classification.kind
+      : appended ? 'existing' : 'new'
+    const proposal = {
+      directory: path.posix.dirname(createdNote.id),
+      filename: path.posix.basename(createdNote.id),
+      title: createdRecord.title,
+      description: createdRecord.description,
+      tags: createdRecord.tags,
+    }
+    const standaloneDirectory = `/${classification.path.join('/')}`
+    const pendingStandaloneFilenames = new Set()
+    const { documents: filingDocuments } = await readBundleDocuments()
+    for (const document of filingDocuments) {
+      for (const source of Array.isArray(document.parsed.frontmatter.sources)
+        ? document.parsed.frontmatter.sources
+        : []) {
+        const pending = source?.confirmation
+        if (!pending?.finalId && pending?.standaloneProposal?.directory === standaloneDirectory)
+          pendingStandaloneFilenames.add(pending.standaloneProposal.filename)
+      }
+    }
+    const standaloneFilename = await availableConceptFilename(
+      path.join(bundleRoot, classification.path.join('/')),
+      classification.title,
+      createdAt.slice(0, 10),
+      null,
+      pendingStandaloneFilenames,
+    )
+    const standaloneProposal = {
+      directory: standaloneDirectory,
+      filename: standaloneFilename,
+      title: classification.title,
+      description: classification.description,
+      tags: classification.tags,
+      type: classification.type,
+    }
+    const confirmation = {
+      id: confirmationId,
+      draftId: sourceDraftId,
+      mode,
+      destinationId: createdNote.id,
+      destination: destinationFor(createdNote.id),
+      actor: captureActor,
+      proposal,
+      ...(appended || classification.kind !== 'note' ? { standaloneProposal } : {}),
+    }
+    await queueMarkdownMutation(async () => {
+      const targetPath = resolveBundleMarkdownPath(createdNote.id)
+      if (!targetPath) return
+      const parsed = parseMarkdownFile(await fs.readFile(targetPath, 'utf8'), targetPath)
+      parsed.frontmatter.sources = (Array.isArray(parsed.frontmatter.sources) ? parsed.frontmatter.sources : [])
+        .map((source) => source?.capture_id === confirmationId ? { ...source, confirmation } : source)
+      await fs.writeFile(targetPath, markdownDocument(parsed.frontmatter, parsed.content))
+    })
     if (sourceDraftId) {
       await queueDraftMutation(async () => {
         const existingDraft = await readDraft(sourceDraftId)
@@ -3043,12 +3241,189 @@ app.post('/api/notes', async (request, response, next) => {
           filedId: createdNote.id,
           filedAt: archivedAt,
           appended,
+          filing: confirmation,
         })
       })
     }
-    response.status(201).json({ note: createdNote, notes: [createdNote], warning, appended })
+    response.status(201).json({ note: createdNote, notes: [createdNote], warning, appended, filing: confirmation })
   } catch (error) {
     next(error)
+  }
+})
+
+app.post(['/api/filing/confirm', '/api/notes/confirm'], async (request, response, next) => {
+  let releaseFilingConfirmation
+  const previousFilingConfirmation = filingConfirmationQueue
+  filingConfirmationQueue = new Promise((resolve) => { releaseFilingConfirmation = resolve })
+  await previousFilingConfirmation
+  try {
+    const confirmationId = String(request.body?.filingId || request.body?.confirmationId || request.body?.id || '').trim()
+    if (!/^confirmation:[a-f0-9]{24}$/.test(confirmationId)) {
+      return response.status(400).json({ error: 'Invalid confirmation ID.' })
+    }
+    const action = String(request.body?.action || request.body?.decision || 'accept').trim()
+    if (!['accept', 'standalone'].includes(action)) return response.status(400).json({ error: 'Choose accept or standalone.' })
+
+    let receipt = null
+    for (const filePath of await listBundleMarkdownFiles()) {
+      const parsed = parseMarkdownFile(await fs.readFile(filePath, 'utf8'), filePath)
+      const source = (Array.isArray(parsed.frontmatter.sources) ? parsed.frontmatter.sources : [])
+        .find((item) => item?.capture_id === confirmationId)
+      if (source?.confirmation) {
+        receipt = { filePath, id: bundleFileId(filePath), parsed, source, confirmation: source.confirmation }
+        break
+      }
+    }
+    if (!receipt) return response.status(404).json({ error: 'Filing confirmation not found.' })
+    if (receipt.confirmation.finalId) {
+      const record = (await readRecords()).find((item) => item.id === receipt.confirmation.finalId)
+      if (record) {
+        const note = publicRecord(record)
+        let sourceRemoved = Boolean(receipt.confirmation.sourceRemoved)
+        const originalPath = resolveBundleMarkdownPath(receipt.confirmation.destinationId)
+        if (!sourceRemoved && originalPath && receipt.confirmation.destinationId !== receipt.id) {
+          try {
+            await fs.access(originalPath)
+          } catch (error) {
+            if (error.code === 'ENOENT') sourceRemoved = true
+            else throw error
+          }
+        }
+        return response.json({ note, notes: (await readRecords()).map(publicRecord), warning: null, oldId: receipt.id, newId: record.id, appended: receipt.confirmation.mode !== 'new', sourceRemoved, filing: receipt.confirmation, idempotent: true })
+      }
+    }
+
+    if (action === 'standalone' && !receipt.confirmation.standaloneProposal) {
+      return response.status(400).json({ error: 'This filing cannot be made standalone.' })
+    }
+    const baseline = action === 'standalone'
+      ? receipt.confirmation.standaloneProposal
+      : receipt.confirmation.proposal
+    const finalFields = normalizeConfirmationFields(request.body?.fields || request.body?.final || request.body, baseline)
+    if (!finalFields) return response.status(400).json({ error: 'Directory, filename, and title must be valid.' })
+    const finalId = finalFields.directory === '/'
+      ? `/${finalFields.filename}`
+      : `${finalFields.directory}/${finalFields.filename}`
+    if (!isMovableConceptId(finalId) && finalId !== receipt.id) return response.status(400).json({ error: 'That destination is reserved.' })
+    const finalPath = resolveBundleMarkdownPath(finalId)
+    if (!finalPath) return response.status(400).json({ error: 'Invalid destination.' })
+    if (action === 'standalone' && finalId === receipt.id) {
+      return response.status(400).json({ error: 'A standalone filing needs a new destination.' })
+    }
+    try {
+      await fs.access(finalPath)
+      if (finalId !== receipt.id) return response.status(409).json({ error: 'A note already uses that filename.' })
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
+
+    const proposal = baseline
+    const pathOrFilenameChanged = finalFields.directory !== proposal.directory || finalFields.filename !== proposal.filename
+    const titleChanged = finalFields.title !== proposal.title
+    const descriptionChanged = finalFields.description !== proposal.description
+    const tagsChanged = JSON.stringify(finalFields.tags) !== JSON.stringify(proposal.tags)
+    const humanGenerated = titleChanged || descriptionChanged || tagsChanged
+    const humanFiling = action === 'standalone' || pathOrFilenameChanged || titleChanged || tagsChanged
+    const confirmedAt = new Date().toISOString()
+    const existingActor = receipt.confirmation.actor || receipt.source.filing_by || 'process:folio-fallback'
+    let targetId = finalId
+    let sourceRemoved = false
+
+    await queueMarkdownMutation(async () => {
+      if (action === 'standalone') {
+        await fs.mkdir(path.dirname(finalPath), { recursive: true })
+        const classification = {
+          type: normalizeInlineText(baseline.type || receipt.parsed.type),
+          title: finalFields.title,
+          description: finalFields.description,
+          tags: finalFields.tags,
+          relationships: [],
+        }
+        const standaloneSource = {
+          ...receipt.source,
+          confirmation: { ...receipt.confirmation, finalId, finalFields, confirmedAt },
+        }
+        const standalone = markdownDocument({
+          type: classification.type,
+          title: finalFields.title,
+          description: finalFields.description,
+          tags: finalFields.tags,
+          status: 'draft',
+          generated: { by: humanGenerated ? 'human:local' : existingActor, at: confirmedAt },
+          filing: { by: 'human:local', at: confirmedAt },
+          sources: [standaloneSource],
+        }, `# Captured note\n\n${captureContribution(confirmationId, String(receipt.source.capture_content || ''))}`)
+        await fs.writeFile(finalPath, standalone, { flag: 'wx' })
+        try {
+          const marker = new RegExp(`\\n*${captureMarker(confirmationId, 'start').replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}[\\s\\S]*?${captureMarker(confirmationId, 'end').replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\n*`, 'g')
+          restoreCaptureMetadata(
+            receipt.parsed.frontmatter,
+            receipt.source,
+            receipt.parsed.frontmatter.sources,
+          )
+          receipt.parsed.frontmatter.sources = receipt.parsed.frontmatter.sources.filter((item) => item?.capture_id !== confirmationId)
+          const remaining = receipt.parsed.content.replace(marker, '\n').trim()
+          const remainingCaptures = receipt.parsed.frontmatter.sources.filter((item) => String(item?.id || '').startsWith('raw-capture'))
+          if (receipt.source.capture_metadata?.created_aggregate && !remainingCaptures.length
+            && /^# (?:Todo List|Daily \d{4}-\d{2}-\d{2})$/.test(remaining)) {
+            await fs.unlink(receipt.filePath)
+            await removeEmptyBundleDirectories(path.dirname(receipt.filePath))
+            sourceRemoved = true
+          } else {
+            await fs.writeFile(receipt.filePath, markdownDocument(receipt.parsed.frontmatter, remaining || '# Captured note'))
+          }
+        } catch (error) {
+          await fs.unlink(finalPath).catch(() => {})
+          throw error
+        }
+        return
+      }
+
+      const current = parseMarkdownFile(await fs.readFile(receipt.filePath, 'utf8'), receipt.filePath)
+      current.frontmatter.title = finalFields.title
+      current.frontmatter.description = finalFields.description
+      current.frontmatter.tags = finalFields.tags
+      if (humanGenerated) current.frontmatter.generated = updatedGenerated(current.frontmatter, 'human:local', confirmedAt)
+      if (humanFiling) current.frontmatter.filing = { ...(current.frontmatter.filing || {}), by: 'human:local', at: confirmedAt }
+      current.frontmatter.sources = current.frontmatter.sources.map((item) => item?.capture_id === confirmationId
+        ? { ...item, confirmation: { ...receipt.confirmation, finalId, finalFields, confirmedAt } }
+        : item)
+      if (pathOrFilenameChanged) {
+        const transaction = await moveConceptMarkdown(receipt.id, finalFields.directory, confirmedAt, { filename: finalFields.filename })
+        try {
+          const movedPath = resolveBundleMarkdownPath(transaction.newId)
+          const moved = parseMarkdownFile(await fs.readFile(movedPath, 'utf8'), movedPath)
+          moved.frontmatter.title = finalFields.title
+          moved.frontmatter.description = finalFields.description
+          moved.frontmatter.tags = finalFields.tags
+          if (humanGenerated) moved.frontmatter.generated = updatedGenerated(moved.frontmatter, 'human:local', confirmedAt)
+          moved.frontmatter.sources = moved.frontmatter.sources.map((item) => item?.capture_id === confirmationId
+            ? { ...item, confirmation: { ...receipt.confirmation, finalId, finalFields, confirmedAt } }
+            : item)
+          await fs.writeFile(movedPath, markdownDocument(moved.frontmatter, moved.content))
+        } catch (error) {
+          await transaction.rollback()
+          throw error
+        }
+      } else {
+        await fs.writeFile(receipt.filePath, markdownDocument(current.frontmatter, current.content))
+      }
+    })
+
+    const reindexed = await reindexBundle()
+    const record = reindexed.records.find((item) => item.id === targetId)
+    if (!record) throw new Error('The confirmed filing could not be indexed.')
+    const confirmation = { ...receipt.confirmation, finalId: targetId, finalFields, confirmedAt, sourceRemoved }
+    if (confirmation.draftId) await queueDraftMutation(async () => {
+      const draft = await readDraft(confirmation.draftId)
+      if (draft) await writeDraft({ ...draft, filedId: targetId, filing: confirmation, confirmation, updatedAt: confirmedAt })
+    })
+    const note = publicRecord(record)
+    response.json({ note, notes: reindexed.records.map(publicRecord), warning: null, oldId: receipt.id, newId: targetId, appended: receipt.confirmation.mode !== 'new', sourceRemoved, filing: confirmation, idempotent: false })
+  } catch (error) {
+    next(error)
+  } finally {
+    releaseFilingConfirmation()
   }
 })
 

@@ -82,11 +82,15 @@ describe("file tree behavior", () => {
   ];
 
   it("builds alphabetized directories and title/date-sorted files, and expands all ancestors", () => {
-    const tree = buildFileTree(files);
+    const tree = buildFileTree([
+      ...files,
+      file("/references/inbox/raw.md", "Raw capture", "2026-03-01", false),
+    ]);
     expect(tree.directories.map((directory) => directory.name)).toEqual([
       "alpha",
       "zeta",
     ]);
+    expect(tree.directories.some((directory) => directory.name === "references")).toBe(false);
     expect(tree.directories[1].files.map((entry) => entry.id)).toEqual([
       "/zeta/early.md",
       "/zeta/late.md",
