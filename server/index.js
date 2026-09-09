@@ -2240,7 +2240,7 @@ function conceptDocument(classification, rawId, createdAt, relatedConcepts, cont
   const related = classification.relationships
     .map((relationship) => ({ ...relationship, concept: relatedConcepts.get(relationship.id) }))
     .filter((relationship) => relationship.concept)
-  const lines = ['# Captured note', '', content]
+  const lines = ['# Captured note', '', captureContribution(captureId, content)]
 
   const generated = generatedRelatedSection(related, relatedConcepts)
   if (generated) lines.push('', generated)
@@ -2261,7 +2261,7 @@ function conceptDocument(classification, rawId, createdAt, relatedConcepts, cont
       filing_by: filingActor(classifiedByModel),
       capture_content: content,
     }],
-  }, lines.join('\n').replace(content, captureContribution(captureId, content)))
+  }, lines.join('\n'))
 }
 
 async function findExactConceptFile(directory, title) {
@@ -3289,7 +3289,7 @@ app.post(['/api/filing/confirm', '/api/notes/confirm'], async (request, response
             else throw error
           }
         }
-        return response.json({ note, notes: (await readRecords()).map(publicRecord), warning: null, oldId: receipt.id, newId: record.id, appended: receipt.confirmation.mode !== 'new', sourceRemoved, filing: receipt.confirmation, idempotent: true })
+        return response.json({ note, notes: (await readRecords()).map(publicRecord), warning: null, oldId: receipt.confirmation.oldId || receipt.confirmation.destinationId || receipt.id, newId: record.id, appended: receipt.confirmation.mode !== 'new', sourceRemoved, filing: receipt.confirmation, idempotent: true })
       }
     }
 
@@ -3319,6 +3319,10 @@ app.post(['/api/filing/confirm', '/api/notes/confirm'], async (request, response
 
     const proposal = baseline
     const pathOrFilenameChanged = finalFields.directory !== proposal.directory || finalFields.filename !== proposal.filename
+    // A prior confirmation may already have moved this shared destination. The
+    // receipt identifies the file's current path, independently of this
+    // confirmation's original proposal.
+    const shouldMove = finalId !== receipt.id
     const titleChanged = finalFields.title !== proposal.title
     const descriptionChanged = finalFields.description !== proposal.description
     const tagsChanged = JSON.stringify(finalFields.tags) !== JSON.stringify(proposal.tags)
@@ -3328,6 +3332,7 @@ app.post(['/api/filing/confirm', '/api/notes/confirm'], async (request, response
     const existingActor = receipt.confirmation.actor || receipt.source.filing_by || 'process:folio-fallback'
     let targetId = finalId
     let sourceRemoved = false
+    const completion = { finalId, finalFields, confirmedAt, oldId: receipt.id }
 
     await queueMarkdownMutation(async () => {
       if (action === 'standalone') {
@@ -3341,7 +3346,7 @@ app.post(['/api/filing/confirm', '/api/notes/confirm'], async (request, response
         }
         const standaloneSource = {
           ...receipt.source,
-          confirmation: { ...receipt.confirmation, finalId, finalFields, confirmedAt },
+          confirmation: { ...receipt.confirmation, ...completion },
         }
         const standalone = markdownDocument({
           type: classification.type,
@@ -3386,10 +3391,23 @@ app.post(['/api/filing/confirm', '/api/notes/confirm'], async (request, response
       if (humanGenerated) current.frontmatter.generated = updatedGenerated(current.frontmatter, 'human:local', confirmedAt)
       if (humanFiling) current.frontmatter.filing = { ...(current.frontmatter.filing || {}), by: 'human:local', at: confirmedAt }
       current.frontmatter.sources = current.frontmatter.sources.map((item) => item?.capture_id === confirmationId
-        ? { ...item, confirmation: { ...receipt.confirmation, finalId, finalFields, confirmedAt } }
+        ? { ...item, confirmation: { ...receipt.confirmation, ...completion } }
         : item)
-      if (pathOrFilenameChanged) {
-        const transaction = await moveConceptMarkdown(receipt.id, finalFields.directory, confirmedAt, { filename: finalFields.filename })
+      if (shouldMove) {
+        const existingFiling = current.frontmatter.filing && typeof current.frontmatter.filing === 'object' && !Array.isArray(current.frontmatter.filing)
+          ? current.frontmatter.filing
+          : { by: existingActor, at: receipt.parsed.generatedAt || confirmedAt }
+        const moveFrontmatter = humanFiling ? null : {
+          filing: {
+            ...existingFiling,
+            previous_path: receipt.id,
+            previous_paths: Array.from(new Set([...filingPreviousPaths(current), receipt.id])),
+          },
+        }
+        const transaction = await moveConceptMarkdown(receipt.id, finalFields.directory, confirmedAt, {
+          filename: finalFields.filename,
+          ...(moveFrontmatter ? { frontmatter: moveFrontmatter } : {}),
+        })
         try {
           const movedPath = resolveBundleMarkdownPath(transaction.newId)
           const moved = parseMarkdownFile(await fs.readFile(movedPath, 'utf8'), movedPath)
@@ -3398,7 +3416,7 @@ app.post(['/api/filing/confirm', '/api/notes/confirm'], async (request, response
           moved.frontmatter.tags = finalFields.tags
           if (humanGenerated) moved.frontmatter.generated = updatedGenerated(moved.frontmatter, 'human:local', confirmedAt)
           moved.frontmatter.sources = moved.frontmatter.sources.map((item) => item?.capture_id === confirmationId
-            ? { ...item, confirmation: { ...receipt.confirmation, finalId, finalFields, confirmedAt } }
+            ? { ...item, confirmation: { ...receipt.confirmation, ...completion } }
             : item)
           await fs.writeFile(movedPath, markdownDocument(moved.frontmatter, moved.content))
         } catch (error) {
@@ -3411,15 +3429,30 @@ app.post(['/api/filing/confirm', '/api/notes/confirm'], async (request, response
     })
 
     const reindexed = await reindexBundle()
-    const record = reindexed.records.find((item) => item.id === targetId)
+    let record = reindexed.records.find((item) => item.id === targetId)
     if (!record) throw new Error('The confirmed filing could not be indexed.')
-    const confirmation = { ...receipt.confirmation, finalId: targetId, finalFields, confirmedAt, sourceRemoved }
+    let currentRecords = reindexed.records
+    let embeddingWarning = null
+    try {
+      const embeddingErrors = await refreshRecordEmbeddings([record])
+      if (embeddingErrors.length) throw new Error(embeddingErrors[0].error)
+      record.embeddingModel = embedModel
+      record.embeddingSchemaVersion = embeddingSchemaVersion
+      record.embeddingInputHash = embeddingInputHash(record)
+      currentRecords = await persistEmbeddingUpdates([record])
+      record = currentRecords.find((item) => item.id === targetId)
+      if (!record) throw new Error('The confirmed filing could not be indexed.')
+    } catch {
+      embeddingWarning = 'The filing was confirmed, but its semantic index could not be refreshed.'
+    }
+    const confirmation = { ...receipt.confirmation, ...completion, sourceRemoved }
     if (confirmation.draftId) await queueDraftMutation(async () => {
       const draft = await readDraft(confirmation.draftId)
       if (draft) await writeDraft({ ...draft, filedId: targetId, filing: confirmation, confirmation, updatedAt: confirmedAt })
     })
     const note = publicRecord(record)
-    response.json({ note, notes: reindexed.records.map(publicRecord), warning: null, oldId: receipt.id, newId: targetId, appended: receipt.confirmation.mode !== 'new', sourceRemoved, filing: confirmation, idempotent: false })
+    if (embeddingWarning) void refreshMissingEmbeddingsInBackground()
+    response.json({ note, notes: currentRecords.map(publicRecord), warning: embeddingWarning, oldId: receipt.id, newId: targetId, appended: receipt.confirmation.mode !== 'new', sourceRemoved, filing: confirmation, idempotent: false })
   } catch (error) {
     next(error)
   } finally {

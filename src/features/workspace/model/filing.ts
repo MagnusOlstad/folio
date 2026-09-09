@@ -69,6 +69,16 @@ export function dismissFailedPreparation(
   return next;
 }
 
+export function finishDraftFiling(
+  queues: Record<string, FilingQueueEntry[]>,
+  draftId: string,
+  filedId: string,
+  filing: Filing | null | undefined,
+) {
+  if (!filing) return dismissFailedPreparation(queues, draftId);
+  return rekeyFilingQueue(queues, draftId, filedId, filingEntry(filing));
+}
+
 export function filingOwnerGroupIds(
   groups: TabGroup[],
   activeGroupId: string,

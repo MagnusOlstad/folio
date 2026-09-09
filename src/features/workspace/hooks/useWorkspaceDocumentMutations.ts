@@ -21,8 +21,8 @@ import {
   applyStandaloneFilingTabs,
   advanceFilingQueue,
   dismissFailedPreparation,
+  finishDraftFiling,
   proposalFields,
-  rekeyFilingQueue,
   type FilingFields,
 } from "../model/filing.ts";
 
@@ -34,6 +34,15 @@ type UseWorkspaceDocumentMutationsOptions = {
   setMessage: (message: string) => void;
   clearDiscovery: () => void;
   replaceDiscoveryDocument: (oldId: string, updated: NoteDetail) => void;
+};
+
+type FiledDraftResult = {
+  note: Note;
+  notes: Note[];
+  warning: string | null;
+  appended: boolean;
+  // Older archived drafts were filed before confirmation metadata existed.
+  filing?: Filing | null;
 };
 
 export function useWorkspaceDocumentMutations({
@@ -312,13 +321,7 @@ export function useWorkspaceDocumentMutations({
           await (
             state.draftSyncQueues.current[id] || Promise.resolve()
           ).catch(() => undefined);
-          const result = await api<{
-            note: Note;
-            notes: Note[];
-            warning: string | null;
-            appended: boolean;
-            filing: Filing;
-          }>("/api/notes", {
+          const result = await api<FiledDraftResult>("/api/notes", {
             method: "POST",
             body: JSON.stringify({
               content: nextContent,
@@ -378,9 +381,8 @@ export function useWorkspaceDocumentMutations({
             filesResult.status === "rejected"
               ? "The workspace will fully refresh when the file is reopened."
               : "";
-          const queueEntry = filingEntry(result.filing);
           state.setFilingQueues((current) =>
-            rekeyFilingQueue(current, id, updated.id, queueEntry),
+            finishDraftFiling(current, id, updated.id, result.filing),
           );
           if (refreshWarning) setMessage(refreshWarning);
           return;

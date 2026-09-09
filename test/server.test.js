@@ -116,14 +116,16 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
                 ? { kind: 'note', path: ['attribution'], title: 'Attribution Title', type: 'Note', description: 'Agent title.', tags: ['agent'] }
                 : note.includes('Attribution path')
                   ? { kind: 'note', path: ['attribution'], title: 'Attribution Path', type: 'Note', description: 'Agent path.', tags: ['agent'] }
-            : {
-                kind: 'note',
-                path: ['meeting-notes', 'morning-meeting'],
-                title: 'Morning<br>launch meeting',
-                type: 'Meeting Note',
-                description: 'The morning meeting covered the launch<br />and its follow-up.',
-                tags: ['launch', 'morning'],
-              }
+                  : note.includes('Marker collision capture')
+                    ? { kind: 'note', path: ['marker-tests'], title: 'Captured note', type: 'Note', description: 'Marker placement regression.', tags: [] }
+                    : {
+                        kind: 'note',
+                        path: ['meeting-notes', 'morning-meeting'],
+                        title: 'Morning<br>launch meeting',
+                        type: 'Meeting Note',
+                        description: 'The morning meeting covered the launch<br />and its follow-up.',
+                        tags: ['launch', 'morning'],
+                      }
       response.end(JSON.stringify({
         message: {
           content: JSON.stringify({ concept }),
@@ -819,7 +821,58 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const movedSemanticBody = await movedSemantic.json()
   assert.equal(movedSemantic.status, 200, JSON.stringify(movedSemanticBody))
   assert.equal(movedSemanticBody.newId, '/ideas/semantic-renamed.md')
+  assert.equal(movedSemanticBody.oldId, semantic.note.id)
   assert.match(await fs.readFile(path.join(dataRoot, 'bundle', 'linked.md'), 'utf8'), /\]\(\/ideas\/semantic-renamed\.md\)/)
+  const movedSemanticIndex = JSON.parse(await fs.readFile(path.join(dataRoot, 'search-index.json'), 'utf8'))
+  const movedSemanticRecord = movedSemanticIndex.find((record) => record.id === movedSemanticBody.newId)
+  assert.ok(movedSemanticRecord.embedding)
+  assert.ok(movedSemanticRecord.chunks.length)
+  assert.ok(movedSemanticRecord.chunks.every((chunk) => chunk.embedding))
+  const retriedMovedSemantic = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: semantic.filing.id, action: 'accept', fields: semantic.filing.proposal }),
+  })
+  const retriedMovedSemanticBody = await retriedMovedSemantic.json()
+  assert.equal(retriedMovedSemantic.status, 200, JSON.stringify(retriedMovedSemanticBody))
+  assert.equal(retriedMovedSemanticBody.idempotent, true)
+  assert.equal(retriedMovedSemanticBody.oldId, semantic.note.id)
+
+  const [queuedMoveFirst, queuedMoveSecond] = await Promise.all([
+    jsonRequest(`${baseUrl}/api/notes`, { content: 'Project Aurora details\nFirst queued move.', timeZone: 'America/New_York' }),
+    jsonRequest(`${baseUrl}/api/notes`, { content: 'Project Aurora details\nSecond queued move.', timeZone: 'America/New_York' }),
+  ])
+  assert.equal(queuedMoveFirst.note.id, auroraId)
+  assert.equal(queuedMoveSecond.note.id, auroraId)
+  const queuedMoveDestination = { ...queuedMoveFirst.filing.proposal, directory: '/projects', filename: 'aurora-queued-move.md' }
+  const queuedFirstConfirmation = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: queuedMoveFirst.filing.id, action: 'accept', fields: queuedMoveDestination }),
+  })
+  const queuedFirstConfirmationBody = await queuedFirstConfirmation.json()
+  assert.equal(queuedFirstConfirmation.status, 200, JSON.stringify(queuedFirstConfirmationBody))
+  await assert.rejects(fs.access(path.join(dataRoot, 'bundle', auroraId.slice(1))), { code: 'ENOENT' })
+  const queuedMovePath = path.join(dataRoot, 'bundle', queuedFirstConfirmationBody.newId.slice(1))
+  const filingAfterHumanMove = markdownFrontmatter(await fs.readFile(queuedMovePath, 'utf8')).filing
+  const queuedSecondConfirmation = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: queuedMoveSecond.filing.id, action: 'accept', fields: queuedMoveSecond.filing.proposal }),
+  })
+  const queuedSecondConfirmationBody = await queuedSecondConfirmation.json()
+  assert.equal(queuedSecondConfirmation.status, 200, JSON.stringify(queuedSecondConfirmationBody))
+  assert.equal(queuedSecondConfirmationBody.oldId, '/projects/aurora-queued-move.md')
+  assert.equal(queuedSecondConfirmationBody.newId, auroraId)
+  const filingAfterMechanicalMove = markdownFrontmatter(await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8')).filing
+  assert.equal(filingAfterMechanicalMove.by, filingAfterHumanMove.by)
+  assert.equal(filingAfterMechanicalMove.at, filingAfterHumanMove.at)
+  const retriedQueuedSecond = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: queuedMoveSecond.filing.id, action: 'accept', fields: queuedMoveSecond.filing.proposal }),
+  })
+  const retriedQueuedSecondBody = await retriedQueuedSecond.json()
+  assert.equal(retriedQueuedSecond.status, 200, JSON.stringify(retriedQueuedSecondBody))
+  assert.equal(retriedQueuedSecondBody.idempotent, true)
+  assert.equal(retriedQueuedSecondBody.oldId, queuedFirstConfirmationBody.newId)
+  assert.equal(retriedQueuedSecondBody.newId, auroraId)
 
   const invalidStandalone = await fetch(`${baseUrl}/api/filing/confirm`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
@@ -845,6 +898,17 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.match(await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8'), /The launch remains confidential\./)
   assert.doesNotMatch(await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8'), /The launch budget was approved\./)
   assert.match(await fs.readFile(path.join(dataRoot, 'bundle', standaloneAurora.note.id.slice(1)), 'utf8'), /The launch budget was approved\./)
+
+  const shortCapture = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: 'Marker collision capture\nCaptured note',
+    filedContent: 'Captured note',
+    timeZone: 'America/New_York',
+  })
+  const shortCaptureFile = await fs.readFile(path.join(dataRoot, 'bundle', shortCapture.note.id.slice(1)), 'utf8')
+  assert.match(shortCaptureFile, /# Captured note\n\n<!-- folio:capture:confirmation:[a-f0-9]{24}:start -->\nCaptured note\n<!-- folio:capture:confirmation:[a-f0-9]{24}:end -->/)
+  assert.doesNotMatch(shortCaptureFile, /# Captured <!-- folio:capture/)
+  const shortCaptureDetail = await (await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(shortCapture.note.id)}`)).json()
+  assert.equal(shortCaptureDetail.content, 'Captured note')
 
   const orderedTargetPath = path.join(dataRoot, 'bundle', auroraId.slice(1))
   const orderedBase = markdownFrontmatter(await fs.readFile(orderedTargetPath, 'utf8'))
@@ -927,6 +991,10 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     const filed = await fs.readFile(path.join(dataRoot, 'bundle', confirmedBody.newId.slice(1)), 'utf8')
     assert.match(filed, new RegExp(`generated:\\n  by: ${attribution.generated}`))
     assert.match(filed, new RegExp(`filing:\\n  by: ${attribution.filing}`))
+    const confirmedIndex = JSON.parse(await fs.readFile(path.join(dataRoot, 'search-index.json'), 'utf8'))
+    const confirmedRecord = confirmedIndex.find((record) => record.id === confirmedBody.newId)
+    assert.ok(confirmedRecord.embedding)
+    assert.ok(confirmedRecord.chunks.every((chunk) => chunk.embedding))
   }
 
   const concurrentCapture = await jsonRequest(`${baseUrl}/api/notes`, { content: 'Concurrent confirmation capture', timeZone: 'America/New_York' })

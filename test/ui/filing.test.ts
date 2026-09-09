@@ -4,6 +4,7 @@ import {
   filingEntry,
   advanceFilingQueue,
   dismissFailedPreparation,
+  finishDraftFiling,
   filingOwnerGroupIds,
   rekeyFilingQueue,
 } from "../../src/features/workspace/model/filing.ts";
@@ -87,6 +88,18 @@ describe("filing queue", () => {
     expect(dismissFailedPreparation({ "draft-one": [failed], "/projects/launch.md": [other] }, "draft-one")).toEqual({
       "/projects/launch.md": [other],
     });
+  });
+
+  it("finishes legacy draft recovery without missing filing metadata", () => {
+    const preparing = { ...filingEntry(filing("draft-legacy", "draft-legacy")), status: "preparing" as const };
+    const existing = filingEntry(filing("filing-other", "draft-other"));
+
+    expect(finishDraftFiling(
+      { "draft-legacy": [preparing], "/projects/launch.md": [existing] },
+      "draft-legacy",
+      "/legacy/recovered.md",
+      null,
+    )).toEqual({ "/projects/launch.md": [existing] });
   });
 
   it("gives a split document exactly one filing-card owner", () => {
