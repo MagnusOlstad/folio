@@ -1324,10 +1324,12 @@ body.resizing-horizontal * {
 .live-markdown-editor .cm-live-markdown-list-source {
   display: inline-block;
   box-sizing: border-box;
-  width: 22px;
+  min-width: 22px;
+  white-space: nowrap;
 }
 
 .live-markdown-editor .cm-live-markdown-list-marker {
+  padding-right: 6px;
   color: var(--muted);
 }
 
@@ -1439,6 +1441,10 @@ body.resizing-horizontal * {
 
 .document-content ul ul {
   list-style-type: circle;
+}
+
+.document-content ol ol {
+  list-style-type: lower-alpha;
 }
 
 .document-content table {

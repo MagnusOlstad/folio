@@ -134,13 +134,26 @@ class ListMarkerWidget extends WidgetType {
       .filter(Boolean)
       .join(" ");
     marker.textContent = /^\d/.test(this.marker)
-      ? this.marker
+      ? this.nested
+        ? `${orderedListLetter(Number.parseInt(this.marker, 10))}${this.marker.at(-1)}`
+        : this.marker
       : this.nested
         ? "◦"
         : "•";
     marker.setAttribute("aria-hidden", "true");
     return marker;
   }
+}
+
+function orderedListLetter(number: number) {
+  let remaining = number;
+  let result = "";
+  while (remaining > 0) {
+    remaining -= 1;
+    result = String.fromCharCode(97 + (remaining % 26)) + result;
+    remaining = Math.floor(remaining / 26);
+  }
+  return result || "a";
 }
 
 function addLinkDecorations(
@@ -420,11 +433,103 @@ export function continueLiveMarkdownList(
   };
 }
 
+/** Inserts a continuation line inside the current list item. */
+export function insertLiveMarkdownListLineBreak(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+) {
+  const lineStart = value.lastIndexOf("\n", selectionStart - 1) + 1;
+  const lineEnd = value.indexOf("\n", selectionStart);
+  const line = value.slice(lineStart, lineEnd === -1 ? value.length : lineEnd);
+  const match = /^((?:[ \t]*>\s*)*[ \t]*)([-+*]|\d+[.)])(\s+)(?:\[([ xX])\](\s+))?/.exec(line);
+  if (!match) return null;
+  const [, prefix, marker, spacing, taskState, taskSpacing = ""] = match;
+  const contentStart =
+    prefix.length +
+    marker.length +
+    spacing.length +
+    (taskState === undefined ? 0 : taskSpacing.length + 3);
+  if (selectionStart - lineStart < contentStart) return null;
+  const indentation = `${prefix}${" ".repeat(contentStart - prefix.length)}`;
+  return {
+    value: `${value.slice(0, selectionStart)}\n${indentation}${value.slice(selectionEnd)}`,
+    caret: selectionStart + indentation.length + 1,
+  };
+}
+
 type ParsedListItem = { prefix: string; marker: string };
 
 function parseListItem(line: string): ParsedListItem | null {
   const match = /^((?:[ \t]*>\s*)*[ \t]*)([-+*]|\d+[.)])[ \t]+/.exec(line);
   return match ? { prefix: match[1], marker: match[2] } : null;
+}
+
+type OrderedListSequence = { nextNumber: number; ordered: boolean };
+export type LiveMarkdownOrderedListChange = {
+  from: number;
+  to: number;
+  insert: string;
+};
+
+/**
+ * Normalizes each ordered sibling sequence while preserving its first number.
+ * Nested sequences are tracked independently and may contain bullet sublists.
+ */
+export function liveMarkdownOrderedListChanges(value: string) {
+  const lines = value.split("\n");
+  const sequences = new Map<string, OrderedListSequence>();
+  const changes: LiveMarkdownOrderedListChange[] = [];
+  let lineStart = 0;
+
+  for (const line of lines) {
+    if (!line.trim()) {
+      sequences.clear();
+      lineStart += line.length + 1;
+      continue;
+    }
+    const item = parseListItem(line);
+    if (!item) {
+      lineStart += line.length + 1;
+      continue;
+    }
+    const ordered = /^\d/.test(item.marker);
+    const sequence = sequences.get(item.prefix);
+    if (!ordered) {
+      sequences.set(item.prefix, { nextNumber: 1, ordered: false });
+      lineStart += line.length + 1;
+      continue;
+    }
+    const currentNumber = Number.parseInt(item.marker, 10);
+    if (!sequence?.ordered) {
+      sequences.set(item.prefix, { nextNumber: currentNumber + 1, ordered: true });
+      lineStart += line.length + 1;
+      continue;
+    }
+    const replacement = `${sequence.nextNumber}${item.marker.at(-1)}`;
+    if (replacement !== item.marker) {
+      const markerStart = lineStart + item.prefix.length;
+      changes.push({
+        from: markerStart,
+        to: markerStart + item.marker.length,
+        insert: replacement,
+      });
+    }
+    sequence.nextNumber += 1;
+    lineStart += line.length + 1;
+  }
+
+  return changes;
+}
+
+export function normalizeLiveMarkdownOrderedLists(value: string) {
+  const changes = liveMarkdownOrderedListChanges(value);
+  let nextValue = value;
+  for (let index = changes.length - 1; index >= 0; index -= 1) {
+    const change = changes[index];
+    nextValue = `${nextValue.slice(0, change.from)}${change.insert}${nextValue.slice(change.to)}`;
+  }
+  return nextValue;
 }
 
 /**

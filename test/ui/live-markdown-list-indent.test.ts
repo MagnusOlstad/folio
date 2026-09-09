@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { changeLiveMarkdownListIndentation } from "../../src/features/workspace/model/live-markdown.ts";
 import { continueLiveMarkdownList } from "../../src/features/workspace/model/live-markdown.ts";
+import { insertLiveMarkdownListLineBreak } from "../../src/features/workspace/model/live-markdown.ts";
+import { normalizeLiveMarkdownOrderedLists } from "../../src/features/workspace/model/live-markdown.ts";
 
 describe("changeLiveMarkdownListIndentation", () => {
   it("indents the current unordered list item by two spaces and preserves its caret", () => {
@@ -80,5 +82,32 @@ describe("continueLiveMarkdownList", () => {
       value: "",
       caret: 0,
     });
+  });
+});
+
+describe("numbered list editing", () => {
+  it("inserts an indented continuation line without creating another item", () => {
+    expect(insertLiveMarkdownListLineBreak("10. first", 9, 9)).toEqual({
+      value: "10. first\n    ",
+      caret: 14,
+    });
+    expect(insertLiveMarkdownListLineBreak("> 1. quoted", 11, 11)).toEqual({
+      value: "> 1. quoted\n>    ",
+      caret: 17,
+    });
+  });
+
+  it("renumbers sibling gaps independently at each nesting level", () => {
+    expect(
+      normalizeLiveMarkdownOrderedLists(
+        "1. first\n  1. nested\n  4. nested again\n3. third",
+      ),
+    ).toBe("1. first\n  1. nested\n  2. nested again\n2. third");
+  });
+
+  it("preserves an intentional starting number", () => {
+    expect(normalizeLiveMarkdownOrderedLists("10. tenth\n14. next")).toBe(
+      "10. tenth\n11. next",
+    );
   });
 });

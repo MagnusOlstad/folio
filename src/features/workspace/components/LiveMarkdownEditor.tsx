@@ -18,6 +18,8 @@ import { applyFormatMarker, type FormatMarker } from "../../../markdown-format.t
 import {
   changeLiveMarkdownListIndentation,
   continueLiveMarkdownList,
+  insertLiveMarkdownListLineBreak,
+  liveMarkdownOrderedListChanges,
   liveMarkdownExtensions,
   type LiveMarkdownCallbacks,
 } from "../model/live-markdown.ts";
@@ -144,6 +146,19 @@ export function LiveMarkdownEditor({
           panels(findLayer ? { topContainer: findLayer } : undefined),
           EditorView.scrollMargins.of(() => ({ bottom: 80 })),
           EditorView.lineWrapping,
+          EditorState.transactionFilter.of((transaction) => {
+            if (!transaction.docChanged) return transaction;
+            const value = transaction.newDoc.toString();
+            const changes = liveMarkdownOrderedListChanges(value);
+            if (!changes.length) return transaction;
+            return [
+              transaction,
+              {
+                changes,
+                sequential: true,
+              },
+            ];
+          }),
           ariaLabelCompartment.current.of(
             EditorView.contentAttributes.of({ "aria-label": ariaLabelRef.current }),
           ),
@@ -162,6 +177,25 @@ export function LiveMarkdownEditor({
               run: () => {
                 if (!onFileRef.current) return false;
                 onFileRef.current();
+                return true;
+              },
+            },
+            {
+              key: "Shift-Enter",
+              run: (editor) => {
+                if (isInsideMarkdownCode(editor)) return false;
+                const selection = editor.state.selection.main;
+                const edit = insertLiveMarkdownListLineBreak(
+                  editor.state.doc.toString(),
+                  selection.from,
+                  selection.to,
+                );
+                if (!edit) return false;
+                editor.dispatch({
+                  changes: { from: 0, to: editor.state.doc.length, insert: edit.value },
+                  selection: { anchor: edit.caret },
+                  scrollIntoView: true,
+                });
                 return true;
               },
             },
