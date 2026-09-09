@@ -25,9 +25,18 @@
 - Use concrete TypeScript contracts; do not use `any` or `@ts-nocheck` to bridge component boundaries.
 - Keep interaction logic in event handlers and effects for external synchronization/subscriptions. Parallelize independent requests, but avoid speculative memoization or new dependencies.
 
+## Git and Pull Requests
+
+- Every commit subject and pull request title must use Conventional Commits syntax. This is mandatory, including follow-up fixes, documentation changes, and agent-authored commits.
+- Use exactly `<type>: <summary>` or `<type>(<scope>): <summary>`, where `type` is one of `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, or `revert`. A breaking change may use `!` before the colon.
+- Write the summary as a concise, lowercase, imperative description. Valid examples: `refactor: split server into runtime modules`, `fix(server): track the update service module`, and `docs: enforce conventional git metadata`.
+- Invalid examples include `Refactor server into runtime modules`, `fix tracked update service module`, branch names, issue numbers without a type, and titles whose type is not in the allowed list.
+- Before running `git commit`, `gh pr create`, or `gh pr edit --title`, explicitly validate the proposed subject/title against the syntax above. Do not rely on branch names, prior context, or GitHub Actions to catch mistakes.
+- Before creating or editing a pull request, inspect `.github/workflows/conventional-commits.yml` for repository-specific policy changes. Repository workflow configuration takes precedence over examples in this file.
+- After creating or editing a pull request, read the stored title with `gh pr view --json title` and correct it immediately if it is not compliant. Do not report PR creation as complete until this check passes.
+
 ## Workflow
 
-- Pull request titles are validated by `amannn/action-semantic-pull-request@v6`. Use a conventional-commit prefix: `feat:`, `fix:`, `docs:`, `style:`, `refactor:`, `perf:`, `test:`, `build:`, `ci:`, `chore:`, or `revert:`.
 - Use the smallest meaningful verification set. Broaden only when affected boundaries, failures, unresolved risk, or the user justify it.
 - Run `npm ci` only when dependencies are missing or `package.json`/`package-lock.json` changed.
 - Documentation-only changes need review plus `git diff --check`, not application tests. For localized code changes, run the nearest Node or Vitest files and lint affected paths when practical.
