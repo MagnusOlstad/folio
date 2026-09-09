@@ -122,13 +122,14 @@ describe("file tree behavior", () => {
     );
 
     fireEvent.click(screen.getByText("Bundle").closest("button")!);
-    fireEvent.click(screen.getByText("root.md").closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: "Root" }));
     expect(handlers.onToggle).toHaveBeenCalledWith("/");
     expect(handlers.onOpen).toHaveBeenCalledWith("/root.md");
-    expect(screen.getByText("root.md").closest("button")).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Root" })).toHaveAttribute(
       "draggable",
       "false",
     );
+    expect(screen.queryByText("root.md")).not.toBeInTheDocument();
 
     rerender(
       <FileTree
@@ -142,9 +143,36 @@ describe("file tree behavior", () => {
         {...handlers}
       />,
     );
-    expect(screen.getByText("first.md").closest("button")).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Alpha" })).toHaveAttribute(
       "draggable",
       "true",
+    );
+  });
+
+  it("limits visible explorer titles while preserving the full accessible title", () => {
+    const title = "A".repeat(49);
+    render(
+      <FileTree
+        directory={buildFileTree([file("/long.md", title, "2026-01-01")])}
+        depth={0}
+        expanded={new Set(["/"])}
+        draggedFileId={null}
+        dropDirectoryPath={null}
+        movingFileId={null}
+        blockedFileIds={new Set()}
+        onToggle={vi.fn()}
+        onOpen={vi.fn()}
+        onFileDragStart={vi.fn()}
+        onFileDragEnd={vi.fn()}
+        onDirectoryDragOver={vi.fn()}
+        onMove={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(`${"A".repeat(47)}…`)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: title })).toHaveAttribute(
+      "title",
+      `${title} - drag onto a folder to move`,
     );
   });
 });

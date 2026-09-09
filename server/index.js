@@ -420,25 +420,16 @@ function confirmationIdFor(rawId) {
   return `confirmation:${crypto.createHash('sha256').update(rawId).digest('hex').slice(0, 24)}`
 }
 
-function safeConfirmationFilename(value) {
-  const name = String(value || '').trim()
-  if (!/^[a-z0-9][a-z0-9._-]{0,100}\.md$/i.test(name)) return null
-  if (name === 'index.md' || name === 'log.md' || name === 'todo-list.md') return null
-  return name
-}
-
-function normalizeConfirmationFields(value, fallback) {
+function normalizeConfirmationFields(value, fallback, internalFilename = fallback.filename) {
   const requestedDirectory = value?.directory ?? fallback.directory
   const directory = normalizeMoveDirectory(requestedDirectory)
     || (requestedDirectory === fallback.directory && requestedDirectory === '/daily' ? '/daily' : null)
-  const requestedFilename = value?.filename ?? fallback.filename
-  const filename = safeConfirmationFilename(requestedFilename)
-    || (requestedFilename === fallback.filename && ['todo-list.md'].includes(requestedFilename) ? requestedFilename : null)
+  const filename = String(internalFilename || '').trim()
   const title = normalizeInlineText(value?.title ?? fallback.title).slice(0, 100)
   const description = normalizeInlineText(value?.description ?? fallback.description).slice(0, 240)
   const tags = Array.from(new Set((Array.isArray(value?.tags) ? value.tags : fallback.tags)
     .map(normalizeTag).filter(Boolean))).slice(0, 12)
-  if (!directory || !filename || !title) return null
+  if (!directory || path.posix.basename(filename) !== filename || path.posix.extname(filename) !== '.md' || !title) return null
   return { directory, filename, title, description, tags }
 }
 
@@ -667,12 +658,7 @@ async function moveConceptMarkdown(oldId, directory, movedAt, options = {}) {
     error.status = 400
     throw error
   }
-  const filename = options.filename || path.posix.basename(oldId)
-  if (path.posix.basename(filename) !== filename || path.posix.extname(filename) !== '.md') {
-    const error = new Error('Invalid destination filename.')
-    error.status = 400
-    throw error
-  }
+  const filename = path.posix.basename(oldId)
   const newId = normalizedDirectory === '/'
     ? `/${filename}`
     : `${normalizedDirectory}/${filename}`
@@ -686,7 +672,7 @@ async function moveConceptMarkdown(oldId, directory, movedAt, options = {}) {
 
   try {
     await fs.access(newPath)
-    const error = new Error(`A file already exists at ${newId}.`)
+    const error = new Error('That path already contains a conflicting note. Choose another path.')
     error.status = 409
     throw error
   } catch (error) {
@@ -810,7 +796,7 @@ async function moveConceptMarkdown(oldId, directory, movedAt, options = {}) {
       destinationLinked = true
     } catch (error) {
       if (error.code === 'EEXIST') {
-        const conflict = new Error(`A file already exists at ${newId}.`)
+        const conflict = new Error('That path already contains a conflicting note. Choose another path.')
         conflict.status = 409
         throw conflict
       }
@@ -2291,13 +2277,11 @@ async function availableConceptFilename(
   directory,
   title,
   dateKey = null,
-  ignoredFilename = null,
   reservedFilenames = new Set(),
 ) {
   const slug = slugify(title)
   for (let collision = 1; ; collision += 1) {
     const filename = `${slug}${collision === 1 ? '' : `-${collision}`}${dateKey ? `-${dateKey}` : ''}.md`
-    if (filename === ignoredFilename) return filename
     if (reservedFilenames.has(filename)) continue
     try {
       await fs.access(path.join(directory, filename))
@@ -2887,12 +2871,9 @@ app.patch('/api/note', async (request, response, next) => {
 
     const updateResult = await queueIndexOperation(async () => {
       const previousRecords = await readRecords()
-      let newId = id
-      let moveTransaction = null
       const mutationError = await queueMarkdownMutation(async () => {
-        let currentFilePath = filePath
-        let markdown = await fs.readFile(currentFilePath, 'utf8')
-        let parsed = parseMarkdownFile(markdown, currentFilePath)
+        const markdown = await fs.readFile(filePath, 'utf8')
+        const parsed = parseMarkdownFile(markdown, filePath)
         if (parsed.type === 'Raw Capture') return { status: 400, error: 'Raw captures cannot be edited.' }
         if (confirmRelatedId) {
           const targetExists = previousRecords.some((record) => record.id === confirmRelatedId)
@@ -2904,29 +2885,6 @@ app.patch('/api/note', async (request, response, next) => {
         if (!hasMarkdownChanges) return null
 
         const updatedAt = new Date().toISOString()
-        const titleChanged = hasTitle && title !== parsed.title
-        if (titleChanged && isMovableConceptId(id)) {
-          const currentFilename = path.posix.basename(id)
-          const dateKey = currentFilename.match(/-(\d{4}-\d{2}-\d{2})\.md$/)?.[1] || null
-          const nextFilename = await availableConceptFilename(path.dirname(filePath), title, dateKey, currentFilename)
-          if (nextFilename !== currentFilename) {
-            moveTransaction = await moveConceptMarkdown(id, path.posix.dirname(id), updatedAt, {
-              filename: nextFilename,
-              frontmatter: {
-                title,
-                ...(hasDescription ? { description } : {}),
-                generated: updatedGenerated(parsed.frontmatter, 'human:local', updatedAt),
-              },
-            })
-            newId = moveTransaction.newId
-            const hasAdditionalChanges = hasContent || hasTags || confirmRelatedId || status !== undefined || staleAfter !== undefined
-            if (!hasAdditionalChanges) return null
-            currentFilePath = resolveBundleMarkdownPath(newId)
-            markdown = await fs.readFile(currentFilePath, 'utf8')
-            parsed = parseMarkdownFile(markdown, currentFilePath)
-          }
-        }
-
         if (hasContent) parsed.content = replaceIndexedConceptContent(parsed.content, content)
         if (hasTags) parsed.frontmatter.tags = tags
         if (hasTitle) parsed.frontmatter.title = title
@@ -2941,27 +2899,13 @@ app.patch('/api/note', async (request, response, next) => {
         if (staleAfter) parsed.frontmatter.stale_after = new Date(staleAfter).toISOString()
         else if (staleAfter === null || staleAfter === '') delete parsed.frontmatter.stale_after
         parsed.frontmatter.generated = updatedGenerated(parsed.frontmatter, 'human:local', updatedAt)
-        await fs.writeFile(currentFilePath, markdownDocument(parsed.frontmatter, parsed.content))
+        await fs.writeFile(filePath, markdownDocument(parsed.frontmatter, parsed.content))
         return null
       })
       if (mutationError) return { mutationError }
 
-      if (newId !== id) {
-        try {
-          await migrateIndexedRecordsAfterMove(id, newId)
-        } catch (error) {
-          try {
-            await moveTransaction.rollback()
-            await writeRecords(previousRecords)
-          } catch (rollbackError) {
-            console.error(`Could not fully roll back title rename: ${rollbackError.message}`)
-          }
-          throw error
-        }
-      }
-
       const reindexed = await performReindexBundle()
-      let updated = reindexed.records.find((record) => record.id === newId)
+      let updated = reindexed.records.find((record) => record.id === id)
       if (!updated) return { notFound: true }
       let currentRecords = reindexed.records
       let warning = null
@@ -2975,13 +2919,13 @@ app.patch('/api/note', async (request, response, next) => {
           updated.embeddingSchemaVersion = embeddingSchemaVersion
           updated.embeddingInputHash = embeddingInputHash(updated)
           currentRecords = await persistEmbeddingUpdatesNow([updated])
-          updated = currentRecords.find((record) => record.id === newId)
+          updated = currentRecords.find((record) => record.id === id)
           if (!updated) return { notFound: true }
         } catch {
           warning = 'The note was updated, but its semantic index could not be refreshed.'
         }
       }
-      return { newId, updated, currentRecords, warning }
+      return { newId: id, updated, currentRecords, warning }
     })
     if (updateResult.mutationError) {
       return response.status(updateResult.mutationError.status).json({ error: updateResult.mutationError.error })
@@ -3200,7 +3144,6 @@ app.post('/api/notes', async (request, response, next) => {
       path.join(bundleRoot, classification.path.join('/')),
       classification.title,
       createdAt.slice(0, 10),
-      null,
       pendingStandaloneFilenames,
     )
     const standaloneProposal = {
@@ -3299,8 +3242,15 @@ app.post(['/api/filing/confirm', '/api/notes/confirm'], async (request, response
     const baseline = action === 'standalone'
       ? receipt.confirmation.standaloneProposal
       : receipt.confirmation.proposal
-    const finalFields = normalizeConfirmationFields(request.body?.fields || request.body?.final || request.body, baseline)
-    if (!finalFields) return response.status(400).json({ error: 'Directory, filename, and title must be valid.' })
+    const internalFilename = action === 'standalone'
+      ? baseline.filename
+      : path.posix.basename(receipt.id)
+    const finalFields = normalizeConfirmationFields(
+      request.body?.fields || request.body?.final || request.body,
+      baseline,
+      internalFilename,
+    )
+    if (!finalFields) return response.status(400).json({ error: 'Directory and title must be valid.' })
     const finalId = finalFields.directory === '/'
       ? `/${finalFields.filename}`
       : `${finalFields.directory}/${finalFields.filename}`
@@ -3312,13 +3262,13 @@ app.post(['/api/filing/confirm', '/api/notes/confirm'], async (request, response
     }
     try {
       await fs.access(finalPath)
-      if (finalId !== receipt.id) return response.status(409).json({ error: 'A note already uses that filename.' })
+      if (finalId !== receipt.id) return response.status(409).json({ error: 'That path already contains a conflicting note. Choose another path.' })
     } catch (error) {
       if (error.code !== 'ENOENT') throw error
     }
 
     const proposal = baseline
-    const pathOrFilenameChanged = finalFields.directory !== proposal.directory || finalFields.filename !== proposal.filename
+    const directoryChanged = finalFields.directory !== proposal.directory
     // A prior confirmation may already have moved this shared destination. The
     // receipt identifies the file's current path, independently of this
     // confirmation's original proposal.
@@ -3327,10 +3277,10 @@ app.post(['/api/filing/confirm', '/api/notes/confirm'], async (request, response
     const descriptionChanged = finalFields.description !== proposal.description
     const tagsChanged = JSON.stringify(finalFields.tags) !== JSON.stringify(proposal.tags)
     const humanGenerated = titleChanged || descriptionChanged || tagsChanged
-    const humanFiling = action === 'standalone' || pathOrFilenameChanged || titleChanged || tagsChanged
+    const humanFiling = action === 'standalone' || directoryChanged || titleChanged || tagsChanged
     const confirmedAt = new Date().toISOString()
     const existingActor = receipt.confirmation.actor || receipt.source.filing_by || 'process:folio-fallback'
-    let targetId = finalId
+    const targetId = finalId
     let sourceRemoved = false
     const completion = { finalId, finalFields, confirmedAt, oldId: receipt.id }
 
@@ -3405,7 +3355,6 @@ app.post(['/api/filing/confirm', '/api/notes/confirm'], async (request, response
           },
         }
         const transaction = await moveConceptMarkdown(receipt.id, finalFields.directory, confirmedAt, {
-          filename: finalFields.filename,
           ...(moveFrontmatter ? { frontmatter: moveFrontmatter } : {}),
         })
         try {

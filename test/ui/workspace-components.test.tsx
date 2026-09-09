@@ -43,7 +43,7 @@ describe("workspace editor components", () => {
         actor: "agent",
         proposal: { directory: "/projects", filename: "prepared.md", title: "Prepared", description: "", tags: [] },
       },
-      fields: { directory: "/projects", filename: "prepared.md", title: "Prepared", description: "", tags: [] },
+      fields: { directory: "/projects", title: "Prepared", description: "", tags: [] },
       standalone: false,
       status: "preparing",
       error: null,
@@ -83,7 +83,6 @@ describe("workspace editor components", () => {
           },
           fields: {
             directory: "/projects",
-            filename: "launch.md",
             title: "Launch plan",
             description: "Publish it",
             tags: ["project"],
@@ -101,12 +100,15 @@ describe("workspace editor components", () => {
     );
 
     expect(screen.getByRole("button", { name: "Accept" })).toHaveFocus();
-    fireEvent.change(screen.getByLabelText("Filename"), {
-      target: { value: "published.md" },
+    expect(screen.queryByLabelText("Filename")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Title"), {
+      target: { value: "Published plan" },
     });
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
-      filename: "published.md",
-      title: "Launch plan",
+      directory: "/projects",
+      title: "Published plan",
+      description: "Publish it",
+      tags: ["project"],
     }));
     expect(screen.getByRole("combobox", { name: "Path" })).toBeInTheDocument();
     fireEvent.keyDown(screen.getByLabelText("Title"), { key: "Enter" });
@@ -129,7 +131,7 @@ describe("workspace editor components", () => {
         actor: "agent",
         proposal: { directory: "/projects", filename: "note.md", title: "Note", description: "", tags: [] },
       },
-      fields: { directory: "/projects", filename: "note.md", title: "Note", description: "", tags: [] },
+      fields: { directory: "/projects", title: "Note", description: "", tags: [] },
       standalone: false,
       status: "ready" as const,
       error: null,
@@ -180,7 +182,7 @@ describe("workspace editor components", () => {
             actor: "agent",
             proposal: { directory: "/projects/we", filename: "launch.md", title: "Launch", description: "", tags: [] },
           },
-          fields: { directory: "/projects/we", filename: "launch.md", title: "Launch", description: "", tags: [] },
+          fields: { directory: "/projects/we", title: "Launch", description: "", tags: [] },
           standalone: false,
           status: "ready",
           error: null,
@@ -222,7 +224,7 @@ describe("workspace editor components", () => {
             actor: "agent",
             proposal: { directory: "/references/inbox", filename: "note.md", title: "Note", description: "", tags: [] },
           },
-          fields: { directory: "/references/inbox", filename: "note.md", title: "Note", description: "", tags: [] },
+          fields: { directory: "/references/inbox", title: "Note", description: "", tags: [] },
           standalone: false,
           status: "ready",
           error: null,
@@ -257,7 +259,7 @@ describe("workspace editor components", () => {
             proposal: { directory: "/projects", filename: "launch.md", title: "Launch", description: "", tags: [] },
             standaloneProposal: { directory: "/projects", filename: "separate.md", title: "Separate", description: "", tags: [] },
           },
-          fields: { directory: "/projects", filename: "launch.md", title: "Launch", description: "", tags: [] },
+          fields: { directory: "/projects", title: "Launch", description: "", tags: [] },
           standalone: false,
           status: "ready",
           error: null,
@@ -269,7 +271,9 @@ describe("workspace editor components", () => {
         onRevealStandalone={onReveal}
       />,
     );
-    expect(screen.getByText("/projects/launch.md")).toBeInTheDocument();
+    expect(screen.getByText("Launch")).toBeInTheDocument();
+    expect(screen.getByText("/projects")).toBeInTheDocument();
+    expect(screen.queryByText("/projects/launch.md")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "File separately" }));
     expect(onReveal).toHaveBeenCalledOnce();
   });

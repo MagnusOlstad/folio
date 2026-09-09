@@ -76,7 +76,7 @@ export function DocumentFooter({
   return (
     <footer className="document-footer">
       <div className="document-footer-details">
-        <div className="document-path" title={document.id}>
+        <div className="document-path" title={directoryForId(document.id)}>
           <span>Path</span>
           {document.movable ? (
             <input
@@ -102,7 +102,7 @@ export function DocumentFooter({
             />
           ) : (
             <strong>
-              {isUntitledId(document.id) ? "Unfiled" : document.id}
+              {isUntitledId(document.id) ? "Unfiled" : directoryForId(document.id)}
             </strong>
           )}
         </div>

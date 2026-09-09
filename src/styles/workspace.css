@@ -881,6 +881,11 @@ body.resizing-horizontal * {
   font-weight: 500;
 }
 
+.filing-destination small {
+  color: var(--muted);
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 .filing-actions {
   justify-content: space-between;
   gap: 18px;

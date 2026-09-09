@@ -1,6 +1,6 @@
 import type { Filing, FilingProposal, TabGroup } from "../../../domain/types.ts";
 
-export type FilingFields = FilingProposal;
+export type FilingFields = Omit<FilingProposal, "filename">;
 export type FilingQueueEntry = {
   filing: Filing;
   fields: FilingFields;
@@ -10,7 +10,12 @@ export type FilingQueueEntry = {
 };
 
 export function proposalFields(proposal: FilingProposal): FilingFields {
-  return { ...proposal, tags: [...proposal.tags] };
+  return {
+    directory: proposal.directory,
+    title: proposal.title,
+    description: proposal.description,
+    tags: [...proposal.tags],
+  };
 }
 
 export function filingEntry(filing: Filing): FilingQueueEntry {

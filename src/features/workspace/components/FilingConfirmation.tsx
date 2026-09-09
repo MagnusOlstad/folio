@@ -122,7 +122,8 @@ export function FilingConfirmation({
           <div className="filing-destination">
             <div>
               <span>Destination</span>
-              <strong>{entry.filing.destinationId ?? "Existing note"}</strong>
+              <strong>{entry.filing.proposal.title}</strong>
+              <small>{entry.filing.proposal.directory}</small>
             </div>
           </div>
         ) : (
@@ -199,7 +200,6 @@ export function FilingConfirmation({
                 </ul>
               )}
             </label>
-            <label>Filename<input value={entry.fields.filename} onChange={(event) => update("filename", event.target.value)} /></label>
             <label>Title<input value={entry.fields.title} onChange={(event) => update("title", event.target.value)} /></label>
             <label>Description<input value={entry.fields.description} onChange={(event) => update("description", event.target.value)} /></label>
             <label>Tags<input value={tagText(entry.fields.tags)} onChange={(event) => update("tags", event.target.value.split(",").map((tag) => tag.trim()).filter(Boolean))} /></label>

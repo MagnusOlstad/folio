@@ -634,6 +634,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     body: JSON.stringify({ id: movedId, directory: '/manual/archive' }),
   })
   assert.equal(conflictMoveResponse.status, 409)
+  assert.equal((await conflictMoveResponse.json()).error, 'That path already contains a conflicting note. Choose another path.')
   assert.equal(await fs.readFile(conflictPath, 'utf8'), conflictMarkdown)
   await fs.access(path.join(dataRoot, 'bundle', movedId.slice(1)))
   const internalMoveResponse = await fetch(`${baseUrl}/api/file/move`, {
@@ -665,27 +666,25 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.ok(index.every((record) => record.chunks.length > 0 && record.chunks.every((chunk) => chunk.embedding)))
   assert.ok(index.find((record) => record.id === longNote.note.id).chunks.length > 6)
 
-  const longNoteDate = longNote.note.id.match(/-(\d{4}-\d{2}-\d{2})\.md$/)?.[1]
-  const renamedLongResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(longNote.note.id)}`, {
+  const editedLongResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(longNote.note.id)}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ title: 'Deep Archive', description: 'Updated archive description.' }),
   })
-  const renamedLong = await renamedLongResponse.json()
-  assert.equal(renamedLongResponse.status, 200, JSON.stringify(renamedLong))
-  assert.equal(renamedLong.oldId, longNote.note.id)
-  assert.equal(renamedLong.newId, `/research/deep-archive-${longNoteDate}.md`)
-  assert.equal(renamedLong.id, renamedLong.newId)
-  assert.equal(renamedLong.title, 'Deep Archive')
-  assert.equal(renamedLong.description, 'Updated archive description.')
-  await assert.rejects(fs.access(path.join(dataRoot, 'bundle', longNote.note.id.slice(1))))
-  const renamedLongFile = await fs.readFile(path.join(dataRoot, 'bundle', renamedLong.newId.slice(1)), 'utf8')
-  assert.match(renamedLongFile, /title: Deep Archive/)
-  assert.match(renamedLongFile, /description: Updated archive description\./)
+  const editedLong = await editedLongResponse.json()
+  assert.equal(editedLongResponse.status, 200, JSON.stringify(editedLong))
+  assert.equal(editedLong.oldId, longNote.note.id)
+  assert.equal(editedLong.newId, longNote.note.id)
+  assert.equal(editedLong.id, longNote.note.id)
+  assert.equal(editedLong.title, 'Deep Archive')
+  assert.equal(editedLong.description, 'Updated archive description.')
+  const editedLongFile = await fs.readFile(path.join(dataRoot, 'bundle', longNote.note.id.slice(1)), 'utf8')
+  assert.match(editedLongFile, /title: Deep Archive/)
+  assert.match(editedLongFile, /description: Updated archive description\./)
   const oldLongPathResponse = await fetch(`${baseUrl}/api/file?path=${encodeURIComponent(longNote.note.id)}`)
-  assert.equal((await oldLongPathResponse.json()).id, renamedLong.newId)
-  const renamedIndex = JSON.parse(await fs.readFile(path.join(dataRoot, 'search-index.json'), 'utf8'))
-  assert.ok(renamedIndex.some((record) => record.id === renamedLong.newId && record.title === 'Deep Archive'))
+  assert.equal((await oldLongPathResponse.json()).id, longNote.note.id)
+  const editedIndex = JSON.parse(await fs.readFile(path.join(dataRoot, 'search-index.json'), 'utf8'))
+  assert.ok(editedIndex.some((record) => record.id === longNote.note.id && record.title === 'Deep Archive'))
   assert.ok(embeddingInputs.some((input) => input.startsWith('title: Deep Archive | text: Updated archive description.\nLong archive')))
 
   invalidEmbeddingResponse = true
@@ -819,10 +818,12 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     body: JSON.stringify({ filingId: semantic.filing.id, action: 'accept', fields: { ...semantic.filing.proposal, directory: '/ideas', filename: 'semantic-renamed.md' } }),
   })
   const movedSemanticBody = await movedSemantic.json()
+  const semanticFilename = path.posix.basename(semantic.note.id)
+  const movedSemanticId = `/ideas/${semanticFilename}`
   assert.equal(movedSemantic.status, 200, JSON.stringify(movedSemanticBody))
-  assert.equal(movedSemanticBody.newId, '/ideas/semantic-renamed.md')
+  assert.equal(movedSemanticBody.newId, movedSemanticId)
   assert.equal(movedSemanticBody.oldId, semantic.note.id)
-  assert.match(await fs.readFile(path.join(dataRoot, 'bundle', 'linked.md'), 'utf8'), /\]\(\/ideas\/semantic-renamed\.md\)/)
+  assert.ok((await fs.readFile(path.join(dataRoot, 'bundle', 'linked.md'), 'utf8')).includes(`](${movedSemanticId})`))
   const movedSemanticIndex = JSON.parse(await fs.readFile(path.join(dataRoot, 'search-index.json'), 'utf8'))
   const movedSemanticRecord = movedSemanticIndex.find((record) => record.id === movedSemanticBody.newId)
   assert.ok(movedSemanticRecord.embedding)
@@ -843,13 +844,15 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   ])
   assert.equal(queuedMoveFirst.note.id, auroraId)
   assert.equal(queuedMoveSecond.note.id, auroraId)
-  const queuedMoveDestination = { ...queuedMoveFirst.filing.proposal, directory: '/projects', filename: 'aurora-queued-move.md' }
+  const queuedMoveDestination = { ...queuedMoveFirst.filing.proposal, directory: '/archive', filename: 'aurora-queued-move.md' }
   const queuedFirstConfirmation = await fetch(`${baseUrl}/api/filing/confirm`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ filingId: queuedMoveFirst.filing.id, action: 'accept', fields: queuedMoveDestination }),
   })
   const queuedFirstConfirmationBody = await queuedFirstConfirmation.json()
+  const queuedMoveId = `/archive/${path.posix.basename(auroraId)}`
   assert.equal(queuedFirstConfirmation.status, 200, JSON.stringify(queuedFirstConfirmationBody))
+  assert.equal(queuedFirstConfirmationBody.newId, queuedMoveId)
   await assert.rejects(fs.access(path.join(dataRoot, 'bundle', auroraId.slice(1))), { code: 'ENOENT' })
   const queuedMovePath = path.join(dataRoot, 'bundle', queuedFirstConfirmationBody.newId.slice(1))
   const filingAfterHumanMove = markdownFrontmatter(await fs.readFile(queuedMovePath, 'utf8')).filing
@@ -859,7 +862,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   })
   const queuedSecondConfirmationBody = await queuedSecondConfirmation.json()
   assert.equal(queuedSecondConfirmation.status, 200, JSON.stringify(queuedSecondConfirmationBody))
-  assert.equal(queuedSecondConfirmationBody.oldId, '/projects/aurora-queued-move.md')
+  assert.equal(queuedSecondConfirmationBody.oldId, queuedMoveId)
   assert.equal(queuedSecondConfirmationBody.newId, auroraId)
   const filingAfterMechanicalMove = markdownFrontmatter(await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8')).filing
   assert.equal(filingAfterMechanicalMove.by, filingAfterHumanMove.by)
@@ -874,11 +877,6 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal(retriedQueuedSecondBody.oldId, queuedFirstConfirmationBody.newId)
   assert.equal(retriedQueuedSecondBody.newId, auroraId)
 
-  const invalidStandalone = await fetch(`${baseUrl}/api/filing/confirm`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ confirmationId: mergedAurora.filing.id, action: 'standalone', fields: { ...mergedAurora.filing.standaloneProposal, filename: '../bad.md' } }),
-  })
-  assert.equal(invalidStandalone.status, 400)
   const internalStandalone = await fetch(`${baseUrl}/api/filing/confirm`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ confirmationId: mergedAurora.filing.id, action: 'standalone', fields: { ...mergedAurora.filing.standaloneProposal, directory: '/references/inbox' } }),
@@ -887,7 +885,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.match(await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8'), /The launch budget was approved\./)
   const standaloneAuroraResponse = await fetch(`${baseUrl}/api/filing/confirm`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ confirmationId: mergedAurora.filing.id, action: 'standalone', fields: mergedAurora.filing.standaloneProposal }),
+    body: JSON.stringify({ confirmationId: mergedAurora.filing.id, action: 'standalone', fields: { ...mergedAurora.filing.standaloneProposal, filename: '../bad.md' } }),
   })
   assert.equal(standaloneAuroraResponse.status, 200)
   const standaloneAurora = await standaloneAuroraResponse.json()
@@ -976,7 +974,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     },
     {
       content: 'Attribution path',
-      fields: (filing) => ({ ...filing.proposal, directory: '/corrected', filename: 'path-only.md' }),
+      fields: (filing) => ({ ...filing.proposal, directory: '/corrected', filename: 'ignored-name.md' }),
       generated: 'okf-notetaker/llama3.2:3b', filing: 'human:local',
     },
   ]
@@ -988,6 +986,8 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     })
     const confirmedBody = await confirmed.json()
     assert.equal(confirmed.status, 200, JSON.stringify(confirmedBody))
+    if (attribution.content === 'Attribution path')
+      assert.equal(path.posix.basename(confirmedBody.newId), path.posix.basename(captured.note.id))
     const filed = await fs.readFile(path.join(dataRoot, 'bundle', confirmedBody.newId.slice(1)), 'utf8')
     assert.match(filed, new RegExp(`generated:\\n  by: ${attribution.generated}`))
     assert.match(filed, new RegExp(`filing:\\n  by: ${attribution.filing}`))

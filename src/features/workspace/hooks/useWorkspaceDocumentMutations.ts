@@ -499,7 +499,7 @@ export function useWorkspaceDocumentMutations({
           actor: "agent",
           proposal: { directory: "", filename: "", title: "", description: "", tags: [] },
         },
-        fields: { directory: "", filename: "", title: "", description: "", tags: [] },
+        fields: { directory: "", title: "", description: "", tags: [] },
         standalone: false,
         status: "preparing",
         error: null,

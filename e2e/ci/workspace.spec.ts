@@ -11,8 +11,9 @@ test.beforeEach(async ({ page }) => {
 
 test('loads the workspace shell with the seeded bundle', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'Folio home' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'todo-list.md' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'start-here.md' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Todo List', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Start Here', exact: true })).toBeVisible()
+  await expect(page.getByText('todo-list.md')).toHaveCount(0)
 })
 
 test('reports Ollama as offline when no local model server is running', async ({ page }) => {
@@ -20,7 +21,7 @@ test('reports Ollama as offline when no local model server is running', async ({
 })
 
 test('opens a seeded note and shows its content', async ({ page }) => {
-  await page.getByRole('button', { name: 'todo-list.md' }).click()
+  await page.getByRole('button', { name: 'Todo List', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Todo List', level: 1 }).first()).toBeVisible()
   await expect(page.getByText('Add your first task')).toBeVisible()
 })
@@ -82,6 +83,7 @@ test.describe('browser-safe keyboard shortcuts', () => {
     await editor.fill('note: quick capture via Ctrl+S')
     await page.keyboard.press('Control+s')
     await expect(page.getByLabel('Filing confirmation')).toContainText('Review filing')
+    await expect(page.getByLabel('Filing confirmation').getByLabel('Filename')).toHaveCount(0)
     await page.getByRole('button', { name: 'search', exact: true }).click()
     await expect(page.getByLabel('Filing confirmation')).toContainText('Review filing')
     await page.getByRole('button', { name: 'explore', exact: true }).click()
