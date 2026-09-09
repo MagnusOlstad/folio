@@ -63,10 +63,10 @@ jobs:
 
       - run: gh release upload "${{ needs.release-please.outputs.tag_name }}" release/*.dmg release/*.zip --clobber
 
-      # release-please's notes are just the changelog — append the install
-      # step by hand, same as the old scripts/release.mjs always did, so a
-      # draft never ships without it.
-      - name: Append install instructions
+      # release-please's notes are just the changelog, and it names the release
+      # after the bare tag — restore both by hand, same as the old
+      # scripts/release.mjs always did, so a draft never ships without them.
+      - name: Set release title and append install instructions
         env:
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
@@ -84,4 +84,4 @@ jobs:
 
           This build is not code-signed, so macOS Gatekeeper needs that one-time nudge.
           EOF
-          gh release edit "$TAG" --notes-file notes.md
+          gh release edit "$TAG" --title "Folio $TAG" --notes-file notes.md
