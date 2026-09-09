@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FilingQueueEntry } from "../model/filing.ts";
 import {
   applyDirectorySuggestion,
@@ -31,9 +31,9 @@ export function FilingConfirmation({
   onDismiss,
   onRevealStandalone,
 }: FilingConfirmationProps) {
-  const cardRef = useRef<HTMLElement>(null);
   const acceptRef = useRef<HTMLButtonElement>(null);
   const directoryInputRef = useRef<HTMLInputElement>(null);
+  const directoryListId = useId();
   const [directoryCaret, setDirectoryCaret] = useState(entry.fields.directory.length);
   const [directoryMenuOpen, setDirectoryMenuOpen] = useState(false);
   const [activeSuggestion, setActiveSuggestion] = useState<number | null>(null);
@@ -47,22 +47,15 @@ export function FilingConfirmation({
   }, [autoFocus, entry.status, entry.filing.id]);
 
   useEffect(() => {
-    function handlePointerDown(event: PointerEvent) {
-      if (cardRef.current?.contains(event.target as Node)) return;
-      onDismiss();
-    }
+    if (!autoFocus) return;
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       event.preventDefault();
       onDismiss();
     }
-    document.addEventListener("pointerdown", handlePointerDown);
     document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [onDismiss]);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [autoFocus, onDismiss]);
 
   const directoryReserved = isInternalBundlePath(normalizeDirectoryInput(entry.fields.directory));
   const submitAction = entry.standalone ? onStandalone : onAccept;
@@ -113,7 +106,6 @@ export function FilingConfirmation({
     <div className="filing-confirmation-layer">
       <aside
         className="filing-confirmation"
-        ref={cardRef}
         role="dialog"
         aria-modal="true"
         aria-label="Filing confirmation"
@@ -132,9 +124,6 @@ export function FilingConfirmation({
               <span>Destination</span>
               <strong>{entry.filing.destinationId ?? "Existing note"}</strong>
             </div>
-            <button className="filing-button filing-button-secondary" type="button" onClick={onRevealStandalone}>
-              File separately
-            </button>
           </div>
         ) : (
           <form
@@ -151,9 +140,9 @@ export function FilingConfirmation({
                 ref={directoryInputRef}
                 role="combobox"
                 aria-autocomplete="list"
-                aria-controls="filing-directory-suggestions"
+                aria-controls={directoryListId}
                 aria-expanded={directoryMenuOpen && directorySuggestions.length > 0}
-                aria-activedescendant={activeSuggestion === null ? undefined : `filing-directory-option-${activeSuggestion}`}
+                aria-activedescendant={activeSuggestion === null ? undefined : `${directoryListId}-option-${activeSuggestion}`}
                 aria-invalid={directoryReserved}
                 value={entry.fields.directory}
                 onFocus={(event) => {
@@ -201,9 +190,9 @@ export function FilingConfirmation({
                 }}
               />
               {directoryMenuOpen && directorySuggestions.length > 0 && (
-                <ul className="filing-directory-suggestions" id="filing-directory-suggestions" role="listbox" aria-label="Directory suggestions">
+                <ul className="filing-directory-suggestions" id={directoryListId} role="listbox" aria-label="Directory suggestions">
                   {directorySuggestions.map((suggestion, index) => (
-                    <li key={suggestion.directory} id={`filing-directory-option-${index}`} role="option" aria-selected={activeSuggestion === index}>
+                    <li key={suggestion.directory} id={`${directoryListId}-option-${index}`} role="option" aria-selected={activeSuggestion === index}>
                       <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => selectDirectorySuggestion(index)}>{suggestion.directory}</button>
                     </li>
                   ))}
@@ -224,6 +213,11 @@ export function FilingConfirmation({
         <div className="filing-actions">
           <span>Enter to accept · Esc to keep agent filing</span>
           <div>
+            {isAppend && !entry.standalone && (
+              <button className="filing-button filing-button-secondary" type="button" onClick={onRevealStandalone}>
+                File separately
+              </button>
+            )}
             <button className="filing-button filing-button-primary" ref={acceptRef} type="button" onClick={submit} disabled={entry.status === "submitting" || directoryReserved}>
               {entry.status === "submitting" ? "Filing…" : entry.error ? "Retry" : entry.standalone ? "File separately" : "Accept"}
             </button>

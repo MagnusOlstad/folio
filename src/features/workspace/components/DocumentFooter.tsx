@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ViewerDocument } from "../../../domain/types.ts";
 import { directoryForId } from "../../../lib/paths.ts";
 import {
@@ -5,6 +6,7 @@ import {
   formatDate,
   isUntitledId,
 } from "../../../lib/workspace.ts";
+import { NoteDeleteConfirmation } from "./NoteDeleteConfirmation.tsx";
 
 type DocumentFooterProps = {
   groupId: string;
@@ -53,6 +55,7 @@ export function DocumentFooter({
   onDelete,
   onOpenDocument,
 }: DocumentFooterProps) {
+  const [deleteConfirmationId, setDeleteConfirmationId] = useState<string | null>(null);
   const frontmatterLinks = Array.from(
     new Map(
       document.links
@@ -173,7 +176,7 @@ export function DocumentFooter({
                 <button
                   type="button"
                   className="document-delete"
-                  onClick={() => void onDelete(document)}
+                  onClick={() => setDeleteConfirmationId(document.id)}
                   disabled={deleteInProgress}
                   title={`Delete ${document.title}`}
                 >
@@ -204,6 +207,14 @@ export function DocumentFooter({
             ))}
           </div>
         </div>
+      )}
+      {deleteConfirmationId === document.id && (
+        <NoteDeleteConfirmation
+          title={document.title}
+          deleting={deleting}
+          onCancel={() => setDeleteConfirmationId(null)}
+          onConfirm={() => void onDelete(document)}
+        />
       )}
     </footer>
   );

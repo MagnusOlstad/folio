@@ -935,6 +935,19 @@ body.resizing-horizontal * {
   outline: none;
 }
 
+.filing-button-danger {
+  border-color: var(--orange);
+  color: #161816;
+  background: var(--orange);
+}
+
+.filing-button-danger:hover,
+.filing-button-danger:focus-visible {
+  border-color: var(--ink);
+  background: var(--ink);
+  outline: none;
+}
+
 .filing-button:disabled {
   cursor: wait;
   opacity: 0.55;
@@ -947,6 +960,23 @@ body.resizing-horizontal * {
   color: var(--ink);
   background: rgba(217, 133, 95, 0.1);
   font-size: 11px;
+}
+
+.note-delete-confirmation {
+  width: min(480px, 100%);
+}
+
+.note-delete-status {
+  border-color: rgba(217, 133, 95, 0.4);
+  color: var(--orange);
+  background: rgba(217, 133, 95, 0.08);
+}
+
+.note-delete-description {
+  margin: 20px 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .filing-confirmation-preparing {

@@ -96,12 +96,6 @@ export function useWorkspaceDocumentNavigation({
       state.savingDocuments.has(document.id)
     )
       return;
-    if (
-      !window.confirm(
-        `Delete "${document.title}"? The raw capture will be retained.`,
-      )
-    )
-      return;
     state.setDeletingNoteId(document.id);
     setMessage("");
     try {

@@ -114,7 +114,56 @@ describe("workspace editor components", () => {
     fireEvent.keyDown(window.document, { key: "Escape" });
     expect(onDismiss).toHaveBeenCalledOnce();
     fireEvent.pointerDown(window.document.body);
-    expect(onDismiss).toHaveBeenCalledTimes(2);
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it("keeps filing dialogs independent across notes", () => {
+    const firstDismiss = vi.fn();
+    const secondDismiss = vi.fn();
+    const sharedEntry = {
+      filing: {
+        id: "filing-shared",
+        draftId: "untitled-shared",
+        mode: "new" as const,
+        destinationId: null,
+        actor: "agent",
+        proposal: { directory: "/projects", filename: "note.md", title: "Note", description: "", tags: [] },
+      },
+      fields: { directory: "/projects", filename: "note.md", title: "Note", description: "", tags: [] },
+      standalone: false,
+      status: "ready" as const,
+      error: null,
+    };
+
+    render(
+      <>
+        <FilingConfirmation
+          entry={sharedEntry}
+          directories={["/", "/projects"]}
+          autoFocus={false}
+          onChange={vi.fn()}
+          onAccept={vi.fn()}
+          onStandalone={vi.fn()}
+          onDismiss={firstDismiss}
+          onRevealStandalone={vi.fn()}
+        />
+        <FilingConfirmation
+          entry={{ ...sharedEntry, filing: { ...sharedEntry.filing, id: "filing-active" } }}
+          directories={["/", "/projects"]}
+          onChange={vi.fn()}
+          onAccept={vi.fn()}
+          onStandalone={vi.fn()}
+          onDismiss={secondDismiss}
+          onRevealStandalone={vi.fn()}
+        />
+      </>,
+    );
+
+    const pathInputs = screen.getAllByRole("combobox", { name: "Path" });
+    expect(pathInputs[0].getAttribute("aria-controls")).not.toBe(pathInputs[1].getAttribute("aria-controls"));
+    fireEvent.keyDown(window.document, { key: "Escape" });
+    expect(firstDismiss).not.toHaveBeenCalled();
+    expect(secondDismiss).toHaveBeenCalledOnce();
   });
 
   it("selects a depth-scoped path suggestion with the keyboard", () => {
@@ -480,6 +529,11 @@ describe("workspace editor components", () => {
     fireEvent.change(tags, { target: { value: "one, two" } });
     fireEvent.blur(tags);
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Delete note" })).toHaveTextContent(
+      "The raw capture will be retained",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Delete note" }));
     fireEvent.click(screen.getByRole("button", { name: /Linked note/ }));
 
     expect(move).toHaveBeenCalledWith(document.id, "/archive");
