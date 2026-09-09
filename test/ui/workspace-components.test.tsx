@@ -471,6 +471,29 @@ describe("workspace editor components", () => {
     expect(screen.getByText("Removed").tagName).toBe("DEL");
   });
 
+  it("renders three hyphens as a horizontal rule without shifting task source lines", () => {
+    const onToggleTask = vi.fn().mockResolvedValue(undefined);
+    const renderedDocument = {
+      ...document,
+      content: "Before the rule\n---\n- [ ] After the rule",
+    };
+    const { container } = render(
+      <RenderedMarkdown
+        document={renderedDocument}
+        groupId="secondary"
+        saving={false}
+        onOpenDocument={vi.fn().mockResolvedValue(undefined)}
+        onToggleTask={onToggleTask}
+      />,
+    );
+
+    expect(screen.queryByRole("heading", { name: "Before the rule" })).toBeNull();
+    expect(screen.getByText("Before the rule").tagName).toBe("P");
+    expect(container.querySelector("[data-readonly-markdown] hr")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(onToggleTask).toHaveBeenCalledWith(renderedDocument, 3, true);
+  });
+
   it("forwards document path, tag, delete, and related-link actions", () => {
     const linkedDocument = {
       ...document,
