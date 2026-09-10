@@ -66,6 +66,17 @@ describe("theme settings", () => {
       <SettingsDialog
         themeId="original"
         onSelectTheme={onSelectTheme}
+        obsidianImport={{
+          supported: false,
+          busy: false,
+          scan: null,
+          job: null,
+          error: "",
+          selectVault: () => {},
+          confirmImport: () => {},
+          cancelImport: () => {},
+          clearScan: () => {},
+        }}
         onClose={onClose}
       />,
     );
@@ -79,6 +90,41 @@ describe("theme settings", () => {
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("summarizes a vault and requires one explicit import confirmation", () => {
+    const confirmImport = vi.fn();
+    render(
+      <SettingsDialog
+        themeId="original"
+        onSelectTheme={() => {}}
+        onClose={() => {}}
+        obsidianImport={{
+          supported: true,
+          busy: false,
+          scan: {
+            id: "scan-1",
+            vaultId: "vault-1",
+            name: "Work vault",
+            provider: "browser",
+            total: 9,
+            counts: { new: 4, imported: 2, changed: 1, retryable: 1, invalid: 0, attachments: 1 },
+            requiredUploads: ["Alpha.md"],
+          },
+          job: null,
+          error: "",
+          selectVault: () => {},
+          confirmImport,
+          cancelImport: () => {},
+          clearScan: () => {},
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Work vault")).toBeInTheDocument();
+    expect(screen.getByText(/import 5 notes/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Import notes" }));
+    expect(confirmImport).toHaveBeenCalledOnce();
   });
 
   it("shows the top-bar Settings fallback only for browser builds", () => {

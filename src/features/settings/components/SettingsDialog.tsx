@@ -1,9 +1,11 @@
 import { useEffect, useId, useRef } from "react";
 import { THEME_OPTIONS, type ThemeId } from "../model/themes.ts";
+import type { ObsidianImportSettings } from "../model/obsidian-import.ts";
 
 export type SettingsDialogProps = {
   themeId: ThemeId;
   onSelectTheme: (themeId: ThemeId) => void;
+  obsidianImport: ObsidianImportSettings;
   onClose: () => void;
 };
 
@@ -13,6 +15,7 @@ const FOCUSABLE_SELECTOR =
 export function SettingsDialog({
   themeId,
   onSelectTheme,
+  obsidianImport,
   onClose,
 }: SettingsDialogProps) {
   const titleId = useId();
@@ -104,6 +107,72 @@ export function SettingsDialog({
                 <small>{theme.description}</small>
               </label>
             ))}
+          </div>
+        </section>
+        <section className="settings-section settings-import-section" aria-labelledby={`${titleId}-import`}>
+          <div className="settings-section-copy">
+            <h2 id={`${titleId}-import`}>Import</h2>
+            <p>File every Markdown note from an Obsidian vault into Folio.</p>
+          </div>
+          {!obsidianImport.supported ? (
+            <p className="settings-import-message">
+              Folder import requires Folio for desktop or a Chromium browser with folder access.
+            </p>
+          ) : null}
+          {obsidianImport.busy && !obsidianImport.job ? (
+            <p className="settings-import-message" aria-live="polite">
+              {obsidianImport.scan ? "Preparing source files…" : "Scanning vault…"}
+            </p>
+          ) : null}
+          {obsidianImport.scan ? (
+            <div className="settings-import-summary">
+              <strong>{obsidianImport.scan.name}</strong>
+              <dl>
+                <div><dt>New</dt><dd>{obsidianImport.scan.counts.new}</dd></div>
+                <div><dt>Already imported</dt><dd>{obsidianImport.scan.counts.imported}</dd></div>
+                <div><dt>Changed (skipped)</dt><dd>{obsidianImport.scan.counts.changed}</dd></div>
+                <div><dt>Ready to retry</dt><dd>{obsidianImport.scan.counts.retryable}</dd></div>
+                <div><dt>Attachments (not copied)</dt><dd>{obsidianImport.scan.counts.attachments}</dd></div>
+              </dl>
+              {obsidianImport.job ? (
+                <div className="settings-import-progress" aria-live="polite">
+                  <progress
+                    max={Math.max(obsidianImport.job.total, 1)}
+                    value={obsidianImport.job.phase === "completed" ? Math.max(obsidianImport.job.total, 1) : obsidianImport.job.processed}
+                  />
+                  <span>
+                    {obsidianImport.job.phase === "completed"
+                      ? `Imported ${obsidianImport.job.imported} notes; ${obsidianImport.job.failed} failed; ${obsidianImport.job.unresolvedLinks} note links unresolved.`
+                      : obsidianImport.job.phase === "cancelled"
+                        ? "Import cancelled. Select this vault again to resume."
+                        : obsidianImport.job.phase === "failed"
+                          ? obsidianImport.job.error || "Import failed."
+                          : `${obsidianImport.job.phase} · ${obsidianImport.job.processed} of ${obsidianImport.job.total || obsidianImport.scan.counts.new + obsidianImport.scan.counts.retryable}`}
+                  </span>
+                </div>
+              ) : (
+                <p className="settings-import-message">
+                  Folio will archive the originals and import {obsidianImport.scan.counts.new + obsidianImport.scan.counts.retryable} notes. This is the only confirmation.
+                </p>
+              )}
+            </div>
+          ) : null}
+          {obsidianImport.error ? <p className="settings-import-error" role="alert">{obsidianImport.error}</p> : null}
+          <div className="settings-import-actions">
+            <button type="button" onClick={obsidianImport.selectVault} disabled={!obsidianImport.supported || obsidianImport.busy}>
+              {obsidianImport.scan ? "Choose another vault" : "Choose Obsidian vault"}
+            </button>
+            {obsidianImport.scan && !obsidianImport.job ? (
+              <button type="button" className="primary" onClick={obsidianImport.confirmImport} disabled={obsidianImport.busy || obsidianImport.scan.counts.new + obsidianImport.scan.counts.retryable === 0}>
+                Import notes
+              </button>
+            ) : null}
+            {obsidianImport.job && !["completed", "cancelled", "failed"].includes(obsidianImport.job.phase) ? (
+              <button type="button" onClick={obsidianImport.cancelImport}>Cancel after current note</button>
+            ) : null}
+            {obsidianImport.job && ["completed", "cancelled", "failed"].includes(obsidianImport.job.phase) ? (
+              <button type="button" onClick={obsidianImport.clearScan}>Done</button>
+            ) : null}
           </div>
         </section>
       </aside>

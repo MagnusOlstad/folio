@@ -31,6 +31,7 @@ export function createConfig(env = process.env) {
     bundleRoot,
     rawRoot: path.join(bundleRoot, 'references', 'inbox'),
     draftsRoot: path.join(dataRoot, 'drafts'),
+    importsRoot: path.join(dataRoot, 'imports'),
     indexPath: path.join(dataRoot, 'search-index.json'),
     distRoot: env.FOLIO_DIST_ROOT || path.join(projectRoot, 'dist'),
     ollamaUrl,

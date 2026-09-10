@@ -70,6 +70,10 @@
   padding: 24px;
 }
 
+.settings-section + .settings-section {
+  border-top: 1px solid var(--line);
+}
+
 .settings-section-copy h2 {
   margin-top: 0;
   font-size: 12px;
@@ -146,6 +150,75 @@
   line-height: 1.35;
   text-overflow: ellipsis;
 }
+
+.settings-import-summary,
+.settings-import-message,
+.settings-import-error {
+  margin: 0 0 14px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.settings-import-summary {
+  padding: 14px;
+  border: 1px solid var(--line);
+  background: var(--paper-raised);
+}
+
+.settings-import-summary > strong {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.settings-import-summary dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 18px;
+}
+
+.settings-import-summary dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-import-summary dt { color: var(--muted); }
+.settings-import-summary dd { margin: 0; color: var(--ink); }
+.settings-import-error { color: var(--danger, #b83a38); }
+
+.settings-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-import-actions button {
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: var(--paper-raised);
+  font: inherit;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.settings-import-actions button.primary {
+  border-color: var(--acid);
+  background: var(--acid);
+  color: var(--acid-ink, var(--paper));
+}
+
+.settings-import-actions button:disabled { opacity: 0.45; }
+
+.settings-import-progress {
+  margin-top: 14px;
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+}
+
+.settings-import-progress progress { width: 100%; accent-color: var(--acid); }
 
 @media (max-width: 560px) {
   .settings-layer {
