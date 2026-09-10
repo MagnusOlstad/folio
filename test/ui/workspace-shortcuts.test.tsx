@@ -1,4 +1,4 @@
-import { fireEvent, renderHook } from "@testing-library/react";
+import { act, fireEvent, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useWorkspaceShortcutActions } from "../../src/features/workspace/hooks/useWorkspaceShortcutActions.ts";
 
@@ -30,6 +30,7 @@ describe("workspace shortcuts", () => {
         closeTab: vi.fn(),
         fileDraft: vi.fn(),
         flushDocument: vi.fn().mockResolvedValue(undefined),
+        openSettings: vi.fn(),
       }),
     );
 
@@ -60,6 +61,7 @@ describe("workspace shortcuts", () => {
         closeTab: vi.fn(),
         fileDraft: vi.fn(),
         flushDocument: vi.fn().mockResolvedValue(undefined),
+        openSettings: vi.fn(),
       }),
     );
 
@@ -69,5 +71,38 @@ describe("workspace shortcuts", () => {
 
     unmount();
     searchInput.remove();
+  });
+
+  it("opens settings from the native application menu action", () => {
+    const openSettings = vi.fn();
+    let handleMenuAction: ((action: string) => void) | undefined;
+    window.folio = {
+      onMenuAction: (handler) => {
+        handleMenuAction = handler;
+        return vi.fn();
+      },
+    };
+    const { unmount } = renderHook(() =>
+      useWorkspaceShortcutActions({
+        sidebarMode: "explore",
+        setSidebarMode: vi.fn(),
+        searchInputRef: { current: null },
+        groups: [],
+        activeGroupId: "primary",
+        documents: {},
+        createNewTab: vi.fn(),
+        activateTab: vi.fn(),
+        closeTab: vi.fn(),
+        fileDraft: vi.fn(),
+        flushDocument: vi.fn().mockResolvedValue(undefined),
+        openSettings,
+      }),
+    );
+
+    act(() => handleMenuAction?.("open-settings"));
+
+    expect(openSettings).toHaveBeenCalledOnce();
+    unmount();
+    delete window.folio;
   });
 });

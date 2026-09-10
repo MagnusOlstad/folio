@@ -1,13 +1,4 @@
 :root {
-  --ink: #e9e5d9;
-  --muted: #918f87;
-  --dim: #5e615b;
-  --paper: #20231f;
-  --paper-raised: #272a25;
-  --line: #373b35;
-  --acid: #b7d892;
-  --orange: #d9855f;
-  --blue: #81a9b5;
   --topbar-height: 68px;
   --sidebar-width: 310px;
 }
@@ -20,9 +11,9 @@
   grid-template-rows: var(--topbar-height) minmax(0, 1fr);
   overflow: hidden;
   background:
-    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.012) 1px, transparent 1px),
-    #161816;
+    linear-gradient(rgba(var(--highlight-rgb), 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--highlight-rgb), 0.012) 1px, transparent 1px),
+    var(--canvas);
   background-size: 28px 28px;
 }
 
@@ -35,12 +26,13 @@
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--line);
-  background: rgba(22, 24, 22, 0.94);
+  background: var(--topbar-background);
   backdrop-filter: blur(14px);
 }
 
 .brand,
 .brand-group,
+.topbar-actions,
 .ollama-status,
 .model-status,
 .endpoint-statuses,
@@ -96,6 +88,10 @@
   gap: 16px;
 }
 
+.topbar-actions {
+  gap: 12px;
+}
+
 .model-status {
   gap: 8px;
   color: var(--muted);
@@ -111,13 +107,13 @@
   height: 7px;
   border-radius: 50%;
   background: var(--orange);
-  box-shadow: 0 0 0 4px rgba(217, 133, 95, 0.08);
+  box-shadow: 0 0 0 4px rgba(var(--orange-rgb), 0.08);
 }
 
 .model-status.online .status-dot,
 .endpoint-status.online .toggle-symbol {
   background: var(--acid);
-  box-shadow: 0 0 0 4px rgba(183, 216, 146, 0.08);
+  box-shadow: 0 0 0 4px rgba(var(--acid-rgb), 0.08);
 }
 
 .model-setup,

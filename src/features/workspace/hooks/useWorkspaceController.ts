@@ -13,6 +13,7 @@ import { useWorkspaceShortcutActions } from "./useWorkspaceShortcutActions.ts";
 import { useFiledDocumentAutosave } from "./useFiledDocumentAutosave.ts";
 import { isUntitledId } from "../../../lib/workspace.ts";
 import { bundleDirectories } from "../model/directory-suggestions.ts";
+import { useThemeSettings } from "../../settings/hooks/useThemeSettings.ts";
 
 function draftTitle(content: string) {
   const firstLine = content
@@ -24,6 +25,7 @@ function draftTitle(content: string) {
 
 export function useWorkspaceController(): WorkspaceShellProps {
   const [message, setMessage] = useState("");
+  const themeSettings = useThemeSettings();
   const embeddingRevisionsRef = useRef(new Map<string, number>());
   const embeddingFinalizationsRef = useRef(new Map<string, Promise<void>>());
   const explorer = useWorkspaceExplorerState(setMessage);
@@ -171,6 +173,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
     closeTab: closeDocumentTab,
     fileDraft: mutations.fileDraft,
     flushDocument: finalizeFiledDocument,
+    openSettings: themeSettings.openSettings,
   });
 
   const { sidebar, moveBundleFile } = useWorkspaceSidebarProps({
@@ -197,8 +200,16 @@ export function useWorkspaceController(): WorkspaceShellProps {
       modelInstallInProgress: models.modelInstallInProgress,
       modelEndpoints: models.modelEndpoints,
       togglingService: models.togglingService,
+      showSettingsButton: !window.folio,
       onInstall: models.installOllamaModels,
       onToggle: models.toggleOllamaService,
+      onOpenSettings: themeSettings.openSettings,
+    },
+    settings: {
+      open: themeSettings.settingsOpen,
+      themeId: themeSettings.themeId,
+      onSelectTheme: themeSettings.selectTheme,
+      onClose: themeSettings.closeSettings,
     },
     sidebar,
     layout: {
