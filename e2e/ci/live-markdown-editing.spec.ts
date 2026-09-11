@@ -15,10 +15,16 @@ function scrollSurface(page: Page) {
   return page.locator("[data-document-scroll]");
 }
 
-async function openSeededNote(page: Page, title: string) {
+async function openSeededNote(
+  page: Page,
+  title: string,
+  disposition: "preview" | "permanent" = "preview",
+) {
   await page.goto("/");
   await expect(page.getByRole("link", { name: "Folio home" })).toBeVisible();
-  await page.getByRole("button", { name: title, exact: true }).click();
+  const note = page.getByRole("button", { name: title, exact: true });
+  if (disposition === "permanent") await note.dblclick();
+  else await note.click();
   await expect(liveEditor(page, title)).toBeVisible();
 }
 
@@ -346,7 +352,7 @@ test("keeps the outer document scroll stable when a rendered construct is activa
 });
 
 test("restores each note scroll position when switching tabs", async ({ page }) => {
-  await openSeededNote(page, "Start Here");
+  await openSeededNote(page, "Start Here", "permanent");
 
   const scroller = scrollSurface(page);
   await scroller.evaluate((element) => {
