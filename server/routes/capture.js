@@ -5,10 +5,11 @@ import path from 'node:path'
 export function registerRoutes(app, runtime) {
   const { embedModel, rawRoot, bundleRoot, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, normalizeDraftId, queueDraftMutation,
     readDraft, writeDraft, resolveBundleMarkdownPath, readBundleDocuments, bundleFileId, parseMarkdownFile, queueMarkdownMutation, reindexBundle,
-    normalizeInlineText, markdownDocument, embeddingInputHash, persistEmbeddingUpdates, refreshRecordEmbeddings, classify, openingSpecialKind, rawDocument,
+    normalizeInlineText, markdownDocument, embeddingInputHash, persistEmbeddingUpdates, refreshRecordEmbeddings, embedDocument, boundedEmbeddingText,
+    embeddingSchemaVersion, classify, openingSpecialKind, rawDocument,
     slugify, confirmationIdFor, destinationFor, availableConceptFilename, findExactConceptFile, appendConceptDocument, appendAggregateDocument, filingActor,
     conceptDocument, validTimeZone, dateKeyInTimeZone, normalizeClassification, embeddingDimension,
-    normalizeMarkdownBreaks } = runtime
+    normalizeMarkdownBreaks, creationRelationships } = runtime
 app.post('/api/notes', async (request, response, next) => {
   try {
     const content = String(request.body?.content || '').trim()
@@ -105,8 +106,8 @@ app.post('/api/notes', async (request, response, next) => {
       appended = aggregate.appended
     } else {
       const folder = classification.path.join('/')
-      classification.relationships = []
-      classification.relatedIds = []
+      classification.relationships = creationRelationships(conceptContent, records, noteEmbedding)
+      classification.relatedIds = classification.relationships.map((relationship) => relationship.id)
 
       const relatedConcepts = new Map(records.map((record) => [record.id, record]))
       const targetFolder = path.join(bundleRoot, folder)

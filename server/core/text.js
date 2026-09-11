@@ -1,6 +1,8 @@
 export function createTextHelpers() {
   function slugify(value, fallback = 'note') {
-    const slug = value.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    const slug = value.toLowerCase()
+      .replaceAll('æ', 'ae').replaceAll('ø', 'o').replaceAll('å', 'a')
+      .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 64)
     return slug || fallback
   }

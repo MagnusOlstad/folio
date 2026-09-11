@@ -22,10 +22,17 @@ async function ollamaRequest(endpoint, body, timeout = 120_000) {
   })
 
   if (!response.ok) {
-    throw new Error(`Ollama returned ${response.status}`)
+    const error = new Error(`Ollama returned ${response.status}`)
+    error.ollamaStatus = response.status
+    throw error
   }
 
-  return response.json()
+  try {
+    return await response.json()
+  } catch (error) {
+    error.ollamaResponse = true
+    throw error
+  }
 }
 
 async function ollamaStatus(timeout = 3_000) {
