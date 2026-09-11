@@ -200,6 +200,16 @@ export function useWorkspaceDocumentNavigation({
       return pinGroupTab(opened, openGroupId, id);
     });
     if (state.documents[id] || state.loadingDocuments.has(id)) return;
+    try {
+      await loadDocument(id, source);
+    } catch (error) {
+      closeTab(openGroupId, id);
+      setMessage(error instanceof Error ? error.message : "Could not open file");
+    }
+  }
+
+  async function loadDocument(id: string, source: "note" | "file" = "file") {
+    if (state.documents[id] || state.loadingDocuments.has(id)) return;
     const requestId = (state.documentRequests.current[id] || 0) + 1;
     state.documentRequests.current[id] = requestId;
     state.setLoadingDocuments((current) => new Set(current).add(id));
@@ -228,9 +238,6 @@ export function useWorkspaceDocumentNavigation({
           })),
         );
       }
-    } catch (error) {
-      closeTab(openGroupId, id);
-      setMessage(error instanceof Error ? error.message : "Could not open file");
     } finally {
       state.setLoadingDocuments((current) => {
         const next = new Set(current);
@@ -240,5 +247,5 @@ export function useWorkspaceDocumentNavigation({
     }
   }
 
-  return { deleteLocalDraft, deleteFiledNote, openDocument };
+  return { deleteLocalDraft, deleteFiledNote, openDocument, loadDocument };
 }

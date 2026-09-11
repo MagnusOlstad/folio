@@ -62,7 +62,7 @@ async function persistRendererStorage(snapshot, revision) {
 
 function scheduleRendererStoragePersist() {
   rendererStorageRevision += 1
-  if (rendererStorageWriteTimer !== null) return
+  if (rendererStorageWriteTimer !== null) clearTimeout(rendererStorageWriteTimer)
   rendererStorageWriteTimer = setTimeout(() => {
     rendererStorageWriteTimer = null
     const revision = rendererStorageRevision
@@ -90,19 +90,17 @@ function registerRendererStorage() {
   ipcMain.on('folio:get-storage', (event, key) => {
     event.returnValue = validStorageKey(key) ? rendererStorage[key] ?? null : null
   })
-  ipcMain.on('folio:set-storage', (event, key, value) => {
+  ipcMain.on('folio:set-storage', (_event, key, value) => {
     if (validStorageKey(key) && typeof value === 'string' && value.length <= 2_000_000) {
       rendererStorage[key] = value
       scheduleRendererStoragePersist()
     }
-    event.returnValue = null
   })
-  ipcMain.on('folio:remove-storage', (event, key) => {
+  ipcMain.on('folio:remove-storage', (_event, key) => {
     if (validStorageKey(key)) {
       delete rendererStorage[key]
       scheduleRendererStoragePersist()
     }
-    event.returnValue = null
   })
 }
 

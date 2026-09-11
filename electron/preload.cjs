@@ -2,8 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('folio', {
   getStorage: (key) => ipcRenderer.sendSync('folio:get-storage', key),
-  setStorage: (key, value) => ipcRenderer.sendSync('folio:set-storage', key, value),
-  removeStorage: (key) => ipcRenderer.sendSync('folio:remove-storage', key),
+  setStorage: (key, value) => ipcRenderer.send('folio:set-storage', key, value),
+  removeStorage: (key) => ipcRenderer.send('folio:remove-storage', key),
   onMenuAction: (handler) => {
     const listener = (_event, action) => handler(action)
     ipcRenderer.on('folio:menu-action', listener)

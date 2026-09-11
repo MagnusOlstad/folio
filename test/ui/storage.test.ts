@@ -7,6 +7,8 @@ import {
 import {
   loadWorkspaceSessionState,
   parseWorkspaceSessionState,
+  pruneDocumentScrollTops,
+  reconcileWorkspaceSessionState,
 } from "../../src/features/workspace/model/workspace-state.ts";
 
 describe("expanded-directory storage", () => {
@@ -213,5 +215,36 @@ describe("workspace session storage", () => {
         previewId: null,
       },
     ]);
+  });
+
+  it("keeps the most recently written scroll entries within the runtime limit", () => {
+    const entries = Object.fromEntries(
+      Array.from({ length: 205 }, (_, index) => [`/notes/${index}.md`, index]),
+    );
+    const result = pruneDocumentScrollTops(entries);
+
+    expect(Object.keys(result)).toHaveLength(200);
+    expect(result["/notes/0.md"]).toBeUndefined();
+    expect(result["/notes/204.md"]).toBe(204);
+  });
+
+  it("reconciles restored tabs without loading or selecting documents", () => {
+    const state = parseWorkspaceSessionState({
+      version: 1,
+      groups: [
+        { id: "primary", tabs: ["/one.md", "/missing.md"], activeId: "/one.md", previewId: null },
+        { id: "secondary", tabs: ["/two.md"], activeId: "/two.md", previewId: null },
+      ],
+      activeGroupId: "secondary",
+      sidebarMode: "explore",
+    });
+    expect(state).not.toBeNull();
+    expect(reconcileWorkspaceSessionState(state!, new Set(["/one.md", "/two.md"]))).toEqual({
+      groups: [
+        { id: "primary", tabs: ["/one.md"], activeId: "/one.md", previewId: null },
+        { id: "secondary", tabs: ["/two.md"], activeId: "/two.md", previewId: null },
+      ],
+      activeGroupId: "secondary",
+    });
   });
 });

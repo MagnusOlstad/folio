@@ -27,7 +27,11 @@ export function readStorageItem(key: string): string | null {
 
 export function writeStorageItem(key: string, value: string): void {
   try {
-    window.folio?.setStorage?.(key, value);
+    const desktopWrite = window.folio?.setStorage;
+    if (desktopWrite) {
+      desktopWrite(key, value);
+      return;
+    }
   } catch {
     /* browser storage remains the fallback */
   }
@@ -40,7 +44,11 @@ export function writeStorageItem(key: string, value: string): void {
 
 export function removeStorageItem(key: string): void {
   try {
-    window.folio?.removeStorage?.(key);
+    const desktopRemove = window.folio?.removeStorage;
+    if (desktopRemove) {
+      desktopRemove(key);
+      return;
+    }
   } catch {
     /* browser storage remains the fallback */
   }
