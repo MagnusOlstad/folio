@@ -14,6 +14,7 @@ import {
   moveGroupTab,
   pinGroupTab,
 } from "../model/tab-state.ts";
+import type { WorkspaceSessionState } from "../model/workspace-state.ts";
 
 type UseWorkspaceTabsOptions = {
   documents: Record<string, ViewerDocument>;
@@ -24,6 +25,7 @@ type UseWorkspaceTabsOptions = {
   setDrafts: Dispatch<SetStateAction<Record<string, string>>>;
   setEditingKey: Dispatch<SetStateAction<string | null>>;
   draftTitle: (content: string) => string;
+  initialState?: WorkspaceSessionState | null;
 };
 
 export function useWorkspaceTabs({
@@ -35,11 +37,14 @@ export function useWorkspaceTabs({
   setDrafts,
   setEditingKey,
   draftTitle,
+  initialState,
 }: UseWorkspaceTabsOptions) {
-  const [groups, setGroups] = useState<TabGroup[]>([
-    { id: "primary", tabs: [], activeId: null, previewId: null },
-  ]);
-  const [activeGroupId, setActiveGroupId] = useState("primary");
+  const [groups, setGroups] = useState<TabGroup[]>(
+    () => initialState?.groups ?? [{ id: "primary", tabs: [], activeId: null, previewId: null }],
+  );
+  const [activeGroupId, setActiveGroupId] = useState(
+    initialState?.activeGroupId ?? "primary",
+  );
   const untitledCounter = useRef(0);
 
   function titleForId(id: string) {

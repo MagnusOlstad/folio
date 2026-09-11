@@ -4,6 +4,10 @@ import {
   loadExpandedDirectoryState,
   loadLocalDrafts,
 } from "../../src/lib/storage.ts";
+import {
+  loadWorkspaceSessionState,
+  parseWorkspaceSessionState,
+} from "../../src/features/workspace/model/workspace-state.ts";
 
 describe("expanded-directory storage", () => {
   afterEach(() => {
@@ -109,5 +113,105 @@ describe("local draft storage", () => {
     });
 
     expect(loadLocalDrafts()).toEqual([]);
+  });
+});
+
+describe("workspace session storage", () => {
+  afterEach(() => {
+    window.localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("restores versioned workspace state while filtering invalid values", () => {
+    window.localStorage.setItem(
+      "folio:workspace-state",
+      JSON.stringify({
+        version: 1,
+        groups: [
+          {
+            id: "primary",
+            tabs: ["/notes/one.md", 4, "/notes/one.md"],
+            activeId: "/notes/one.md",
+            previewId: "missing",
+          },
+          null,
+        ],
+        activeGroupId: "missing",
+        sidebarMode: "search",
+        explorerScrollTop: 180,
+        documentScrollTops: {
+          "/notes/one.md": 420,
+          bad: -1,
+          "": 10,
+        },
+      }),
+    );
+
+    expect(loadWorkspaceSessionState()).toEqual({
+      version: 1,
+      groups: [
+        {
+          id: "primary",
+          tabs: ["/notes/one.md"],
+          activeId: "/notes/one.md",
+          previewId: null,
+        },
+      ],
+      activeGroupId: "primary",
+      sidebarMode: "search",
+      explorerScrollTop: 180,
+      documentScrollTops: { "/notes/one.md": 420 },
+    });
+  });
+
+  it("rejects corrupt or unsupported workspace state", () => {
+    expect(parseWorkspaceSessionState({ version: 2, groups: [] })).toBeNull();
+    expect(parseWorkspaceSessionState({ version: 1, groups: [] })).toBeNull();
+    expect(
+      parseWorkspaceSessionState({
+        version: 1,
+        groups: [
+          { id: "tertiary", tabs: ["/bad"], activeId: "/bad", previewId: null },
+          { id: "primary", tabs: ["/good"], activeId: "/good", previewId: null },
+        ],
+      }),
+    ).toMatchObject({ groups: [{ id: "primary", tabs: ["/good"] }] });
+    window.localStorage.setItem("folio:workspace-state", "{broken");
+    expect(loadWorkspaceSessionState()).toBeNull();
+  });
+
+  it("caps groups and removes duplicate tabs across groups", () => {
+    const result = parseWorkspaceSessionState({
+      version: 1,
+      groups: [
+        {
+          id: "primary",
+          tabs: ["/same", "/first"],
+          activeId: "/same",
+          previewId: null,
+        },
+        {
+          id: "secondary",
+          tabs: ["/same", "/second"],
+          activeId: "/second",
+          previewId: null,
+        },
+        { id: "primary", tabs: ["/third"], activeId: "/third", previewId: null },
+      ],
+    });
+    expect(result?.groups).toEqual([
+      {
+        id: "primary",
+        tabs: ["/same", "/first"],
+        activeId: "/same",
+        previewId: null,
+      },
+      {
+        id: "secondary",
+        tabs: ["/second"],
+        activeId: "/second",
+        previewId: null,
+      },
+    ]);
   });
 });

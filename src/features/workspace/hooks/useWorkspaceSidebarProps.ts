@@ -88,6 +88,8 @@ export function useWorkspaceSidebarProps({
     sidebar: {
       sidebarMode: explorer.sidebarMode,
       setSidebarMode: explorer.setSidebarMode,
+      explorerScrollTop: explorer.explorerScrollTop,
+      onExplorerScroll: explorer.rememberExplorerScrollTop,
       reindexing: explorer.reindexing,
       reindexBundle,
       filesLoading: explorer.filesLoading,

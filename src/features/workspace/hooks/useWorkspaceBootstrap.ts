@@ -21,6 +21,7 @@ type UseWorkspaceBootstrapOptions = {
   expandedDirectoriesReadyRef: MutableRefObject<boolean>;
   setExpandedDirectories: Dispatch<SetStateAction<Set<string>>>;
   setExpandedDirectoriesReady: Dispatch<SetStateAction<boolean>>;
+  onWorkspaceDataReady?: () => void;
 };
 
 export function useWorkspaceBootstrap({
@@ -34,6 +35,7 @@ export function useWorkspaceBootstrap({
   expandedDirectoriesReadyRef,
   setExpandedDirectories,
   setExpandedDirectoriesReady,
+  onWorkspaceDataReady,
 }: UseWorkspaceBootstrapOptions) {
   useEffect(() => {
     let cancelled = false;
@@ -82,6 +84,8 @@ export function useWorkspaceBootstrap({
         setVersionInfo(versionResult.value);
       if (draftsResult.status === "fulfilled")
         mergeRemoteDrafts(draftsResult.value);
+      if (notesResult.status === "fulfilled" && filesResult.status === "fulfilled")
+        onWorkspaceDataReady?.();
       setFilesLoading(false);
       if (
         notesResult.status === "rejected" ||

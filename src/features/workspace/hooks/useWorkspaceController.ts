@@ -18,6 +18,11 @@ import { bundleDirectories } from "../model/directory-suggestions.ts";
 import { useNoteExport } from "./useNoteExport.ts";
 import { useThemeSettings } from "../../settings/hooks/useThemeSettings.ts";
 import { useObsidianImport } from "../../settings/hooks/useObsidianImport.ts";
+import {
+  loadWorkspaceSessionState,
+  saveWorkspaceSessionState,
+  type WorkspaceSessionState,
+} from "../model/workspace-state.ts";
 
 function draftTitle(content: string) {
   const firstLine = content
@@ -29,6 +34,28 @@ function draftTitle(content: string) {
 
 export function useWorkspaceController(): WorkspaceShellProps {
   const [message, setMessage] = useState("");
+  const [initialWorkspaceState] = useState<WorkspaceSessionState | null>(
+    loadWorkspaceSessionState,
+  );
+  const [workspaceDataReady, setWorkspaceDataReady] = useState(
+    initialWorkspaceState === null,
+  );
+  const [workspaceRestored, setWorkspaceRestored] = useState(
+    initialWorkspaceState === null,
+  );
+  const documentScrollTopsRef = useRef<Record<string, number>>(
+    initialWorkspaceState?.documentScrollTops ?? {},
+  );
+  const explorerScrollTopRef = useRef(
+    initialWorkspaceState?.explorerScrollTop ?? 0,
+  );
+  const latestWorkspaceStateRef = useRef<{
+    groups: import("../../../domain/types.ts").TabGroup[];
+    activeGroupId: string;
+    sidebarMode: import("../../../domain/types.ts").SidebarMode;
+  } | null>(null);
+  const persistScrollFrameRef = useRef<number | null>(null);
+  const restoreStartedRef = useRef(false);
   const noteExport = useNoteExport({ setMessage });
   const themeSettings = useThemeSettings();
   const [editorFocusRequest, setEditorFocusRequest] = useState<{
@@ -39,7 +66,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
   const editorFocusRequestIdRef = useRef(0);
   const embeddingRevisionsRef = useRef(new Map<string, number>());
   const embeddingFinalizationsRef = useRef(new Map<string, Promise<void>>());
-  const explorer = useWorkspaceExplorerState(setMessage);
+  const explorer = useWorkspaceExplorerState(setMessage, initialWorkspaceState);
   const {
     files: explorerFiles,
     setExpandedDirectories,
@@ -85,6 +112,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
     setDrafts: documents.setDrafts,
     setEditingKey: documents.setEditingKey,
     draftTitle,
+    initialState: initialWorkspaceState,
   });
   const mutations = useWorkspaceDocumentMutations({
     documents,
@@ -193,7 +221,139 @@ export function useWorkspaceController(): WorkspaceShellProps {
     expandedDirectoriesReadyRef: explorer.expandedDirectoriesReadyRef,
     setExpandedDirectories: explorer.setExpandedDirectories,
     setExpandedDirectoriesReady: explorer.setExpandedDirectoriesReady,
+    onWorkspaceDataReady: () => setWorkspaceDataReady(true),
   });
+
+  latestWorkspaceStateRef.current = {
+    groups: tabs.groups,
+    activeGroupId: tabs.activeGroupId,
+    sidebarMode: explorer.sidebarMode,
+  };
+  explorerScrollTopRef.current = explorer.explorerScrollTop;
+
+  const persistWorkspaceState = useCallback(() => {
+    if (!workspaceRestored || !latestWorkspaceStateRef.current) return;
+    saveWorkspaceSessionState({
+      ...latestWorkspaceStateRef.current,
+      explorerScrollTop: explorerScrollTopRef.current,
+      documentScrollTops: documentScrollTopsRef.current,
+    });
+  }, [workspaceRestored]);
+
+  const scheduleScrollPersistence = useCallback(() => {
+    if (persistScrollFrameRef.current !== null) return;
+    persistScrollFrameRef.current = window.requestAnimationFrame(() => {
+      persistScrollFrameRef.current = null;
+      persistWorkspaceState();
+    });
+  }, [persistWorkspaceState]);
+
+  useEffect(() => {
+    if (!workspaceRestored) return;
+    persistWorkspaceState();
+  }, [
+    explorer.explorerScrollTop,
+    explorer.sidebarMode,
+    tabs.activeGroupId,
+    tabs.groups,
+    workspaceRestored,
+    persistWorkspaceState,
+  ]);
+
+  useEffect(() => {
+    if (!workspaceDataReady || workspaceRestored || restoreStartedRef.current) return;
+    restoreStartedRef.current = true;
+    const localIds = new Set(Object.keys(documents.documents));
+    const noteIds = new Set(explorer.notes.map((note) => note.id));
+    const fileIds = new Set(explorer.files.map((file) => file.id));
+    const validIds = new Set([...localIds, ...noteIds, ...fileIds]);
+    documentScrollTopsRef.current = Object.fromEntries(
+      Object.entries(documentScrollTopsRef.current).filter(([id]) =>
+        validIds.has(id),
+      ),
+    );
+    const restoredGroups = tabs.groups.map((group) => {
+      const tabsForGroup = group.tabs.filter((id) => validIds.has(id));
+      return {
+        ...group,
+        tabs: tabsForGroup,
+        activeId: group.activeId && tabsForGroup.includes(group.activeId)
+          ? group.activeId
+          : tabsForGroup[0] ?? null,
+        previewId: group.previewId && tabsForGroup.includes(group.previewId)
+          ? group.previewId
+          : null,
+      };
+    });
+    const nextGroups = restoredGroups.length
+      ? restoredGroups
+      : [{ id: "primary", tabs: [], activeId: null, previewId: null }];
+    const nextActiveGroupId = nextGroups.some(
+      (group) => group.id === tabs.activeGroupId,
+    )
+      ? tabs.activeGroupId
+      : nextGroups[0].id;
+    tabs.setGroups(nextGroups);
+    tabs.setActiveGroupId(nextActiveGroupId);
+    const filedToRestore = nextGroups.flatMap((group) =>
+      group.tabs
+        .filter((id) => !localIds.has(id) && !documents.documents[id])
+        .map((id) => ({
+          id,
+          groupId: group.id,
+          source: noteIds.has(id) ? ("note" as const) : ("file" as const),
+        })),
+    );
+    void Promise.all(
+      filedToRestore.map(({ id, groupId, source }) =>
+        navigation.openDocument(id, source, groupId, "permanent"),
+      ),
+    ).finally(() => {
+      tabs.setGroups((current) =>
+        current.map((group) => {
+          const restored = nextGroups.find((candidate) => candidate.id === group.id);
+          return restored
+            ? {
+                ...group,
+                activeId:
+                  restored.activeId && group.tabs.includes(restored.activeId)
+                    ? restored.activeId
+                    : group.activeId,
+                previewId:
+                  restored.previewId && group.tabs.includes(restored.previewId)
+                    ? restored.previewId
+                    : group.previewId,
+              }
+            : group;
+        }),
+      );
+      tabs.setActiveGroupId(nextActiveGroupId);
+      setWorkspaceRestored(true);
+    });
+  }, [
+    documents.documents,
+    explorer.files,
+    explorer.notes,
+    navigation,
+    tabs,
+    workspaceDataReady,
+    workspaceRestored,
+  ]);
+
+  useEffect(() => {
+    const flush = () => {
+      if (persistScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(persistScrollFrameRef.current);
+        persistScrollFrameRef.current = null;
+      }
+      persistWorkspaceState();
+    };
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, [persistWorkspaceState]);
 
   useEffect(() => {
     if (!message) return;
@@ -380,6 +540,13 @@ export function useWorkspaceController(): WorkspaceShellProps {
         moveBundleFile: async (id, directory) => {
           await finalizeFiledDocument(id);
           return moveBundleFile(id, directory);
+        },
+        getDocumentScrollTop: (documentId) =>
+          documentScrollTopsRef.current[documentId] ?? 0,
+        rememberDocumentScrollTop: (documentId, scrollTop) => {
+          if (!Number.isFinite(scrollTop) || scrollTop < 0) return;
+          documentScrollTopsRef.current[documentId] = scrollTop;
+          scheduleScrollPersistence();
         },
         exportDocument: (document, format) =>
           void noteExport.exportDocument(

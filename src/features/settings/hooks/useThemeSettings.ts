@@ -4,13 +4,14 @@ import {
   isThemeId,
   type ThemeId,
 } from "../model/themes.ts";
+import { readStorageItem, writeStorageItem } from "../../../lib/storage.ts";
 
 const THEME_STORAGE_KEY = "folio:theme";
 
 export function loadStoredTheme(): ThemeId {
   if (typeof window === "undefined") return "original";
   try {
-    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    const stored = readStorageItem(THEME_STORAGE_KEY);
     return isThemeId(stored) ? stored : "original";
   } catch {
     return "original";
@@ -19,7 +20,7 @@ export function loadStoredTheme(): ThemeId {
 
 function persistTheme(themeId: ThemeId) {
   try {
-    window.localStorage.setItem(THEME_STORAGE_KEY, themeId);
+    writeStorageItem(THEME_STORAGE_KEY, themeId);
   } catch {
     /* Theme persistence is optional when browser storage is unavailable. */
   }

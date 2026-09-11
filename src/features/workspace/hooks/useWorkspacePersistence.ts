@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import type { StoredDraft, ViewerDocument } from "../../../domain/types.ts";
 import { isUntitledId } from "../../../lib/workspace.ts";
+import { writeStorageItem } from "../../../lib/storage.ts";
 
 export function useWorkspacePersistence({
   documents,
@@ -33,7 +34,7 @@ export function useWorkspacePersistence({
     const nonemptyDrafts = localDrafts.filter((draft) => draft.content.trim());
     draftSnapshotRef.current = nonemptyDrafts;
     try {
-      window.localStorage.setItem("folio:drafts", JSON.stringify(nonemptyDrafts));
+      writeStorageItem("folio:drafts", JSON.stringify(nonemptyDrafts));
     } catch {
       /* server copy remains authoritative */
     }
@@ -47,7 +48,7 @@ export function useWorkspacePersistence({
   useEffect(() => {
     if (!expandedDirectoriesReady) return;
     try {
-      window.localStorage.setItem(
+      writeStorageItem(
         "folio:expanded-directories",
         JSON.stringify([...expandedDirectories]),
       );
