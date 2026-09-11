@@ -175,6 +175,29 @@ function addLinkDecorations(
   }
 }
 
+type MarkdownSyntaxNode = {
+  name: string;
+  from: number;
+  to: number;
+  parent: MarkdownSyntaxNode | null;
+};
+
+function isCodeOrMarkdownLink(node: MarkdownSyntaxNode) {
+  let current = node.parent;
+  while (current) {
+    if (current.name === "Link" || current.name === "InlineCode" || current.name === "FencedCode")
+      return true;
+    current = current.parent;
+  }
+  return false;
+}
+
+function isBareWebUrl(node: MarkdownSyntaxNode, value: string) {
+  return node.name === "URL" &&
+    !isCodeOrMarkdownLink(node) &&
+    /^https?:\/\//i.test(value);
+}
+
 function buildDecorations(
   state: EditorState,
   configuration: LiveMarkdownConfiguration,
@@ -218,6 +241,11 @@ function buildDecorations(
       const className = inlineSyntaxClasses[node.name];
       if (className && node.from < node.to)
         ranges.push(Decoration.mark({ class: className }).range(node.from, node.to));
+
+      if (isBareWebUrl(node.node, state.sliceDoc(node.from, node.to)))
+        ranges.push(
+          Decoration.mark({ class: "cm-live-markdown-link" }).range(node.from, node.to),
+        );
 
       if (!inlineMarkerNodes.has(node.name)) return;
       const parent = node.node.parent;
@@ -334,7 +362,8 @@ function buildDecorations(
 
 type DecorationFieldValue = { decorations: DecorationSet; focused: boolean };
 
-function sourceLinkAt(documentText: string, position: number): SourceLink | null {
+function sourceLinkAt(view: EditorView, position: number): SourceLink | null {
+  const documentText = view.state.doc.toString();
   const lineStart = documentText.lastIndexOf("\n", Math.max(0, position - 1)) + 1;
   const lineEnd = documentText.indexOf("\n", position);
   const line = documentText.slice(lineStart, lineEnd === -1 ? documentText.length : lineEnd);
@@ -342,6 +371,18 @@ function sourceLinkAt(documentText: string, position: number): SourceLink | null
     const from = lineStart + (match.index ?? 0);
     const to = from + match[0].length;
     if (position >= from && position <= to) return { from, to, href: match[2] };
+  }
+  for (const resolveDirection of [-1, 1] as const) {
+    let node: MarkdownSyntaxNode | null = syntaxTree(view.state).resolveInner(
+      position,
+      resolveDirection,
+    );
+    while (node) {
+      const href = documentText.slice(node.from, node.to);
+      if (isBareWebUrl(node, href))
+        return { from: node.from, to: node.to, href };
+      node = node.parent;
+    }
   }
   return null;
 }
@@ -382,7 +423,7 @@ export function liveMarkdownExtensions(configuration: LiveMarkdownConfiguration)
         if (!(event.metaKey || event.ctrlKey)) return false;
         const position = view.posAtCoords({ x: event.clientX, y: event.clientY });
         if (position === null) return false;
-        const link = sourceLinkAt(view.state.doc.toString(), position);
+        const link = sourceLinkAt(view, position);
         if (!link) return false;
         event.preventDefault();
         configuration.callbacks.current.onOpenLink?.(link.href);

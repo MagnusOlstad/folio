@@ -244,6 +244,38 @@ describe("LiveMarkdownEditor", () => {
     expect(onChange).toHaveBeenLastCalledWith("10. tenth\n    ");
   });
 
+  it("opens bare web URLs only through modifier-click without hiding their text", () => {
+    const onOpenLink = vi.fn();
+    const value =
+      "Bare https://example.com/docs and [Named](https://example.com/named) " +
+      "and `https://example.com/code` and test@example.com";
+    render(
+      <LiveMarkdownEditor
+        value={value}
+        onChange={vi.fn()}
+        onOpenLink={onOpenLink}
+        ariaLabel="Edit links"
+      />,
+    );
+
+    const editor = screen.getByLabelText("Edit links");
+    const view = EditorView.findFromDOM(editor);
+    expect(document.querySelectorAll(".cm-live-markdown-link")).toHaveLength(2);
+    expect(editor).toHaveTextContent("https://example.com/docs");
+    vi.spyOn(view, "posAtCoords").mockReturnValue(10);
+
+    fireEvent.mouseDown(editor, { clientX: 0, clientY: 0 });
+    expect(onOpenLink).not.toHaveBeenCalled();
+    fireEvent.mouseDown(editor, { clientX: 0, clientY: 0, metaKey: true });
+
+    expect(onOpenLink).toHaveBeenCalledWith("https://example.com/docs");
+
+    vi.mocked(view.posAtCoords).mockReturnValue(value.indexOf("Named") + 1);
+    fireEvent.mouseDown(editor, { clientX: 0, clientY: 0, ctrlKey: true });
+
+    expect(onOpenLink).toHaveBeenLastCalledWith("https://example.com/named");
+  });
+
   it("finishes the presentation of an unclosed fenced code block", () => {
     render(
       <LiveMarkdownEditor
