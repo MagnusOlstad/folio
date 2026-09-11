@@ -132,6 +132,7 @@ export function EditorGroup({
             saving={saving}
             deletingNoteId={model.deletingNoteId}
             movingFileId={model.movingFileId}
+            exportingNoteId={model.exportingNoteId}
             filingDirectories={model.filingDirectories}
             editingMetadataKey={ui.editingMetadataKey}
             metadataDrafts={ui.metadataDrafts}
@@ -174,6 +175,7 @@ export function EditorGroup({
               )
             }
             onDelete={actions.deleteFiledNote}
+            onExport={actions.exportDocument}
             filing={
               model.filingOwnerGroupIds[document.id] === group.id
                 ? model.filingQueues[document.id]?.[0]

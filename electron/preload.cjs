@@ -7,4 +7,6 @@ contextBridge.exposeInMainWorld('folio', {
     return () => ipcRenderer.removeListener('folio:menu-action', listener)
   },
   closeWindow: () => ipcRenderer.send('folio:close-window'),
+  saveMarkdownExport: (filename, content) => ipcRenderer.invoke('folio:save-markdown-export', filename, content),
+  savePdfExport: (filename) => ipcRenderer.invoke('folio:save-pdf-export', filename),
 })

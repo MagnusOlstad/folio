@@ -7,6 +7,7 @@ import { DocumentHeader } from "./DocumentHeader.tsx";
 import type { MetadataField } from "../types.ts";
 import type { FilingFields, FilingQueueEntry } from "../model/filing.ts";
 import { FilingConfirmation } from "./FilingConfirmation.tsx";
+import type { NoteExportFormat } from "../model/note-export.ts";
 
 export type DocumentViewProps = {
   groupId: string;
@@ -16,6 +17,7 @@ export type DocumentViewProps = {
   saving: boolean;
   deletingNoteId: string | null;
   movingFileId: string | null;
+  exportingNoteId: string | null;
   filingDirectories: string[];
   editingMetadataKey: string | null;
   metadataDrafts: Record<string, string>;
@@ -64,6 +66,7 @@ export type DocumentViewProps = {
   onChangeTag: (documentId: string, value: string) => void;
   onFinishTagEditing: (document: ViewerDocument, value: string) => void;
   onDelete: (document: ViewerDocument) => Promise<void>;
+  onExport: (document: ViewerDocument, format: NoteExportFormat) => void;
   filing: FilingQueueEntry | undefined;
   focusFiling: boolean;
   onChangeFilingFields: (documentId: string, fields: FilingFields) => void;
@@ -141,6 +144,7 @@ export function DocumentView(props: DocumentViewProps) {
         deleting={props.deletingNoteId === document.id}
         deleteInProgress={Boolean(props.deletingNoteId)}
         moving={props.movingFileId === document.id}
+        exporting={props.exportingNoteId === document.id}
         onBeginPathEditing={props.onBeginPathEditing}
         onChangePath={props.onChangePath}
         onFinishPathEditing={props.onFinishPathEditing}
@@ -150,6 +154,7 @@ export function DocumentView(props: DocumentViewProps) {
         onFinishTagEditing={props.onFinishTagEditing}
         onFileDraft={props.onFileDraft}
         onDelete={props.onDelete}
+        onExport={props.onExport}
         onOpenDocument={props.onOpenDocument}
       />
     </article>

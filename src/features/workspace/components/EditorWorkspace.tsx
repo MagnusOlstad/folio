@@ -22,6 +22,7 @@ export function EditorWorkspace({ model, actions }: EditorWorkspaceProps) {
     drafts: model.drafts,
     deletingNoteId: model.deletingNoteId,
     movingFileId: model.movingFileId,
+    exportingNoteId: model.exportingNoteId,
     filingDirectories: model.filingDirectories,
     filingQueues: model.filingQueues,
     filingOwnerGroupIds: owners,
@@ -49,6 +50,7 @@ export function EditorWorkspace({ model, actions }: EditorWorkspaceProps) {
     persistDocument: actions.persistDocument,
     persistMetadata: actions.persistMetadata,
     moveBundleFile: actions.moveBundleFile,
+    exportDocument: actions.exportDocument,
   };
 
   return (

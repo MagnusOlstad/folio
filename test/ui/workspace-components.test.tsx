@@ -378,6 +378,7 @@ describe("workspace editor components", () => {
           deleting={false}
           deleteInProgress={false}
           moving={false}
+          exporting={false}
           onBeginPathEditing={vi.fn()}
           onChangePath={vi.fn()}
           onFinishPathEditing={vi.fn()}
@@ -387,6 +388,7 @@ describe("workspace editor components", () => {
           onFinishTagEditing={vi.fn()}
           onFileDraft={vi.fn()}
           onDelete={vi.fn().mockResolvedValue(undefined)}
+          onExport={vi.fn()}
           onOpenDocument={vi.fn().mockResolvedValue(undefined)}
         />
       </>,
@@ -527,6 +529,7 @@ describe("workspace editor components", () => {
           deleting={false}
           deleteInProgress={false}
           moving={false}
+          exporting={false}
           onBeginPathEditing={ui.beginPathEditing}
           onChangePath={ui.changePathDraft}
           onFinishPathEditing={(target, value) =>
@@ -540,6 +543,7 @@ describe("workspace editor components", () => {
           }
           onFileDraft={vi.fn()}
           onDelete={onDelete}
+          onExport={vi.fn()}
           onOpenDocument={onOpen}
         />
       );

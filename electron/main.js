@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, BrowserWindow, Menu, ipcMain, screen, shell } from 'electron'
+import { app, BrowserWindow, Menu, dialog, ipcMain, screen, shell } from 'electron'
 
 const isMac = process.platform === 'darwin'
 const preloadPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'preload.cjs')
@@ -43,6 +43,22 @@ function sendToRenderer(action) {
   }
 }
 
+function exportFilename(value, extension) {
+  const filename = path.basename(String(value || `Untitled.${extension}`))
+  return filename.toLowerCase().endsWith(`.${extension}`)
+    ? filename
+    : `${filename}.${extension}`
+}
+
+async function selectExportPath(filename, extension, name) {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: `Export note as ${name}`,
+    defaultPath: path.join(app.getPath('downloads'), exportFilename(filename, extension)),
+    filters: [{ name, extensions: [extension] }],
+  })
+  return result.canceled ? null : result.filePath
+}
+
 function setApplicationMenu() {
   const template = [
     ...(isMac ? [{ role: 'appMenu' }] : []),
@@ -51,6 +67,13 @@ function setApplicationMenu() {
       submenu: [
         { label: 'New Note', accelerator: 'CmdOrCtrl+T', click: sendToRenderer('new-note') },
         { label: 'Save', accelerator: 'CmdOrCtrl+S', click: sendToRenderer('save') },
+        {
+          label: 'Export',
+          submenu: [
+            { label: 'Markdown…', click: sendToRenderer('export-markdown') },
+            { label: 'PDF…', click: sendToRenderer('export-pdf') },
+          ],
+        },
         { type: 'separator' },
         { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: sendToRenderer('close-tab') },
         { label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W', role: 'close' },
@@ -170,6 +193,24 @@ app.whenReady().then(async () => {
   ipcMain.on('folio:close-window', () => {
     mainWindow?.close()
   })
+  ipcMain.handle('folio:save-markdown-export', async (_event, filename, content) => {
+    if (typeof content !== 'string') throw new Error('Could not export invalid Markdown content.')
+    const filePath = await selectExportPath(filename, 'md', 'Markdown')
+    if (!filePath) return { canceled: true }
+    await fs.writeFile(filePath, content, 'utf8')
+    return { canceled: false }
+  })
+  ipcMain.handle('folio:save-pdf-export', async (event, filename) => {
+    const filePath = await selectExportPath(filename, 'pdf', 'PDF')
+    if (!filePath) return { canceled: true }
+    const pdf = await event.sender.printToPDF({
+      pageSize: 'A4',
+      printBackground: true,
+      preferCSSPageSize: true,
+    })
+    await fs.writeFile(filePath, pdf)
+    return { canceled: false }
+  })
 
   await createWindow()
 
@@ -186,5 +227,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  ipcMain.removeHandler('folio:save-markdown-export')
+  ipcMain.removeHandler('folio:save-pdf-export')
   localServer?.close()
 })

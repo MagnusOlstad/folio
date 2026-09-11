@@ -13,6 +13,7 @@ import { useWorkspaceShortcutActions } from "./useWorkspaceShortcutActions.ts";
 import { useFiledDocumentAutosave } from "./useFiledDocumentAutosave.ts";
 import { isUntitledId } from "../../../lib/workspace.ts";
 import { bundleDirectories } from "../model/directory-suggestions.ts";
+import { useNoteExport } from "./useNoteExport.ts";
 
 function draftTitle(content: string) {
   const firstLine = content
@@ -24,6 +25,7 @@ function draftTitle(content: string) {
 
 export function useWorkspaceController(): WorkspaceShellProps {
   const [message, setMessage] = useState("");
+  const noteExport = useNoteExport({ setMessage });
   const embeddingRevisionsRef = useRef(new Map<string, number>());
   const embeddingFinalizationsRef = useRef(new Map<string, Promise<void>>());
   const explorer = useWorkspaceExplorerState(setMessage);
@@ -171,6 +173,12 @@ export function useWorkspaceController(): WorkspaceShellProps {
     closeTab: closeDocumentTab,
     fileDraft: mutations.fileDraft,
     flushDocument: finalizeFiledDocument,
+    exportDocument: (document, format) =>
+      void noteExport.exportDocument(
+        document,
+        documents.drafts[document.id],
+        format,
+      ),
   });
 
   const { sidebar, moveBundleFile } = useWorkspaceSidebarProps({
@@ -190,6 +198,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
   });
 
   return {
+    exportPreview: noteExport.preview,
     topBar: {
       versionInfo: models.versionInfo,
       status: models.status,
@@ -223,6 +232,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
         filingDirectories: bundleDirectories(explorer.files),
         filingQueues: documents.filingQueues,
         message,
+        exportingNoteId: noteExport.exportingNoteId,
       },
       actions: {
         beginHorizontalResize: layout.beginHorizontalResize,
@@ -282,6 +292,12 @@ export function useWorkspaceController(): WorkspaceShellProps {
           await finalizeFiledDocument(id);
           return moveBundleFile(id, directory);
         },
+        exportDocument: (document, format) =>
+          void noteExport.exportDocument(
+            document,
+            documents.drafts[document.id],
+            format,
+          ),
         dismissMessage: () => setMessage(""),
       },
     },

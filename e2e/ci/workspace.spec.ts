@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import fs from 'node:fs/promises'
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control'
 
@@ -32,6 +33,23 @@ test('creates a new local draft note from the editor', async ({ page }) => {
   await editor.fill('My first draft note')
 
   await expect(page.locator('.draft-tree-open', { hasText: 'My first draft note' })).toBeVisible()
+})
+
+test('exports the current draft as an exact Markdown download', async ({ page }) => {
+  await page.getByTitle('New note (Cmd+T)').click()
+  const editor = page.getByLabel('Write a new note')
+  const content = 'Exported draft\n\n**Bold detail**'
+  await editor.fill(content)
+
+  await page.getByRole('button', { name: 'Export', exact: true }).click()
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('menuitem', { name: 'Markdown' }).click()
+  const download = await downloadPromise
+
+  expect(download.suggestedFilename()).toBe('Exported draft.md')
+  const downloadPath = await download.path()
+  expect(downloadPath).not.toBeNull()
+  expect(await fs.readFile(downloadPath!, 'utf8')).toBe(content)
 })
 
 // Cmd/Ctrl+T, +S, +B, +I, +K, and +Shift+F are documented as working in both the

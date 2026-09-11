@@ -4,6 +4,7 @@ import type {
   ViewerDocument,
 } from "../../domain/types.ts";
 import type { FilingFields, FilingQueueEntry } from "./model/filing.ts";
+import type { NoteExportFormat } from "./model/note-export.ts";
 
 export type TabDrag = { documentId: string; groupId: string };
 export type MetadataField = "title" | "description";
@@ -22,6 +23,7 @@ export type EditorWorkspaceModel = {
   filingDirectories: string[];
   filingQueues: Record<string, FilingQueueEntry[]>;
   message: string;
+  exportingNoteId: string | null;
 };
 
 export type EditorWorkspaceActions = {
@@ -78,6 +80,10 @@ export type EditorWorkspaceActions = {
     value: string,
   ) => void;
   moveBundleFile: (id: string, directory: string) => Promise<void>;
+  exportDocument: (
+    document: ViewerDocument,
+    format: NoteExportFormat,
+  ) => void;
   dismissMessage: () => void;
 };
 

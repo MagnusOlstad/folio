@@ -6,11 +6,14 @@ import type { TopBarProps } from "../../status/TopBar.tsx";
 import { EditorWorkspace } from "./EditorWorkspace.tsx";
 import type { EditorWorkspaceProps } from "../types.ts";
 import { WorkspaceSidebarHandle } from "./WorkspaceSidebarHandle.tsx";
+import { NoteExportPreview } from "./NoteExportPreview.tsx";
+import type { NoteExportSnapshot } from "../model/note-export.ts";
 
 export type WorkspaceShellProps = {
   topBar: TopBarProps;
   sidebar: WorkspaceSidebarProps;
   editor: EditorWorkspaceProps;
+  exportPreview: NoteExportSnapshot | null;
   layout: {
     sidebarWidth: number | null;
     beginHorizontalResize: (event: PointerEvent<HTMLElement>) => void;
@@ -24,6 +27,7 @@ export function WorkspaceShell({
   topBar,
   sidebar,
   editor,
+  exportPreview,
   layout,
 }: WorkspaceShellProps) {
   return (
@@ -50,6 +54,7 @@ export function WorkspaceShell({
         />
         <EditorWorkspace {...editor} />
       </section>
+      {exportPreview ? <NoteExportPreview snapshot={exportPreview} /> : null}
     </main>
   );
 }

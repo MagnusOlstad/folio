@@ -10,12 +10,18 @@ import {
   useWorkspaceCommands,
   type WorkspaceShortcutAction,
 } from "./useWorkspaceCommands.ts";
+import type { NoteExportFormat } from "../model/note-export.ts";
 
 declare global {
   interface Window {
     folio?: {
       onMenuAction?: (handler: (action: string) => void) => () => void;
       closeWindow?: () => void;
+      saveMarkdownExport?: (
+        filename: string,
+        content: string,
+      ) => Promise<{ canceled: boolean }>;
+      savePdfExport?: (filename: string) => Promise<{ canceled: boolean }>;
     };
   }
 }
@@ -32,6 +38,10 @@ type Options = {
   closeTab: (groupId: string, documentId: string) => void;
   fileDraft: (document: ViewerDocument) => void;
   flushDocument: (documentId: string) => Promise<void>;
+  exportDocument: (
+    document: ViewerDocument,
+    format: NoteExportFormat,
+  ) => void;
 };
 
 export function useWorkspaceShortcutActions(options: Options) {
@@ -87,6 +97,20 @@ export function useWorkspaceShortcutActions(options: Options) {
     }
     if (action === "save") return saveActiveDocument();
     if (action === "search") return focusSearchInput();
+    if (action === "export-markdown" || action === "export-pdf") {
+      const group = options.groups.find(
+        (candidate) => candidate.id === options.activeGroupId,
+      );
+      const activeDocument = group?.activeId
+        ? options.documents[group.activeId]
+        : undefined;
+      if (activeDocument)
+        options.exportDocument(
+          activeDocument,
+          action === "export-markdown" ? "markdown" : "pdf",
+        );
+      return;
+    }
     const target = document.activeElement;
     if (
       target instanceof HTMLElement &&
