@@ -11,6 +11,8 @@ type DocumentBodyProps = {
   editKey: string;
   draft: string | undefined;
   saving: boolean;
+  focusRequestId?: number;
+  onFocusRequestConsumed?: () => void;
   onChangeContent: (document: ViewerDocument, content: string) => void;
   onFileDraft: (document: ViewerDocument) => void;
   onFinishEditing: (
@@ -40,6 +42,8 @@ export function DocumentBody({
   editKey,
   draft,
   saving,
+  focusRequestId,
+  onFocusRequestConsumed,
   onChangeContent,
   onFileDraft,
   onFinishEditing,
@@ -66,6 +70,8 @@ export function DocumentBody({
           const content = toggleTaskAtLine(draft ?? document.content, lineNumber, checked);
           if (content) onChangeContent(document, content);
         }}
+        focusRequestId={focusRequestId}
+        onFocusRequestConsumed={onFocusRequestConsumed}
         ariaLabel="Write a new note"
       />
     );
@@ -94,6 +100,8 @@ export function DocumentBody({
           const content = toggleTaskAtLine(value, lineNumber, checked);
           if (content) onChangeContent(document, content);
         }}
+        focusRequestId={focusRequestId}
+        onFocusRequestConsumed={onFocusRequestConsumed}
         ariaLabel={`Edit ${document.title}`}
       />
     );

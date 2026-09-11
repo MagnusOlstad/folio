@@ -12,6 +12,13 @@ import type {
   ViewerDocument,
 } from "../../domain/types.ts";
 
+type OpenDocument = (
+  id: string,
+  source?: "note" | "file",
+  targetGroupId?: string,
+  disposition?: "preview" | "permanent",
+) => Promise<void>;
+
 export type WorkspaceSidebarProps = {
   sidebarMode: SidebarMode;
   setSidebarMode: Dispatch<SetStateAction<SidebarMode>>;
@@ -32,11 +39,7 @@ export type WorkspaceSidebarProps = {
   movingFileId: string | null;
   blockedFileIds: Set<string>;
   setExpandedDirectories: Dispatch<SetStateAction<Set<string>>>;
-  openDocument: (
-    id: string,
-    source?: "note" | "file",
-    targetGroupId?: string,
-  ) => Promise<void>;
+  openDocument: OpenDocument;
   setDraggedFileId: Dispatch<SetStateAction<string | null>>;
   setDropDirectoryPath: Dispatch<SetStateAction<string | null>>;
   moveBundleFile: (id: string, directory: string) => Promise<void>;
@@ -215,7 +218,9 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                         return next;
                       })
                     }
-                    onOpen={(id) => void openDocument(id, "file")}
+                    onOpen={(id, disposition) =>
+                      void openDocument(id, "file", undefined, disposition)
+                    }
                     onFileDragStart={setDraggedFileId}
                     onFileDragEnd={() => {
                       setDraggedFileId(null);
@@ -291,7 +296,12 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                 <button
                   type="button"
                   className="sidebar-result"
-                  onClick={() => void openDocument(result.id, "note")}
+                  onClick={() =>
+                    void openDocument(result.id, "note", undefined, "preview")
+                  }
+                  onDoubleClick={() =>
+                    void openDocument(result.id, "note", undefined, "permanent")
+                  }
                   key={result.id}
                 >
                   <span>
@@ -370,7 +380,11 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                               href={conceptUrl(href)}
                               onClick={(event) => {
                                 event.preventDefault();
-                                void openDocument(href, "note");
+                                void openDocument(href, "note", undefined, "preview");
+                              }}
+                              onDoubleClick={(event) => {
+                                event.preventDefault();
+                                void openDocument(href, "note", undefined, "permanent");
                               }}
                             >
                               {children}
@@ -388,7 +402,8 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                       (source: { id: string; title: string }) => (
                         <button
                           type="button"
-                          onClick={() => void openDocument(source.id, "note")}
+                          onClick={() => void openDocument(source.id, "note", undefined, "preview")}
+                          onDoubleClick={() => void openDocument(source.id, "note", undefined, "permanent")}
                           key={source.id}
                         >
                           {source.title}
@@ -418,7 +433,8 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
               type="button"
               className="recent-row"
               key={note.id}
-              onClick={() => void openDocument(note.id, "note")}
+              onClick={() => void openDocument(note.id, "note", undefined, "preview")}
+              onDoubleClick={() => void openDocument(note.id, "note", undefined, "permanent")}
             >
               <span
                 className={`type-pip type-${note.type.toLowerCase().replace(/\s+/g, "-")}`}

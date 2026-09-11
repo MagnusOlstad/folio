@@ -112,6 +112,9 @@ export function useWorkspaceBundleActions(
             activeId: group.activeId
               ? refreshedByOldId.get(group.activeId)?.id || group.activeId
               : null,
+            previewId: group.previewId
+              ? refreshedByOldId.get(group.previewId)?.id || group.previewId
+              : null,
           })),
         );
         setEditingKey((current) => {
@@ -181,6 +184,8 @@ export function useWorkspaceBundleActions(
             tabs,
             activeId:
               group.activeId === result.oldId ? result.newId : group.activeId,
+            previewId:
+              group.previewId === result.oldId ? result.newId : group.previewId,
           };
         }),
       );

@@ -181,13 +181,13 @@ function existingTagGuide(content, records, queryEmbedding = null, maxEntries = 
   return entries.length ? entries.join('\n') : '- No relevant existing tag candidates found.'
 }
 
-async function classify(content, records) {
+async function classify(content, records, options = {}) {
   const reusableRecords = reusableClassificationRecords(records)
   const dimension = embeddingDimension(reusableRecords)
   let queryEmbedding = null
   if (dimension) {
     try {
-      queryEmbedding = await embedQuery(boundedEmbeddingText(content), dimension)
+      queryEmbedding = await embedQuery(boundedEmbeddingText(content), dimension, options.keepAlive)
     } catch {
       // Lexical filing and tag retrieval remain available while embeddings are unavailable.
     }
@@ -196,7 +196,7 @@ async function classify(content, records) {
   const tagGuide = existingTagGuide(content, records, queryEmbedding)
   const response = await ollamaRequest('/api/chat', {
     model: classifierModel,
-    keep_alive: warmKeepAlive,
+    keep_alive: options.keepAlive ?? warmKeepAlive,
     stream: false,
     format: classificationSchema,
     options: { temperature: 0 },
@@ -240,10 +240,10 @@ async function classify(content, records) {
   return JSON.parse(response.message.content)
 }
 
-async function embedMany(input, expectedDimension = null) {
+async function embedMany(input, expectedDimension = null, keepAlive = warmKeepAlive) {
   const response = await ollamaRequest('/api/embed', {
     model: embedModel,
-    keep_alive: warmKeepAlive,
+    keep_alive: keepAlive,
     input,
   })
   const embeddings = response.embeddings
@@ -257,8 +257,8 @@ async function embedMany(input, expectedDimension = null) {
   return embeddings
 }
 
-async function embedQuery(text, expectedDimension = null) {
-  return (await embedMany([embeddingQueryInput(text)], expectedDimension))[0]
+async function embedQuery(text, expectedDimension = null, keepAlive = warmKeepAlive) {
+  return (await embedMany([embeddingQueryInput(text)], expectedDimension, keepAlive))[0]
 }
 
 async function embedDocument(title, text, expectedDimension = null) {

@@ -1,10 +1,10 @@
-import { fireEvent, renderHook } from "@testing-library/react";
+import { act, fireEvent, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useWorkspaceShortcutActions } from "../../src/features/workspace/hooks/useWorkspaceShortcutActions.ts";
 
 describe("workspace shortcuts", () => {
   it("opens find in the active note and changes tabs within the active group", () => {
-    const activateTab = vi.fn();
+    const activateTabAtEnd = vi.fn();
     const findInNote = vi.fn();
     const group = document.createElement("div");
     group.className = "editor-group active";
@@ -20,16 +20,27 @@ describe("workspace shortcuts", () => {
         setSidebarMode: vi.fn(),
         searchInputRef: { current: null },
         groups: [
-          { id: "primary", tabs: ["first", "second"], activeId: "first" },
-          { id: "secondary", tabs: ["third"], activeId: "third" },
+          {
+            id: "primary",
+            tabs: ["first", "second"],
+            activeId: "first",
+            previewId: null,
+          },
+          {
+            id: "secondary",
+            tabs: ["third"],
+            activeId: "third",
+            previewId: null,
+          },
         ],
         activeGroupId: "primary",
         documents: {},
         createNewTab: vi.fn(),
-        activateTab,
+        activateTabAtEnd,
         closeTab: vi.fn(),
         fileDraft: vi.fn(),
         flushDocument: vi.fn().mockResolvedValue(undefined),
+        openSettings: vi.fn(),
       }),
     );
 
@@ -37,7 +48,7 @@ describe("workspace shortcuts", () => {
     fireEvent.keyDown(window, { key: "2", ctrlKey: true });
 
     expect(findInNote).toHaveBeenCalledOnce();
-    expect(activateTab).toHaveBeenCalledWith("primary", "second");
+    expect(activateTabAtEnd).toHaveBeenCalledWith("primary", "second");
 
     unmount();
     group.remove();
@@ -56,10 +67,11 @@ describe("workspace shortcuts", () => {
         activeGroupId: "primary",
         documents: {},
         createNewTab: vi.fn(),
-        activateTab: vi.fn(),
+        activateTabAtEnd: vi.fn(),
         closeTab: vi.fn(),
         fileDraft: vi.fn(),
         flushDocument: vi.fn().mockResolvedValue(undefined),
+        openSettings: vi.fn(),
       }),
     );
 
@@ -69,5 +81,38 @@ describe("workspace shortcuts", () => {
 
     unmount();
     searchInput.remove();
+  });
+
+  it("opens settings from the native application menu action", () => {
+    const openSettings = vi.fn();
+    let handleMenuAction: ((action: string) => void) | undefined;
+    window.folio = {
+      onMenuAction: (handler) => {
+        handleMenuAction = handler;
+        return vi.fn();
+      },
+    };
+    const { unmount } = renderHook(() =>
+      useWorkspaceShortcutActions({
+        sidebarMode: "explore",
+        setSidebarMode: vi.fn(),
+        searchInputRef: { current: null },
+        groups: [],
+        activeGroupId: "primary",
+        documents: {},
+        createNewTab: vi.fn(),
+        activateTab: vi.fn(),
+        closeTab: vi.fn(),
+        fileDraft: vi.fn(),
+        flushDocument: vi.fn().mockResolvedValue(undefined),
+        openSettings,
+      }),
+    );
+
+    act(() => handleMenuAction?.("open-settings"));
+
+    expect(openSettings).toHaveBeenCalledOnce();
+    unmount();
+    delete window.folio;
   });
 });

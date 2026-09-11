@@ -16,6 +16,7 @@ export type TopBarProps = {
   togglingService: string | null;
   onInstall: () => void;
   onToggle: (id: string, model?: string) => void;
+  onOpenSettings: () => void;
 };
 
 export function TopBar({
@@ -27,6 +28,7 @@ export function TopBar({
   togglingService,
   onInstall,
   onToggle,
+  onOpenSettings,
 }: TopBarProps) {
   return (
     <header className="topbar">
@@ -49,70 +51,79 @@ export function TopBar({
           </a>
         )}
       </div>
-      <div className="ollama-status" aria-live="polite">
-        <div className={`model-status ${status?.online ? "online" : ""}`}>
-          <span className="status-dot" />
-          <span>Ollama {status?.online ? "online" : "offline"}</span>
-        </div>
-        {!status ? (
-          <span className="model-setup-copy">Checking local models...</span>
-        ) : !status.online ? (
-          <div className="model-setup">
-            <span>Install or start Ollama first.</span>
-            <a
-              href="https://ollama.com/download"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Get Ollama
-            </a>
-            <button
-              type="button"
-              onClick={onInstall}
-              disabled={modelInstallInProgress}
-            >
-              {modelInstallInProgress ? "Checking..." : "Set up"}
-            </button>
+      <div className="topbar-actions">
+        <div className="ollama-status" aria-live="polite">
+          <div className={`model-status ${status?.online ? "online" : ""}`}>
+            <span className="status-dot" />
+            <span>Ollama {status?.online ? "online" : "offline"}</span>
           </div>
-        ) : missingModels.length ? (
-          <div className="model-setup">
-            <span>
-              {missingModels.length} local model
-              {missingModels.length === 1 ? "" : "s"} required.
-            </span>
-            <button
-              type="button"
-              onClick={onInstall}
-              disabled={modelInstallInProgress}
-            >
-              {modelInstallInProgress ? "Installing..." : "Install models"}
-            </button>
-          </div>
-        ) : (
-          <div
-            className="endpoint-statuses"
-            aria-label="Ollama endpoint status"
-          >
-            {modelEndpoints.map((endpoint) => (
-              <div
-                className={`endpoint-status ${endpoint.state}`}
-                key={endpoint.label}
-                title={`${endpoint.label}: ${endpoint.model || "checking"} (${endpoint.state})`}
+          {!status ? (
+            <span className="model-setup-copy">Checking local models...</span>
+          ) : !status.online ? (
+            <div className="model-setup">
+              <span>Install or start Ollama first.</span>
+              <a
+                href="https://ollama.com/download"
+                target="_blank"
+                rel="noreferrer"
               >
-                <button
-                  className="model-toggle"
-                  type="button"
-                  onClick={() => onToggle(endpoint.id, endpoint.model)}
-                  disabled={togglingService !== null}
-                  aria-label={`${endpoint.state === "online" ? "Stop" : "Launch"} ${endpoint.label}`}
+                Get Ollama
+              </a>
+              <button
+                type="button"
+                onClick={onInstall}
+                disabled={modelInstallInProgress}
+              >
+                {modelInstallInProgress ? "Checking..." : "Set up"}
+              </button>
+            </div>
+          ) : missingModels.length ? (
+            <div className="model-setup">
+              <span>
+                {missingModels.length} local model
+                {missingModels.length === 1 ? "" : "s"} required.
+              </span>
+              <button
+                type="button"
+                onClick={onInstall}
+                disabled={modelInstallInProgress}
+              >
+                {modelInstallInProgress ? "Installing..." : "Install models"}
+              </button>
+            </div>
+          ) : (
+            <div
+              className="endpoint-statuses"
+              aria-label="Ollama endpoint status"
+            >
+              {modelEndpoints.map((endpoint) => (
+                <div
+                  className={`endpoint-status ${endpoint.state}`}
+                  key={endpoint.label}
+                  title={`${endpoint.label}: ${endpoint.model || "checking"} (${endpoint.state})`}
                 >
-                  <span className="toggle-symbol" aria-hidden="true" />
-                </button>
-                <span>{endpoint.label}</span>
-              </div>
-            ))}
-          </div>
-        )}
+                  <button
+                    className="model-toggle"
+                    type="button"
+                    onClick={() => onToggle(endpoint.id, endpoint.model)}
+                    disabled={togglingService !== null}
+                    aria-label={`${endpoint.state === "online" ? "Stop" : "Launch"} ${endpoint.label}`}
+                  >
+                    <span className="toggle-symbol" aria-hidden="true" />
+                  </button>
+                  <span>{endpoint.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          className="browser-settings-button"
+          onClick={onOpenSettings}
+        >
+          Settings
+        </button>
       </div>
     </header>
   );

@@ -20,6 +20,35 @@ test('reports Ollama as offline when no local model server is running', async ({
   await expect(page.getByText('Ollama offline')).toBeVisible()
 })
 
+test('changes and restores the color theme from browser settings', async ({ page }) => {
+  await page.getByRole('button', { name: 'Settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await expect(settings.getByRole('radio')).toHaveCount(4)
+  await settings.getByText('Editorial', { exact: true }).click()
+  await expect(settings.getByRole('radio', { name: /Editorial/ })).toBeChecked()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'editorial')
+  await settings.getByRole('button', { name: 'Close' }).click()
+
+  await page.reload()
+
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'editorial')
+})
+
+test('downloads a bundle backup from settings', async ({ page }) => {
+  await page.getByRole('button', { name: 'Settings' }).click()
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('link', { name: 'Download bundle backup' }).click()
+  const download = await downloadPromise
+
+  expect(download.suggestedFilename()).toMatch(/^folio-bundle-backup-.+\.zip$/)
+  expect(await download.failure()).toBeNull()
+  const stream = await download.createReadStream()
+  expect(stream).not.toBeNull()
+  const chunks: Buffer[] = []
+  for await (const chunk of stream!) chunks.push(Buffer.from(chunk))
+  expect(Buffer.concat(chunks).subarray(0, 2)).toEqual(Buffer.from('PK'))
+})
+
 test('opens a seeded note and shows its content', async ({ page }) => {
   await page.getByRole('button', { name: 'Todo List', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Todo List', level: 1 }).first()).toBeVisible()
@@ -32,6 +61,41 @@ test('creates a new local draft note from the editor', async ({ page }) => {
   await editor.fill('My first draft note')
 
   await expect(page.locator('.draft-tree-open', { hasText: 'My first draft note' })).toBeVisible()
+})
+
+test('opens sidebar notes as a replaceable preview until the editor is focused', async ({ page }) => {
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  const tabs = page.locator('.editor-tab')
+  const startHereTab = tabs.filter({ hasText: 'Start Here' })
+  await expect(tabs).toHaveCount(1)
+  await expect(startHereTab).toHaveClass(/preview/)
+
+  await page.getByRole('button', { name: 'Todo List', exact: true }).click()
+  const todoTab = tabs.filter({ hasText: 'Todo List' })
+  await expect(tabs).toHaveCount(1)
+  await expect(todoTab).toHaveCount(1)
+  await expect(todoTab).toHaveClass(/preview/)
+  await expect(tabs.filter({ hasText: 'Start Here' })).toHaveCount(0)
+
+  await page.getByRole('textbox', { name: 'Edit Todo List' }).click()
+  await expect(todoTab).not.toHaveClass(/preview/)
+})
+
+test('Cmd/Ctrl+number selects local draft tabs and focuses at the document end', async ({ page }) => {
+  await page.getByTitle('New note (Cmd+T)').click()
+  const firstEditor = page.getByLabel('Write a new note')
+  await firstEditor.fill('First local draft')
+
+  await page.getByTitle('New note (Cmd+T)').click()
+  const secondEditor = page.getByLabel('Write a new note')
+  await secondEditor.fill('Second local draft')
+
+  await page.keyboard.press(`${modifier}+1`)
+  const selectedEditor = page.getByLabel('Write a new note')
+  await expect(selectedEditor).toBeFocused()
+  await page.keyboard.type(' at the end')
+  await expect(selectedEditor).toHaveText('First local draft at the end')
+  await expect(page.locator('.editor-tab').filter({ hasText: 'First local draft at the end' })).toHaveClass(/active/)
 })
 
 // Cmd/Ctrl+T, +S, +B, +I, +K, and +Shift+F are documented as working in both the

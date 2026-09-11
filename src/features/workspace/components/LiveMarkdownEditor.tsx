@@ -34,6 +34,8 @@ export type LiveMarkdownEditorProps = {
   onOpenLink?: (href: string) => void;
   onToggleTask?: (lineNumber: number, checked: boolean) => void | Promise<void>;
   autoFocus?: boolean;
+  focusRequestId?: number;
+  onFocusRequestConsumed?: () => void;
   ariaLabel: string;
 };
 
@@ -97,6 +99,8 @@ export function LiveMarkdownEditor({
   onOpenLink,
   onToggleTask,
   autoFocus = false,
+  focusRequestId,
+  onFocusRequestConsumed,
   ariaLabel,
 }: LiveMarkdownEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -107,7 +111,9 @@ export function LiveMarkdownEditor({
   const onFocusRef = useRef(onFocus);
   const onFileRef = useRef(onFile);
   const pendingLocalValuesRef = useRef<string[]>([]);
+  const focusRequestFrameRef = useRef<number | null>(null);
   const ariaLabelRef = useRef(ariaLabel);
+  const onFocusRequestConsumedRef = useRef(onFocusRequestConsumed);
   const ariaLabelCompartment = useRef(new Compartment());
   const callbacksRef = useRef<LiveMarkdownCallbacks>({
     onOpenLink,
@@ -119,9 +125,19 @@ export function LiveMarkdownEditor({
     onBlurRef.current = onBlur;
     onFocusRef.current = onFocus;
     onFileRef.current = onFile;
+    onFocusRequestConsumedRef.current = onFocusRequestConsumed;
     ariaLabelRef.current = ariaLabel;
     callbacksRef.current = { onOpenLink, onToggleTask };
-  }, [ariaLabel, onBlur, onChange, onFile, onFocus, onOpenLink, onToggleTask]);
+  }, [
+    ariaLabel,
+    onBlur,
+    onChange,
+    onFile,
+    onFocus,
+    onFocusRequestConsumed,
+    onOpenLink,
+    onToggleTask,
+  ]);
 
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -135,6 +151,10 @@ export function LiveMarkdownEditor({
         extensions: [
           markdown({
             base: markdownLanguage,
+            // Keep Markdown commands in the explicit keymap below so Folio's
+            // list continuation handler wins over the implicit high-priority
+            // Enter binding.
+            addKeymap: false,
             // A hyphen-only line should remain available for a list or a
             // horizontal rule. Setext headings would otherwise make the
             // previous line jump to H2 size as soon as its first dash is
@@ -284,6 +304,29 @@ export function LiveMarkdownEditor({
       viewRef.current = null;
     };
   }, [autoFocus]);
+
+  useLayoutEffect(() => {
+    if (focusRequestId === undefined) return;
+    const frame = window.requestAnimationFrame(() => {
+      focusRequestFrameRef.current = null;
+      const view = viewRef.current;
+      if (!view) return;
+      const end = view.state.doc.length;
+      view.dispatch({
+        selection: EditorSelection.cursor(end),
+        scrollIntoView: true,
+      });
+      view.focus();
+      onFocusRequestConsumedRef.current?.();
+    });
+    focusRequestFrameRef.current = frame;
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (focusRequestFrameRef.current === frame) {
+        focusRequestFrameRef.current = null;
+      }
+    };
+  }, [focusRequestId]);
 
   useEffect(() => {
     const view = viewRef.current;

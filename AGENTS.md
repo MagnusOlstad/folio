@@ -1,3 +1,8 @@
+NEVER PUSH TO MAIN — NON-NEGOTIABLE REPOSITORY RULE
+
+- NEVER push directly to `main`, `master`, or any default branch. Make every change on a non-default branch and submit it through a pull request.
+- Every implementation task MUST use a sub-agent for the implementation. Delegate implementation to GPT-5.6 Luna; do not implement the change directly in the coordinating agent. This applies even to small or tightly coupled implementation work. Delegation may be skipped only when no implementation is being performed (for example, read-only investigation, planning, review, or final validation).
+
 # AGENTS.md
 
 ## Architecture
@@ -9,8 +14,8 @@
 
 ## Agent Use
 
-- Codex agents only: prefer GPT-5.6 Sol for scoping, orchestration, review, and final validation; prefer GPT-5.6 Terra at medium reasoning for bounded, substantive implementation. This is advisory: use one agent for small or tightly coupled changes and adjust model or effort when risk warrants it. Other agents should ignore this model-selection guidance.
-- Default to one implementer. Parallelize only independent, non-overlapping work. Delegate relevant paths, constraints, and acceptance criteria instead of full conversation history.
+- Codex agents only: prefer GPT-5.6 Sol for scoping, orchestration, review, and final validation; GPT-5.6 Luna is the required implementation sub-agent. Other agents should ignore this model-selection guidance.
+- Use a GPT-5.6 Luna sub-agent for every implementation task. Parallelize only independent, non-overlapping implementation tasks, and delegate relevant paths, constraints, and acceptance criteria instead of full conversation history.
 - Handoffs should list changed files, decisions, checks, and unresolved issues without passing logs. In Codex workflows, Sol should review the diff and focused evidence without repeating discovery or passing checks; use focused follow-ups for rework.
 
 ## Skills

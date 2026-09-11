@@ -7,6 +7,11 @@ import type { FilingFields, FilingQueueEntry } from "./model/filing.ts";
 
 export type TabDrag = { documentId: string; groupId: string };
 export type MetadataField = "title" | "description";
+export type EditorFocusRequest = {
+  id: number;
+  groupId: string;
+  documentId: string;
+};
 
 export type EditorWorkspaceModel = {
   groups: TabGroup[];
@@ -21,6 +26,7 @@ export type EditorWorkspaceModel = {
   movingFileId: string | null;
   filingDirectories: string[];
   filingQueues: Record<string, FilingQueueEntry[]>;
+  editorFocusRequest: EditorFocusRequest | null;
   message: string;
 };
 
@@ -37,6 +43,8 @@ export type EditorWorkspaceActions = {
   ) => void;
   titleForId: (id: string) => string;
   activateTab: (groupId: string, documentId: string) => void;
+  pinTab: (groupId: string, documentId: string) => void;
+  consumeEditorFocusRequest: (requestId: number) => void;
   createNewTab: (targetGroupId?: string) => void;
   splitWorkspace: () => void;
   closeGroup: (groupId: string) => void;

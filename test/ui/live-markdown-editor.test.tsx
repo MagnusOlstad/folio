@@ -7,6 +7,78 @@ import { LiveMarkdownEditor } from "../../src/features/workspace/components/Live
 import { continueLiveMarkdownList } from "../../src/features/workspace/model/live-markdown.ts";
 
 describe("LiveMarkdownEditor", () => {
+  it("focuses and collapses the caret at the end for a focus request", () => {
+    const frames: FrameRequestCallback[] = [];
+    const requestAnimationFrame = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    const onFocusRequestConsumed = vi.fn();
+
+    render(
+      <LiveMarkdownEditor
+        value="Some note"
+        onChange={vi.fn()}
+        focusRequestId={1}
+        onFocusRequestConsumed={onFocusRequestConsumed}
+        ariaLabel="Focus note"
+      />,
+    );
+
+    const view = EditorView.findFromDOM(screen.getByLabelText("Focus note"));
+    expect(view.state.selection.main.head).toBe(0);
+    act(() => frames.at(-1)?.(0));
+
+    expect(view.state.selection.main.from).toBe(view.state.doc.length);
+    expect(view.state.selection.main.to).toBe(view.state.doc.length);
+    expect(view.hasFocus).toBe(true);
+    expect(onFocusRequestConsumed).toHaveBeenCalledOnce();
+    requestAnimationFrame.mockRestore();
+    vi.restoreAllMocks();
+  });
+
+  it("cancels a pending focus request when its request id changes", () => {
+    const frames: FrameRequestCallback[] = [];
+    const cancelAnimationFrame = vi.fn();
+    vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(
+      cancelAnimationFrame,
+    );
+    const onFocusRequestConsumed = vi.fn();
+    const { rerender } = render(
+      <LiveMarkdownEditor
+        value="Some note"
+        onChange={vi.fn()}
+        focusRequestId={1}
+        onFocusRequestConsumed={onFocusRequestConsumed}
+        ariaLabel="Focus note"
+      />,
+    );
+
+    rerender(
+      <LiveMarkdownEditor
+        value="Some note"
+        onChange={vi.fn()}
+        focusRequestId={2}
+        onFocusRequestConsumed={onFocusRequestConsumed}
+        ariaLabel="Focus note"
+      />,
+    );
+
+    expect(cancelAnimationFrame).toHaveBeenCalledOnce();
+    act(() => frames.at(-1)?.(0));
+    expect(onFocusRequestConsumed).toHaveBeenCalledOnce();
+    vi.restoreAllMocks();
+  });
+
   it("exposes an accessible continuously mounted CodeMirror editor", () => {
     render(
       <LiveMarkdownEditor
@@ -274,6 +346,24 @@ describe("LiveMarkdownEditor", () => {
     fireEvent.mouseDown(editor, { clientX: 0, clientY: 0, ctrlKey: true });
 
     expect(onOpenLink).toHaveBeenLastCalledWith("https://example.com/named");
+  it("continues a bullet in a loose list without inserting an extra blank line", () => {
+    const onChange = vi.fn();
+    render(
+      <LiveMarkdownEditor
+        value={"- first\n\n- second"}
+        onChange={onChange}
+        ariaLabel="Edit loose list"
+      />,
+    );
+    const editor = screen.getByLabelText("Edit loose list");
+    const view = EditorView.findFromDOM(editor);
+    act(() => view.dispatch({ selection: { anchor: 7 } }));
+
+    fireEvent.keyDown(editor, { key: "Enter" });
+
+    expect(view.state.doc.toString()).toBe("- first\n- \n\n- second");
+    expect(view.state.selection.main.head).toBe(10);
+    expect(onChange).toHaveBeenLastCalledWith("- first\n- \n\n- second");
   });
 
   it("finishes the presentation of an unclosed fenced code block", () => {
