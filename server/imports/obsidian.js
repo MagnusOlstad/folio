@@ -243,6 +243,17 @@ export function createObsidianImportService(runtime) {
 
   async function runJob(job, scan) {
     const { manifest, manifestPath } = await manifestFor(scan.vaultId, scan.name)
+    let wrote = false
+    let reindexAttempted = false
+
+    async function reindexWrittenFiles() {
+      if (!wrote || reindexAttempted) return
+      reindexAttempted = true
+      job.phase = 'indexing'
+      await runtime.reindexBundle()
+      void runtime.refreshMissingEmbeddingsInBackground()
+    }
+
     try {
       const status = await runtime.ollamaStatus()
       if (!status.online || !runtime.hasOllamaModel(runtime.classifierModel, status.installed)) throw new Error(`The classifier model ${runtime.classifierModel} must be installed before importing.`)
@@ -277,7 +288,11 @@ export function createObsidianImportService(runtime) {
         try {
           const parsed = runtime.parseMarkdownFile(raw, file.relativePath)
           sources.set(file.relativePath, { raw, parsed })
-          const result = runtime.normalizeClassification(await runtime.classify(`Source path: ${file.relativePath}\n\n${parsed.content}`, records), parsed.content, records)
+          const result = runtime.normalizeClassification(
+            await runtime.classify(`Source path: ${file.relativePath}\n\n${parsed.content}`, records, { keepAlive: 0 }),
+            parsed.content,
+            records,
+          )
           const directory = `/${result.path.join('/')}`
           const directoryPath = path.join(runtime.bundleRoot, ...result.path)
           await fs.mkdir(directoryPath, { recursive: true })
@@ -302,7 +317,6 @@ export function createObsidianImportService(runtime) {
         const parsed = sources.get(file.relativePath)?.parsed
         return { relativePath: file.relativePath, destination: entry?.destination, aliases: parsed ? sourceAliases(parsed.frontmatter) : [] }
       })
-      let wrote = false
       for (const file of candidates) {
         if (job.cancelRequested) break
         const entry = manifest.files[file.relativePath]
@@ -352,16 +366,14 @@ export function createObsidianImportService(runtime) {
         await writeJsonAtomic(manifestPath, manifest)
         job.processed += 1
       }
-      if (job.cancelRequested) job.phase = 'cancelled'
-      else {
-        if (wrote) {
-          job.phase = 'indexing'
-          await runtime.reindexBundle()
-          void runtime.refreshMissingEmbeddingsInBackground()
-        }
-        job.phase = 'completed'
-      }
+      await reindexWrittenFiles()
+      job.phase = job.cancelRequested ? 'cancelled' : 'completed'
     } catch (error) {
+      try {
+        await reindexWrittenFiles()
+      } catch (reindexError) {
+        console.error(`Could not index partially imported Obsidian notes: ${reindexError.message}`)
+      }
       job.phase = 'failed'
       job.error = error.message
     } finally {

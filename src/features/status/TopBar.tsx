@@ -14,7 +14,6 @@ export type TopBarProps = {
   modelInstallInProgress: boolean;
   modelEndpoints: Endpoint[];
   togglingService: string | null;
-  showSettingsButton: boolean;
   onInstall: () => void;
   onToggle: (id: string, model?: string) => void;
   onOpenSettings: () => void;
@@ -27,7 +26,6 @@ export function TopBar({
   modelInstallInProgress,
   modelEndpoints,
   togglingService,
-  showSettingsButton,
   onInstall,
   onToggle,
   onOpenSettings,
@@ -119,15 +117,13 @@ export function TopBar({
             </div>
           )}
         </div>
-        {showSettingsButton ? (
-          <button
-            type="button"
-            className="browser-settings-button"
-            onClick={onOpenSettings}
-          >
-            Settings
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className="browser-settings-button"
+          onClick={onOpenSettings}
+        >
+          Settings
+        </button>
       </div>
     </header>
   );

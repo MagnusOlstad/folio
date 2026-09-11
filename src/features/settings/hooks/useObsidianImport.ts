@@ -14,13 +14,25 @@ import type {
 
 const TERMINAL_PHASES = new Set(["completed", "cancelled", "failed"]);
 
-export function useObsidianImport(): ObsidianImportSettings {
+type UseObsidianImportOptions = {
+  onImportFinished?: (job: ObsidianImportJob) => void | Promise<void>;
+};
+
+export function useObsidianImport({
+  onImportFinished,
+}: UseObsidianImportOptions = {}): ObsidianImportSettings {
   const [scan, setScan] = useState<ObsidianImportScan | null>(null);
   const [job, setJob] = useState<ObsidianImportJob | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const browserSelection = useRef<BrowserVaultSelection | null>(null);
+  const finishedJobIds = useRef(new Set<string>());
+  const onImportFinishedRef = useRef(onImportFinished);
   const supported = Boolean(window.folio?.selectObsidianVault) || supportsBrowserVaultSelection();
+
+  useEffect(() => {
+    onImportFinishedRef.current = onImportFinished;
+  }, [onImportFinished]);
 
   useEffect(() => {
     if (!job || TERMINAL_PHASES.has(job.phase)) return;
@@ -30,7 +42,13 @@ export function useObsidianImport(): ObsidianImportSettings {
           ? await window.folio.getObsidianImportJob(job.id)
           : await api<ObsidianImportJob>(`/api/imports/obsidian/jobs/${job.id}`);
         setJob(next);
-        if (TERMINAL_PHASES.has(next.phase)) setBusy(false);
+        if (TERMINAL_PHASES.has(next.phase)) {
+          setBusy(false);
+          if (!finishedJobIds.current.has(next.id)) {
+            finishedJobIds.current.add(next.id);
+            void onImportFinishedRef.current?.(next);
+          }
+        }
       } catch (pollError) {
         setError(pollError instanceof Error ? pollError.message : "Could not read import progress.");
         setBusy(false);

@@ -193,7 +193,9 @@
   gap: 8px;
 }
 
-.settings-import-actions button {
+.settings-import-actions button,
+.settings-import-actions .settings-action {
+  display: inline-block;
   padding: 8px 11px;
   border: 1px solid var(--line);
   color: var(--ink);
@@ -201,6 +203,7 @@
   font: inherit;
   font-size: 10px;
   text-transform: uppercase;
+  text-decoration: none;
 }
 
 .settings-import-actions button.primary {

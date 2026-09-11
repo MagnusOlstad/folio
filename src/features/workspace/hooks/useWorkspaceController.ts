@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { BundleFile, Note } from "../../../domain/types.ts";
+import { api } from "../../../lib/api.ts";
 import type { WorkspaceShellProps } from "../components/WorkspaceShell.tsx";
 import { useWorkspaceBootstrap } from "./useWorkspaceBootstrap.ts";
 import { useWorkspaceLayout } from "./useWorkspaceLayout.ts";
@@ -11,7 +13,7 @@ import { useWorkspaceExplorerState } from "./useWorkspaceExplorerState.ts";
 import { useWorkspaceSidebarProps } from "./useWorkspaceSidebarProps.ts";
 import { useWorkspaceShortcutActions } from "./useWorkspaceShortcutActions.ts";
 import { useFiledDocumentAutosave } from "./useFiledDocumentAutosave.ts";
-import { isUntitledId } from "../../../lib/workspace.ts";
+import { expandedPathsForFiles, isUntitledId } from "../../../lib/workspace.ts";
 import { bundleDirectories } from "../model/directory-suggestions.ts";
 import { useThemeSettings } from "../../settings/hooks/useThemeSettings.ts";
 import { useObsidianImport } from "../../settings/hooks/useObsidianImport.ts";
@@ -27,10 +29,39 @@ function draftTitle(content: string) {
 export function useWorkspaceController(): WorkspaceShellProps {
   const [message, setMessage] = useState("");
   const themeSettings = useThemeSettings();
-  const obsidianImport = useObsidianImport();
   const embeddingRevisionsRef = useRef(new Map<string, number>());
   const embeddingFinalizationsRef = useRef(new Map<string, Promise<void>>());
   const explorer = useWorkspaceExplorerState(setMessage);
+  const {
+    files: explorerFiles,
+    setExpandedDirectories,
+    setFiles,
+    setNotes,
+  } = explorer;
+  const refreshAfterObsidianImport = useCallback(async () => {
+    const previousIds = new Set(explorerFiles.map((file) => file.id));
+    const [filesResult, notesResult] = await Promise.allSettled([
+      api<BundleFile[]>("/api/files"),
+      api<Note[]>("/api/notes"),
+    ]);
+    if (filesResult.status === "fulfilled") {
+      const newFiles = filesResult.value.filter((file) => !previousIds.has(file.id));
+      setFiles(filesResult.value);
+      if (newFiles.length) {
+        const importedPaths = expandedPathsForFiles(newFiles);
+        setExpandedDirectories((current) =>
+          new Set([...current, ...importedPaths]),
+        );
+      }
+    }
+    if (notesResult.status === "fulfilled") setNotes(notesResult.value);
+    if (filesResult.status === "rejected" || notesResult.status === "rejected") {
+      setMessage("The import finished, but the file explorer could not be fully refreshed.");
+    }
+  }, [explorerFiles, setExpandedDirectories, setFiles, setNotes]);
+  const obsidianImport = useObsidianImport({
+    onImportFinished: refreshAfterObsidianImport,
+  });
   const documents = useWorkspaceDocumentState({
     expandedDirectories: explorer.expandedDirectories,
     expandedDirectoriesReady: explorer.expandedDirectoriesReady,
@@ -202,7 +233,6 @@ export function useWorkspaceController(): WorkspaceShellProps {
       modelInstallInProgress: models.modelInstallInProgress,
       modelEndpoints: models.modelEndpoints,
       togglingService: models.togglingService,
-      showSettingsButton: !window.folio,
       onInstall: models.installOllamaModels,
       onToggle: models.toggleOllamaService,
       onOpenSettings: themeSettings.openSettings,

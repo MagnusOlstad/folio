@@ -21,6 +21,7 @@ import { registerRoutes as registerCaptureRoutes } from './routes/capture.js'
 import { registerRoutes as registerConfirmationRoutes } from './routes/confirmation.js'
 import { registerRoutes as registerAskRoutes } from './routes/ask.js'
 import { registerRoutes as registerImportRoutes } from './routes/imports.js'
+import { registerRoutes as registerBackupRoutes } from './routes/backup.js'
 
 export function createRuntime(env = process.env) {
   const runtime = { ...createConfig(env), ...createTextHelpers() }
@@ -48,6 +49,7 @@ export async function createApp(runtime = createRuntime()) {
 
   const app = express()
   registerImportRoutes(app, runtime)
+  registerBackupRoutes(app, runtime)
   app.use(express.json({ limit: '1mb' }))
   registerSystemRoutes(app, runtime)
   registerFileRoutes(app, runtime)

@@ -109,6 +109,20 @@ export function SettingsDialog({
             ))}
           </div>
         </section>
+        <section className="settings-section" aria-labelledby={`${titleId}-backup`}>
+          <div className="settings-section-copy">
+            <h2 id={`${titleId}-backup`}>Backup</h2>
+            <p>
+              Download the complete Folio bundle as a ZIP file. We recommend
+              making a backup before importing an Obsidian vault.
+            </p>
+          </div>
+          <div className="settings-import-actions">
+            <a className="settings-action" href="/api/backup">
+              Download bundle backup
+            </a>
+          </div>
+        </section>
         <section className="settings-section settings-import-section" aria-labelledby={`${titleId}-import`}>
           <div className="settings-section-copy">
             <h2 id={`${titleId}-import`}>Import</h2>

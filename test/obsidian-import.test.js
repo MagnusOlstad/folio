@@ -43,14 +43,18 @@ test('imports each vault note once and reports changed sources without overwriti
     fs.mkdir(runtime.importsRoot, { recursive: true }),
   ])
   runtime.ollamaStatus = async () => ({ online: true, installed: [runtime.classifierModel] })
-  runtime.classify = async (content) => ({ concept: {
+  const classificationOptions = []
+  runtime.classify = async (content, _records, options) => {
+    classificationOptions.push(options)
+    return { concept: {
     kind: 'note',
     path: ['imported'],
     title: content.includes('# Alpha') ? 'Alpha' : 'Beta',
     type: 'Imported note',
     description: 'Imported from Obsidian.',
     tags: ['classified'],
-  } })
+    } }
+  }
   runtime.reindexBundle = async () => ({ records: [], errors: [] })
   runtime.refreshMissingEmbeddingsInBackground = async () => {}
 
@@ -59,6 +63,7 @@ test('imports each vault note once and reports changed sources without overwriti
   const completed = await waitForJob(runtime, (await runtime.startObsidianImport(scan.id)).id)
   assert.equal(completed.phase, 'completed')
   assert.equal(completed.imported, 2)
+  assert.deepEqual(classificationOptions, [{ keepAlive: 0 }, { keepAlive: 0 }])
 
   const repeated = await runtime.scanObsidianFilesystem(vaultRoot)
   assert.equal(repeated.counts.imported, 2)
@@ -71,4 +76,53 @@ test('imports each vault note once and reports changed sources without overwriti
   const changed = await runtime.scanObsidianFilesystem(vaultRoot)
   assert.equal(changed.counts.changed, 1)
   assert.equal(changed.counts.imported, 1)
+})
+
+test('reindexes files written before an Obsidian import is cancelled', async (context) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-obsidian-cancel-'))
+  const dataRoot = path.join(root, 'data')
+  const vaultRoot = path.join(root, 'vault')
+  await fs.mkdir(vaultRoot, { recursive: true })
+  await Promise.all([
+    fs.writeFile(path.join(vaultRoot, 'Alpha.md'), '# Alpha\n'),
+    fs.writeFile(path.join(vaultRoot, 'Beta.md'), '# Beta\n'),
+  ])
+  context.after(() => fs.rm(root, { recursive: true, force: true }))
+
+  const runtime = createRuntime({ FOLIO_DATA_ROOT: dataRoot })
+  await Promise.all([
+    fs.mkdir(runtime.bundleRoot, { recursive: true }),
+    fs.mkdir(runtime.importsRoot, { recursive: true }),
+  ])
+  runtime.ollamaStatus = async () => ({ online: true, installed: [runtime.classifierModel] })
+  runtime.classify = async (content) => ({ concept: {
+    kind: 'note',
+    path: ['imported'],
+    title: content.includes('# Alpha') ? 'Alpha' : 'Beta',
+    type: 'Imported note',
+    description: 'Imported from Obsidian.',
+    tags: ['classified'],
+  } })
+  let reindexCount = 0
+  runtime.reindexBundle = async () => {
+    reindexCount += 1
+    return { records: [], errors: [] }
+  }
+  runtime.refreshMissingEmbeddingsInBackground = async () => {}
+  const markdownDocument = runtime.markdownDocument
+  let jobId = null
+  runtime.markdownDocument = (...args) => {
+    if (jobId) runtime.cancelObsidianImport(jobId)
+    return markdownDocument(...args)
+  }
+
+  const scan = await runtime.scanObsidianFilesystem(vaultRoot)
+  const started = await runtime.startObsidianImport(scan.id)
+  jobId = started.id
+  const cancelled = await waitForJob(runtime, jobId)
+
+  assert.equal(cancelled.phase, 'cancelled')
+  assert.equal(cancelled.imported, 1)
+  assert.equal(reindexCount, 1)
+  assert.equal((await fs.readdir(path.join(runtime.bundleRoot, 'imported'))).length, 1)
 })
