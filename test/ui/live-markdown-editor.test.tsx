@@ -346,6 +346,8 @@ describe("LiveMarkdownEditor", () => {
     fireEvent.mouseDown(editor, { clientX: 0, clientY: 0, ctrlKey: true });
 
     expect(onOpenLink).toHaveBeenLastCalledWith("https://example.com/named");
+  });
+
   it("continues a bullet in a loose list without inserting an extra blank line", () => {
     const onChange = vi.fn();
     render(
