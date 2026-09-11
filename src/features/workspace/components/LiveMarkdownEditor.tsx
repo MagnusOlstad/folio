@@ -135,6 +135,10 @@ export function LiveMarkdownEditor({
         extensions: [
           markdown({
             base: markdownLanguage,
+            // Keep Markdown commands in the explicit keymap below so Folio's
+            // list continuation handler wins over the implicit high-priority
+            // Enter binding.
+            addKeymap: false,
             // A hyphen-only line should remain available for a list or a
             // horizontal rule. Setext headings would otherwise make the
             // previous line jump to H2 size as soon as its first dash is

@@ -228,6 +228,27 @@ test("keeps the caret after two newlines at the end of a filed note", async ({ p
   await expect(lines.last()).toHaveText("Tail");
 });
 
+test("continues a loose bullet list without adding another blank line", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTitle("New note (Cmd+T)").click();
+  const editor = page.getByLabel("Write a new note");
+  const lines = editor.locator(".cm-line");
+  await editor.fill("- first\n\n- later");
+  await editor.press(
+    process.platform === "darwin" ? "Meta+ArrowUp" : "Control+Home",
+  );
+  await editor.press("End");
+
+  await editor.press("Enter");
+  await editor.type("second");
+
+  await expect(lines).toHaveCount(4);
+  await expect(lines.nth(0)).toContainText("first");
+  await expect(lines.nth(1)).toContainText("second");
+  await expect(lines.nth(2)).toHaveText("");
+  await expect(lines.nth(3)).toContainText("later");
+});
+
 test("autosaves quickly and reembeds on blur and Cmd/Ctrl+S", async ({ page }) => {
   await openSeededNote(page, "Daily 2026-09-03");
 

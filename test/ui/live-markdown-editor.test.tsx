@@ -244,6 +244,26 @@ describe("LiveMarkdownEditor", () => {
     expect(onChange).toHaveBeenLastCalledWith("10. tenth\n    ");
   });
 
+  it("continues a bullet in a loose list without inserting an extra blank line", () => {
+    const onChange = vi.fn();
+    render(
+      <LiveMarkdownEditor
+        value={"- first\n\n- second"}
+        onChange={onChange}
+        ariaLabel="Edit loose list"
+      />,
+    );
+    const editor = screen.getByLabelText("Edit loose list");
+    const view = EditorView.findFromDOM(editor);
+    act(() => view.dispatch({ selection: { anchor: 7 } }));
+
+    fireEvent.keyDown(editor, { key: "Enter" });
+
+    expect(view.state.doc.toString()).toBe("- first\n- \n\n- second");
+    expect(view.state.selection.main.head).toBe(10);
+    expect(onChange).toHaveBeenLastCalledWith("- first\n- \n\n- second");
+  });
+
   it("finishes the presentation of an unclosed fenced code block", () => {
     render(
       <LiveMarkdownEditor
