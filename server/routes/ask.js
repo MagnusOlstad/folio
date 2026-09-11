@@ -79,9 +79,15 @@ app.post('/api/ask', async (request, response, next) => {
         },
       ],
     })
+    const answer = result?.message?.content
+    if (typeof answer !== 'string' || !answer.trim()) {
+      const error = new Error('Ollama returned an empty answer.')
+      error.answerResponse = true
+      throw error
+    }
 
     response.json({
-      answer: ensureAnswerCitations(result.message.content, matches),
+      answer: ensureAnswerCitations(answer, matches),
       sources: matches.map(({
         embedding: _embedding,
         chunks: _chunks,
@@ -106,6 +112,9 @@ app.post('/api/ask', async (request, response, next) => {
   } catch (error) {
     if (error.name === 'TimeoutError' || error.cause?.code === 'ECONNREFUSED') {
       return response.status(503).json({ error: 'Ollama is not available. Start it and make sure the configured models are installed.' })
+    }
+    if (error.answerResponse || error.ollamaStatus >= 400 || error.ollamaResponse) {
+      return response.status(502).json({ error: 'Ollama could not produce an answer. Check the selected model and try again.' })
     }
     next(error)
   }

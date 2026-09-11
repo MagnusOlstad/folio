@@ -7,7 +7,7 @@ export function createFilingService(runtime) {
     captureMarker, captureContribution,
     captureMetadata, updatedGenerated, filingActor, stripGeneratedRelatedSection, indexedConceptContent,
     searchTerms, reuseExistingClassificationPath,
-    isMovableConceptId, bundleFileId, dateKeyInTimeZone } = runtime
+    isMovableConceptId, bundleFileId, dateKeyInTimeZone, cosineSimilarity, lexicalScore } = runtime
 function openingSpecialKind(content) {
   const firstLine = content.split('\n').find((line) => line.trim())?.trim() || ''
   const normalized = firstLine.replace(/^#{1,6}\s*/, '').toLowerCase()
@@ -88,6 +88,35 @@ function mentionedRecordIds(content, records) {
     .map((record) => record.id)
 }
 
+function creationRelationships(content, records, noteEmbedding = null) {
+  const candidates = records.filter((record) => (
+    record.id !== '/todo-list.md'
+    && !record.id.startsWith('/daily/')
+    && !record.id.startsWith('/references/')
+    && path.posix.dirname(record.id) !== '/'
+  ))
+  const mentionedIds = new Set(mentionedRecordIds(content, candidates))
+  const ranked = candidates
+    .map((record) => ({
+      record,
+      semantic: noteEmbedding ? cosineSimilarity(noteEmbedding, record.embedding) : 0,
+      lexical: lexicalScore(record, content),
+    }))
+    .filter(({ record, semantic, lexical }) => mentionedIds.has(record.id) || semantic >= 0.75 || lexical >= 0.45)
+    .sort((left, right) => (
+      Number(mentionedIds.has(right.record.id)) - Number(mentionedIds.has(left.record.id))
+      || right.semantic - left.semantic
+      || right.lexical - left.lexical
+      || left.record.id.localeCompare(right.record.id)
+    ))
+    .slice(0, 3)
+
+  return ranked.map(({ record }) => ({
+    id: record.id,
+    relation: mentionedIds.has(record.id) ? 'Mentions' : 'Related',
+  }))
+}
+
 function generatedRelatedSection(relationships, recordsById) {
   if (!relationships.length) return ''
   const lines = [generatedRelatedStart, '# Related', '']
@@ -98,6 +127,23 @@ function generatedRelatedSection(relationships, recordsById) {
   }
   lines.push(generatedRelatedEnd)
   return lines.length > 4 ? lines.join('\n') : ''
+}
+
+function generatedRelatedIds(content) {
+  const section = String(content).match(
+    /<!-- folio:generated-related:start -->[\s\S]*?<!-- folio:generated-related:end -->/i,
+  )?.[0]
+  if (!section) return []
+  return section.split('\n').flatMap((line) => {
+    if (!/ - Related\s*$/.test(line)) return []
+    const id = line.match(/\]\((\/[^)]+)\)\s+- Related\s*$/)?.[1]
+    if (!id) return []
+    try {
+      return [decodeURI(id)]
+    } catch {
+      return [id]
+    }
+  })
 }
 
 async function recalculateGeneratedRelationships(records, documents) {
@@ -128,6 +174,9 @@ async function recalculateGeneratedRelationships(records, documents) {
     else delete parsed.frontmatter.folio_related
     const relationships = new Map()
     for (const id of validConfirmedIds) relationships.set(id, { id, relation: 'Confirmed related' })
+    for (const id of generatedRelatedIds(parsed.content)) {
+      if (id !== document.id && recordsById.has(id) && !relationships.has(id)) relationships.set(id, { id, relation: 'Related' })
+    }
     for (const id of mentionedRecordIds(indexedContent, records.filter((record) => record.id !== document.id))) {
       if (!relationships.has(id)) relationships.set(id, { id, relation: 'Mentions' })
     }
@@ -344,7 +393,7 @@ async function rebuildBundleFiles(records) {
   await fs.writeFile(path.join(bundleRoot, 'log.md'), logLines.join('\n'))
 }
 
-  return { openingSpecialKind, aggregateEntryContent, normalizeClassification, rawDocument, mentionedRecordIds,
+  return { openingSpecialKind, aggregateEntryContent, normalizeClassification, rawDocument, mentionedRecordIds, creationRelationships,
     generatedRelatedSection, recalculateGeneratedRelationships, conceptDocument, findExactConceptFile,
     availableConceptFilename, appendConceptDocument, localTimeLabel, appendAggregateDocument, rebuildBundleFiles }
 }

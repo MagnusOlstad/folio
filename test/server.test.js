@@ -448,6 +448,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.ok(auroraRawCaptures.some((rawCapture) => /second steering line/.test(rawCapture)))
   const planningFilePath = path.join(dataRoot, 'bundle', planning.note.id.slice(1))
   const planningFile = await fs.readFile(planningFilePath, 'utf8')
+  assert.match(planningFile, /\[Morning launch meeting\]\([^)]*morning-launch-meeting[^)]*\) - Related/)
   assert.match(planningFile, /<!-- folio:generated-related:start -->/)
   assert.match(planningFile, new RegExp(`\\[Project Aurora\\]\\(${auroraId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\) - Mentions`))
 
@@ -475,11 +476,13 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const semanticDetailResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(semantic.note.id)}`)
   const semanticDetail = await semanticDetailResponse.json()
   const suggestion = semanticDetail.suggestions.find((item) => item.id === meetingResult.note.id)
-  assert.ok(suggestion)
+  const autoRelated = semanticDetail.links.find((item) => item.id === meetingResult.note.id && item.relation === 'Related')
+  assert.ok(suggestion || autoRelated)
+  const relatedId = suggestion?.id || autoRelated.id
   const confirmResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(semantic.note.id)}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ confirmRelatedId: suggestion.id }),
+    body: JSON.stringify({ confirmRelatedId: relatedId }),
   })
   const confirmedSemantic = await confirmResponse.json()
   assert.equal(confirmResponse.status, 200, JSON.stringify(confirmedSemantic))
