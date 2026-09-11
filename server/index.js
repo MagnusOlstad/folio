@@ -7,8 +7,8 @@ export const reuseExistingClassificationPath = (...args) => createRuntime().reus
 export const existingClassificationGuide = (...args) => createRuntime().existingClassificationGuide(...args)
 export const existingTagGuide = (...args) => createRuntime().existingTagGuide(...args)
 
-export function startServer(requestedPort) {
-  const runtime = createRuntime()
+export function startServer(requestedPort, injectedRuntime = null) {
+  const runtime = injectedRuntime || createRuntime()
   const serverPort = requestedPort ?? runtime.port
   return createApp(runtime).then((app) => new Promise((resolve, reject) => {
     const server = app.listen(serverPort, '127.0.0.1', () => {

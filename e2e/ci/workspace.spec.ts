@@ -34,6 +34,21 @@ test('changes and restores the color theme from browser settings', async ({ page
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'editorial')
 })
 
+test('downloads a bundle backup from settings', async ({ page }) => {
+  await page.getByRole('button', { name: 'Settings' }).click()
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('link', { name: 'Download bundle backup' }).click()
+  const download = await downloadPromise
+
+  expect(download.suggestedFilename()).toMatch(/^folio-bundle-backup-.+\.zip$/)
+  expect(await download.failure()).toBeNull()
+  const stream = await download.createReadStream()
+  expect(stream).not.toBeNull()
+  const chunks: Buffer[] = []
+  for await (const chunk of stream!) chunks.push(Buffer.from(chunk))
+  expect(Buffer.concat(chunks).subarray(0, 2)).toEqual(Buffer.from('PK'))
+})
+
 test('opens a seeded note and shows its content', async ({ page }) => {
   await page.getByRole('button', { name: 'Todo List', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Todo List', level: 1 }).first()).toBeVisible()

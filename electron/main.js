@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, BrowserWindow, Menu, ipcMain, screen, shell } from 'electron'
+import { app, BrowserWindow, Menu, dialog, ipcMain, screen, shell } from 'electron'
 
 const isMac = process.platform === 'darwin'
 const preloadPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'preload.cjs')
@@ -9,6 +9,7 @@ const preloadPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'pre
 let mainWindow = null
 let localServer = null
 let localUrl = null
+let localRuntime = null
 
 async function pathExists(target) {
   try {
@@ -181,8 +182,10 @@ app.whenReady().then(async () => {
   process.env.FOLIO_VERSION = app.getVersion()
   process.env.FOLIO_DATA_ROOT = await prepareDataDirectory()
 
+  const { createRuntime } = await import('../server/app.js')
   const { startServer } = await import('../server/index.js')
-  localServer = await startServer(0)
+  localRuntime = createRuntime()
+  localServer = await startServer(0, localRuntime)
   const address = localServer.address()
   if (!address || typeof address === 'string') throw new Error('Could not determine the local server port.')
   localUrl = `http://127.0.0.1:${address.port}`
@@ -191,6 +194,17 @@ app.whenReady().then(async () => {
   ipcMain.on('folio:close-window', () => {
     mainWindow?.close()
   })
+  ipcMain.handle('folio:select-obsidian-vault', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Choose Obsidian vault',
+      properties: ['openDirectory'],
+    })
+    if (result.canceled || !result.filePaths[0]) return null
+    return localRuntime.scanObsidianFilesystem(result.filePaths[0])
+  })
+  ipcMain.handle('folio:start-obsidian-import', (_event, scanId) => localRuntime.startObsidianImport(scanId))
+  ipcMain.handle('folio:get-obsidian-import-job', (_event, jobId) => localRuntime.getObsidianImportJob(jobId))
+  ipcMain.handle('folio:cancel-obsidian-import', (_event, jobId) => localRuntime.cancelObsidianImport(jobId))
 
   await createWindow()
 
@@ -207,5 +221,9 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  ipcMain.removeHandler('folio:select-obsidian-vault')
+  ipcMain.removeHandler('folio:start-obsidian-import')
+  ipcMain.removeHandler('folio:get-obsidian-import-job')
+  ipcMain.removeHandler('folio:cancel-obsidian-import')
   localServer?.close()
 })

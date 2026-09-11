@@ -6,6 +6,7 @@ import {
   useThemeSettings,
 } from "../../src/features/settings/hooks/useThemeSettings.ts";
 import { TopBar } from "../../src/features/status/TopBar.tsx";
+import { useObsidianImport } from "../../src/features/settings/hooks/useObsidianImport.ts";
 
 describe("theme settings", () => {
   afterEach(() => {
@@ -13,6 +14,8 @@ describe("theme settings", () => {
     delete document.documentElement.dataset.theme;
     document.documentElement.style.colorScheme = "";
     vi.restoreAllMocks();
+    vi.useRealTimers();
+    delete window.folio;
   });
 
   it("restores valid themes and defaults invalid or unavailable storage to Original", () => {
@@ -66,11 +69,28 @@ describe("theme settings", () => {
       <SettingsDialog
         themeId="original"
         onSelectTheme={onSelectTheme}
+        obsidianImport={{
+          supported: false,
+          busy: false,
+          scan: null,
+          job: null,
+          error: "",
+          selectVault: () => {},
+          confirmImport: () => {},
+          cancelImport: () => {},
+          clearScan: () => {},
+        }}
         onClose={onClose}
       />,
     );
 
     expect(screen.getAllByRole("radio")).toHaveLength(4);
+    expect(
+      screen.getByText(/recommend making a backup before importing an Obsidian vault/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Download bundle backup" }),
+    ).toHaveAttribute("href", "/api/backup");
     expect(screen.getByRole("radio", { name: /Original/ })).toBeChecked();
     expect(screen.getByRole("radio", { name: /Original/ })).toHaveFocus();
 
@@ -81,7 +101,42 @@ describe("theme settings", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it("shows the top-bar Settings fallback only for browser builds", () => {
+  it("summarizes a vault and requires one explicit import confirmation", () => {
+    const confirmImport = vi.fn();
+    render(
+      <SettingsDialog
+        themeId="original"
+        onSelectTheme={() => {}}
+        onClose={() => {}}
+        obsidianImport={{
+          supported: true,
+          busy: false,
+          scan: {
+            id: "scan-1",
+            vaultId: "vault-1",
+            name: "Work vault",
+            provider: "browser",
+            total: 9,
+            counts: { new: 4, imported: 2, changed: 1, retryable: 1, invalid: 0, attachments: 1 },
+            requiredUploads: ["Alpha.md"],
+          },
+          job: null,
+          error: "",
+          selectVault: () => {},
+          confirmImport,
+          cancelImport: () => {},
+          clearScan: () => {},
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Work vault")).toBeInTheDocument();
+    expect(screen.getByText(/import 5 notes/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Import notes" }));
+    expect(confirmImport).toHaveBeenCalledOnce();
+  });
+
+  it("always shows the top-bar Settings button", () => {
     const onOpenSettings = vi.fn();
     const topBarProps = {
       versionInfo: null,
@@ -94,14 +149,59 @@ describe("theme settings", () => {
       onToggle: vi.fn(),
       onOpenSettings,
     };
-    const { rerender } = render(
-      <TopBar {...topBarProps} showSettingsButton />,
-    );
+    render(<TopBar {...topBarProps} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     expect(onOpenSettings).toHaveBeenCalledOnce();
+  });
 
-    rerender(<TopBar {...topBarProps} showSettingsButton={false} />);
-    expect(screen.queryByRole("button", { name: "Settings" })).not.toBeInTheDocument();
+  it("reports a terminal Obsidian import exactly once", async () => {
+    vi.useFakeTimers();
+    const onImportFinished = vi.fn();
+    const scan = {
+      id: "scan-1",
+      vaultId: "vault-1",
+      name: "Work vault",
+      provider: "electron" as const,
+      total: 1,
+      counts: { new: 1, imported: 0, changed: 0, retryable: 0, invalid: 0, attachments: 0 },
+      requiredUploads: [],
+    };
+    const runningJob = {
+      id: "job-1",
+      scanId: scan.id,
+      phase: "planning" as const,
+      processed: 0,
+      total: 1,
+      imported: 0,
+      failed: 0,
+      unresolvedLinks: 0,
+      error: null,
+      startedAt: "2026-01-01T00:00:00.000Z",
+      finishedAt: null,
+    };
+    window.folio = {
+      selectObsidianVault: vi.fn().mockResolvedValue(scan),
+      startObsidianImport: vi.fn().mockResolvedValue(runningJob),
+      getObsidianImportJob: vi.fn().mockResolvedValue({
+        ...runningJob,
+        phase: "cancelled",
+        imported: 1,
+        finishedAt: "2026-01-01T00:01:00.000Z",
+      }),
+    };
+    const { result } = renderHook(() => useObsidianImport({ onImportFinished }));
+
+    await act(async () => result.current.selectVault());
+    await act(async () => result.current.confirmImport());
+    await act(async () => vi.advanceTimersByTimeAsync(500));
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+
+    expect(onImportFinished).toHaveBeenCalledOnce();
+    expect(onImportFinished).toHaveBeenCalledWith(expect.objectContaining({
+      id: "job-1",
+      phase: "cancelled",
+      imported: 1,
+    }));
   });
 });

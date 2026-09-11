@@ -11,15 +11,6 @@ import {
   type WorkspaceShortcutAction,
 } from "./useWorkspaceCommands.ts";
 
-declare global {
-  interface Window {
-    folio?: {
-      onMenuAction?: (handler: (action: string) => void) => () => void;
-      closeWindow?: () => void;
-    };
-  }
-}
-
 type Options = {
   sidebarMode: SidebarMode;
   setSidebarMode: Dispatch<SetStateAction<SidebarMode>>;

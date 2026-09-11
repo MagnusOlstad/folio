@@ -58,6 +58,7 @@ export function WorkspaceShell({
         <SettingsDialog
           themeId={settings.themeId}
           onSelectTheme={settings.onSelectTheme}
+          obsidianImport={settings.obsidianImport}
           onClose={settings.onClose}
         />
       ) : null}
