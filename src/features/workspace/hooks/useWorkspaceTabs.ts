@@ -12,6 +12,7 @@ import {
   closeGroupTab,
   mergeClosedGroup,
   moveGroupTab,
+  pinGroupTab,
 } from "../model/tab-state.ts";
 
 type UseWorkspaceTabsOptions = {
@@ -36,7 +37,7 @@ export function useWorkspaceTabs({
   draftTitle,
 }: UseWorkspaceTabsOptions) {
   const [groups, setGroups] = useState<TabGroup[]>([
-    { id: "primary", tabs: [], activeId: null },
+    { id: "primary", tabs: [], activeId: null, previewId: null },
   ]);
   const [activeGroupId, setActiveGroupId] = useState("primary");
   const untitledCounter = useRef(0);
@@ -56,6 +57,10 @@ export function useWorkspaceTabs({
     setActiveGroupId(groupId);
     setGroups((current) => activateGroupTab(current, groupId, documentId));
     if (isUntitledId(documentId)) setEditingKey(`${groupId}:${documentId}`);
+  }
+
+  function pinTab(groupId: string, documentId: string) {
+    setGroups((current) => pinGroupTab(current, groupId, documentId));
   }
 
   function createNewTab(targetGroupId = activeGroupId) {
@@ -126,7 +131,7 @@ export function useWorkspaceTabs({
     const newGroupId = source.id === "primary" ? "secondary" : "primary";
     setGroups((current) => [
       ...current,
-      { id: newGroupId, tabs: [], activeId: null },
+      { id: newGroupId, tabs: [], activeId: null, previewId: null },
     ]);
     setActiveGroupId(newGroupId);
   }
@@ -159,6 +164,7 @@ export function useWorkspaceTabs({
     setActiveGroupId,
     titleForId,
     activateTab,
+    pinTab,
     createNewTab,
     openLocalDraft,
     closeTab,

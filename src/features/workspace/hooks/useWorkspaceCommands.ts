@@ -16,6 +16,7 @@ export type WorkspaceShortcutAction =
   | "find-in-note"
   | "export-markdown"
   | "export-pdf"
+  | "open-settings"
   | `switch-tab-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`
   | FormatMarker;
 
@@ -49,6 +50,7 @@ const MENU_ACTIONS = new Set<string>([
   "find-in-note",
   "export-markdown",
   "export-pdf",
+  "open-settings",
   ...Object.values(TAB_SHORTCUTS),
 ]);
 

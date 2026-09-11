@@ -15,10 +15,16 @@ function scrollSurface(page: Page) {
   return page.locator("[data-document-scroll]");
 }
 
-async function openSeededNote(page: Page, title: string) {
+async function openSeededNote(
+  page: Page,
+  title: string,
+  disposition: "preview" | "permanent" = "preview",
+) {
   await page.goto("/");
   await expect(page.getByRole("link", { name: "Folio home" })).toBeVisible();
-  await page.getByRole("button", { name: title, exact: true }).click();
+  const note = page.getByRole("button", { name: title, exact: true });
+  if (disposition === "permanent") await note.dblclick();
+  else await note.click();
   await expect(liveEditor(page, title)).toBeVisible();
 }
 
@@ -228,6 +234,27 @@ test("keeps the caret after two newlines at the end of a filed note", async ({ p
   await expect(lines.last()).toHaveText("Tail");
 });
 
+test("continues a loose bullet list without adding another blank line", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTitle("New note (Cmd+T)").click();
+  const editor = page.getByLabel("Write a new note");
+  const lines = editor.locator(".cm-line");
+  await editor.fill("- first\n\n- later");
+  await editor.press(
+    process.platform === "darwin" ? "Meta+ArrowUp" : "Control+Home",
+  );
+  await editor.press("End");
+
+  await editor.press("Enter");
+  await editor.type("second");
+
+  await expect(lines).toHaveCount(4);
+  await expect(lines.nth(0)).toContainText("first");
+  await expect(lines.nth(1)).toContainText("second");
+  await expect(lines.nth(2)).toHaveText("");
+  await expect(lines.nth(3)).toContainText("later");
+});
+
 test("autosaves quickly and reembeds on blur and Cmd/Ctrl+S", async ({ page }) => {
   await openSeededNote(page, "Daily 2026-09-03");
 
@@ -346,7 +373,7 @@ test("keeps the outer document scroll stable when a rendered construct is activa
 });
 
 test("restores each note scroll position when switching tabs", async ({ page }) => {
-  await openSeededNote(page, "Start Here");
+  await openSeededNote(page, "Start Here", "permanent");
 
   const scroller = scrollSurface(page);
   await scroller.evaluate((element) => {

@@ -7,6 +7,8 @@ type DraftMarkdownEditorProps = {
   onFile: () => void;
   onOpenLink?: (href: string) => void;
   onToggleTask?: (lineNumber: number, checked: boolean) => void | Promise<void>;
+  focusRequestId?: number;
+  onFocusRequestConsumed?: () => void;
   ariaLabel: string;
 };
 
@@ -24,6 +26,8 @@ export function DraftMarkdownEditor({
   onFile,
   onOpenLink,
   onToggleTask,
+  focusRequestId,
+  onFocusRequestConsumed,
   ariaLabel,
 }: DraftMarkdownEditorProps) {
   const shellRef = useRef<HTMLDivElement>(null);
@@ -71,6 +75,8 @@ export function DraftMarkdownEditor({
         onFile={onFile}
         onOpenLink={onOpenLink}
         onToggleTask={onToggleTask}
+        focusRequestId={focusRequestId}
+        onFocusRequestConsumed={onFocusRequestConsumed}
         autoFocus
         ariaLabel={ariaLabel}
       />

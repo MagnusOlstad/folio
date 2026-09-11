@@ -115,6 +115,8 @@ export function applyStandaloneFilingTabs(
         ...group,
         tabs,
         activeId: group.activeId === sourceId ? standaloneId : group.activeId,
+        previewId:
+          group.previewId === sourceId ? standaloneId : group.previewId,
       };
     }
     if (group.id !== ownerGroupId || group.activeId !== sourceId) return group;

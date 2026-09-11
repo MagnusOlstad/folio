@@ -32,7 +32,7 @@ export function FileTree({
   movingFileId: string | null;
   blockedFileIds: Set<string>;
   onToggle: (path: string) => void;
-  onOpen: (id: string) => void;
+  onOpen: (id: string, disposition: "preview" | "permanent") => void;
   onFileDragStart: (id: string) => void;
   onFileDragEnd: () => void;
   onDirectoryDragOver: (path: string | null) => void;
@@ -101,7 +101,8 @@ export function FileTree({
               type="button"
               className={`tree-row tree-file ${draggedFileId === file.id ? "dragging" : ""} ${movingFileId === file.id ? "moving" : ""}`}
               style={{ "--tree-depth": depth + 1 } as React.CSSProperties}
-              onClick={() => onOpen(file.id)}
+              onClick={() => onOpen(file.id, "preview")}
+              onDoubleClick={() => onOpen(file.id, "permanent")}
               draggable={
                 file.movable &&
                 !blockedFileIds.has(file.id) &&

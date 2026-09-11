@@ -12,20 +12,6 @@ import {
 } from "./useWorkspaceCommands.ts";
 import type { NoteExportFormat } from "../model/note-export.ts";
 
-declare global {
-  interface Window {
-    folio?: {
-      onMenuAction?: (handler: (action: string) => void) => () => void;
-      closeWindow?: () => void;
-      saveMarkdownExport?: (
-        filename: string,
-        content: string,
-      ) => Promise<{ canceled: boolean }>;
-      savePdfExport?: (filename: string) => Promise<{ canceled: boolean }>;
-    };
-  }
-}
-
 type Options = {
   sidebarMode: SidebarMode;
   setSidebarMode: Dispatch<SetStateAction<SidebarMode>>;
@@ -34,7 +20,7 @@ type Options = {
   activeGroupId: string;
   documents: Record<string, ViewerDocument>;
   createNewTab: () => void;
-  activateTab: (groupId: string, documentId: string) => void;
+  activateTabAtEnd: (groupId: string, documentId: string) => void;
   closeTab: (groupId: string, documentId: string) => void;
   fileDraft: (document: ViewerDocument) => void;
   flushDocument: (documentId: string) => Promise<void>;
@@ -42,6 +28,7 @@ type Options = {
     document: ViewerDocument,
     format: NoteExportFormat,
   ) => void;
+  openSettings: () => void;
 };
 
 export function useWorkspaceShortcutActions(options: Options) {
@@ -65,6 +52,7 @@ export function useWorkspaceShortcutActions(options: Options) {
   }
 
   function runShortcut(action: WorkspaceShortcutAction) {
+    if (action === "open-settings") return options.openSettings();
     if (action === "new-note") return options.createNewTab();
     if (action === "find-in-note") {
       const editor = document.querySelector<HTMLElement>(
@@ -84,7 +72,7 @@ export function useWorkspaceShortcutActions(options: Options) {
         (candidate) => candidate.id === options.activeGroupId,
       );
       const documentId = group?.tabs[index];
-      if (group && documentId) options.activateTab(group.id, documentId);
+      if (group && documentId) options.activateTabAtEnd(group.id, documentId);
       return;
     }
     if (action === "close-tab") {

@@ -124,7 +124,12 @@ describe("file tree behavior", () => {
     fireEvent.click(screen.getByText("Bundle").closest("button")!);
     fireEvent.click(screen.getByRole("button", { name: "Root" }));
     expect(handlers.onToggle).toHaveBeenCalledWith("/");
-    expect(handlers.onOpen).toHaveBeenCalledWith("/root.md");
+    expect(handlers.onOpen).toHaveBeenCalledWith("/root.md", "preview");
+    fireEvent.doubleClick(screen.getByRole("button", { name: "Root" }));
+    expect(handlers.onOpen).toHaveBeenLastCalledWith(
+      "/root.md",
+      "permanent",
+    );
     expect(screen.getByRole("button", { name: "Root" })).toHaveAttribute(
       "draggable",
       "false",

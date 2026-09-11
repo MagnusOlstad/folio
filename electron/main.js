@@ -9,6 +9,7 @@ const preloadPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'pre
 let mainWindow = null
 let localServer = null
 let localUrl = null
+let localRuntime = null
 
 async function pathExists(target) {
   try {
@@ -60,8 +61,28 @@ async function selectExportPath(filename, extension, name) {
 }
 
 function setApplicationMenu() {
+  const settingsItem = {
+    label: 'Settings…',
+    accelerator: 'CmdOrCtrl+,',
+    click: sendToRenderer('open-settings'),
+  }
   const template = [
-    ...(isMac ? [{ role: 'appMenu' }] : []),
+    ...(isMac ? [{
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        settingsItem,
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    }] : []),
     {
       label: 'File',
       submenu: [
@@ -74,6 +95,7 @@ function setApplicationMenu() {
             { label: 'PDF…', click: sendToRenderer('export-pdf') },
           ],
         },
+        ...(!isMac ? [{ type: 'separator' }, settingsItem] : []),
         { type: 'separator' },
         { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: sendToRenderer('close-tab') },
         { label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W', role: 'close' },
@@ -183,8 +205,10 @@ app.whenReady().then(async () => {
   process.env.FOLIO_VERSION = app.getVersion()
   process.env.FOLIO_DATA_ROOT = await prepareDataDirectory()
 
+  const { createRuntime } = await import('../server/app.js')
   const { startServer } = await import('../server/index.js')
-  localServer = await startServer(0)
+  localRuntime = createRuntime()
+  localServer = await startServer(0, localRuntime)
   const address = localServer.address()
   if (!address || typeof address === 'string') throw new Error('Could not determine the local server port.')
   localUrl = `http://127.0.0.1:${address.port}`
@@ -211,6 +235,17 @@ app.whenReady().then(async () => {
     await fs.writeFile(filePath, pdf)
     return { canceled: false }
   })
+  ipcMain.handle('folio:select-obsidian-vault', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Choose Obsidian vault',
+      properties: ['openDirectory'],
+    })
+    if (result.canceled || !result.filePaths[0]) return null
+    return localRuntime.scanObsidianFilesystem(result.filePaths[0])
+  })
+  ipcMain.handle('folio:start-obsidian-import', (_event, scanId) => localRuntime.startObsidianImport(scanId))
+  ipcMain.handle('folio:get-obsidian-import-job', (_event, jobId) => localRuntime.getObsidianImportJob(jobId))
+  ipcMain.handle('folio:cancel-obsidian-import', (_event, jobId) => localRuntime.cancelObsidianImport(jobId))
 
   await createWindow()
 
@@ -229,5 +264,9 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   ipcMain.removeHandler('folio:save-markdown-export')
   ipcMain.removeHandler('folio:save-pdf-export')
+  ipcMain.removeHandler('folio:select-obsidian-vault')
+  ipcMain.removeHandler('folio:start-obsidian-import')
+  ipcMain.removeHandler('folio:get-obsidian-import-job')
+  ipcMain.removeHandler('folio:cancel-obsidian-import')
   localServer?.close()
 })

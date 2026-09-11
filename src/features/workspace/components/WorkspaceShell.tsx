@@ -1,4 +1,6 @@
 import type { CSSProperties, PointerEvent } from "react";
+import { SettingsDialog } from "../../settings/components/SettingsDialog.tsx";
+import type { SettingsDialogProps } from "../../settings/components/SettingsDialog.tsx";
 import { WorkspaceSidebar } from "../../sidebar/WorkspaceSidebar.tsx";
 import type { WorkspaceSidebarProps } from "../../sidebar/WorkspaceSidebar.tsx";
 import { TopBar } from "../../status/TopBar.tsx";
@@ -11,6 +13,7 @@ import type { NoteExportSnapshot } from "../model/note-export.ts";
 
 export type WorkspaceShellProps = {
   topBar: TopBarProps;
+  settings: SettingsDialogProps & { open: boolean };
   sidebar: WorkspaceSidebarProps;
   editor: EditorWorkspaceProps;
   exportPreview: NoteExportSnapshot | null;
@@ -25,6 +28,7 @@ export type WorkspaceShellProps = {
 
 export function WorkspaceShell({
   topBar,
+  settings,
   sidebar,
   editor,
   exportPreview,
@@ -55,6 +59,14 @@ export function WorkspaceShell({
         <EditorWorkspace {...editor} />
       </section>
       {exportPreview ? <NoteExportPreview snapshot={exportPreview} /> : null}
+      {settings.open ? (
+        <SettingsDialog
+          themeId={settings.themeId}
+          onSelectTheme={settings.onSelectTheme}
+          obsidianImport={settings.obsidianImport}
+          onClose={settings.onClose}
+        />
+      ) : null}
     </main>
   );
 }

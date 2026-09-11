@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { TabGroup } from "../../../domain/types.ts";
 import type { WorkspaceEditorUi } from "../hooks/useWorkspaceEditorUi.ts";
 import { isUntitledId } from "../../../lib/workspace.ts";
@@ -48,6 +48,16 @@ export function EditorGroup({
   );
   const editKey = document ? `${group.id}:${document.id}` : "";
   const saving = Boolean(document && model.savingDocuments.has(document.id));
+  const focusRequest =
+    model.editorFocusRequest?.groupId === group.id &&
+    model.editorFocusRequest.documentId === document?.id
+      ? model.editorFocusRequest
+      : null;
+
+  useEffect(() => {
+    if (focusRequest && document && !document.deletable)
+      actions.consumeEditorFocusRequest(focusRequest.id);
+  }, [actions, document, focusRequest]);
 
   return (
     <section
@@ -98,6 +108,7 @@ export function EditorGroup({
         titleForId={actions.titleForId}
         isUntitledId={isUntitledId}
         onActivate={actions.activateTab}
+        onPinTab={actions.pinTab}
         onDragStart={(event, id, groupId) => {
           const payload = { documentId: id, groupId };
           event.dataTransfer.effectAllowed = "move";
@@ -130,6 +141,12 @@ export function EditorGroup({
             editKey={editKey}
             draft={model.drafts[document.id]}
             saving={saving}
+            focusRequestId={focusRequest?.id}
+            onFocusRequestConsumed={
+              focusRequest
+                ? () => actions.consumeEditorFocusRequest(focusRequest.id)
+                : undefined
+            }
             deletingNoteId={model.deletingNoteId}
             movingFileId={model.movingFileId}
             exportingNoteId={model.exportingNoteId}

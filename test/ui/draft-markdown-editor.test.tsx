@@ -1,9 +1,44 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { EditorView } from "@codemirror/view";
+import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { DraftMarkdownEditor } from "../../src/features/workspace/components/DraftMarkdownEditor.tsx";
 
 describe("DraftMarkdownEditor", () => {
+  it("forwards focus requests to the live editor", () => {
+    const frames: FrameRequestCallback[] = [];
+    vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    const onFocusRequestConsumed = vi.fn();
+
+    render(
+      <DraftMarkdownEditor
+        value="Draft note"
+        onChange={vi.fn()}
+        onFile={vi.fn()}
+        focusRequestId={7}
+        onFocusRequestConsumed={onFocusRequestConsumed}
+        ariaLabel="Write a new note"
+      />,
+    );
+
+    const view = EditorView.findFromDOM(screen.getByLabelText("Write a new note"));
+    act(() => {
+      frames.forEach((frame) => frame(0));
+    });
+
+    expect(view.state.selection.main.head).toBe(view.state.doc.length);
+    expect(view.hasFocus).toBe(true);
+    expect(onFocusRequestConsumed).toHaveBeenCalledOnce();
+    vi.restoreAllMocks();
+  });
+
   it("keeps the steering placeholder while mounting an accessible live editor", () => {
     render(
       <DraftMarkdownEditor

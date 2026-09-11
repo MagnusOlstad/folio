@@ -16,6 +16,7 @@ export type EditorTabsProps = {
   onNewTab: (groupId: string) => void;
   onSplit: () => void;
   onCloseGroup: (groupId: string) => void;
+  onPinTab: (groupId: string, id: string) => void;
 };
 
 export function EditorTabs({
@@ -30,6 +31,7 @@ export function EditorTabs({
   onNewTab,
   onSplit,
   onCloseGroup,
+  onPinTab,
 }: EditorTabsProps) {
   return (
     <div className="editor-tabs">
@@ -37,8 +39,9 @@ export function EditorTabs({
         {group.tabs.map((id) => (
           <button
             type="button"
-            className={`editor-tab ${group.activeId === id ? "active" : ""}`}
+            className={`editor-tab ${group.activeId === id ? "active" : ""} ${group.previewId === id ? "preview" : ""}`}
             onClick={() => onActivate(group.id, id)}
+            onDoubleClick={() => onPinTab(group.id, id)}
             draggable
             onDragStart={(event) => onDragStart(event, id, group.id)}
             onDragEnd={onDragEnd}
@@ -48,7 +51,7 @@ export function EditorTabs({
             <span className="tab-file-mark">
               {isUntitledId(id) ? "+" : "M"}
             </span>
-            <span>{titleForId(id)}</span>
+            <span className="tab-title">{titleForId(id)}</span>
             <span
               className="tab-close"
               role="button"

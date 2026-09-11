@@ -26,12 +26,15 @@ export function EditorWorkspace({ model, actions }: EditorWorkspaceProps) {
     filingDirectories: model.filingDirectories,
     filingQueues: model.filingQueues,
     filingOwnerGroupIds: owners,
+    editorFocusRequest: model.editorFocusRequest,
   };
   const groupActions = {
     activateGroup: actions.activateGroup,
     moveTabToGroup: actions.moveTabToGroup,
     titleForId: actions.titleForId,
     activateTab: actions.activateTab,
+    pinTab: actions.pinTab,
+    consumeEditorFocusRequest: actions.consumeEditorFocusRequest,
     createNewTab: actions.createNewTab,
     splitWorkspace: actions.splitWorkspace,
     closeGroup: actions.closeGroup,
