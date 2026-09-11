@@ -63,6 +63,41 @@ test('creates a new local draft note from the editor', async ({ page }) => {
   await expect(page.locator('.draft-tree-open', { hasText: 'My first draft note' })).toBeVisible()
 })
 
+test('opens sidebar notes as a replaceable preview until the editor is focused', async ({ page }) => {
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  const tabs = page.locator('.editor-tab')
+  const startHereTab = tabs.filter({ hasText: 'Start Here' })
+  await expect(tabs).toHaveCount(1)
+  await expect(startHereTab).toHaveClass(/preview/)
+
+  await page.getByRole('button', { name: 'Todo List', exact: true }).click()
+  const todoTab = tabs.filter({ hasText: 'Todo List' })
+  await expect(tabs).toHaveCount(1)
+  await expect(todoTab).toHaveCount(1)
+  await expect(todoTab).toHaveClass(/preview/)
+  await expect(tabs.filter({ hasText: 'Start Here' })).toHaveCount(0)
+
+  await page.getByRole('textbox', { name: 'Edit Todo List' }).click()
+  await expect(todoTab).not.toHaveClass(/preview/)
+})
+
+test('Cmd/Ctrl+number selects local draft tabs and focuses at the document end', async ({ page }) => {
+  await page.getByTitle('New note (Cmd+T)').click()
+  const firstEditor = page.getByLabel('Write a new note')
+  await firstEditor.fill('First local draft')
+
+  await page.getByTitle('New note (Cmd+T)').click()
+  const secondEditor = page.getByLabel('Write a new note')
+  await secondEditor.fill('Second local draft')
+
+  await page.keyboard.press(`${modifier}+1`)
+  const selectedEditor = page.getByLabel('Write a new note')
+  await expect(selectedEditor).toBeFocused()
+  await page.keyboard.type(' at the end')
+  await expect(selectedEditor).toHaveText('First local draft at the end')
+  await expect(page.locator('.editor-tab').filter({ hasText: 'First local draft at the end' })).toHaveClass(/active/)
+})
+
 // Cmd/Ctrl+T, +S, +B, +I, +K, and +Shift+F are documented as working in both the
 // browser and the desktop app (unlike +W, which browsers reserve and the app
 // deliberately skips outside Electron - see src/App.tsx's close-tab guard).

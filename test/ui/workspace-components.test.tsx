@@ -584,7 +584,12 @@ describe("workspace editor components", () => {
       const ui = useWorkspaceEditorUi();
       return (
         <EditorGroup
-          group={{ id: "secondary", tabs: [], activeId: null }}
+          group={{
+            id: "secondary",
+            tabs: [],
+            activeId: null,
+            previewId: null,
+          }}
           groupCount={2}
           model={{
             activeGroupId: "primary",
@@ -595,12 +600,15 @@ describe("workspace editor components", () => {
             drafts: {},
             deletingNoteId: null,
             movingFileId: null,
+            editorFocusRequest: null,
           }}
           actions={{
             activateGroup: vi.fn(),
             moveTabToGroup,
             titleForId: (id) => id,
             activateTab: vi.fn(),
+            pinTab: vi.fn(),
+            consumeEditorFocusRequest: vi.fn(),
             createNewTab: vi.fn(),
             splitWorkspace: vi.fn(),
             closeGroup: vi.fn(),

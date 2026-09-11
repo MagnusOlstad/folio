@@ -105,8 +105,8 @@ describe("filing queue", () => {
   it("gives a split document exactly one filing-card owner", () => {
     const entry = filingEntry(filing("filing-first", "draft-first"));
     const groups = [
-      { id: "primary", tabs: ["/projects/launch.md"], activeId: "/projects/launch.md" },
-      { id: "secondary", tabs: ["/projects/launch.md"], activeId: "/projects/launch.md" },
+      { id: "primary", tabs: ["/projects/launch.md"], activeId: "/projects/launch.md", previewId: null },
+      { id: "secondary", tabs: ["/projects/launch.md"], activeId: "/projects/launch.md", previewId: null },
     ];
 
     expect(filingOwnerGroupIds(groups, "secondary", {
@@ -116,8 +116,8 @@ describe("filing queue", () => {
 
   it("opens a standalone result without discarding its source tab", () => {
     const groups = [
-      { id: "primary", tabs: ["/projects/launch.md"], activeId: "/projects/launch.md" },
-      { id: "secondary", tabs: ["/projects/launch.md"], activeId: "/projects/launch.md" },
+      { id: "primary", tabs: ["/projects/launch.md"], activeId: "/projects/launch.md", previewId: null },
+      { id: "secondary", tabs: ["/projects/launch.md"], activeId: "/projects/launch.md", previewId: null },
     ];
     const next = applyStandaloneFilingTabs(
       groups,
@@ -131,6 +131,7 @@ describe("filing queue", () => {
       id: "primary",
       tabs: ["/projects/launch.md", "/projects/separate.md"],
       activeId: "/projects/separate.md",
+      previewId: null,
     });
     expect(next[1]).toEqual(groups[1]);
   });

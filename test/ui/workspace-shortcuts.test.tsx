@@ -4,7 +4,7 @@ import { useWorkspaceShortcutActions } from "../../src/features/workspace/hooks/
 
 describe("workspace shortcuts", () => {
   it("opens find in the active note and changes tabs within the active group", () => {
-    const activateTab = vi.fn();
+    const activateTabAtEnd = vi.fn();
     const findInNote = vi.fn();
     const group = document.createElement("div");
     group.className = "editor-group active";
@@ -20,13 +20,23 @@ describe("workspace shortcuts", () => {
         setSidebarMode: vi.fn(),
         searchInputRef: { current: null },
         groups: [
-          { id: "primary", tabs: ["first", "second"], activeId: "first" },
-          { id: "secondary", tabs: ["third"], activeId: "third" },
+          {
+            id: "primary",
+            tabs: ["first", "second"],
+            activeId: "first",
+            previewId: null,
+          },
+          {
+            id: "secondary",
+            tabs: ["third"],
+            activeId: "third",
+            previewId: null,
+          },
         ],
         activeGroupId: "primary",
         documents: {},
         createNewTab: vi.fn(),
-        activateTab,
+        activateTabAtEnd,
         closeTab: vi.fn(),
         fileDraft: vi.fn(),
         flushDocument: vi.fn().mockResolvedValue(undefined),
@@ -38,7 +48,7 @@ describe("workspace shortcuts", () => {
     fireEvent.keyDown(window, { key: "2", ctrlKey: true });
 
     expect(findInNote).toHaveBeenCalledOnce();
-    expect(activateTab).toHaveBeenCalledWith("primary", "second");
+    expect(activateTabAtEnd).toHaveBeenCalledWith("primary", "second");
 
     unmount();
     group.remove();
@@ -57,7 +67,7 @@ describe("workspace shortcuts", () => {
         activeGroupId: "primary",
         documents: {},
         createNewTab: vi.fn(),
-        activateTab: vi.fn(),
+        activateTabAtEnd: vi.fn(),
         closeTab: vi.fn(),
         fileDraft: vi.fn(),
         flushDocument: vi.fn().mockResolvedValue(undefined),

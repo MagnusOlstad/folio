@@ -153,6 +153,8 @@ export function useWorkspaceDocumentMutations({
               .map((id) => (id === result.oldId ? result.newId : id))
               .filter((id, index, tabs) => tabs.indexOf(id) === index),
             activeId: group.activeId === result.oldId ? result.newId : group.activeId,
+            previewId:
+              group.previewId === result.oldId ? result.newId : group.previewId,
           })));
         }
       }
@@ -215,6 +217,7 @@ export function useWorkspaceDocumentMutations({
             ...group,
             tabs,
             activeId: group.activeId === oldId ? newId : group.activeId,
+            previewId: group.previewId === oldId ? newId : group.previewId,
           };
         }),
       );
@@ -373,6 +376,8 @@ export function useWorkspaceDocumentMutations({
                 ...group,
                 tabs,
                 activeId: group.activeId === id ? updated.id : group.activeId,
+                previewId:
+                  group.previewId === id ? updated.id : group.previewId,
               };
             }),
           );

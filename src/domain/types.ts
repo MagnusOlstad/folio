@@ -142,7 +142,12 @@ export type AskResult = {
   retrieval: string;
 };
 export type SidebarMode = "explore" | "search" | "ask";
-export type TabGroup = { id: string; tabs: string[]; activeId: string | null };
+export type TabGroup = {
+  id: string;
+  tabs: string[];
+  activeId: string | null;
+  previewId: string | null;
+};
 export type TreeDirectory = {
   name: string;
   path: string;

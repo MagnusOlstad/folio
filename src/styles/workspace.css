@@ -616,6 +616,10 @@ body.resizing-horizontal * {
   white-space: nowrap;
 }
 
+.editor-tab.preview .tab-title {
+  font-style: italic;
+}
+
 .editor-tab.active {
   color: var(--ink);
   background: var(--paper);
