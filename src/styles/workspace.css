@@ -1549,6 +1549,10 @@ body.resizing-horizontal * {
   background: repeating-linear-gradient(transparent, transparent 31px, rgba(var(--highlight-rgb), 0.025) 32px);
 }
 
+.draft-note-editor .live-markdown-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
 .draft-note-editor .live-markdown-editor .cm-content {
   padding-top: clamp(32px, 6cqi, 70px);
 }
