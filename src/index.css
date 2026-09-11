@@ -1,7 +1,7 @@
 :root {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  color: #e9e5d9;
-  background: #161816;
+  color: var(--ink);
+  background: var(--canvas);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -22,7 +22,7 @@ body,
 
 html {
   min-width: 320px;
-  background: #161816;
+  background: var(--canvas);
 }
 
 body {
@@ -42,5 +42,5 @@ button {
 
 code {
   font-family: inherit;
-  color: #b7d892;
+  color: var(--acid);
 }

@@ -11,15 +11,6 @@ import {
   type WorkspaceShortcutAction,
 } from "./useWorkspaceCommands.ts";
 
-declare global {
-  interface Window {
-    folio?: {
-      onMenuAction?: (handler: (action: string) => void) => () => void;
-      closeWindow?: () => void;
-    };
-  }
-}
-
 type Options = {
   sidebarMode: SidebarMode;
   setSidebarMode: Dispatch<SetStateAction<SidebarMode>>;
@@ -32,6 +23,7 @@ type Options = {
   closeTab: (groupId: string, documentId: string) => void;
   fileDraft: (document: ViewerDocument) => void;
   flushDocument: (documentId: string) => Promise<void>;
+  openSettings: () => void;
 };
 
 export function useWorkspaceShortcutActions(options: Options) {
@@ -55,6 +47,7 @@ export function useWorkspaceShortcutActions(options: Options) {
   }
 
   function runShortcut(action: WorkspaceShortcutAction) {
+    if (action === "open-settings") return options.openSettings();
     if (action === "new-note") return options.createNewTab();
     if (action === "find-in-note") {
       const editor = document.querySelector<HTMLElement>(

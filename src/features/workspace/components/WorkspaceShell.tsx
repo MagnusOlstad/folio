@@ -1,4 +1,6 @@
 import type { CSSProperties, PointerEvent } from "react";
+import { SettingsDialog } from "../../settings/components/SettingsDialog.tsx";
+import type { SettingsDialogProps } from "../../settings/components/SettingsDialog.tsx";
 import { WorkspaceSidebar } from "../../sidebar/WorkspaceSidebar.tsx";
 import type { WorkspaceSidebarProps } from "../../sidebar/WorkspaceSidebar.tsx";
 import { TopBar } from "../../status/TopBar.tsx";
@@ -9,6 +11,7 @@ import { WorkspaceSidebarHandle } from "./WorkspaceSidebarHandle.tsx";
 
 export type WorkspaceShellProps = {
   topBar: TopBarProps;
+  settings: SettingsDialogProps & { open: boolean };
   sidebar: WorkspaceSidebarProps;
   editor: EditorWorkspaceProps;
   layout: {
@@ -22,6 +25,7 @@ export type WorkspaceShellProps = {
 
 export function WorkspaceShell({
   topBar,
+  settings,
   sidebar,
   editor,
   layout,
@@ -50,6 +54,14 @@ export function WorkspaceShell({
         />
         <EditorWorkspace {...editor} />
       </section>
+      {settings.open ? (
+        <SettingsDialog
+          themeId={settings.themeId}
+          onSelectTheme={settings.onSelectTheme}
+          obsidianImport={settings.obsidianImport}
+          onClose={settings.onClose}
+        />
+      ) : null}
     </main>
   );
 }

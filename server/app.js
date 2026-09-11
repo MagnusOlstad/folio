@@ -14,11 +14,14 @@ import { createClassificationService } from './knowledge/classification.js'
 import { createSearchService } from './knowledge/search.js'
 import { createFilingService } from './filing/service.js'
 import { createReleaseService } from './updates/service.js'
+import { createObsidianImportService } from './imports/obsidian.js'
 import { registerRoutes as registerSystemRoutes } from './routes/system.js'
 import { registerRoutes as registerFileRoutes } from './routes/files.js'
 import { registerRoutes as registerCaptureRoutes } from './routes/capture.js'
 import { registerRoutes as registerConfirmationRoutes } from './routes/confirmation.js'
 import { registerRoutes as registerAskRoutes } from './routes/ask.js'
+import { registerRoutes as registerImportRoutes } from './routes/imports.js'
+import { registerRoutes as registerBackupRoutes } from './routes/backup.js'
 
 export function createRuntime(env = process.env) {
   const runtime = { ...createConfig(env), ...createTextHelpers() }
@@ -31,6 +34,7 @@ export function createRuntime(env = process.env) {
   Object.assign(runtime, createSearchService(runtime))
   Object.assign(runtime, createFilingService(runtime))
   Object.assign(runtime, createReleaseService(runtime))
+  Object.assign(runtime, createObsidianImportService(runtime))
   return runtime
 }
 
@@ -38,11 +42,14 @@ export async function createApp(runtime = createRuntime()) {
   await Promise.all([
     fs.mkdir(runtime.rawRoot, { recursive: true }),
     fs.mkdir(runtime.draftsRoot, { recursive: true }),
+    fs.mkdir(runtime.importsRoot, { recursive: true }),
   ])
   await runtime.reindexBundle()
   void runtime.refreshMissingEmbeddingsInBackground()
 
   const app = express()
+  registerImportRoutes(app, runtime)
+  registerBackupRoutes(app, runtime)
   app.use(express.json({ limit: '1mb' }))
   registerSystemRoutes(app, runtime)
   registerFileRoutes(app, runtime)
