@@ -61,6 +61,9 @@ declare global {
   interface Window {
     folio?: {
       onMenuAction?: (handler: (action: string) => void) => () => void;
+      getStorage?: (key: string) => string | null;
+      setStorage?: (key: string, value: string) => void;
+      removeStorage?: (key: string) => void;
       closeWindow?: () => void;
       saveMarkdownExport?: (
         filename: string,

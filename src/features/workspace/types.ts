@@ -93,6 +93,8 @@ export type EditorWorkspaceActions = {
     format: NoteExportFormat,
   ) => void;
   dismissMessage: () => void;
+  getDocumentScrollTop: (documentId: string) => number;
+  rememberDocumentScrollTop: (documentId: string, scrollTop: number) => void;
 };
 
 export type EditorWorkspaceProps = {

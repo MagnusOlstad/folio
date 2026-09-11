@@ -5,9 +5,63 @@ import type {
 } from "../domain/types.ts";
 import { isUntitledId, storedDraftDocument } from "./workspace.ts";
 
+/**
+ * Electron serves the renderer from a random localhost port, so browser
+ * localStorage would be scoped to a new origin after every restart. The
+ * narrow preload bridge keeps the same API for browsers while moving Folio
+ * keys into an app-level store when the desktop shell is present.
+ */
+export function readStorageItem(key: string): string | null {
+  try {
+    const desktopValue = window.folio?.getStorage?.(key);
+    if (desktopValue !== undefined && desktopValue !== null) return desktopValue;
+  } catch {
+    /* fall back to browser storage */
+  }
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+export function writeStorageItem(key: string, value: string): void {
+  try {
+    const desktopWrite = window.folio?.setStorage;
+    if (desktopWrite) {
+      desktopWrite(key, value);
+      return;
+    }
+  } catch {
+    /* browser storage remains the fallback */
+  }
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    /* optional persistence */
+  }
+}
+
+export function removeStorageItem(key: string): void {
+  try {
+    const desktopRemove = window.folio?.removeStorage;
+    if (desktopRemove) {
+      desktopRemove(key);
+      return;
+    }
+  } catch {
+    /* browser storage remains the fallback */
+  }
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    /* optional persistence */
+  }
+}
+
 export function loadExpandedDirectoryState(): ExpandedDirectoryState {
   try {
-    const stored = window.localStorage.getItem("folio:expanded-directories");
+    const stored = readStorageItem("folio:expanded-directories");
     if (stored === null) return { directories: new Set(), restored: false };
     const parsed = JSON.parse(stored);
     if (!Array.isArray(parsed))
@@ -28,7 +82,7 @@ export function loadLocalDrafts(): ViewerDocument[] {
   if (typeof window === "undefined") return [];
   let storedDrafts: string;
   try {
-    storedDrafts = window.localStorage.getItem("folio:drafts") || "[]";
+    storedDrafts = readStorageItem("folio:drafts") || "[]";
   } catch {
     return [];
   }
@@ -61,11 +115,11 @@ export function loadLocalDrafts(): ViewerDocument[] {
     });
   } catch {
     try {
-      window.localStorage.setItem(
+      writeStorageItem(
         `folio:drafts-recovery:${Date.now()}`,
         storedDrafts,
       );
-      window.localStorage.removeItem("folio:drafts");
+      removeStorageItem("folio:drafts");
     } catch {
       /* storage unavailable */
     }

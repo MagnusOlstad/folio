@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import fsSync from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, Menu, dialog, ipcMain, screen, shell } from 'electron'
@@ -10,6 +11,98 @@ let mainWindow = null
 let localServer = null
 let localUrl = null
 let localRuntime = null
+let rendererStoragePath = null
+let rendererStorage = {}
+let rendererStorageRevision = 0
+let rendererStorageWriteTimer = null
+let rendererStorageWritePromise = Promise.resolve()
+let rendererStorageSyncFlushRevision = -1
+
+function validStorageKey(key) {
+  return typeof key === 'string' && key.startsWith('folio:') && key.length <= 200
+}
+
+async function loadRendererStorage() {
+  rendererStoragePath = path.join(app.getPath('userData'), 'renderer-storage.json')
+  try {
+    const parsed = JSON.parse(await fs.readFile(rendererStoragePath, 'utf8'))
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return
+    rendererStorage = Object.fromEntries(
+      Object.entries(parsed).filter(([key, value]) => validStorageKey(key) && typeof value === 'string'),
+    )
+  } catch {
+    rendererStorage = {}
+  }
+}
+
+function saveRendererStorageSync() {
+  if (!rendererStoragePath) return
+  fsSync.mkdirSync(path.dirname(rendererStoragePath), { recursive: true })
+  const tempPath = `${rendererStoragePath}.tmp`
+  fsSync.writeFileSync(tempPath, JSON.stringify(rendererStorage), 'utf8')
+  fsSync.renameSync(tempPath, rendererStoragePath)
+  rendererStorageSyncFlushRevision = rendererStorageRevision
+}
+
+async function persistRendererStorage(snapshot, revision) {
+  if (!rendererStoragePath || revision !== rendererStorageRevision || rendererStorageSyncFlushRevision >= revision) return
+  const tempPath = `${rendererStoragePath}.${process.pid}.${revision}.tmp`
+  try {
+    await fs.mkdir(path.dirname(rendererStoragePath), { recursive: true })
+    await fs.writeFile(tempPath, JSON.stringify(snapshot), 'utf8')
+    if (revision === rendererStorageRevision && rendererStorageSyncFlushRevision < revision)
+      await fs.rename(tempPath, rendererStoragePath)
+    else
+      await fs.rm(tempPath, { force: true })
+  } catch (error) {
+    await fs.rm(tempPath, { force: true }).catch(() => {})
+    console.error('Failed to persist Folio renderer storage:', error)
+  }
+}
+
+function scheduleRendererStoragePersist() {
+  rendererStorageRevision += 1
+  if (rendererStorageWriteTimer !== null) clearTimeout(rendererStorageWriteTimer)
+  rendererStorageWriteTimer = setTimeout(() => {
+    rendererStorageWriteTimer = null
+    const revision = rendererStorageRevision
+    const snapshot = { ...rendererStorage }
+    rendererStorageWritePromise = rendererStorageWritePromise
+      .catch(() => {})
+      .then(() => persistRendererStorage(snapshot, revision))
+      .catch((error) => console.error('Failed to schedule Folio renderer storage:', error))
+  }, 150)
+}
+
+function flushRendererStorageSync() {
+  if (rendererStorageWriteTimer !== null) {
+    clearTimeout(rendererStorageWriteTimer)
+    rendererStorageWriteTimer = null
+  }
+  try {
+    saveRendererStorageSync()
+  } catch (error) {
+    console.error('Failed to flush Folio renderer storage:', error)
+  }
+}
+
+function registerRendererStorage() {
+  ipcMain.on('folio:get-storage', (event, key) => {
+    event.returnValue = validStorageKey(key) ? rendererStorage[key] ?? null : null
+  })
+  ipcMain.on('folio:set-storage', (_event, key, value) => {
+    if (validStorageKey(key) && typeof value === 'string' && value.length <= 2_000_000) {
+      rendererStorage[key] = value
+      scheduleRendererStoragePersist()
+    }
+  })
+  ipcMain.on('folio:remove-storage', (_event, key) => {
+    if (validStorageKey(key)) {
+      delete rendererStorage[key]
+      scheduleRendererStoragePersist()
+    }
+  })
+}
 
 async function pathExists(target) {
   try {
@@ -202,6 +295,8 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  await loadRendererStorage()
+  registerRendererStorage()
   process.env.FOLIO_VERSION = app.getVersion()
   process.env.FOLIO_DATA_ROOT = await prepareDataDirectory()
 
@@ -262,11 +357,15 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  flushRendererStorageSync()
   ipcMain.removeHandler('folio:save-markdown-export')
   ipcMain.removeHandler('folio:save-pdf-export')
   ipcMain.removeHandler('folio:select-obsidian-vault')
   ipcMain.removeHandler('folio:start-obsidian-import')
   ipcMain.removeHandler('folio:get-obsidian-import-job')
   ipcMain.removeHandler('folio:cancel-obsidian-import')
+  ipcMain.removeAllListeners('folio:get-storage')
+  ipcMain.removeAllListeners('folio:set-storage')
+  ipcMain.removeAllListeners('folio:remove-storage')
   localServer?.close()
 })

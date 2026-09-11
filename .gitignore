@@ -29,6 +29,9 @@ release
 data
 seed-data/**/.DS_Store
 
+# Codex local rules
+.codex/rules/default.rules
+
 # Playwright MCP debug artifacts
 .playwright-mcp
 

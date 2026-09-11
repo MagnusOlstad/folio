@@ -18,6 +18,10 @@ import { bundleDirectories } from "../model/directory-suggestions.ts";
 import { useNoteExport } from "./useNoteExport.ts";
 import { useThemeSettings } from "../../settings/hooks/useThemeSettings.ts";
 import { useObsidianImport } from "../../settings/hooks/useObsidianImport.ts";
+import {
+  useWorkspaceSessionPersistence,
+} from "./useWorkspaceSessionPersistence.ts";
+import { loadWorkspaceSessionState } from "../model/workspace-state.ts";
 
 function draftTitle(content: string) {
   const firstLine = content
@@ -29,6 +33,7 @@ function draftTitle(content: string) {
 
 export function useWorkspaceController(): WorkspaceShellProps {
   const [message, setMessage] = useState("");
+  const [initialWorkspaceState] = useState(loadWorkspaceSessionState);
   const noteExport = useNoteExport({ setMessage });
   const themeSettings = useThemeSettings();
   const [editorFocusRequest, setEditorFocusRequest] = useState<{
@@ -39,7 +44,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
   const editorFocusRequestIdRef = useRef(0);
   const embeddingRevisionsRef = useRef(new Map<string, number>());
   const embeddingFinalizationsRef = useRef(new Map<string, Promise<void>>());
-  const explorer = useWorkspaceExplorerState(setMessage);
+  const explorer = useWorkspaceExplorerState(setMessage, initialWorkspaceState);
   const {
     files: explorerFiles,
     setExpandedDirectories,
@@ -85,6 +90,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
     setDrafts: documents.setDrafts,
     setEditingKey: documents.setEditingKey,
     draftTitle,
+    initialState: initialWorkspaceState,
   });
   const mutations = useWorkspaceDocumentMutations({
     documents,
@@ -167,6 +173,31 @@ export function useWorkspaceController(): WorkspaceShellProps {
     removeDiscoveryDocument: explorer.discovery.removeDocument,
   });
 
+  const session = useWorkspaceSessionPersistence({
+    initialState: initialWorkspaceState,
+    documents: documents.documents,
+    notes: explorer.notes,
+    files: explorer.files,
+    groups: tabs.groups,
+    activeGroupId: tabs.activeGroupId,
+    sidebarMode: explorer.sidebarMode,
+    explorerScrollTop: explorer.explorerScrollTop,
+    setGroups: tabs.setGroups,
+    setActiveGroupId: tabs.setActiveGroupId,
+    loadDocument: navigation.loadDocument,
+    onLoadError: (_documentId, error) => {
+      setMessage(error instanceof Error ? error.message : "Could not restore document");
+    },
+  });
+
+  const ensureDocumentLoaded = useCallback((documentId: string) => {
+    if (documents.documents[documentId] || documents.loadingDocuments.has(documentId)) return;
+    const source = explorer.notes.some((note) => note.id === documentId) ? "note" : "file";
+    void navigation.loadDocument(documentId, source).catch((error) => {
+      setMessage(error instanceof Error ? error.message : "Could not open file");
+    });
+  }, [documents.documents, documents.loadingDocuments, explorer.notes, navigation]);
+
   function closeDocumentTab(groupId: string, documentId: string) {
     setEditorFocusRequest((current) =>
       current?.groupId === groupId && current.documentId === documentId
@@ -193,6 +224,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
     expandedDirectoriesReadyRef: explorer.expandedDirectoriesReadyRef,
     setExpandedDirectories: explorer.setExpandedDirectories,
     setExpandedDirectoriesReady: explorer.setExpandedDirectoriesReady,
+    onWorkspaceDataReady: session.markWorkspaceDataReady,
   });
 
   useEffect(() => {
@@ -217,6 +249,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       if (groupId !== tabs.activeGroupId || group?.activeId !== documentId)
         void finalizeAllFiledDocuments();
       tabs.activateTab(groupId, documentId);
+      ensureDocumentLoaded(documentId);
       setEditorFocusRequest({
         id: ++editorFocusRequestIdRef.current,
         groupId,
@@ -324,6 +357,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
           if (groupId !== tabs.activeGroupId || group?.activeId !== documentId)
             void finalizeAllFiledDocuments();
           tabs.activateTab(groupId, documentId);
+          ensureDocumentLoaded(documentId);
         },
         pinTab: tabs.pinTab,
         consumeEditorFocusRequest: (requestId) =>
@@ -381,6 +415,9 @@ export function useWorkspaceController(): WorkspaceShellProps {
           await finalizeFiledDocument(id);
           return moveBundleFile(id, directory);
         },
+        getDocumentScrollTop: (documentId) =>
+          session.getDocumentScrollTop(documentId),
+        rememberDocumentScrollTop: session.rememberDocumentScrollTop,
         exportDocument: (document, format) =>
           void noteExport.exportDocument(
             document,

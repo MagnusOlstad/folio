@@ -22,6 +22,8 @@ type OpenDocument = (
 export type WorkspaceSidebarProps = {
   sidebarMode: SidebarMode;
   setSidebarMode: Dispatch<SetStateAction<SidebarMode>>;
+  explorerScrollTop: number;
+  onExplorerScroll: (scrollTop: number) => void;
   reindexing: boolean;
   reindexBundle: () => Promise<void>;
   filesLoading: boolean;
@@ -75,6 +77,8 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
   const {
     sidebarMode,
     setSidebarMode,
+    explorerScrollTop,
+    onExplorerScroll,
     reindexing,
     reindexBundle,
     filesLoading,
@@ -152,7 +156,15 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                 {reindexing ? "..." : "Reindex"}
               </button>
             </div>
-            <div className="tree-scroll">
+            <div
+              className="tree-scroll"
+              style={{ overflowAnchor: "none" }}
+              onScroll={(event) => onExplorerScroll(event.currentTarget.scrollTop)}
+              ref={(element) => {
+                if (element && element.scrollTop !== explorerScrollTop)
+                  element.scrollTop = explorerScrollTop;
+              }}
+            >
               {filesLoading ? (
                 <p className="sidebar-empty">Reading bundle...</p>
               ) : (
