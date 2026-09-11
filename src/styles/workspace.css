@@ -1682,6 +1682,56 @@ body.resizing-horizontal * {
   gap: 8px;
 }
 
+.note-export-menu {
+  position: relative;
+}
+
+.save-state .note-export-trigger {
+  border-color: var(--line);
+  color: var(--muted);
+  background: transparent;
+}
+
+.save-state .note-export-trigger:hover,
+.save-state .note-export-trigger:focus-visible,
+.save-state .note-export-trigger[aria-expanded="true"] {
+  border-color: var(--acid);
+  color: var(--acid);
+  background: transparent;
+}
+
+.note-export-options {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 7px);
+  z-index: 30;
+  width: 132px;
+  padding: 5px;
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--paper-raised);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+}
+
+.save-state .note-export-options button {
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+  text-align: left;
+}
+
+.save-state .note-export-options button:hover,
+.save-state .note-export-options button:focus-visible {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.06);
+  outline: none;
+}
+
 .save-state {
   padding-left: 12px;
   border-left: 1px solid var(--line);
@@ -1714,6 +1764,114 @@ body.resizing-horizontal * {
 .save-state .document-delete:focus-visible {
   color: #161816;
   background: var(--orange);
+}
+
+.note-export-preview {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 18mm;
+  }
+
+  html,
+  body,
+  #root,
+  .shell {
+    width: auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: visible;
+    color: #171717;
+    background: #fff;
+  }
+
+  .shell > :not(.note-export-preview) {
+    display: none !important;
+  }
+
+  .note-export-preview {
+    max-width: none;
+    display: block;
+    color: #171717;
+    background: #fff;
+    font: 11pt/1.55 ui-serif, Georgia, Cambria, "Times New Roman", serif;
+  }
+
+  .note-export-preview > header {
+    margin-bottom: 24pt;
+    padding-bottom: 12pt;
+    border-bottom: 1px solid #d8d8d8;
+  }
+
+  .note-export-preview > header h1 {
+    margin: 0;
+    font: 600 25pt/1.2 ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+
+  .note-export-preview > header p {
+    margin: 7pt 0 0;
+    color: #555;
+    font: 10.5pt/1.45 ui-sans-serif, system-ui, sans-serif;
+  }
+
+  .note-export-preview h1,
+  .note-export-preview h2,
+  .note-export-preview h3,
+  .note-export-preview h4,
+  .note-export-preview h5,
+  .note-export-preview h6 {
+    break-after: avoid;
+    color: #111;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+  }
+
+  .note-export-preview a {
+    color: #174ea6;
+    text-decoration: underline;
+  }
+
+  .note-export-preview blockquote {
+    margin-left: 0;
+    padding-left: 12pt;
+    border-left: 3px solid #aaa;
+    color: #444;
+  }
+
+  .note-export-preview pre,
+  .note-export-preview code {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+
+  .note-export-preview pre {
+    max-width: 100%;
+    padding: 9pt;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+    break-inside: avoid;
+    background: #f4f4f4;
+  }
+
+  .note-export-preview table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .note-export-preview th,
+  .note-export-preview td {
+    padding: 5pt;
+    border: 1px solid #bbb;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .note-export-preview img {
+    max-width: 100%;
+    break-inside: avoid;
+  }
 }
 
 .document-footer-links {
