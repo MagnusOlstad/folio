@@ -179,6 +179,23 @@ test("renders one clickable control for a task-list marker", async ({ page }) =>
   await expect(task).toBeChecked();
 });
 
+test("opens a bare web URL from the live editor with a modifier-click", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTitle("New note (Cmd+T)").click();
+  const editor = page.getByLabel("Write a new note");
+  const url = new URL("/api/status", page.url()).href;
+  await editor.fill(`Open ${url}`);
+  const link = editor.locator(".cm-live-markdown-link");
+
+  await expect(link).toHaveText(url);
+  const popupPromise = page.waitForEvent("popup");
+  await link.click({ modifiers: [modifier] });
+  const popup = await popupPromise;
+
+  await expect.poll(() => popup.url()).toBe(url);
+  await popup.close();
+});
+
 test("keeps the caret on a newly inserted line", async ({ page }) => {
   await page.goto("/");
   await page.getByTitle("New note (Cmd+T)").click();

@@ -159,7 +159,9 @@ export function RenderedMarkdown({
             {children}
           </a>
         ) : (
-          <a href={href}>{children}</a>
+          <a href={href} target="_blank" rel="noopener noreferrer">
+            {children}
+          </a>
         );
       },
       p: ({ node, ...props }) => <p {...props} {...sourcePosition(node)} />,

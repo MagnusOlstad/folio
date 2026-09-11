@@ -453,6 +453,28 @@ describe("workspace editor components", () => {
     expect(onToggle).toHaveBeenCalledWith(document, 3, true);
   });
 
+  it("renders bare web URLs as safe external links", () => {
+    render(
+      <RenderedMarkdown
+        document={{
+          ...document,
+          content: "Bare https://example.com/docs and [Named](https://example.com/named)",
+        }}
+        groupId="secondary"
+        saving={false}
+        onOpenDocument={vi.fn().mockResolvedValue(undefined)}
+        onToggleTask={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const links = screen.getAllByRole("link");
+    expect(links).toHaveLength(2);
+    expect(links[0]).toHaveAttribute("href", "https://example.com/docs");
+    expect(links[0]).toHaveAttribute("target", "_blank");
+    expect(links[0]).toHaveAttribute("rel", "noopener noreferrer");
+    expect(links[1]).toHaveAttribute("href", "https://example.com/named");
+  });
+
   it("renders GFM strikethrough and heading levels", () => {
     render(
       <RenderedMarkdown
