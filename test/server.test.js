@@ -1010,6 +1010,29 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal(offline.filing.actor, 'process:folio-fallback')
   assert.match(await fs.readFile(path.join(dataRoot, 'bundle', offline.note.id.slice(1)), 'utf8'), /filing:\n  by: process:folio-fallback/)
 
+  const nestedDeleteDirectory = path.join(dataRoot, 'bundle', 'temporary', 'sole', 'deep')
+  const nestedDeleteId = '/temporary/sole/deep/only-note.md'
+  await fs.mkdir(nestedDeleteDirectory, { recursive: true })
+  await fs.writeFile(path.join(nestedDeleteDirectory, 'only-note.md'), [
+    '---',
+    'title: Only nested note',
+    'type: Note',
+    'description: A note used to verify empty directory cleanup.',
+    'tags: []',
+    '---',
+    '',
+    'This note should remove its empty parent directories when deleted.',
+    '',
+  ].join('\n'))
+  const nestedReindexResponse = await fetch(`${baseUrl}/api/reindex`, { method: 'POST' })
+  assert.equal(nestedReindexResponse.status, 200)
+  const nestedDeleteResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(nestedDeleteId)}`, { method: 'DELETE' })
+  assert.equal(nestedDeleteResponse.status, 200)
+  assert.deepEqual(await nestedDeleteResponse.json(), { deletedId: nestedDeleteId, rawId: null })
+  await assert.rejects(fs.access(nestedDeleteDirectory), { code: 'ENOENT' })
+  await assert.rejects(fs.access(path.join(dataRoot, 'bundle', 'temporary', 'sole')), { code: 'ENOENT' })
+  await assert.rejects(fs.access(path.join(dataRoot, 'bundle', 'temporary')), { code: 'ENOENT' })
+
   const notesResponse = await fetch(`${baseUrl}/api/notes`)
   const notes = await notesResponse.json()
   assert.ok(notes.length >= 19)
