@@ -15,6 +15,7 @@ import { useWorkspaceShortcutActions } from "./useWorkspaceShortcutActions.ts";
 import { useFiledDocumentAutosave } from "./useFiledDocumentAutosave.ts";
 import { expandedPathsForFiles, isUntitledId } from "../../../lib/workspace.ts";
 import { bundleDirectories } from "../model/directory-suggestions.ts";
+import { useNoteExport } from "./useNoteExport.ts";
 import { useThemeSettings } from "../../settings/hooks/useThemeSettings.ts";
 import { useObsidianImport } from "../../settings/hooks/useObsidianImport.ts";
 
@@ -28,6 +29,7 @@ function draftTitle(content: string) {
 
 export function useWorkspaceController(): WorkspaceShellProps {
   const [message, setMessage] = useState("");
+  const noteExport = useNoteExport({ setMessage });
   const themeSettings = useThemeSettings();
   const [editorFocusRequest, setEditorFocusRequest] = useState<{
     id: number;
@@ -224,6 +226,12 @@ export function useWorkspaceController(): WorkspaceShellProps {
     closeTab: closeDocumentTab,
     fileDraft: mutations.fileDraft,
     flushDocument: finalizeFiledDocument,
+    exportDocument: (document, format) =>
+      void noteExport.exportDocument(
+        document,
+        documents.drafts[document.id],
+        format,
+      ),
     openSettings: themeSettings.openSettings,
   });
 
@@ -248,6 +256,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
   });
 
   return {
+    exportPreview: noteExport.preview,
     topBar: {
       versionInfo: models.versionInfo,
       status: models.status,
@@ -290,6 +299,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
         filingQueues: documents.filingQueues,
         editorFocusRequest,
         message,
+        exportingNoteId: noteExport.exportingNoteId,
       },
       actions: {
         beginHorizontalResize: layout.beginHorizontalResize,
@@ -371,6 +381,12 @@ export function useWorkspaceController(): WorkspaceShellProps {
           await finalizeFiledDocument(id);
           return moveBundleFile(id, directory);
         },
+        exportDocument: (document, format) =>
+          void noteExport.exportDocument(
+            document,
+            documents.drafts[document.id],
+            format,
+          ),
         dismissMessage: () => setMessage(""),
       },
     },

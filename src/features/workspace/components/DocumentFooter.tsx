@@ -7,6 +7,8 @@ import {
   isUntitledId,
 } from "../../../lib/workspace.ts";
 import { NoteDeleteConfirmation } from "./NoteDeleteConfirmation.tsx";
+import { NoteExportMenu } from "./NoteExportMenu.tsx";
+import type { NoteExportFormat } from "../model/note-export.ts";
 
 type DocumentFooterProps = {
   groupId: string;
@@ -18,6 +20,7 @@ type DocumentFooterProps = {
   deleting: boolean;
   deleteInProgress: boolean;
   moving: boolean;
+  exporting: boolean;
   onBeginPathEditing: (document: ViewerDocument) => void;
   onChangePath: (documentId: string, value: string) => void;
   onFinishPathEditing: (document: ViewerDocument, value: string) => void;
@@ -32,6 +35,7 @@ type DocumentFooterProps = {
     source?: "note" | "file",
     targetGroupId?: string,
   ) => Promise<void>;
+  onExport: (document: ViewerDocument, format: NoteExportFormat) => void;
 };
 
 export function DocumentFooter({
@@ -44,6 +48,7 @@ export function DocumentFooter({
   deleting,
   deleteInProgress,
   moving,
+  exporting,
   onBeginPathEditing,
   onChangePath,
   onFinishPathEditing,
@@ -54,6 +59,7 @@ export function DocumentFooter({
   onFileDraft,
   onDelete,
   onOpenDocument,
+  onExport,
 }: DocumentFooterProps) {
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<string | null>(null);
   const frontmatterLinks = Array.from(
@@ -185,6 +191,11 @@ export function DocumentFooter({
               )}
             </>
           )}
+          <NoteExportMenu
+            title={document.title}
+            exporting={exporting}
+            onExport={(format) => onExport(document, format)}
+          />
         </div>
       </div>
       {footerLinks.length > 0 && (

@@ -62,6 +62,11 @@ declare global {
     folio?: {
       onMenuAction?: (handler: (action: string) => void) => () => void;
       closeWindow?: () => void;
+      saveMarkdownExport?: (
+        filename: string,
+        content: string,
+      ) => Promise<{ canceled: boolean }>;
+      savePdfExport?: (filename: string) => Promise<{ canceled: boolean }>;
       selectObsidianVault?: () => Promise<ObsidianImportScan | null>;
       startObsidianImport?: (scanId: string) => Promise<ObsidianImportJob>;
       getObsidianImportJob?: (jobId: string) => Promise<ObsidianImportJob>;
