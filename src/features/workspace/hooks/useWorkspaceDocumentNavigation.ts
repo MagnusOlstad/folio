@@ -9,6 +9,11 @@ import type {
 import { api } from "../../../lib/api.ts";
 import { isUntitledId } from "../../../lib/workspace.ts";
 import type { WorkspaceDocumentState } from "./useWorkspaceDocumentState.ts";
+import {
+  activateGroupTab,
+  openPreviewTab,
+  pinGroupTab,
+} from "../model/tab-state.ts";
 
 type UseWorkspaceDocumentNavigationOptions = {
   documents: WorkspaceDocumentState;
@@ -16,7 +21,6 @@ type UseWorkspaceDocumentNavigationOptions = {
   setGroups: Dispatch<SetStateAction<TabGroup[]>>;
   activeGroupId: string;
   setActiveGroupId: Dispatch<SetStateAction<string>>;
-  activateTab: (groupId: string, documentId: string) => void;
   closeTab: (groupId: string, documentId: string) => void;
   setNotes: Dispatch<SetStateAction<Note[]>>;
   setFiles: Dispatch<SetStateAction<BundleFile[]>>;
@@ -30,7 +34,6 @@ export function useWorkspaceDocumentNavigation({
   setGroups,
   activeGroupId,
   setActiveGroupId,
-  activateTab,
   closeTab,
   setNotes,
   setFiles,
@@ -68,7 +71,12 @@ export function useWorkspaceDocumentNavigation({
             group.activeId === id
               ? tabs[Math.min(tabIndex, tabs.length - 1)] || null
               : group.activeId;
-          return { ...group, tabs, activeId };
+          return {
+            ...group,
+            tabs,
+            activeId,
+            previewId: group.previewId === id ? null : group.previewId,
+          };
         }),
       );
       state.setEditingKey((current) =>
@@ -136,7 +144,13 @@ export function useWorkspaceDocumentNavigation({
             group.activeId === result.deletedId
               ? tabs[Math.min(tabIndex, tabs.length - 1)] || null
               : group.activeId;
-          return { ...group, tabs, activeId };
+          return {
+            ...group,
+            tabs,
+            activeId,
+            previewId:
+              group.previewId === result.deletedId ? null : group.previewId,
+          };
         }),
       );
       state.setEditingKey((current) =>
@@ -160,24 +174,31 @@ export function useWorkspaceDocumentNavigation({
     id: string,
     source: "note" | "file" = "file",
     targetGroupId = activeGroupId,
+    disposition: "preview" | "permanent" = "permanent",
   ) {
     const existingGroup = groups.find((group) => group.tabs.includes(id));
-    if (existingGroup && existingGroup.id !== targetGroupId) {
-      activateTab(existingGroup.id, id);
-      return;
-    }
-    setActiveGroupId(targetGroupId);
-    setGroups((current) =>
-      current.map((group) =>
-        group.id === targetGroupId
+    const openGroupId = existingGroup?.id ?? targetGroupId;
+    setActiveGroupId(openGroupId);
+    setGroups((current) => {
+      if (existingGroup) {
+        const activated = activateGroupTab(current, openGroupId, id);
+        return disposition === "permanent"
+          ? pinGroupTab(activated, openGroupId, id)
+          : activated;
+      }
+      if (disposition === "preview")
+        return openPreviewTab(current, openGroupId, id);
+      const opened = current.map((group) =>
+        group.id === openGroupId
           ? {
               ...group,
               tabs: group.tabs.includes(id) ? group.tabs : [...group.tabs, id],
               activeId: id,
             }
           : group,
-      ),
-    );
+      );
+      return pinGroupTab(opened, openGroupId, id);
+    });
     if (state.documents[id] || state.loadingDocuments.has(id)) return;
     const requestId = (state.documentRequests.current[id] || 0) + 1;
     state.documentRequests.current[id] = requestId;
@@ -202,11 +223,13 @@ export function useWorkspaceDocumentNavigation({
               tabId === id ? document.id : tabId,
             ),
             activeId: group.activeId === id ? document.id : group.activeId,
+            previewId:
+              group.previewId === id ? document.id : group.previewId,
           })),
         );
       }
     } catch (error) {
-      closeTab(targetGroupId, id);
+      closeTab(openGroupId, id);
       setMessage(error instanceof Error ? error.message : "Could not open file");
     } finally {
       state.setLoadingDocuments((current) => {

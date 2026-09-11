@@ -14,6 +14,8 @@ export type DocumentViewProps = {
   editKey: string;
   draft: string | undefined;
   saving: boolean;
+  focusRequestId?: number;
+  onFocusRequestConsumed?: () => void;
   deletingNoteId: string | null;
   movingFileId: string | null;
   filingDirectories: string[];
@@ -110,6 +112,8 @@ export function DocumentView(props: DocumentViewProps) {
           editKey={props.editKey}
           draft={props.draft}
           saving={props.saving}
+          focusRequestId={props.focusRequestId}
+          onFocusRequestConsumed={props.onFocusRequestConsumed}
           onChangeContent={props.onChangeContent}
           onFileDraft={props.onFileDraft}
           onFinishEditing={props.onFinishEditing}

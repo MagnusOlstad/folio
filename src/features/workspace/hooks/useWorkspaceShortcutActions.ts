@@ -28,7 +28,7 @@ type Options = {
   activeGroupId: string;
   documents: Record<string, ViewerDocument>;
   createNewTab: () => void;
-  activateTab: (groupId: string, documentId: string) => void;
+  activateTabAtEnd: (groupId: string, documentId: string) => void;
   closeTab: (groupId: string, documentId: string) => void;
   fileDraft: (document: ViewerDocument) => void;
   flushDocument: (documentId: string) => Promise<void>;
@@ -74,7 +74,7 @@ export function useWorkspaceShortcutActions(options: Options) {
         (candidate) => candidate.id === options.activeGroupId,
       );
       const documentId = group?.tabs[index];
-      if (group && documentId) options.activateTab(group.id, documentId);
+      if (group && documentId) options.activateTabAtEnd(group.id, documentId);
       return;
     }
     if (action === "close-tab") {
