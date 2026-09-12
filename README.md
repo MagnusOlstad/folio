@@ -108,6 +108,24 @@ npm run dist:mac
 This writes `release/Folio-<version>-arm64.dmg`, a matching `.zip`, and the unpacked
 `release/mac-arm64/Folio.app`.
 
+Desktop transcription is macOS-only and captures microphone audio, with optional system
+audio loopback on macOS 12.3+ through `electron-audio-loopback`. The desktop and macOS
+distribution commands first prepare a pinned whisper.cpp v1.8.6 runtime (commit
+`23ee03506a91ac3d3f0071b40e66a430eebdfa1d`) with Metal support. Ordinary web builds and
+tests do not download or build that runtime.
+
+Preparing the runtime requires macOS arm64, Git, CMake, and Xcode Command Line Tools
+(`xcode-select --install`). The preparation cache is pinned and resumable, so rerunning
+the command after an interrupted build reuses the checkout and CMake build directory.
+
+The runtime preparation never downloads model weights. To enable local transcription,
+place `ggml-large-v3-turbo.bin` at `~/Documents/Folio/models/whisper/ggml-large-v3-turbo.bin`
+after the app has launched once. The app can reveal that folder from the transcription
+workspace. `FOLIO_WHISPER_MODEL` overrides the model path and `FOLIO_WHISPER_PATH`
+overrides the whisper executable for development or testing; packaged builds use
+`resources/bin/whisper-cli` by default. Browser mode and unsupported macOS versions keep
+system audio unavailable while microphone-only capture remains the fallback.
+
 The packaged app stores its writable Markdown bundle and search index in `~/Documents/Folio`. On first launch it copies the notes bundled at build time into that folder. Ollama must be installed locally; Folio then offers to install its configured models automatically.
 
 ### The build is not code-signed

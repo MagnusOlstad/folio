@@ -58,8 +58,7 @@ export type ObsidianImportSettings = {
 };
 
 declare global {
-  interface Window {
-    folio?: {
+  interface FolioBridge {
       onMenuAction?: (handler: (action: string) => void) => () => void;
       getStorage?: (key: string) => string | null;
       setStorage?: (key: string, value: string) => void;
@@ -74,6 +73,6 @@ declare global {
       startObsidianImport?: (scanId: string) => Promise<ObsidianImportJob>;
       getObsidianImportJob?: (jobId: string) => Promise<ObsidianImportJob>;
       cancelObsidianImport?: (jobId: string) => Promise<ObsidianImportJob>;
-    };
   }
+  interface Window { folio?: FolioBridge }
 }

@@ -10,6 +10,7 @@ import type { SidebarMode } from "../../../domain/types.ts";
 
 export type WorkspaceShortcutAction =
   | "new-note"
+  | "new-transcription"
   | "close-tab"
   | "save"
   | "search"
@@ -46,6 +47,7 @@ const TAB_SHORTCUTS: Record<
 
 const MENU_ACTIONS = new Set<string>([
   ...Object.values(KEYBOARD_SHORTCUTS),
+  "new-transcription",
   "search",
   "find-in-note",
   "export-markdown",
