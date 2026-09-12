@@ -1,7 +1,7 @@
 import path from 'node:path'
 
 export function createSearchService(runtime) {
-  const { normalizeTag, recordIsStale, lifecycleFactor, embedQuery, embeddingDimension, cosineSimilarity,
+  const { normalizeTag, markdownText, recordIsStale, lifecycleFactor, embedQuery, embeddingDimension, cosineSimilarity,
     bestSemanticChunk } = runtime
 const searchStopWords = new Set([
   'a', 'about', 'all', 'and', 'are', 'do', 'for', 'from', 'have', 'i', 'in', 'is', 'me', 'my', 'notes', 'of', 'on', 'say', 'the', 'to', 'what',

@@ -103,6 +103,27 @@ test('Ask returns the model answer and maps invalid Ollama responses', async (co
   assert.equal(calls.length, 4)
 })
 
+test('Ask context builder includes note titles without throwing', () => {
+  const search = createSearchService({
+    ...createTextHelpers(),
+    recordIsStale: () => false,
+    lifecycleFactor: () => 1,
+    embedQuery: async () => null,
+    embeddingDimension: () => null,
+    cosineSimilarity: () => 0,
+    bestSemanticChunk: () => null,
+  })
+
+  assert.match(search.buildKnowledgeContext([{
+    id: '/research/launch.md',
+    title: 'Launch [research]',
+    type: 'Research',
+    tags: ['launch'],
+    createdAt: '2026-09-11T08:00:00.000Z',
+    excerpts: ['The launch is planned for Friday.'],
+  }], 5000), /Launch research/)
+})
+
 test('slugify transliterates Norwegian letters without changing user-facing text', () => {
   const { slugify, normalizeTag } = createTextHelpers()
   assert.equal(slugify('Bløtkake recipe'), 'blotkake-recipe')
