@@ -1112,6 +1112,10 @@ body.resizing-horizontal * {
   background: var(--paper);
 }
 
+.live-markdown-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
 .live-markdown-editor .cm-editor,
 .live-markdown-editor .cm-scroller {
   width: 100%;
@@ -1547,10 +1551,6 @@ body.resizing-horizontal * {
   position: relative;
   z-index: 2;
   background: repeating-linear-gradient(transparent, transparent 31px, rgba(var(--highlight-rgb), 0.025) 32px);
-}
-
-.draft-note-editor .live-markdown-editor .cm-editor.cm-focused {
-  outline: none;
 }
 
 .draft-note-editor .live-markdown-editor .cm-content {

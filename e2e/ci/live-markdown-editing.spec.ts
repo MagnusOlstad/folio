@@ -93,6 +93,14 @@ test("activating a rendered line keeps one editor mounted and preserves layout",
   await surface.getByRole("heading", { name: "Todo List", level: 1 }).click();
 
   await expect(editor).toBeFocused();
+  await expect
+    .poll(() =>
+      surface.locator(".cm-editor").evaluate(
+        (element) =>
+          element.ownerDocument.defaultView?.getComputedStyle(element).outlineStyle,
+      ),
+    )
+    .toBe("none");
   await expect.poll(() => visibleSurfaceText(surface)).toMatch(/# Todo List/);
   expect(await surface.evaluate((element) =>
     (element as unknown as E2eElement).__e2eIdentity,
