@@ -5,6 +5,7 @@ import type { Note, SearchResult } from "../../src/domain/types.ts";
 import { WorkspaceSidebar } from "../../src/features/sidebar/WorkspaceSidebar.tsx";
 import type { WorkspaceSidebarProps } from "../../src/features/sidebar/WorkspaceSidebar.tsx";
 import { buildFileTree } from "../../src/lib/tree.ts";
+import type { TranscriptionDockProps } from "../../src/features/transcription/components/TranscriptionDock.tsx";
 
 const note: Note = {
   id: "/notes/preview.md",
@@ -85,6 +86,31 @@ function sidebarProps(
   };
 }
 
+function transcriptionProps(): TranscriptionDockProps {
+  return {
+    model: {
+      phase: "idle",
+      elapsedMs: 0,
+      activeSession: null,
+      pending: [],
+      systemAudio: false,
+      fallbackMessage: "",
+      bridgeAvailable: false,
+      status: null,
+      error: "",
+    },
+    actions: {
+      start: vi.fn(),
+      stop: vi.fn(),
+      transcribe: vi.fn(),
+      transcribePending: vi.fn(),
+      later: vi.fn(),
+      retry: vi.fn(),
+      revealModelFolder: vi.fn(),
+    },
+  };
+}
+
 describe("WorkspaceSidebar preview navigation", () => {
   it("previews single-clicked Search and Recent notes and pins double-clicks", () => {
     const openDocument = vi.fn().mockResolvedValue(undefined);
@@ -146,5 +172,17 @@ describe("WorkspaceSidebar preview navigation", () => {
       undefined,
       "preview",
     );
+  });
+
+  it("opens the transcription controls from the compact sidebar tab", () => {
+    const props = {
+      ...sidebarProps(vi.fn().mockResolvedValue(undefined)),
+      sidebarMode: "transcription" as const,
+      transcriptions: transcriptionProps(),
+    };
+    const { getByRole, getByText } = render(<WorkspaceSidebar {...props} />);
+    expect(getByText("Transcriptions")).toBeInTheDocument();
+    expect(getByRole("button", { name: "Transcription" })).toHaveTextContent("Record");
+    expect(getByRole("button", { name: "Record" })).toBeDisabled();
   });
 });

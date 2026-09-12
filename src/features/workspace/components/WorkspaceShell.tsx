@@ -10,8 +10,6 @@ import type { EditorWorkspaceProps } from "../types.ts";
 import { WorkspaceSidebarHandle } from "./WorkspaceSidebarHandle.tsx";
 import { NoteExportPreview } from "./NoteExportPreview.tsx";
 import type { NoteExportSnapshot } from "../model/note-export.ts";
-import { TranscriptionDock } from "../../transcription/components/TranscriptionDock.tsx";
-import type { TranscriptionDockProps } from "../../transcription/components/TranscriptionDock.tsx";
 
 export type WorkspaceShellProps = {
   topBar: TopBarProps;
@@ -19,7 +17,6 @@ export type WorkspaceShellProps = {
   sidebar: WorkspaceSidebarProps;
   editor: EditorWorkspaceProps;
   exportPreview: NoteExportSnapshot | null;
-  transcriptions: TranscriptionDockProps;
   layout: {
     sidebarWidth: number | null;
     beginHorizontalResize: (event: PointerEvent<HTMLElement>) => void;
@@ -35,7 +32,6 @@ export function WorkspaceShell({
   sidebar,
   editor,
   exportPreview,
-  transcriptions,
   layout,
 }: WorkspaceShellProps) {
   return (
@@ -61,7 +57,6 @@ export function WorkspaceShell({
           onReset={layout.resetSidebar}
         />
         <EditorWorkspace {...editor} />
-        <TranscriptionDock {...transcriptions} />
       </section>
       {exportPreview ? <NoteExportPreview snapshot={exportPreview} /> : null}
       {settings.open ? (

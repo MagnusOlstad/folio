@@ -287,7 +287,10 @@ export function useWorkspaceController(): WorkspaceShellProps {
         format,
       ),
     openSettings: themeSettings.openSettings,
-    newTranscription: transcription.actions.start,
+    newTranscription: () => {
+      explorer.setSidebarMode("transcription");
+      transcription.actions.start();
+    },
   });
 
   const { sidebar, moveBundleFile } = useWorkspaceSidebarProps({
@@ -314,11 +317,11 @@ export function useWorkspaceController(): WorkspaceShellProps {
       void finalizeAllFiledDocuments();
       return navigation.openDocument(...args);
     },
+    transcriptions: transcription,
   });
 
   return {
     exportPreview: noteExport.preview,
-    transcriptions: transcription,
     topBar: {
       versionInfo: models.versionInfo,
       status: models.status,

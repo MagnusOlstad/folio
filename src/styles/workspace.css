@@ -24,7 +24,7 @@
 .workspace {
   min-height: 0;
   display: grid;
-  grid-template-columns: var(--sidebar-width) 7px minmax(0, 1fr) minmax(280px, 330px);
+  grid-template-columns: var(--sidebar-width) 7px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
@@ -69,7 +69,7 @@ body.resizing-horizontal * {
 
 .sidebar-tabs {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   border-bottom: 1px solid var(--line);
 }
 
@@ -82,6 +82,19 @@ body.resizing-horizontal * {
   font-size: 10px;
   letter-spacing: 0.11em;
   text-transform: uppercase;
+}
+
+.sidebar-tabs button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.sidebar-tab-indicator {
+  color: var(--acid);
+  font-size: 9px;
+  letter-spacing: 0;
 }
 
 .sidebar-tabs button:last-child {
@@ -558,20 +571,17 @@ body.resizing-horizontal * {
 }
 
 .transcription-dock {
-  position: relative;
-  grid-column: 4;
-  grid-row: 1;
-  align-self: start;
+  position: static;
   min-width: 0;
   width: auto;
-  max-height: calc(100% - 24px);
-  margin: 12px;
-  z-index: 12;
+  height: 100%;
+  max-height: none;
+  margin: 0;
   overflow: auto;
-  border: 1px solid var(--line);
+  border: 0;
   color: var(--muted);
   background: var(--surface-deep);
-  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.24);
+  box-shadow: none;
 }
 
 .transcription-heading,
@@ -2288,14 +2298,6 @@ body.resizing-horizontal * {
     padding: 0 12px;
   }
 
-  .transcription-dock {
-    grid-column: 1;
-    grid-row: 3;
-    width: auto;
-    max-height: min(260px, 34vh);
-    margin: 8px 12px 12px;
-  }
-
   .brand > span:last-child,
   .app-version,
   .endpoint-status > span:last-child {
@@ -2304,7 +2306,7 @@ body.resizing-horizontal * {
 
   .workspace {
     grid-template-columns: 1fr;
-    grid-template-rows: 42vh minmax(0, 1fr) auto;
+    grid-template-rows: 42vh minmax(0, 1fr);
   }
 
   .sidebar-resize-handle {
