@@ -1,9 +1,10 @@
-NEVER PUSH TO MAIN — NON-NEGOTIABLE REPOSITORY RULE
-
-- NEVER push directly to `main`, `master`, or any default branch. Make every change on a non-default branch and submit it through a pull request.
-- Every implementation task MUST use a sub-agent for the implementation. Delegate implementation to GPT-5.6 Luna; do not implement the change directly in the coordinating agent. This applies even to small or tightly coupled implementation work. Delegation may be skipped only when no implementation is being performed (for example, read-only investigation, planning, review, or final validation).
-
 # AGENTS.md
+
+## Non-Negotiable Repository Rules
+
+- Never perform a remote merge under any circumstance.
+- Never push directly to `main`, `master`, or any default branch. Make every change on a non-default branch and submit it through a pull request.
+- Every implementation task must use a sub-agent for the implementation. Delegate implementation to GPT-5.6 Luna; do not implement the change directly in the coordinating agent. This applies even to small or tightly coupled implementation work. Delegation may be skipped only when no implementation is being performed (for example, read-only investigation, planning, review, or final validation).
 
 ## Architecture
 
