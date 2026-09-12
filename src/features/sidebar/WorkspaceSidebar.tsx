@@ -2,6 +2,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { FileTree } from "../explorer/FileTree.tsx";
+import { TranscriptionDock } from "../transcription/components/TranscriptionDock.tsx";
 import type {
   AskResult,
   ModelStatus,
@@ -11,6 +12,7 @@ import type {
   TreeDirectory,
   ViewerDocument,
 } from "../../domain/types.ts";
+import type { TranscriptionDockProps } from "../transcription/components/TranscriptionDock.tsx";
 
 type OpenDocument = (
   id: string,
@@ -18,6 +20,13 @@ type OpenDocument = (
   targetGroupId?: string,
   disposition?: "preview" | "permanent",
 ) => Promise<void>;
+
+const SIDEBAR_MODES: Array<{ mode: SidebarMode; label: string }> = [
+  { mode: "explore", label: "explore" },
+  { mode: "search", label: "search" },
+  { mode: "ask", label: "ask" },
+  { mode: "transcription", label: "Record" },
+];
 
 export type WorkspaceSidebarProps = {
   sidebarMode: SidebarMode;
@@ -71,6 +80,7 @@ export type WorkspaceSidebarProps = {
   answer: AskResult | null;
   conceptUrl: (id: string) => string;
   formatDate: (value: string) => string;
+  transcriptions?: TranscriptionDockProps;
 };
 
 export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
@@ -126,18 +136,32 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
     answer,
     conceptUrl,
     formatDate,
+    transcriptions,
   } = props;
   return (
     <aside className="workbench-sidebar">
       <nav className="sidebar-tabs" aria-label="Sidebar tools">
-        {(["explore", "search", "ask"] as SidebarMode[]).map((mode) => (
+        {SIDEBAR_MODES.map(({ mode, label }) => (
           <button
             type="button"
             className={sidebarMode === mode ? "active" : ""}
             onClick={() => setSidebarMode(mode)}
             key={mode}
+            aria-label={
+              mode === "transcription"
+                ? `Transcription${transcriptions?.model.phase === "recording" ? ", recording" : transcriptions?.model.pending.length ? `, ${transcriptions.model.pending.length} pending` : ""}`
+                : label
+            }
+            title={mode === "transcription" ? "Transcription" : undefined}
           >
-            {mode}
+            {label}
+            {mode === "transcription" && transcriptions && (
+              <small className="sidebar-tab-indicator">
+                {transcriptions.model.phase === "recording"
+                  ? "●"
+                  : transcriptions.model.pending.length || ""}
+              </small>
+            )}
           </button>
         ))}
       </nav>
@@ -330,6 +354,8 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
               )}
             </div>
           </>
+        ) : sidebarMode === "transcription" && transcriptions ? (
+          <TranscriptionDock {...transcriptions} />
         ) : (
           <>
             <div className="sidebar-heading">

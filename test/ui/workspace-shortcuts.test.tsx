@@ -185,4 +185,39 @@ describe("workspace shortcuts", () => {
     unmount();
     delete window.folio;
   });
+
+  it("starts a transcription from the native application menu action", () => {
+    const newTranscription = vi.fn();
+    let handleMenuAction: ((action: string) => void) | undefined;
+    window.folio = {
+      onMenuAction: (handler) => {
+        handleMenuAction = handler;
+        return vi.fn();
+      },
+    };
+    const { unmount } = renderHook(() =>
+      useWorkspaceShortcutActions({
+        sidebarMode: "explore",
+        setSidebarMode: vi.fn(),
+        searchInputRef: { current: null },
+        groups: [],
+        activeGroupId: "primary",
+        documents: {},
+        createNewTab: vi.fn(),
+        activateTabAtEnd: vi.fn(),
+        closeTab: vi.fn(),
+        fileDraft: vi.fn(),
+        flushDocument: vi.fn().mockResolvedValue(undefined),
+        exportDocument: vi.fn(),
+        openSettings: vi.fn(),
+        newTranscription,
+      }),
+    );
+
+    act(() => handleMenuAction?.("new-transcription"));
+    expect(newTranscription).toHaveBeenCalledOnce();
+
+    unmount();
+    delete window.folio;
+  });
 });

@@ -22,6 +22,7 @@ import {
   useWorkspaceSessionPersistence,
 } from "./useWorkspaceSessionPersistence.ts";
 import { loadWorkspaceSessionState } from "../model/workspace-state.ts";
+import { useTranscription } from "../../transcription/hooks/useTranscription.ts";
 
 function draftTitle(content: string) {
   const firstLine = content
@@ -100,6 +101,22 @@ export function useWorkspaceController(): WorkspaceShellProps {
     setMessage,
     clearDiscovery: explorer.discovery.clearDiscovery,
     replaceDiscoveryDocument: explorer.discovery.replaceDocument,
+  });
+  const transcription = useTranscription({
+    drafts: {
+      createDraft: () => tabs.createNewTab(),
+      getDraftContent: (id) =>
+        documents.drafts[id] ?? documents.documentsRef.current[id]?.content,
+      getDraftDocument: (id) => documents.documentsRef.current[id],
+      updateDraftContent: (id, content) => {
+        const document = documents.documentsRef.current[id] ?? documents.documents[id];
+        if (document) documents.changeDraftContent(document, content);
+        else documents.setDrafts((current) => ({ ...current, [id]: content }));
+      },
+      openDraft: (id) => tabs.openLocalDraft(id),
+      fileDraft: (document, content) => mutations.fileDraft(document, content),
+    },
+    setMessage,
   });
   const autosave = useFiledDocumentAutosave({
     save: async (documentId, content) => {
@@ -199,6 +216,10 @@ export function useWorkspaceController(): WorkspaceShellProps {
   }, [documents.documents, documents.loadingDocuments, explorer.notes, navigation]);
 
   function closeDocumentTab(groupId: string, documentId: string) {
+    if (transcription.isDraftBusy(documentId)) {
+      setMessage("Stop or finish the transcription before closing its draft.");
+      return;
+    }
     setEditorFocusRequest((current) =>
       current?.groupId === groupId && current.documentId === documentId
         ? null
@@ -266,6 +287,10 @@ export function useWorkspaceController(): WorkspaceShellProps {
         format,
       ),
     openSettings: themeSettings.openSettings,
+    newTranscription: () => {
+      explorer.setSidebarMode("transcription");
+      transcription.actions.start();
+    },
   });
 
   const { sidebar, moveBundleFile } = useWorkspaceSidebarProps({
@@ -280,12 +305,19 @@ export function useWorkspaceController(): WorkspaceShellProps {
       setEditorFocusRequest(null);
       tabs.openLocalDraft(id);
     },
-    deleteLocalDraft: navigation.deleteLocalDraft,
+    deleteLocalDraft: async (id) => {
+      if (transcription.isDraftBusy(id)) {
+        setMessage("Stop or finish the transcription before deleting its draft.");
+        return;
+      }
+      return navigation.deleteLocalDraft(id);
+    },
     openDocument: async (...args) => {
       setEditorFocusRequest(null);
       void finalizeAllFiledDocuments();
       return navigation.openDocument(...args);
     },
+    transcriptions: transcription,
   });
 
   return {

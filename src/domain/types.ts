@@ -141,7 +141,7 @@ export type AskResult = {
   model: string;
   retrieval: string;
 };
-export type SidebarMode = "explore" | "search" | "ask";
+export type SidebarMode = "explore" | "search" | "ask" | "transcription";
 export type TabGroup = {
   id: string;
   tabs: string[];

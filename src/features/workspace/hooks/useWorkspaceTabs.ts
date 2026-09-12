@@ -102,6 +102,7 @@ export function useWorkspaceTabs({
     );
     setActiveGroupId(targetGroupId);
     setEditingKey(`${targetGroupId}:${id}`);
+    return id;
   }
 
   function openLocalDraft(id: string, targetGroupId = activeGroupId) {

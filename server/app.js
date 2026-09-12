@@ -1,6 +1,7 @@
 import 'dotenv/config'
 
 import fs from 'node:fs/promises'
+import path from 'node:path'
 import express from 'express'
 
 import { createConfig } from './config.js'
@@ -22,6 +23,9 @@ import { registerRoutes as registerConfirmationRoutes } from './routes/confirmat
 import { registerRoutes as registerAskRoutes } from './routes/ask.js'
 import { registerRoutes as registerImportRoutes } from './routes/imports.js'
 import { registerRoutes as registerBackupRoutes } from './routes/backup.js'
+import { createTranscriptionStorage } from './transcription/storage.js'
+import { createTranscriptionService } from './transcription/service.js'
+import { registerRoutes as registerTranscriptionRoutes } from './transcription/routes.js'
 
 export function createRuntime(env = process.env) {
   const runtime = { ...createConfig(env), ...createTextHelpers() }
@@ -35,6 +39,8 @@ export function createRuntime(env = process.env) {
   Object.assign(runtime, createFilingService(runtime))
   Object.assign(runtime, createReleaseService(runtime))
   Object.assign(runtime, createObsidianImportService(runtime))
+  Object.assign(runtime, { transcriptionStorage: createTranscriptionStorage(runtime) })
+  Object.assign(runtime, { transcriptionService: createTranscriptionService(runtime) })
   return runtime
 }
 
@@ -43,7 +49,10 @@ export async function createApp(runtime = createRuntime()) {
     fs.mkdir(runtime.rawRoot, { recursive: true }),
     fs.mkdir(runtime.draftsRoot, { recursive: true }),
     fs.mkdir(runtime.importsRoot, { recursive: true }),
+    fs.mkdir(runtime.transcriptionsRoot, { recursive: true }),
+    fs.mkdir(path.dirname(runtime.whisperModelPath), { recursive: true }),
   ])
+  await runtime.transcriptionService.recoverInterrupted()
   await runtime.reindexBundle()
   void runtime.refreshMissingEmbeddingsInBackground()
 
@@ -56,5 +65,6 @@ export async function createApp(runtime = createRuntime()) {
   registerCaptureRoutes(app, runtime)
   registerConfirmationRoutes(app, runtime)
   registerAskRoutes(app, runtime)
+  registerTranscriptionRoutes(app, runtime)
   return app
 }
