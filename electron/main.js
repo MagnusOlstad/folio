@@ -179,6 +179,7 @@ function setApplicationMenu() {
     {
       label: 'File',
       submenu: [
+        { label: 'Command Palette…', accelerator: 'CmdOrCtrl+P', click: sendToRenderer('open-palette') },
         { label: 'New Note', accelerator: 'CmdOrCtrl+T', click: sendToRenderer('new-note') },
         { label: 'Save', accelerator: 'CmdOrCtrl+S', click: sendToRenderer('save') },
         {

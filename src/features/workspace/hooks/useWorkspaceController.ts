@@ -12,6 +12,9 @@ import { useWorkspaceDocumentNavigation } from "./useWorkspaceDocumentNavigation
 import { useWorkspaceExplorerState } from "./useWorkspaceExplorerState.ts";
 import { useWorkspaceSidebarProps } from "./useWorkspaceSidebarProps.ts";
 import { useWorkspaceShortcutActions } from "./useWorkspaceShortcutActions.ts";
+import { useCommandPalette } from "./useCommandPalette.ts";
+import type { PaletteCommand } from "../model/command-palette.ts";
+import type { SearchResult } from "../../../domain/types.ts";
 import { useFiledDocumentAutosave } from "./useFiledDocumentAutosave.ts";
 import { expandedPathsForFiles, isUntitledId } from "../../../lib/workspace.ts";
 import { bundleDirectories } from "../model/directory-suggestions.ts";
@@ -233,7 +236,15 @@ export function useWorkspaceController(): WorkspaceShellProps {
     return () => window.clearTimeout(timeout);
   }, [message]);
 
-  useWorkspaceShortcutActions({
+  const paletteRunnerRef = useRef<(() => void) | null>(null);
+
+  function openPaletteNote(note: SearchResult) {
+    setEditorFocusRequest(null);
+    void finalizeAllFiledDocuments();
+    void navigation.openDocument(note.id, "note", tabs.activeGroupId, "permanent");
+  }
+
+  const shortcutActions = useWorkspaceShortcutActions({
     sidebarMode: explorer.sidebarMode,
     setSidebarMode: explorer.setSidebarMode,
     searchInputRef: explorer.searchInputRef,
@@ -266,7 +277,76 @@ export function useWorkspaceController(): WorkspaceShellProps {
         format,
       ),
     openSettings: themeSettings.openSettings,
+    openPalette: () => paletteRunnerRef.current?.(),
   });
+
+  const paletteCommands: PaletteCommand[] = [
+    {
+      id: "new-note",
+      label: "New Note",
+      hotkey: "⌘T",
+      run: () => shortcutActions.runShortcut("new-note"),
+    },
+    {
+      id: "save",
+      label: "Save",
+      hotkey: "⌘S",
+      run: () => shortcutActions.runShortcut("save"),
+    },
+    {
+      id: "close-tab",
+      label: "Close Tab",
+      hotkey: "⌘W",
+      run: () => shortcutActions.runShortcut("close-tab"),
+    },
+    {
+      id: "split-workspace",
+      label: "Split Workspace",
+      run: () => {
+        setEditorFocusRequest(null);
+        tabs.splitWorkspace();
+      },
+    },
+    {
+      id: "search-notes",
+      label: "Search Notes",
+      hotkey: "⇧⌘F",
+      run: () => shortcutActions.runShortcut("search"),
+    },
+    {
+      id: "find-in-note",
+      label: "Find in Note",
+      hotkey: "⌘F",
+      run: () => shortcutActions.runShortcut("find-in-note"),
+    },
+    {
+      id: "ask-notes",
+      label: "Ask Notes",
+      run: () => explorer.setSidebarMode("ask"),
+    },
+    {
+      id: "export-markdown",
+      label: "Export Markdown",
+      run: () => shortcutActions.runShortcut("export-markdown"),
+    },
+    {
+      id: "export-pdf",
+      label: "Export PDF",
+      run: () => shortcutActions.runShortcut("export-pdf"),
+    },
+    {
+      id: "open-settings",
+      label: "Open Settings",
+      run: () => shortcutActions.runShortcut("open-settings"),
+    },
+  ];
+
+  const palette = useCommandPalette({
+    commands: paletteCommands,
+    openNote: openPaletteNote,
+  });
+
+  paletteRunnerRef.current = () => palette.togglePalette();
 
   const { sidebar, moveBundleFile } = useWorkspaceSidebarProps({
     explorer,
@@ -308,6 +388,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       obsidianImport,
       onClose: themeSettings.closeSettings,
     },
+    palette,
     sidebar,
     layout: {
       sidebarWidth: layout.sidebarWidth,

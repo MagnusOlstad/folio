@@ -29,6 +29,7 @@ type Options = {
     format: NoteExportFormat,
   ) => void;
   openSettings: () => void;
+  openPalette: () => void;
 };
 
 export function useWorkspaceShortcutActions(options: Options) {
@@ -52,6 +53,7 @@ export function useWorkspaceShortcutActions(options: Options) {
   }
 
   function runShortcut(action: WorkspaceShortcutAction) {
+    if (action === "open-palette") return options.openPalette();
     if (action === "open-settings") return options.openSettings();
     if (action === "new-note") return options.createNewTab();
     if (action === "find-in-note") {
@@ -117,4 +119,6 @@ export function useWorkspaceShortcutActions(options: Options) {
     runShortcutRef,
     runShortcut,
   });
+
+  return { focusSearchInput, runShortcut };
 }

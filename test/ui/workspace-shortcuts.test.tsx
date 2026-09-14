@@ -42,6 +42,7 @@ describe("workspace shortcuts", () => {
         fileDraft: vi.fn(),
         flushDocument: vi.fn().mockResolvedValue(undefined),
         exportDocument: vi.fn(),
+        openPalette: vi.fn(),
         openSettings: vi.fn(),
       }),
     );
@@ -74,6 +75,7 @@ describe("workspace shortcuts", () => {
         fileDraft: vi.fn(),
         flushDocument: vi.fn().mockResolvedValue(undefined),
         exportDocument: vi.fn(),
+        openPalette: vi.fn(),
         openSettings: vi.fn(),
       }),
     );
@@ -141,6 +143,7 @@ describe("workspace shortcuts", () => {
         fileDraft: vi.fn(),
         flushDocument: vi.fn().mockResolvedValue(undefined),
         exportDocument,
+        openPalette: vi.fn(),
         openSettings: vi.fn(),
       }),
     );
@@ -176,6 +179,7 @@ describe("workspace shortcuts", () => {
         flushDocument: vi.fn().mockResolvedValue(undefined),
         exportDocument: vi.fn(),
         openSettings,
+        openPalette: vi.fn(),
       }),
     );
 
@@ -184,5 +188,67 @@ describe("workspace shortcuts", () => {
     expect(openSettings).toHaveBeenCalledOnce();
     unmount();
     delete window.folio;
+  });
+});
+
+describe("command palette shortcuts", () => {
+  it("toggles the command palette with Cmd/Ctrl+P", () => {
+    const openPalette = vi.fn();
+    renderHook(() =>
+      useWorkspaceShortcutActions({
+        sidebarMode: "explore",
+        setSidebarMode: vi.fn(),
+        searchInputRef: { current: null },
+        groups: [],
+        activeGroupId: "primary",
+        documents: {},
+        createNewTab: vi.fn(),
+        activateTabAtEnd: vi.fn(),
+        closeTab: vi.fn(),
+        fileDraft: vi.fn(),
+        flushDocument: vi.fn().mockResolvedValue(undefined),
+        exportDocument: vi.fn(),
+        openSettings: vi.fn(),
+        openPalette,
+      }),
+    );
+
+    fireEvent.keyDown(window, { key: "p", metaKey: true });
+    fireEvent.keyDown(window, { key: "p", ctrlKey: true });
+
+    expect(openPalette).toHaveBeenCalledTimes(2);
+  });
+
+  it("opens the palette from the native menu action", () => {
+    const openPalette = vi.fn();
+    let handleMenuAction: ((action: string) => void) | undefined;
+    window.folio = {
+      onMenuAction: (handler) => {
+        handleMenuAction = handler;
+        return vi.fn();
+      },
+    };
+    renderHook(() =>
+      useWorkspaceShortcutActions({
+        sidebarMode: "explore",
+        setSidebarMode: vi.fn(),
+        searchInputRef: { current: null },
+        groups: [],
+        activeGroupId: "primary",
+        documents: {},
+        createNewTab: vi.fn(),
+        activateTabAtEnd: vi.fn(),
+        closeTab: vi.fn(),
+        fileDraft: vi.fn(),
+        flushDocument: vi.fn().mockResolvedValue(undefined),
+        exportDocument: vi.fn(),
+        openSettings: vi.fn(),
+        openPalette,
+      }),
+    );
+
+    act(() => handleMenuAction?.("open-palette"));
+
+    expect(openPalette).toHaveBeenCalledOnce();
   });
 });
