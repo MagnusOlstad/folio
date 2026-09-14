@@ -1,8 +1,10 @@
 import type { CSSProperties, PointerEvent } from "react";
 import { SettingsDialog } from "../../settings/components/SettingsDialog.tsx";
 import type { SettingsDialogProps } from "../../settings/components/SettingsDialog.tsx";
+import { CommandPalette } from "./CommandPalette.tsx";
 import { WorkspaceSidebar } from "../../sidebar/WorkspaceSidebar.tsx";
 import type { WorkspaceSidebarProps } from "../../sidebar/WorkspaceSidebar.tsx";
+import type { CommandPaletteState } from "../hooks/useCommandPalette.ts";
 import { TopBar } from "../../status/TopBar.tsx";
 import type { TopBarProps } from "../../status/TopBar.tsx";
 import { EditorWorkspace } from "./EditorWorkspace.tsx";
@@ -14,6 +16,7 @@ import type { NoteExportSnapshot } from "../model/note-export.ts";
 export type WorkspaceShellProps = {
   topBar: TopBarProps;
   settings: SettingsDialogProps & { open: boolean };
+  palette: CommandPaletteState;
   sidebar: WorkspaceSidebarProps;
   editor: EditorWorkspaceProps;
   exportPreview: NoteExportSnapshot | null;
@@ -29,6 +32,7 @@ export type WorkspaceShellProps = {
 export function WorkspaceShell({
   topBar,
   settings,
+  palette,
   sidebar,
   editor,
   exportPreview,
@@ -67,6 +71,7 @@ export function WorkspaceShell({
           onClose={settings.onClose}
         />
       ) : null}
+      {palette.open ? <CommandPalette palette={palette} /> : null}
     </main>
   );
 }
