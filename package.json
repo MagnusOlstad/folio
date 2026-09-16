@@ -18,8 +18,9 @@
     "test:ui": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:local": "playwright test --config=playwright.local.config.ts",
-    "desktop": "npm run build && electron .",
-    "dist:mac": "npm run build && electron-builder --mac --arm64 --publish never",
+    "prepare:whisper": "node scripts/prepare-whisper-runtime.mjs",
+    "desktop": "npm run prepare:whisper && npm run build && electron .",
+    "dist:mac": "npm run prepare:whisper && npm run build && electron-builder --mac --arm64 --publish never",
     "lint": "oxlint",
     "preview": "vite preview",
     "start": "node server/index.js"
@@ -34,6 +35,7 @@
     "archiver": "^8.0.0",
     "concurrently": "^10.0.5",
     "dotenv": "^17.4.2",
+    "electron-audio-loopback": "1.0.6",
     "express": "^5.2.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -75,12 +77,25 @@
       {
         "from": "seed-data",
         "to": "seed-data"
+      },
+      {
+        "from": "runtime/whisper.cpp",
+        "to": "bin",
+        "filter": [
+          "whisper-cli",
+          "ggml-metal.metal",
+          "LICENSE"
+        ]
       }
     ],
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "build/icon.icns",
       "identity": null,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Folio uses the microphone to transcribe desktop recordings.",
+        "NSAudioCaptureUsageDescription": "Folio uses system audio capture when you include desktop audio in a transcription."
+      },
       "target": [
         {
           "target": "dmg",

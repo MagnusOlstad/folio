@@ -16,4 +16,13 @@ contextBridge.exposeInMainWorld('folio', {
   startObsidianImport: (scanId) => ipcRenderer.invoke('folio:start-obsidian-import', scanId),
   getObsidianImportJob: (jobId) => ipcRenderer.invoke('folio:get-obsidian-import-job', jobId),
   cancelObsidianImport: (jobId) => ipcRenderer.invoke('folio:cancel-obsidian-import', jobId),
+  requestMicrophoneAccess: () => ipcRenderer.invoke('folio:transcription-microphone-permission'),
+  enableTranscriptionLoopback: () => ipcRenderer.invoke('folio:transcription-enable-loopback'),
+  disableTranscriptionLoopback: () => ipcRenderer.invoke('folio:transcription-disable-loopback'),
+  beginTranscriptionRecording: (options) => ipcRenderer.invoke('folio:transcription-begin-recording', options),
+  writeTranscriptionChunk: (id, chunk) => ipcRenderer.invoke('folio:transcription-write-chunk', id, chunk),
+  stopTranscriptionRecording: (id) => ipcRenderer.invoke('folio:transcription-stop-recording', id),
+  finalizeTranscriptionRecording: (id) => ipcRenderer.invoke('folio:transcription-finalize-recording', id),
+  abortTranscriptionRecording: (id) => ipcRenderer.invoke('folio:transcription-abort-recording', id),
+  revealTranscriptionModelFolder: () => ipcRenderer.invoke('folio:transcription-reveal-model-folder'),
 })

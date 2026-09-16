@@ -24,6 +24,8 @@ export function createConfig(env = process.env) {
   const embedModel = env.OLLAMA_EMBED_MODEL || 'embeddinggemma'
   const configuredAskContextLength = Number(env.OLLAMA_ASK_CONTEXT_LENGTH || 8192)
   const parsedOllamaUrl = new URL(ollamaUrl)
+  const whisperModelPath = env.FOLIO_WHISPER_MODEL || path.join(dataRoot, 'models', 'whisper', 'ggml-large-v3-turbo.bin')
+  const whisperPath = env.FOLIO_WHISPER_PATH || path.join(projectRoot, 'runtime', 'whisper.cpp', 'whisper-cli')
 
   return {
     projectRoot,
@@ -32,6 +34,7 @@ export function createConfig(env = process.env) {
     rawRoot: path.join(bundleRoot, 'references', 'inbox'),
     draftsRoot: path.join(dataRoot, 'drafts'),
     importsRoot: path.join(dataRoot, 'imports'),
+    transcriptionsRoot: path.join(dataRoot, 'transcriptions'),
     indexPath: path.join(dataRoot, 'search-index.json'),
     distRoot: env.FOLIO_DIST_ROOT || path.join(projectRoot, 'dist'),
     ollamaUrl,
@@ -54,5 +57,7 @@ export function createConfig(env = process.env) {
     port: Number(env.PORT || 8787),
     canLaunchOllama: parsedOllamaUrl.protocol === 'http:'
       && ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(parsedOllamaUrl.hostname),
+    whisperPath,
+    whisperModelPath,
   }
 }

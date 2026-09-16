@@ -13,7 +13,12 @@ export type WorkspaceSessionState = {
   documentScrollTops: Record<string, number>;
 };
 
-const sidebarModes = new Set<SidebarMode>(["explore", "search", "ask"]);
+const sidebarModes = new Set<SidebarMode>([
+  "explore",
+  "search",
+  "ask",
+  "transcription",
+]);
 const workspaceGroupIds = new Set(["primary", "secondary"]);
 export const MAX_TABS_PER_GROUP = 100;
 export const MAX_DOCUMENT_SCROLL_ENTRIES = 200;

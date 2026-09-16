@@ -9,6 +9,7 @@ import {
 } from "../../../lib/workspace.ts";
 import { useWorkspaceBundleActions } from "./useWorkspaceBundleActions.ts";
 import type { WorkspaceSidebarProps } from "../../sidebar/WorkspaceSidebar.tsx";
+import type { TranscriptionDockProps } from "../../transcription/components/TranscriptionDock.tsx";
 import type { WorkspaceDocumentState } from "./useWorkspaceDocumentState.ts";
 import type { WorkspaceExplorerState } from "./useWorkspaceExplorerState.ts";
 import type { ReturnTypeOfWorkspaceModels } from "./useWorkspaceModels.ts";
@@ -24,6 +25,7 @@ type Options = {
   openLocalDraft: (id: string) => void;
   deleteLocalDraft: (id: string) => Promise<void>;
   openDocument: WorkspaceSidebarProps["openDocument"];
+  transcriptions: TranscriptionDockProps;
 };
 
 export function useWorkspaceSidebarProps({
@@ -37,6 +39,7 @@ export function useWorkspaceSidebarProps({
   openLocalDraft,
   deleteLocalDraft,
   openDocument,
+  transcriptions,
 }: Options): {
   sidebar: WorkspaceSidebarProps;
   moveBundleFile: ReturnType<typeof useWorkspaceBundleActions>["moveBundleFile"];
@@ -137,6 +140,7 @@ export function useWorkspaceSidebarProps({
       answer: discovery.answer,
       conceptUrl,
       formatDate,
+      transcriptions,
     },
   };
 }

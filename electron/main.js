@@ -3,9 +3,15 @@ import fsSync from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, Menu, dialog, ipcMain, screen, shell } from 'electron'
+import { initMain as initAudioLoopback } from 'electron-audio-loopback'
+import { createTranscriptionCapture } from './transcription/capture.js'
 
 const isMac = process.platform === 'darwin'
 const preloadPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'preload.cjs')
+
+// Electron 38 needs the loopback feature switch installed before app.ready.
+// The capture bridge below still owns the renderer-facing, sender-validated IPC.
+if (isMac) initAudioLoopback({ forceCoreAudioTap: true })
 
 let mainWindow = null
 let localServer = null
@@ -17,6 +23,7 @@ let rendererStorageRevision = 0
 let rendererStorageWriteTimer = null
 let rendererStorageWritePromise = Promise.resolve()
 let rendererStorageSyncFlushRevision = -1
+let transcriptionCapture = null
 
 function validStorageKey(key) {
   return typeof key === 'string' && key.startsWith('folio:') && key.length <= 200
@@ -180,6 +187,7 @@ function setApplicationMenu() {
       label: 'File',
       submenu: [
         { label: 'New Note', accelerator: 'CmdOrCtrl+T', click: sendToRenderer('new-note') },
+        { label: 'New Transcription', click: sendToRenderer('new-transcription') },
         { label: 'Save', accelerator: 'CmdOrCtrl+S', click: sendToRenderer('save') },
         {
           label: 'Export',
@@ -292,6 +300,7 @@ async function createWindow() {
     mainWindow = null
   })
   await mainWindow.loadURL(localUrl)
+  transcriptionCapture?.attachWindow(mainWindow)
 }
 
 app.whenReady().then(async () => {
@@ -299,6 +308,11 @@ app.whenReady().then(async () => {
   registerRendererStorage()
   process.env.FOLIO_VERSION = app.getVersion()
   process.env.FOLIO_DATA_ROOT = await prepareDataDirectory()
+  if (!process.env.FOLIO_WHISPER_PATH) {
+    process.env.FOLIO_WHISPER_PATH = app.isPackaged
+      ? path.join(process.resourcesPath, 'bin', 'whisper-cli')
+      : path.join(path.dirname(path.dirname(preloadPath)), 'runtime', 'whisper.cpp', 'whisper-cli')
+  }
 
   const { createRuntime } = await import('../server/app.js')
   const { startServer } = await import('../server/index.js')
@@ -342,6 +356,13 @@ app.whenReady().then(async () => {
   ipcMain.handle('folio:get-obsidian-import-job', (_event, jobId) => localRuntime.getObsidianImportJob(jobId))
   ipcMain.handle('folio:cancel-obsidian-import', (_event, jobId) => localRuntime.cancelObsidianImport(jobId))
 
+  transcriptionCapture = createTranscriptionCapture({
+    ipcMain,
+    app,
+    getWindow: () => mainWindow,
+    getRuntime: () => localRuntime,
+    isMac,
+  })
   await createWindow()
 
   app.on('activate', async () => {

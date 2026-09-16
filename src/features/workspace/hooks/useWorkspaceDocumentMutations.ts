@@ -484,8 +484,8 @@ export function useWorkspaceDocumentMutations({
     state.setEditingKey(null);
   }
 
-  function fileDraft(document: ViewerDocument) {
-    const content = state.drafts[document.id] ?? document.content;
+  function fileDraft(document: ViewerDocument, contentOverride?: string) {
+    const content = contentOverride ?? state.drafts[document.id] ?? document.content;
     if (
       !filedDraftContent(content).trim() ||
       state.savingDocuments.has(document.id)

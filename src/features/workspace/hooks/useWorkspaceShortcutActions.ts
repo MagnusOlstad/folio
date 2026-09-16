@@ -29,6 +29,7 @@ type Options = {
     format: NoteExportFormat,
   ) => void;
   openSettings: () => void;
+  newTranscription?: () => void;
 };
 
 export function useWorkspaceShortcutActions(options: Options) {
@@ -54,6 +55,7 @@ export function useWorkspaceShortcutActions(options: Options) {
   function runShortcut(action: WorkspaceShortcutAction) {
     if (action === "open-settings") return options.openSettings();
     if (action === "new-note") return options.createNewTab();
+    if (action === "new-transcription") return options.newTranscription?.();
     if (action === "find-in-note") {
       const editor = document.querySelector<HTMLElement>(
         ".editor-group.active [data-live-markdown-editor]",
