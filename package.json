@@ -52,7 +52,7 @@
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.1.0",
     "electron": "^38.0.0",
-    "electron-builder": "^26.0.0",
+    "electron-builder": "^26.16.1",
     "jsdom": "^30.0.1",
     "oxlint": "^1.79.0",
     "typescript": "~6.0.2",
