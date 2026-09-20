@@ -32,6 +32,11 @@ jobs:
     runs-on: macos-latest
     env:
       GH_TOKEN: ${{ github.token }}
+      CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+      CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
     steps:
       # Check out the immutable release tag so the packaged version exactly matches
       # the GitHub release created by release-please.
@@ -46,9 +51,40 @@ jobs:
 
       - run: npm ci
 
+      - name: Validate signing credentials
+        run: |
+          test -n "${CSC_LINK:-}" || { echo "MACOS_CERTIFICATE_P12 is required" >&2; exit 1; }
+          test -n "${CSC_KEY_PASSWORD:-}" || { echo "MACOS_CERTIFICATE_PASSWORD is required" >&2; exit 1; }
+          test -n "${APPLE_API_KEY_P8:-}" || { echo "APPLE_API_KEY_P8 is required" >&2; exit 1; }
+          test -n "${APPLE_API_KEY_ID:-}" || { echo "APPLE_API_KEY_ID is required" >&2; exit 1; }
+          test -n "${APPLE_API_ISSUER:-}" || { echo "APPLE_API_ISSUER is required" >&2; exit 1; }
+
+      - name: Prepare App Store Connect API key
+        run: |
+          key_path="${RUNNER_TEMP}/folio-notary-api-key.p8"
+          printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$key_path"
+          chmod 600 "$key_path"
+          echo "APPLE_API_KEY=$key_path" >> "$GITHUB_ENV"
+          echo "APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
       - run: npm run dist:mac
 
-      - run: gh release upload "${{ needs.release-please.outputs.tag_name }}" release/*.dmg release/*.zip --clobber
+      - name: Verify signed and notarized artifacts
+        run: |
+          app_path="release/mac-arm64/Folio.app"
+          dmg_path=$(printf '%s\n' release/*.dmg | head -n 1)
+          test -d "$app_path"
+          test -f "$dmg_path"
+          test -f release/latest-mac.yml
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          xcrun stapler validate "$app_path"
+          spctl --assess --type execute --verbose=4 "$app_path"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg_path"
+
+      # Keep the release as a draft so artifact and release-note checks remain
+      # the final human publish checkpoint.
+      - name: Upload signed artifacts
+        run: gh release upload "${{ needs.release-please.outputs.tag_name }}" release/*.dmg release/*.zip release/latest-mac.yml --clobber
 
       # release-please's notes are just the changelog, and it names the release
       # after the bare tag — restore both by hand, same as the old
@@ -63,12 +99,12 @@ jobs:
 
           ## Install
 
-          Download \`$dmg\`, drag Folio to Applications, then run once:
-
-          \`\`\`sh
-          xattr -dr com.apple.quarantine /Applications/Folio.app
-          \`\`\`
-
-          This build is not code-signed, so macOS Gatekeeper needs that one-time nudge.
+          Download \`$dmg\`, open it, and drag Folio to Applications. This release is
+          signed with an Apple Developer ID certificate and notarized by Apple, so
+          macOS Gatekeeper can verify it normally.
           EOF
           gh release edit "$TAG" --title "Folio $TAG" --notes-file notes.md
+
+      - name: Remove temporary notarization key
+        if: always()
+        run: rm -f "${APPLE_API_KEY_PATH:-${RUNNER_TEMP}/folio-notary-api-key.p8}"

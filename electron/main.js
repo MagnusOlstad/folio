@@ -3,6 +3,7 @@ import fsSync from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, Menu, dialog, ipcMain, screen, shell } from 'electron'
+import { createUpdaterCoordinator } from './updater.js'
 
 const isMac = process.platform === 'darwin'
 const preloadPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'preload.cjs')
@@ -17,6 +18,7 @@ let rendererStorageRevision = 0
 let rendererStorageWriteTimer = null
 let rendererStorageWritePromise = Promise.resolve()
 let rendererStorageSyncFlushRevision = -1
+let updaterCoordinator = null
 
 function validStorageKey(key) {
   return typeof key === 'string' && key.startsWith('folio:') && key.length <= 200
@@ -294,6 +296,28 @@ async function createWindow() {
   await mainWindow.loadURL(localUrl)
 }
 
+async function initializeUpdater() {
+  if (!app.isPackaged || !isMac || updaterCoordinator) return
+
+  try {
+    // electron-updater is CommonJS, so use its default namespace when loading
+    // it from this ESM entrypoint. Dynamic import keeps the development/test
+    // path dependency-free.
+    const { default: electronUpdater } = await import('electron-updater')
+    const { autoUpdater } = electronUpdater
+    updaterCoordinator = createUpdaterCoordinator({
+      updater: autoUpdater,
+      dialog,
+      getWindow: () => mainWindow,
+      isPackaged: app.isPackaged,
+      platform: process.platform,
+    })
+    await updaterCoordinator.start()
+  } catch (error) {
+    console.error('Failed to initialize Folio updater:', error)
+  }
+}
+
 app.whenReady().then(async () => {
   await loadRendererStorage()
   registerRendererStorage()
@@ -343,6 +367,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('folio:cancel-obsidian-import', (_event, jobId) => localRuntime.cancelObsidianImport(jobId))
 
   await createWindow()
+  await initializeUpdater()
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) await createWindow()

@@ -34,6 +34,7 @@
     "archiver": "^8.0.0",
     "concurrently": "^10.0.5",
     "dotenv": "^17.4.2",
+    "electron-updater": "^6.6.2",
     "express": "^5.2.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -80,7 +81,11 @@
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "build/icon.icns",
-      "identity": null,
+      "hardenedRuntime": true,
+      "notarize": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "forceCodeSigning": true,
       "target": [
         {
           "target": "dmg",
@@ -99,6 +104,10 @@
     "dmg": {
       "artifactName": "${productName}-${version}-${arch}.dmg"
     },
-    "publish": null
+    "publish": {
+      "provider": "github",
+      "owner": "MagnusOlstad",
+      "repo": "folio"
+    }
   }
 }
