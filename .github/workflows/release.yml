@@ -50,7 +50,6 @@ jobs:
       APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
       APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-      RECOVERY_DIR: ${{ runner.temp }}/folio-macos-recovery-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -91,6 +90,8 @@ jobs:
 
       - name: Create recovery archive and manifest
         id: recovery
+        env:
+          RECOVERY_DIR: ${{ runner.temp }}/folio-macos-recovery-${{ github.run_id }}
         run: |
           set -euo pipefail
           mkdir -p "$RECOVERY_DIR"
@@ -114,8 +115,8 @@ jobs:
         with:
           name: folio-macos-notarization-${{ github.run_id }}
           path: |
-            ${{ env.RECOVERY_DIR }}/${{ steps.recovery.outputs.archive_name }}
-            ${{ env.RECOVERY_DIR }}/notarization-manifest.json
+            ${{ runner.temp }}/folio-macos-recovery-${{ github.run_id }}/${{ steps.recovery.outputs.archive_name }}
+            ${{ runner.temp }}/folio-macos-recovery-${{ github.run_id }}/notarization-manifest.json
           if-no-files-found: error
           retention-days: 14
 
@@ -205,6 +206,8 @@ jobs:
 
       - name: Verify, package, and upload accepted release
         if: steps.wait.outputs.status == 'accepted'
+        env:
+          RECOVERY_DIR: ${{ runner.temp }}/folio-macos-recovery-${{ github.run_id }}
         run: |
           set -euo pipefail
           app_path="release/mac-arm64/Folio.app"
@@ -247,7 +250,6 @@ jobs:
       APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
       APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-      RECOVERY_DIR: ${{ runner.temp }}/folio-macos-recovery-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v7
 
@@ -322,6 +324,8 @@ jobs:
 
       - name: Download recovery artifact from source run
         if: steps.check.outputs.status == 'accepted'
+        env:
+          RECOVERY_DIR: ${{ runner.temp }}/folio-macos-recovery-${{ github.run_id }}
         run: |
           set -euo pipefail
           rm -rf "$RECOVERY_DIR"
@@ -333,6 +337,8 @@ jobs:
       - name: Read recovery manifest
         id: manifest
         if: steps.check.outputs.status == 'accepted'
+        env:
+          RECOVERY_DIR: ${{ runner.temp }}/folio-macos-recovery-${{ github.run_id }}
         run: |
           set -euo pipefail
           node scripts/macos-notarization.mjs manifest-fields \
@@ -357,6 +363,8 @@ jobs:
 
       - name: Validate recovery archive and manifest
         if: steps.check.outputs.status == 'accepted'
+        env:
+          RECOVERY_DIR: ${{ runner.temp }}/folio-macos-recovery-${{ github.run_id }}
         run: |
           set -euo pipefail
           node scripts/macos-notarization.mjs manifest-validate \
@@ -371,6 +379,7 @@ jobs:
         if: steps.check.outputs.status == 'accepted'
         env:
           TAG: ${{ steps.manifest.outputs.tag }}
+          RECOVERY_DIR: ${{ runner.temp }}/folio-macos-recovery-${{ github.run_id }}
         run: |
           set -euo pipefail
           archive_path="$RECOVERY_DIR/${{ steps.manifest.outputs.archiveName }}"
