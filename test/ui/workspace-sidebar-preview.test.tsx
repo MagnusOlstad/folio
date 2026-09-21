@@ -82,6 +82,10 @@ function sidebarProps(
     },
     conceptUrl: (id) => id,
     formatDate: () => "today",
+    bundles: [],
+    activeBundleId: null,
+    selectBundle: vi.fn(),
+    openSettings: vi.fn(),
   };
 }
 
@@ -145,6 +149,88 @@ describe("WorkspaceSidebar preview navigation", () => {
       "note",
       undefined,
       "preview",
+    );
+  });
+
+  it("collapses the active bundle without changing which bundle is active", () => {
+    const selectBundle = vi.fn();
+    const props = {
+      ...sidebarProps(vi.fn().mockResolvedValue(undefined)),
+      sidebarMode: "explore" as const,
+      bundles: [
+        {
+          id: "work",
+          name: "Work",
+          markdownPath: "/notes/work",
+          managed: false,
+          detached: false,
+        },
+        {
+          id: "personal",
+          name: "Personal",
+          markdownPath: "/notes/personal",
+          managed: false,
+          detached: false,
+        },
+      ],
+      activeBundleId: "work",
+      selectBundle,
+    };
+    const { container, getByRole } = render(<WorkspaceSidebar {...props} />);
+    const workHeading = getByRole("button", { name: /Work/ });
+    const workTree = container.querySelector("#bundle-tree-work")!;
+
+    expect(workHeading).toHaveAttribute("aria-expanded", "true");
+    expect(workTree).not.toHaveAttribute("hidden");
+
+    fireEvent.click(workHeading);
+    expect(workHeading).toHaveAttribute("aria-expanded", "false");
+    expect(workTree).toHaveAttribute("hidden");
+    expect(selectBundle).not.toHaveBeenCalled();
+
+    fireEvent.click(workHeading);
+    expect(workHeading).toHaveAttribute("aria-expanded", "true");
+    expect(workTree).not.toHaveAttribute("hidden");
+  });
+
+  it("activates and expands an inactive bundle in one click", () => {
+    const selectBundle = vi.fn();
+    const props = {
+      ...sidebarProps(vi.fn().mockResolvedValue(undefined)),
+      sidebarMode: "explore" as const,
+      bundles: [
+        {
+          id: "work",
+          name: "Work",
+          markdownPath: "/notes/work",
+          managed: false,
+          detached: false,
+        },
+        {
+          id: "personal",
+          name: "Personal",
+          markdownPath: "/notes/personal",
+          managed: false,
+          detached: false,
+        },
+      ],
+      activeBundleId: "work",
+      selectBundle,
+    };
+    const { container, getByRole, rerender } = render(
+      <WorkspaceSidebar {...props} />,
+    );
+
+    fireEvent.click(getByRole("button", { name: /Personal/ }));
+    expect(selectBundle).toHaveBeenCalledWith("personal");
+
+    rerender(
+      <WorkspaceSidebar {...props} activeBundleId="personal" />,
+    );
+    const personalHeading = getByRole("button", { name: /Personal/ });
+    expect(personalHeading).toHaveAttribute("aria-expanded", "true");
+    expect(container.querySelector("#bundle-tree-personal")).not.toHaveAttribute(
+      "hidden",
     );
   });
 });

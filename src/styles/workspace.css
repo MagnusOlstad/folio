@@ -2153,12 +2153,12 @@ body.resizing-horizontal * {
 .bundle-explorer-heading.active { background: var(--paper-raised); color: var(--ink); font-weight: 600; }
 .bundle-explorer-heading:focus-visible { outline: 1px solid var(--acid); outline-offset: -1px; }
 .bundle-explorer-chevron { font-size: 17px; color: var(--dim); line-height: 12px; transition: transform .15s ease; }
-.bundle-explorer-heading.active .bundle-explorer-chevron { transform: rotate(90deg); }
+.bundle-explorer-heading.expanded .bundle-explorer-chevron { transform: rotate(90deg); }
 .bundle-explorer-icon { font-size: 18px; color: var(--dim); line-height: 12px; }
 .bundle-explorer-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bundle-explorer-active { margin-left: auto; width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: var(--acid); }
 .bundle-explorer-root { min-height: 0; flex-shrink: 0; }
-.bundle-explorer-root.active { display: flex; flex-direction: column; flex: 1; }
+.bundle-explorer-root.active.expanded { display: flex; flex-direction: column; flex: 1; }
 .bundle-explorer-heading { flex-shrink: 0; }
 .bundle-explorer-content { display: flex; flex: 1; min-height: 0; margin: 4px 0 8px 14px; border-left: 1px solid var(--line); }
 .bundle-explorer-root .tree-scroll { flex: 1; margin: 0; padding-left: 4px; }

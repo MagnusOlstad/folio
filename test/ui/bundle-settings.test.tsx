@@ -50,7 +50,7 @@ describe("bundle setup interface", () => {
       screen.queryByRole("textbox", { name: "Name" }),
     ).not.toBeInTheDocument();
     fireEvent.click(
-      screen.getByRole("button", { name: "Add or import bundle" }),
+      screen.getByRole("button", { name: "Create bundle or import Obsidian vault" }),
     );
     fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
       target: { value: "Personal" },
@@ -69,15 +69,15 @@ describe("bundle setup interface", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Work is ready.");
   });
 
-  it("opens a selected Markdown folder in place and derives its editable name", async () => {
+  it("opens an existing Folio bundle in place and derives its editable name", async () => {
     window.folio = {
       selectFolder: vi.fn().mockResolvedValue("/notes/Research"),
     };
     const { controls } = renderSettings();
     fireEvent.click(
-      screen.getByRole("button", { name: "Add or import bundle" }),
+      screen.getByRole("button", { name: "Create bundle or import Obsidian vault" }),
     );
-    fireEvent.click(screen.getByRole("radio", { name: /Markdown folder/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Existing Folio bundle/ }));
     expect(
       screen.queryByRole("combobox", { name: "Location" }),
     ).not.toBeInTheDocument();
@@ -98,18 +98,18 @@ describe("bundle setup interface", () => {
     });
   });
 
-  it("keeps local Markdown folder selection desktop-only in the browser", () => {
+  it("keeps existing Folio bundle selection desktop-only in the browser", () => {
     renderSettings();
     fireEvent.click(
-      screen.getByRole("button", { name: "Add or import bundle" }),
+      screen.getByRole("button", { name: "Create bundle or import Obsidian vault" }),
     );
-    fireEvent.click(screen.getByRole("radio", { name: /Markdown folder/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Existing Folio bundle/ }));
 
     expect(
       screen.getByRole("button", { name: "Choose folder" }),
     ).toBeDisabled();
     expect(
-      screen.getByText("Open Folio desktop to connect a local Markdown folder."),
+      screen.getByText("Open Folio desktop to connect an existing Folio bundle."),
     ).toBeInTheDocument();
   });
 
@@ -117,7 +117,7 @@ describe("bundle setup interface", () => {
     window.folio = { selectFolder: vi.fn().mockResolvedValue("/notes") };
     const { controls } = renderSettings();
     fireEvent.click(
-      screen.getByRole("button", { name: "Add or import bundle" }),
+      screen.getByRole("button", { name: "Create bundle or import Obsidian vault" }),
     );
     fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
       target: { value: "Personal" },

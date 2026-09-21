@@ -25,8 +25,8 @@ const SOURCES = [
   {
     id: "existing",
     mark: "↗",
-    title: "Markdown folder",
-    description: "Open your files in place",
+    title: "Existing Folio bundle",
+    description: "Open an existing bundle in place",
   },
   {
     id: "obsidian",
@@ -312,7 +312,7 @@ export function BundleSettings({
               setSuccess("");
             }}
           >
-            Add or import bundle
+            Create bundle or import Obsidian vault
           </button>
         ) : null}
       </div>
@@ -339,7 +339,7 @@ export function BundleSettings({
           <div>
             <strong>Your first bundle starts here</strong>
             <p>
-              Create a space for new notes, or bring a folder you already have.
+              Create a space for new notes, or open an existing Folio bundle.
             </p>
           </div>
         </div>
@@ -402,7 +402,7 @@ export function BundleSettings({
           <div className="bundle-setup-fields">
             {source === "existing" ? (
               <div className="bundle-field">
-                <label htmlFor={`${id}-folder`}>Markdown folder</label>
+                <label htmlFor={`${id}-folder`}>Existing Folio bundle</label>
                 <div className="bundle-path-control">
                   <input
                     id={`${id}-folder`}
@@ -421,11 +421,13 @@ export function BundleSettings({
                   </button>
                 </div>
                 <p>
-                  Your Markdown stays in this folder. Other files are left
-                  untouched.
+                  This existing Folio bundle stays in this folder. Other files
+                  are left untouched.
                 </p>
                 {!nativePicker ? (
-                  <p>Open Folio desktop to connect a local Markdown folder.</p>
+                  <p>
+                    Open Folio desktop to connect an existing Folio bundle.
+                  </p>
                 ) : null}
               </div>
             ) : null}
@@ -635,7 +637,7 @@ export function BundleSettings({
           <div className="bundle-setup-footer">
             <p>
               {source === "existing"
-                ? "Connect this folder without moving any files."
+                ? "Open this existing Folio bundle without moving any files."
                 : source === "obsidian"
                   ? "Review the preview, then start the import."
                   : "A fresh workspace, ready for your first note."}

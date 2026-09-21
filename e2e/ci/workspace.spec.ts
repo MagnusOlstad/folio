@@ -57,7 +57,7 @@ test('keeps a new bundle draft isolated across legacy bundle switches', async ({
   const bundleName = `E2E isolation ${Date.now()}`
   await page.getByRole('button', { name: 'Settings' }).click()
   const settings = page.getByRole('dialog', { name: 'Settings' })
-  await settings.getByRole('button', { name: 'Add or import bundle' }).click()
+  await settings.getByRole('button', { name: 'Create bundle or import Obsidian vault' }).click()
   await settings.getByRole('textbox', { name: 'Name' }).fill(bundleName)
   await settings.getByRole('button', { name: 'Create bundle' }).click()
   await expect(settings.getByRole('listitem').filter({ hasText: bundleName })).toBeVisible()

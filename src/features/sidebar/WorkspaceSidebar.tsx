@@ -1,5 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useState } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { FileTree } from "../explorer/FileTree.tsx";
 import type {
@@ -136,6 +137,20 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
     selectBundle,
     openSettings,
   } = props;
+  const [collapsedBundleId, setCollapsedBundleId] = useState<string | null>(
+    null,
+  );
+
+  function handleBundleClick(bundleId: string) {
+    if (bundleId === activeBundleId) {
+      setCollapsedBundleId((current) =>
+        current === bundleId ? null : bundleId,
+      );
+      return;
+    }
+    setCollapsedBundleId(null);
+    selectBundle(bundleId);
+  }
 
   const treePanel = (
     <div
@@ -261,19 +276,41 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
             </div>
             {bundles.length > 0 ? (
               <div className="bundle-explorer-list" aria-label="Bundles">
-                {bundles.map((bundle) => (
-                  <div className={`bundle-explorer-root ${bundle.id === activeBundleId ? "active" : ""}`} key={bundle.id}>
-                    <button type="button" aria-expanded={bundle.id === activeBundleId} aria-controls={bundle.id === activeBundleId ? `bundle-tree-${bundle.id}` : undefined} className={`bundle-explorer-heading${bundle.id === activeBundleId ? " active" : ""}`} onClick={() => selectBundle(bundle.id)} title={bundle.markdownPath}>
+                {bundles.map((bundle) => {
+                  const active = bundle.id === activeBundleId;
+                  const expanded = active && bundle.id !== collapsedBundleId;
+                  return (
+                  <div
+                    className={`bundle-explorer-root${active ? " active" : ""}${expanded ? " expanded" : ""}`}
+                    key={bundle.id}
+                  >
+                    <button
+                      type="button"
+                      aria-expanded={expanded}
+                      aria-controls={active ? `bundle-tree-${bundle.id}` : undefined}
+                      className={`bundle-explorer-heading${active ? " active" : ""}${expanded ? " expanded" : ""}`}
+                      onClick={() => handleBundleClick(bundle.id)}
+                      title={bundle.markdownPath}
+                    >
                       <span className="bundle-explorer-chevron" aria-hidden="true">›</span>
                       <span className="bundle-explorer-icon" aria-hidden="true">▱</span>
                       <span className="bundle-explorer-name">{bundle.name}</span>
-                      {bundle.id === activeBundleId ? <span className="bundle-explorer-active" aria-label="Active bundle" /> : null}
+                      {active ? <span className="bundle-explorer-active" aria-label="Active bundle" /> : null}
                     </button>
-                    {bundle.id === activeBundleId ? <div className="bundle-explorer-content" id={`bundle-tree-${bundle.id}`}>{treePanel}</div> : null}
+                    {active ? (
+                      <div
+                        className="bundle-explorer-content"
+                        id={`bundle-tree-${bundle.id}`}
+                        hidden={!expanded}
+                      >
+                        {treePanel}
+                      </div>
+                    ) : null}
                   </div>
-                ))}
+                  );
+                })}
               </div>
-            ) : <div className="bundle-explorer-empty"><span aria-hidden="true">▱</span><strong>A space for your notes</strong><p>Create a bundle or open a folder to get started.</p><button type="button" className="bundle-setup-cta" onClick={openSettings}>Add or import bundle</button></div>}
+            ) : <div className="bundle-explorer-empty"><span aria-hidden="true">▱</span><strong>A space for your notes</strong><p>Create a bundle or open an existing Folio bundle to get started.</p><button type="button" className="bundle-setup-cta" onClick={openSettings}>Add or import bundle</button></div>}
           </>
         ) : sidebarMode === "search" ? (
           <>
