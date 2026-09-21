@@ -5,6 +5,9 @@ export function registerRoutes(app, runtime) {
   app.post('/api/imports/obsidian/scan', express.json({ limit: '10mb' }), async (request, response) => {
     try { response.json(await runtime.scanObsidianBrowser(request.body || {})) } catch (error) { fail(response, error) }
   })
+  app.get('/api/imports/obsidian/scans/:scanId', async (request, response) => {
+    try { response.json(await runtime.refreshObsidianScan(request.params.scanId)) } catch (error) { fail(response, error) }
+  })
   app.put('/api/imports/obsidian/scans/:scanId/file', express.raw({ type: 'text/markdown', limit: '25mb' }), async (request, response) => {
     try { response.json(await runtime.stageBrowserFile(request.params.scanId, request.query.path, request.body)) } catch (error) { fail(response, error) }
   })

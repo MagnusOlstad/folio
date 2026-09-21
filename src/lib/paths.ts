@@ -1,5 +1,8 @@
-export function conceptUrl(id: string) {
-  return `/api/concepts?path=${encodeURIComponent(id)}`;
+import { getActiveBundleId } from "./api.ts";
+
+export function conceptUrl(id: string, bundleId = getActiveBundleId()) {
+  const bundle = bundleId ? `&bundle=${encodeURIComponent(bundleId)}` : "";
+  return `/api/concepts?path=${encodeURIComponent(id)}${bundle}`;
 }
 
 export function resolveBundleLink(currentId: string, href?: string) {

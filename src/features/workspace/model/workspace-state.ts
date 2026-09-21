@@ -1,5 +1,5 @@
 import type { SidebarMode, TabGroup } from "../../../domain/types.ts";
-import { readStorageItem } from "../../../lib/storage.ts";
+import { readStorageItem, writeStorageItem } from "../../../lib/storage.ts";
 
 export const WORKSPACE_STATE_STORAGE_KEY = "folio:workspace-state";
 export const WORKSPACE_STATE_VERSION = 1;
@@ -10,6 +10,7 @@ export type WorkspaceSessionState = {
   activeGroupId: string;
   sidebarMode: SidebarMode;
   explorerScrollTop: number;
+  splitPosition?: number;
   documentScrollTops: Record<string, number>;
 };
 
@@ -82,7 +83,10 @@ export function parseWorkspaceSessionState(value: unknown): WorkspaceSessionStat
         documentScrollTops[id] = top;
     }
   }
-  return { version: 1, groups, activeGroupId, sidebarMode, explorerScrollTop, documentScrollTops };
+  const splitPosition = typeof candidate.splitPosition === "number" && Number.isFinite(candidate.splitPosition) && candidate.splitPosition >= 0 && candidate.splitPosition <= 100
+    ? candidate.splitPosition
+    : undefined;
+  return { version: 1, groups, activeGroupId, sidebarMode, explorerScrollTop, splitPosition, documentScrollTops };
 }
 
 export function pruneDocumentScrollTops(
@@ -117,11 +121,17 @@ export function reconcileWorkspaceSessionState(
   return { groups: nextGroups, activeGroupId };
 }
 
-export function loadWorkspaceSessionState(): WorkspaceSessionState | null {
+export function loadWorkspaceSessionState(bundleId = "legacy-bundle"): WorkspaceSessionState | null {
   try {
-    const stored = readStorageItem(WORKSPACE_STATE_STORAGE_KEY);
+    const scopedKey = `${WORKSPACE_STATE_STORAGE_KEY}:v2:${bundleId}`;
+    const scoped = readStorageItem(scopedKey);
+    const stored = scoped
+      || (bundleId === "legacy-bundle" ? readStorageItem(WORKSPACE_STATE_STORAGE_KEY) : null);
     if (!stored) return null;
-    return parseWorkspaceSessionState(JSON.parse(stored));
+    const parsed = parseWorkspaceSessionState(JSON.parse(stored));
+    if (parsed && !scoped && bundleId === "legacy-bundle")
+      writeStorageItem(scopedKey, JSON.stringify(parsed));
+    return parsed;
   } catch {
     return null;
   }

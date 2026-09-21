@@ -8,6 +8,9 @@ test.beforeEach(async ({ page }) => {
   // Keyboard-shortcut tests dispatch keys with no element to auto-wait on, so make
   // sure React has mounted and attached its window keydown listener first.
   await expect(page.getByRole('link', { name: 'Folio home' })).toBeVisible()
+  // The logo only proves the shell mounted. Wait for registry resolution and the
+  // active bundle tree before dispatching shortcuts or interacting with workspace state.
+  await expect(page.getByRole('button', { name: 'Todo List', exact: true })).toBeVisible()
 })
 
 test('loads the workspace shell with the seeded bundle', async ({ page }) => {
@@ -48,6 +51,32 @@ test('downloads a bundle backup from settings', async ({ page }) => {
   const chunks: Buffer[] = []
   for await (const chunk of stream!) chunks.push(Buffer.from(chunk))
   expect(Buffer.concat(chunks).subarray(0, 2)).toEqual(Buffer.from('PK'))
+})
+
+test('keeps a new bundle draft isolated across legacy bundle switches', async ({ page }) => {
+  const bundleName = `E2E isolation ${Date.now()}`
+  await page.getByRole('button', { name: 'Settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await settings.getByRole('textbox', { name: 'Name' }).fill(bundleName)
+  await settings.getByRole('button', { name: 'Add or import bundle' }).click()
+  await expect(settings.getByRole('listitem').filter({ hasText: bundleName })).toBeVisible()
+  await settings.getByRole('button', { name: 'Close' }).click()
+
+  await page.getByTitle('New note (Cmd+T)').click()
+  const editor = page.getByLabel('Write a new note')
+  const draftContent = `${bundleName} draft`
+  await editor.fill(draftContent)
+  await expect(page.locator('.draft-tree-open', { hasText: draftContent })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Settings' }).click()
+  const legacyRow = page.getByRole('listitem').filter({ hasText: 'Folio bundle' })
+  await legacyRow.getByRole('button', { name: /Folio bundle/ }).click()
+  await expect(page.getByRole('button', { name: 'Todo List', exact: true })).toBeVisible()
+  await expect(page.locator('.draft-tree-open', { hasText: draftContent })).toHaveCount(0)
+
+  const legacySettings = page.getByRole('dialog', { name: 'Settings' })
+  await legacySettings.getByRole('listitem').filter({ hasText: bundleName }).getByRole('button', { name: new RegExp(bundleName) }).click()
+  await expect(page.locator('.draft-tree-open', { hasText: draftContent })).toBeVisible()
 })
 
 test('opens a seeded note and shows its content', async ({ page }) => {

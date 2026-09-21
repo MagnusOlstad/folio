@@ -31,6 +31,9 @@ describe("expanded-directory storage", () => {
     expect(window.localStorage.getItem("folio:expanded-directories")).toBe(
       JSON.stringify(["/projects", 4, null, "/daily", "/projects"]),
     );
+    expect(window.localStorage.getItem("folio:expanded-directories:v2:legacy-bundle")).toBe(
+      JSON.stringify(["/projects", 4, null, "/daily", "/projects"]),
+    );
     expect(window.localStorage.getItem("folio:drafts")).toBe("important draft");
   });
 
@@ -89,18 +92,19 @@ describe("local draft storage", () => {
       }),
     ]);
     expect(window.localStorage.getItem("folio:drafts")).toBe(serialized);
+    expect(window.localStorage.getItem("folio:drafts:v2:legacy-bundle")).toBe(serialized);
     expect(window.localStorage.getItem("folio:expanded-directories")).toBe(
       '["/projects"]',
     );
   });
 
-  it("recovers malformed draft JSON under a timestamped key and clears only the corrupt cache", () => {
+  it("recovers malformed draft JSON without mutating the legacy cache", () => {
     vi.spyOn(Date, "now").mockReturnValue(12345);
     window.localStorage.setItem("folio:drafts", "{broken");
     window.localStorage.setItem("folio:expanded-directories", '["/daily"]');
 
     expect(loadLocalDrafts()).toEqual([]);
-    expect(window.localStorage.getItem("folio:drafts")).toBeNull();
+    expect(window.localStorage.getItem("folio:drafts")).toBe("{broken");
     expect(window.localStorage.getItem("folio:drafts-recovery:12345")).toBe(
       "{broken",
     );
@@ -164,6 +168,8 @@ describe("workspace session storage", () => {
       explorerScrollTop: 180,
       documentScrollTops: { "/notes/one.md": 420 },
     });
+    expect(window.localStorage.getItem("folio:workspace-state:v2:legacy-bundle")).toBeTruthy();
+    expect(window.localStorage.getItem("folio:workspace-state")).toContain("/notes/one.md");
   });
 
   it("rejects corrupt or unsupported workspace state", () => {

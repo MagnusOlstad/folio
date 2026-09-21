@@ -1,10 +1,35 @@
+let activeBundleId: string | null = null;
+
+export function setActiveBundleId(bundleId: string | null) {
+  activeBundleId = bundleId;
+}
+
+export function getActiveBundleId() {
+  return activeBundleId;
+}
+
+export async function apiForBundle<T>(bundleId: string | null, url: string, options?: RequestInit): Promise<T> {
+  return api<T>(url, {
+    ...options,
+    headers: {
+      ...(options?.headers || {}),
+      ...(bundleId ? { "x-folio-bundle": bundleId, "x-folio-bundle-id": bundleId } : {}),
+    },
+  });
+}
+
 /** Keeps the server's response and error semantics in one place for every feature. */
 export async function api<T>(url: string, options?: RequestInit): Promise<T> {
   let response: Response;
   try {
     response = await fetch(url, {
       ...options,
-      headers: { "content-type": "application/json", ...options?.headers },
+      headers: {
+        "content-type": "application/json",
+        ...(activeBundleId ? { "x-folio-bundle": activeBundleId } : {}),
+        ...(activeBundleId ? { "x-folio-bundle-id": activeBundleId } : {}),
+        ...options?.headers,
+      },
     });
   } catch {
     throw new Error("The local Folio service is not ready yet.");

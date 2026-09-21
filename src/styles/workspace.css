@@ -2126,3 +2126,27 @@ body.resizing-horizontal * {
     padding-left: 9px;
   }
 }
+.bundle-explorer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 0 12px 8px;
+}
+.bundle-explorer-list button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 10px;
+}
+.bundle-explorer-list button.active { border-color: var(--acid); color: var(--ink); }
+.bundle-explorer-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.bundle-explorer-list button.active .bundle-explorer-dot { background: var(--acid); }
+.bundle-explorer-root { display: block; }
+.bundle-explorer-root .tree-scroll { margin: 0 -1px; }
+.bundle-setup-cta { margin: 0 12px 8px; padding: 8px 10px; border: 1px solid var(--acid); background: transparent; color: var(--ink); font: inherit; font-size: 10px; text-transform: uppercase; }

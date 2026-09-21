@@ -102,6 +102,18 @@ export type BundleFile = {
   filedBy: string | null;
   filedAt: string | null;
 };
+export type Bundle = {
+  id: string;
+  name: string;
+  markdownPath: string;
+  managed: boolean;
+  detached: boolean;
+};
+export type BundleRegistryResponse = {
+  version: 1;
+  bundles: Bundle[];
+  error: string | null;
+};
 export type StoredDraft = {
   id: string;
   content: string;

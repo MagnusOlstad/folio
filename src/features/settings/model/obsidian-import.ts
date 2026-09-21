@@ -52,7 +52,7 @@ export type ObsidianImportSettings = {
   job: ObsidianImportJob | null;
   error: string;
   selectVault: () => void;
-  confirmImport: () => void;
+  confirmImport: () => void | Promise<void>;
   cancelImport: () => void;
   clearScan: () => void;
 };
@@ -70,10 +70,11 @@ declare global {
         content: string,
       ) => Promise<{ canceled: boolean }>;
       savePdfExport?: (filename: string) => Promise<{ canceled: boolean }>;
-      selectObsidianVault?: () => Promise<ObsidianImportScan | null>;
+      selectObsidianVault?: (bundleId?: string | null) => Promise<ObsidianImportScan | null>;
       startObsidianImport?: (scanId: string) => Promise<ObsidianImportJob>;
       getObsidianImportJob?: (jobId: string) => Promise<ObsidianImportJob>;
       cancelObsidianImport?: (jobId: string) => Promise<ObsidianImportJob>;
+      selectFolder?: () => Promise<string | null>;
     };
   }
 }

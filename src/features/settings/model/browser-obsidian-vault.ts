@@ -1,4 +1,4 @@
-import { api } from "../../../lib/api.ts";
+import { api, getActiveBundleId } from "../../../lib/api.ts";
 import type { BrowserVaultSelection, ObsidianImportScan } from "./obsidian-import.ts";
 
 type DirectoryHandle = {
@@ -123,7 +123,10 @@ export async function uploadBrowserVaultFiles(selection: BrowserVaultSelection) 
       if (!file) throw new Error(`The selected vault no longer contains ${relativePath}.`);
       const response = await fetch(
         `/api/imports/obsidian/scans/${selection.scan.id}/file?path=${encodeURIComponent(relativePath)}`,
-        { method: "PUT", headers: { "content-type": "text/markdown" }, body: file },
+        { method: "PUT", headers: {
+          "content-type": "text/markdown",
+          ...(getActiveBundleId() ? { "x-folio-bundle": getActiveBundleId() as string, "x-folio-bundle-id": getActiveBundleId() as string } : {}),
+        }, body: file },
       );
       if (!response.ok) {
         const result = (await response.json()) as { error?: string };

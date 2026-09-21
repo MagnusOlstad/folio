@@ -7,6 +7,7 @@ import type {
   StoredDraft,
   VersionInfo,
 } from "../../../domain/types.ts";
+import type { BundleRegistryResponse } from "../../../domain/types.ts";
 import { api, apiWithRetry } from "../../../lib/api.ts";
 import { expandedPathsForFiles } from "../../../lib/workspace.ts";
 
@@ -22,6 +23,8 @@ type UseWorkspaceBootstrapOptions = {
   setExpandedDirectories: Dispatch<SetStateAction<Set<string>>>;
   setExpandedDirectoriesReady: Dispatch<SetStateAction<boolean>>;
   onWorkspaceDataReady?: () => void;
+  onNoBundle?: () => void;
+  enabled: boolean;
 };
 
 export function useWorkspaceBootstrap({
@@ -36,8 +39,11 @@ export function useWorkspaceBootstrap({
   setExpandedDirectories,
   setExpandedDirectoriesReady,
   onWorkspaceDataReady,
+  onNoBundle,
+  enabled,
 }: UseWorkspaceBootstrapOptions) {
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     let reconnectTimer = 0;
     const reconnectMessage =
@@ -45,6 +51,16 @@ export function useWorkspaceBootstrap({
 
     const loadWorkspace = async () => {
       try {
+        const registry = await api<BundleRegistryResponse>("/api/bundles");
+        if (!registry.bundles.length) {
+          if (cancelled) return;
+          setStatus(null);
+          setNotes([]);
+          setFiles([]);
+          setFilesLoading(false);
+          onNoBundle?.();
+          return;
+        }
         const currentStatus = await apiWithRetry<ModelStatus>("/api/status");
         if (cancelled) return;
         setStatus(currentStatus);
@@ -110,7 +126,6 @@ export function useWorkspaceBootstrap({
       window.clearTimeout(reconnectTimer);
       window.clearInterval(interval);
     };
-    // The bootstrap behavior deliberately runs only once per controller mount.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // Bootstrap starts once registry resolution has selected the active bundle.
+  }, [enabled]);
 }

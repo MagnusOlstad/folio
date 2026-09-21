@@ -31,7 +31,7 @@ describe("draft persistence", () => {
     const { result } = setup();
     act(() => result.current.setDocuments({ "untitled:test": draft(" \n ") }));
     await act(async () => { await vi.advanceTimersByTimeAsync(500); });
-    expect(JSON.parse(localStorage.getItem("folio:drafts")!)).toEqual([]);
+    expect(JSON.parse(localStorage.getItem("folio:drafts:v2:legacy-bundle")!)).toEqual([]);
     expect(fetchMock.mock.calls.every(([, options]) => options.method === "DELETE")).toBe(true);
   });
 
@@ -39,11 +39,11 @@ describe("draft persistence", () => {
     const { result } = setup();
     act(() => result.current.setDocuments({ "untitled:test": draft("Keep me") }));
     await act(async () => { await vi.advanceTimersByTimeAsync(500); });
-    expect(JSON.parse(localStorage.getItem("folio:drafts")!)[0].content).toBe("Keep me");
+    expect(JSON.parse(localStorage.getItem("folio:drafts:v2:legacy-bundle")!)[0].content).toBe("Keep me");
     expect(fetchMock).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ method: "PUT" }));
     act(() => result.current.changeDraftContent(result.current.documents["untitled:test"], ""));
     await act(async () => { await vi.advanceTimersByTimeAsync(500); });
-    expect(JSON.parse(localStorage.getItem("folio:drafts")!)).toEqual([]);
+    expect(JSON.parse(localStorage.getItem("folio:drafts:v2:legacy-bundle")!)).toEqual([]);
     expect(fetchMock).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ method: "DELETE" }));
   });
 

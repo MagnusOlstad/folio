@@ -101,13 +101,29 @@ describe("theme settings", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it("summarizes a vault and requires one explicit import confirmation", () => {
+  it("summarizes a vault and requires one explicit import confirmation", async () => {
     const confirmImport = vi.fn();
+    const setupBundle = vi.fn().mockResolvedValue({
+      id: "bundle-1",
+      name: "Work vault",
+      markdownPath: "/bundles/work-vault",
+      managed: true,
+      detached: false,
+    });
     render(
       <SettingsDialog
         themeId="original"
         onSelectTheme={() => {}}
         onClose={() => {}}
+        bundleSetup={{
+          bundles: [],
+          activeBundleId: null,
+          error: "",
+          selectBundle: () => {},
+          setupBundle,
+          renameBundle: async () => {},
+          detachBundle: async () => {},
+        }}
         obsidianImport={{
           supported: true,
           busy: false,
@@ -132,8 +148,11 @@ describe("theme settings", () => {
 
     expect(screen.getByText("Work vault")).toBeInTheDocument();
     expect(screen.getByText(/import 5 notes/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Import notes" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add or import bundle" }));
+    });
     expect(confirmImport).toHaveBeenCalledOnce();
+    expect(setupBundle).toHaveBeenCalledOnce();
   });
 
   it("always shows the top-bar Settings button", () => {

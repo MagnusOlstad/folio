@@ -13,7 +13,7 @@ function readPackageVersion(projectRoot) {
 export function createConfig(env = process.env) {
   const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const dataRoot = env.FOLIO_DATA_ROOT || path.join(projectRoot, 'data')
-  const bundleRoot = path.join(dataRoot, 'bundle')
+  const bundleRoot = env.FOLIO_BUNDLE_ROOT || path.join(dataRoot, 'bundle')
   const ollamaUrl = env.OLLAMA_URL || 'http://127.0.0.1:11434'
   const classifierModel = env.OLLAMA_CLASSIFIER_MODEL || 'llama3.2:3b'
   const answerModel = env.OLLAMA_ANSWER_MODEL || 'llama3.2:3b'
@@ -29,10 +29,10 @@ export function createConfig(env = process.env) {
     projectRoot,
     dataRoot,
     bundleRoot,
-    rawRoot: path.join(bundleRoot, 'references', 'inbox'),
-    draftsRoot: path.join(dataRoot, 'drafts'),
-    importsRoot: path.join(dataRoot, 'imports'),
-    indexPath: path.join(dataRoot, 'search-index.json'),
+    rawRoot: env.FOLIO_RAW_ROOT || path.join(bundleRoot, 'references', 'inbox'),
+    draftsRoot: env.FOLIO_DRAFTS_ROOT || path.join(dataRoot, 'drafts'),
+    importsRoot: env.FOLIO_IMPORTS_ROOT || path.join(dataRoot, 'imports'),
+    indexPath: env.FOLIO_INDEX_PATH || path.join(dataRoot, 'search-index.json'),
     distRoot: env.FOLIO_DIST_ROOT || path.join(projectRoot, 'dist'),
     ollamaUrl,
     parsedOllamaUrl,

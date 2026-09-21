@@ -1,12 +1,26 @@
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import { THEME_OPTIONS, type ThemeId } from "../model/themes.ts";
 import type { ObsidianImportSettings } from "../model/obsidian-import.ts";
+import type { Bundle } from "../../../domain/types.ts";
+import type { BundleSetupInput } from "../hooks/useBundleSetup.ts";
+import { selectBundleFolder } from "../model/bundle-picker.ts";
+import { getActiveBundleId } from "../../../lib/api.ts";
 
 export type SettingsDialogProps = {
   themeId: ThemeId;
   onSelectTheme: (themeId: ThemeId) => void;
   obsidianImport: ObsidianImportSettings;
   onClose: () => void;
+  bundleSetup?: {
+    bundles: Bundle[];
+    activeBundleId: string | null;
+    error: string;
+    selectBundle: (id: string) => void;
+    setupBundle: (input: BundleSetupInput) => Promise<Bundle>;
+    renameBundle: (id: string, name: string) => Promise<void>;
+    detachBundle: (id: string) => Promise<void>;
+  };
 };
 
 const FOCUSABLE_SELECTOR =
@@ -17,9 +31,57 @@ export function SettingsDialog({
   onSelectTheme,
   obsidianImport,
   onClose,
+  bundleSetup,
 }: SettingsDialogProps) {
+  const setup = bundleSetup || {
+    bundles: [], activeBundleId: null, error: "",
+    selectBundle: () => {}, setupBundle: async () => { throw new Error("Bundle setup is unavailable."); },
+    renameBundle: async () => {}, detachBundle: async () => {},
+  };
+  const supportsNativeFolderPicker = Boolean(window.folio?.selectFolder);
   const titleId = useId();
   const dialogRef = useRef<HTMLElement>(null);
+  const [destination, setDestination] = useState<"new" | "existing">("new");
+  const [destinationBundleId, setDestinationBundleId] = useState("");
+  const [source, setSource] = useState<"empty" | "existing" | "obsidian">(obsidianImport.scan ? "obsidian" : "empty");
+  const [bundleName, setBundleName] = useState("");
+  const [parentPath, setParentPath] = useState("");
+  const [sourcePath, setSourcePath] = useState("");
+  const [bundleBusy, setBundleBusy] = useState(false);
+  const [bundleError, setBundleError] = useState("");
+  const [renamingBundleId, setRenamingBundleId] = useState<string | null>(null);
+  const [renamingName, setRenamingName] = useState("");
+
+  async function submitBundle(event: FormEvent) {
+    event.preventDefault();
+    setBundleBusy(true);
+    setBundleError("");
+    try {
+      await setup.setupBundle({
+        destination,
+        source,
+        name: bundleName,
+        ...(destination === "existing" ? { bundleId: destinationBundleId } : {}),
+        ...(destination === "new" && source === "existing" ? { sourcePath } : {}),
+        ...(destination === "new" && source !== "existing" && parentPath ? { parentPath } : {}),
+        ...(source === "obsidian" && obsidianImport.scan ? { scanId: obsidianImport.scan.id } : {}),
+      });
+      if (source === "obsidian" && obsidianImport.scan && !obsidianImport.job)
+        await obsidianImport.confirmImport();
+      setBundleName("");
+      setParentPath("");
+      setSourcePath("");
+    } catch (error) {
+      setBundleError(error instanceof Error ? error.message : "Could not set up bundle.");
+    } finally {
+      setBundleBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (source === "obsidian" && obsidianImport.scan && !bundleName)
+      setBundleName(obsidianImport.scan.name);
+  }, [bundleName, obsidianImport.scan, source]);
 
   useEffect(() => {
     const previouslyFocused = document.activeElement;
@@ -118,76 +180,101 @@ export function SettingsDialog({
             </p>
           </div>
           <div className="settings-import-actions">
-            <a className="settings-action" href="/api/backup">
+            <a className="settings-action" href={`/api/backup${getActiveBundleId() ? `?bundle=${encodeURIComponent(getActiveBundleId() as string)}` : ""}`}>
               Download bundle backup
             </a>
           </div>
         </section>
-        <section className="settings-section settings-import-section" aria-labelledby={`${titleId}-import`}>
+        <section className="settings-section settings-bundles-section" aria-labelledby={`${titleId}-bundles`}>
           <div className="settings-section-copy">
-            <h2 id={`${titleId}-import`}>Import</h2>
-            <p>File every Markdown note from an Obsidian vault into Folio.</p>
+            <h2 id={`${titleId}-bundles`}>Bundles</h2>
+            <p>Add or import bundle. Choose where the Markdown lives and what Folio should do with it.</p>
           </div>
-          {!obsidianImport.supported ? (
-            <p className="settings-import-message">
-              Folder import requires Folio for desktop or a Chromium browser with folder access.
-            </p>
-          ) : null}
-          {obsidianImport.busy && !obsidianImport.job ? (
-            <p className="settings-import-message" aria-live="polite">
-              {obsidianImport.scan ? "Preparing source files…" : "Scanning vault…"}
-            </p>
-          ) : null}
-          {obsidianImport.scan ? (
-            <div className="settings-import-summary">
-              <strong>{obsidianImport.scan.name}</strong>
-              <dl>
-                <div><dt>New</dt><dd>{obsidianImport.scan.counts.new}</dd></div>
-                <div><dt>Already imported</dt><dd>{obsidianImport.scan.counts.imported}</dd></div>
-                <div><dt>Changed (skipped)</dt><dd>{obsidianImport.scan.counts.changed}</dd></div>
-                <div><dt>Ready to retry</dt><dd>{obsidianImport.scan.counts.retryable}</dd></div>
-                <div><dt>Attachments (not copied)</dt><dd>{obsidianImport.scan.counts.attachments}</dd></div>
-              </dl>
-              {obsidianImport.job ? (
-                <div className="settings-import-progress" aria-live="polite">
-                  <progress
-                    max={Math.max(obsidianImport.job.total, 1)}
-                    value={obsidianImport.job.phase === "completed" ? Math.max(obsidianImport.job.total, 1) : obsidianImport.job.processed}
-                  />
-                  <span>
-                    {obsidianImport.job.phase === "completed"
-                      ? `Imported ${obsidianImport.job.imported} notes; ${obsidianImport.job.failed} failed; ${obsidianImport.job.unresolvedLinks} note links unresolved.`
-                      : obsidianImport.job.phase === "cancelled"
-                        ? "Import cancelled. Select this vault again to resume."
-                        : obsidianImport.job.phase === "failed"
-                          ? obsidianImport.job.error || "Import failed."
-                          : `${obsidianImport.job.phase} · ${obsidianImport.job.processed} of ${obsidianImport.job.total || obsidianImport.scan.counts.new + obsidianImport.scan.counts.retryable}`}
-                  </span>
-                </div>
-              ) : (
-                <p className="settings-import-message">
-                  Folio will archive the originals and import {obsidianImport.scan.counts.new + obsidianImport.scan.counts.retryable} notes. This is the only confirmation.
-                </p>
-              )}
+          {setup.error ? <p className="settings-import-error" role="alert">{setup.error}</p> : null}
+          <div className="bundle-list" role="list" aria-label="Bundles">
+            {setup.bundles.map((bundle) => (
+              <div className={`bundle-row ${bundle.id === setup.activeBundleId ? "active" : ""}`} key={bundle.id} role="listitem">
+                {renamingBundleId === bundle.id ? (
+                  <form onSubmit={(event) => {
+                    event.preventDefault();
+                    setBundleError("");
+                    void setup.renameBundle(bundle.id, renamingName)
+                      .then(() => setRenamingBundleId(null))
+                      .catch((error) => setBundleError(error instanceof Error ? error.message : "Could not rename bundle."));
+                  }}>
+                    <input value={renamingName} onChange={(event) => setRenamingName(event.target.value)} aria-label={`Rename ${bundle.name}`} autoFocus />
+                    <button type="submit">Save</button>
+                  </form>
+                ) : <button type="button" onClick={() => setup.selectBundle(bundle.id)} aria-pressed={bundle.id === setup.activeBundleId}>
+                  <strong>{bundle.name}</strong><small>{bundle.markdownPath}</small>
+                </button>}
+                <button type="button" onClick={() => { setRenamingBundleId(bundle.id); setRenamingName(bundle.name); }}>Rename</button>
+                <button type="button" onClick={() => {
+                  setBundleError("");
+                  void setup.detachBundle(bundle.id).catch((error) => setBundleError(error instanceof Error ? error.message : "Could not detach bundle."));
+                }}>Detach</button>
+              </div>
+            ))}
+          </div>
+          <form className="bundle-setup-form" onSubmit={(event) => void submitBundle(event)}>
+            <label>Destination
+              <select value={destination} onChange={(event) => {
+                const next = event.target.value as "new" | "existing";
+                setDestination(next);
+                if (next === "existing") {
+                  setSource("obsidian");
+                  setDestinationBundleId(setup.activeBundleId || setup.bundles[0]?.id || "");
+                }
+              }}>
+                <option value="new">New bundle</option><option value="existing">Existing bundle</option>
+              </select>
+            </label>
+            {destination === "existing" ? (
+              <label>Bundle
+                <select value={destinationBundleId} onChange={(event) => setDestinationBundleId(event.target.value)} required>
+                  <option value="">Choose a bundle</option>
+                  {setup.bundles.map((bundle) => <option value={bundle.id} key={bundle.id}>{bundle.name}</option>)}
+                </select>
+              </label>
+            ) : null}
+            <label>Source
+              <select value={source} onChange={(event) => setSource(event.target.value as "empty" | "existing" | "obsidian")}>
+                <option value="empty" disabled={destination === "existing"}>Empty</option><option value="existing" disabled={destination === "existing"}>Markdown folder</option><option value="obsidian">Obsidian vault</option>
+              </select>
+            </label>
+            {destination === "new" ? <label>Name<input value={bundleName} onChange={(event) => setBundleName(event.target.value)} required placeholder={source === "obsidian" ? "Vault name" : "Bundle name"} /></label> : null}
+            {destination === "new" && source === "existing" ? <label>Markdown folder<input value={sourcePath} onChange={(event) => setSourcePath(event.target.value)} placeholder="/path/to/folder" required disabled={!supportsNativeFolderPicker} /></label> : null}
+            {destination === "new" && source !== "existing" ? <label>Parent folder<input value={parentPath} onChange={(event) => setParentPath(event.target.value)} placeholder="Default Folio location" disabled={!supportsNativeFolderPicker} /></label> : null}
+            <div className="settings-import-actions">
+              <button type="button" onClick={() => {
+                if (source === "obsidian") {
+                  obsidianImport.selectVault();
+                  return;
+                }
+                void selectBundleFolder().then((path) => {
+                  if (!path) return;
+                  if (source === "existing" && destination === "new") setSourcePath(path);
+                  else setParentPath(path);
+                  if (destination === "new" && source === "existing") {
+                    const selectedName = path.split(/[\\/]/).filter(Boolean).pop();
+                    if (selectedName) setBundleName(selectedName);
+                  }
+                });
+              }} disabled={source === "obsidian" ? (!obsidianImport.supported || obsidianImport.busy) : !supportsNativeFolderPicker}>{source === "obsidian" ? "Choose Obsidian vault" : "Choose folder"}</button>
+              {source !== "obsidian" && !supportsNativeFolderPicker ? <small className="settings-import-message">Custom folder paths require Folio desktop; browser folder handles are not sent as paths.</small> : null}
+              <button type="submit" className="primary" disabled={bundleBusy || (source === "obsidian" && !obsidianImport.scan)}>{bundleBusy ? "Setting up…" : "Add or import bundle"}</button>
             </div>
-          ) : null}
-          {obsidianImport.error ? <p className="settings-import-error" role="alert">{obsidianImport.error}</p> : null}
-          <div className="settings-import-actions">
-            <button type="button" onClick={obsidianImport.selectVault} disabled={!obsidianImport.supported || obsidianImport.busy}>
-              {obsidianImport.scan ? "Choose another vault" : "Choose Obsidian vault"}
-            </button>
-            {obsidianImport.scan && !obsidianImport.job ? (
-              <button type="button" className="primary" onClick={obsidianImport.confirmImport} disabled={obsidianImport.busy || obsidianImport.scan.counts.new + obsidianImport.scan.counts.retryable === 0}>
-                Import notes
-              </button>
+            {bundleError ? <p className="settings-import-error" role="alert">{bundleError}</p> : null}
+            {obsidianImport.error ? <p className="settings-import-error" role="alert">{obsidianImport.error}</p> : null}
+            {source === "obsidian" && obsidianImport.scan ? (
+              <div className="settings-import-summary">
+                <strong>{obsidianImport.scan.name}</strong>
+                <span>Folio will archive the originals and import {obsidianImport.scan.counts.new + obsidianImport.scan.counts.retryable} notes. This is the only confirmation.</span>
+                {obsidianImport.job ? <p className="settings-import-message" aria-live="polite">{obsidianImport.job.phase} · {obsidianImport.job.processed} of {obsidianImport.job.total}</p> : null}
+                {obsidianImport.job && !["completed", "cancelled", "failed"].includes(obsidianImport.job.phase) ? <button type="button" onClick={obsidianImport.cancelImport}>Cancel after current note</button> : null}
+              </div>
             ) : null}
-            {obsidianImport.job && !["completed", "cancelled", "failed"].includes(obsidianImport.job.phase) ? (
-              <button type="button" onClick={obsidianImport.cancelImport}>Cancel after current note</button>
-            ) : null}
-            {obsidianImport.job && ["completed", "cancelled", "failed"].includes(obsidianImport.job.phase) ? (
-              <button type="button" onClick={obsidianImport.clearScan}>Done</button>
-            ) : null}
-          </div>
+          </form>
         </section>
       </aside>
     </div>
