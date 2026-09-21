@@ -263,15 +263,17 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
               <div className="bundle-explorer-list" aria-label="Bundles">
                 {bundles.map((bundle) => (
                   <div className={`bundle-explorer-root ${bundle.id === activeBundleId ? "active" : ""}`} key={bundle.id}>
-                    <button type="button" aria-expanded={bundle.id === activeBundleId} className={bundle.id === activeBundleId ? "active" : ""} onClick={() => selectBundle(bundle.id)}>
-                      <span className="bundle-explorer-dot" aria-hidden="true" />
-                      <span>{bundle.name}</span>
+                    <button type="button" aria-expanded={bundle.id === activeBundleId} aria-controls={bundle.id === activeBundleId ? `bundle-tree-${bundle.id}` : undefined} className={`bundle-explorer-heading${bundle.id === activeBundleId ? " active" : ""}`} onClick={() => selectBundle(bundle.id)} title={bundle.markdownPath}>
+                      <span className="bundle-explorer-chevron" aria-hidden="true">›</span>
+                      <span className="bundle-explorer-icon" aria-hidden="true">▱</span>
+                      <span className="bundle-explorer-name">{bundle.name}</span>
+                      {bundle.id === activeBundleId ? <span className="bundle-explorer-active" aria-label="Active bundle" /> : null}
                     </button>
-                    {bundle.id === activeBundleId && treePanel}
+                    {bundle.id === activeBundleId ? <div className="bundle-explorer-content" id={`bundle-tree-${bundle.id}`}>{treePanel}</div> : null}
                   </div>
                 ))}
               </div>
-            ) : <button type="button" className="bundle-setup-cta" onClick={openSettings}>Add or import bundle</button>}
+            ) : <div className="bundle-explorer-empty"><span aria-hidden="true">▱</span><strong>A space for your notes</strong><p>Create a bundle or open a folder to get started.</p><button type="button" className="bundle-setup-cta" onClick={openSettings}>Add or import bundle</button></div>}
           </>
         ) : sidebarMode === "search" ? (
           <>

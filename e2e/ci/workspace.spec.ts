@@ -57,8 +57,9 @@ test('keeps a new bundle draft isolated across legacy bundle switches', async ({
   const bundleName = `E2E isolation ${Date.now()}`
   await page.getByRole('button', { name: 'Settings' }).click()
   const settings = page.getByRole('dialog', { name: 'Settings' })
-  await settings.getByRole('textbox', { name: 'Name' }).fill(bundleName)
   await settings.getByRole('button', { name: 'Add or import bundle' }).click()
+  await settings.getByRole('textbox', { name: 'Name' }).fill(bundleName)
+  await settings.getByRole('button', { name: 'Create bundle' }).click()
   await expect(settings.getByRole('listitem').filter({ hasText: bundleName })).toBeVisible()
   await settings.getByRole('button', { name: 'Close' }).click()
 
@@ -70,12 +71,12 @@ test('keeps a new bundle draft isolated across legacy bundle switches', async ({
 
   await page.getByRole('button', { name: 'Settings' }).click()
   const legacyRow = page.getByRole('listitem').filter({ hasText: 'Folio bundle' })
-  await legacyRow.getByRole('button', { name: /Folio bundle/ }).click()
+  await legacyRow.locator('.bundle-select').click()
   await expect(page.getByRole('button', { name: 'Todo List', exact: true })).toBeVisible()
   await expect(page.locator('.draft-tree-open', { hasText: draftContent })).toHaveCount(0)
 
   const legacySettings = page.getByRole('dialog', { name: 'Settings' })
-  await legacySettings.getByRole('listitem').filter({ hasText: bundleName }).getByRole('button', { name: new RegExp(bundleName) }).click()
+  await legacySettings.getByRole('listitem').filter({ hasText: bundleName }).locator('.bundle-select').click()
   await expect(page.locator('.draft-tree-open', { hasText: draftContent })).toBeVisible()
 })
 

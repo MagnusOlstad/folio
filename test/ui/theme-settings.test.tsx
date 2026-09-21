@@ -84,15 +84,15 @@ describe("theme settings", () => {
       />,
     );
 
-    expect(screen.getAllByRole("radio")).toHaveLength(4);
+    expect(screen.getAllByRole("radio", { name: /Original|Editorial|Light|Dark/ })).toHaveLength(4);
     expect(
-      screen.getByText(/recommend making a backup before importing an Obsidian vault/i),
+      screen.getByText(/Download the active bundle as a ZIP file/i),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Download bundle backup" }),
     ).toHaveAttribute("href", "/api/backup");
     expect(screen.getByRole("radio", { name: /Original/ })).toBeChecked();
-    expect(screen.getByRole("radio", { name: /Original/ })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Close" })).toHaveFocus();
 
     fireEvent.click(screen.getByRole("radio", { name: /Editorial/ }));
     expect(onSelectTheme).toHaveBeenCalledWith("editorial");
@@ -147,9 +147,9 @@ describe("theme settings", () => {
     );
 
     expect(screen.getByText("Work vault")).toBeInTheDocument();
-    expect(screen.getByText(/import 5 notes/i)).toBeInTheDocument();
+    expect(screen.getByText("Notes to import").nextElementSibling).toHaveTextContent("5");
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Add or import bundle" }));
+      fireEvent.click(screen.getByRole("button", { name: "Start import" }));
     });
     expect(confirmImport).toHaveBeenCalledOnce();
     expect(setupBundle).toHaveBeenCalledOnce();
