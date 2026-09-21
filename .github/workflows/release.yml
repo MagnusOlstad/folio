@@ -1,7 +1,16 @@
 name: Release
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: GitHub Actions run ID that created the recovery artifact
+        required: true
+        type: string
+      submission_id:
+        description: Apple notarization submission ID to resume
+        required: true
+        type: string
   push:
     branches: [main]
 
@@ -27,20 +36,22 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  upload-artifacts:
+  stage-macos:
     needs: release-please
-    if: needs.release-please.outputs.releases_created == 'true'
+    if: github.event_name == 'push' && needs.release-please.outputs.releases_created == 'true'
     runs-on: macos-latest
+    timeout-minutes: 25
     env:
       GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+      SOURCE_RUN_ID: ${{ github.run_id }}
       CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12 }}
       CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
       APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
       APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      RECOVERY_DIR: ${{ runner.temp }}/folio-macos-recovery-${{ github.run_id }}
     steps:
-      # Check out the immutable release tag so the packaged version exactly matches
-      # the GitHub release created by release-please.
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
@@ -54,6 +65,7 @@ jobs:
 
       - name: Validate signing credentials
         run: |
+          set -euo pipefail
           test -n "${CSC_LINK:-}" || { echo "MACOS_CERTIFICATE_P12 is required" >&2; exit 1; }
           test -n "${CSC_KEY_PASSWORD:-}" || { echo "MACOS_CERTIFICATE_PASSWORD is required" >&2; exit 1; }
           test -n "${APPLE_API_KEY_P8:-}" || { echo "APPLE_API_KEY_P8 is required" >&2; exit 1; }
@@ -62,79 +74,197 @@ jobs:
 
       - name: Prepare App Store Connect API key
         run: |
+          set -euo pipefail
           key_path="${RUNNER_TEMP}/folio-notary-api-key.p8"
           printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$key_path"
           chmod 600 "$key_path"
           echo "APPLE_API_KEY=$key_path" >> "$GITHUB_ENV"
           echo "APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
-      - run: npm run dist:mac
-
-      - name: Verify signed and notarized artifacts
+      - name: Build and sign app without automatic notarization
         run: |
+          set -euo pipefail
+          npm run dist:mac:staged
           app_path="release/mac-arm64/Folio.app"
-          dmg_path=$(printf '%s\n' release/*.dmg | head -n 1)
           test -d "$app_path"
-          test -f "$dmg_path"
-          test -f release/latest-mac.yml
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+
+      - name: Create recovery archive and manifest
+        id: recovery
+        run: |
+          set -euo pipefail
+          mkdir -p "$RECOVERY_DIR"
+          app_path="release/mac-arm64/Folio.app"
+          version=$(node -p "require('./package.json').version")
+          archive_name="Folio-${version}-arm64-notarization-${SOURCE_RUN_ID}.zip"
+          archive_path="$RECOVERY_DIR/$archive_name"
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" "$archive_path"
+          commit=$(git rev-parse HEAD)
+          node scripts/macos-notarization.mjs manifest-create \
+            --tag "$TAG" \
+            --commit "$commit" \
+            --archive-name "$archive_name" \
+            --archive "$archive_path" \
+            --output "$RECOVERY_DIR/notarization-manifest.json"
+          echo "archive_path=$archive_path" >> "$GITHUB_OUTPUT"
+          echo "archive_name=$archive_name" >> "$GITHUB_OUTPUT"
+
+      - name: Upload 14-day recovery artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: folio-macos-notarization-${{ github.run_id }}
+          path: |
+            ${{ env.RECOVERY_DIR }}/${{ steps.recovery.outputs.archive_name }}
+            ${{ env.RECOVERY_DIR }}/notarization-manifest.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Submit archive to Apple without waiting
+        id: submit
+        env:
+          ARCHIVE_PATH: ${{ steps.recovery.outputs.archive_path }}
+        run: |
+          set -euo pipefail
+          submit_output=$(xcrun notarytool submit "$ARCHIVE_PATH" \
+            --key "$APPLE_API_KEY" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            --no-wait \
+            --output-format json 2>&1) || {
+              echo "Apple notarization submission failed" >&2
+              exit 1
+            }
+          submission_id=$(printf '%s' "$submit_output" | node scripts/macos-notarization.mjs submission-id)
+          test -n "$submission_id"
+          echo "submission_id=$submission_id" >> "$GITHUB_OUTPUT"
+
+      - name: Record recovery instructions
+        run: |
+          set -euo pipefail
+          node scripts/macos-notarization.mjs summary \
+            --source-run-id "$SOURCE_RUN_ID" \
+            --submission-id "${{ steps.submit.outputs.submission_id }}" \
+            --repository "$GITHUB_REPOSITORY" \
+            --reason "submitted; awaiting Apple status" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Wait up to 10 minutes for Apple
+        id: wait
+        env:
+          SUBMISSION_ID: ${{ steps.submit.outputs.submission_id }}
+        run: |
+          set -euo pipefail
+          status=transient
+          deadline=$((SECONDS + 600))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if info_output=$(xcrun notarytool info "$SUBMISSION_ID" \
+              --key "$APPLE_API_KEY" \
+              --key-id "$APPLE_API_KEY_ID" \
+              --issuer "$APPLE_API_ISSUER" \
+              --output-format json 2>&1); then
+              status=$(printf '%s' "$info_output" | node scripts/macos-notarization.mjs status || printf 'transient')
+            else
+              status=transient
+            fi
+            case "$status" in
+              accepted|invalid|rejected)
+                break
+                ;;
+            esac
+            remaining=$((deadline - SECONDS))
+            if [ "$remaining" -gt 0 ] && [ "$remaining" -lt 60 ]; then
+              sleep "$remaining"
+            elif [ "$remaining" -ge 60 ]; then
+              sleep 60
+            fi
+          done
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          if [ "$status" = pending ] || [ "$status" = transient ]; then
+            node scripts/macos-notarization.mjs summary \
+              --source-run-id "$SOURCE_RUN_ID" \
+              --submission-id "$SUBMISSION_ID" \
+              --repository "$GITHUB_REPOSITORY" \
+              --reason "$status" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Block release while notarization is incomplete
+        if: steps.wait.outputs.status == 'pending' || steps.wait.outputs.status == 'transient'
+        run: exit 1
+
+      - name: Retrieve Apple rejection log
+        if: steps.wait.outputs.status == 'invalid' || steps.wait.outputs.status == 'rejected'
+        env:
+          SUBMISSION_ID: ${{ steps.submit.outputs.submission_id }}
+        run: |
+          set -euo pipefail
+          xcrun notarytool log "$SUBMISSION_ID" \
+            --key "$APPLE_API_KEY" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            --output-format json
+          exit 1
+
+      - name: Verify, package, and upload accepted release
+        if: steps.wait.outputs.status == 'accepted'
+        run: |
+          set -euo pipefail
+          app_path="release/mac-arm64/Folio.app"
+          xcrun stapler staple "$app_path"
           codesign --verify --deep --strict --verbose=2 "$app_path"
           xcrun stapler validate "$app_path"
           spctl --assess --type execute --verbose=4 "$app_path"
+          npx --no-install electron-builder --prepackaged "$app_path" --mac --arm64 --publish never --config.mac.notarize=false
+          dmg_path=$(printf '%s\n' release/*.dmg | head -n 1)
+          zip_path=$(printf '%s\n' release/*.zip | head -n 1)
+          test -f "$dmg_path"
+          test -f "$zip_path"
+          test -f release/latest-mac.yml
           spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg_path"
-
-      # Keep the release as a draft so artifact and release-note checks remain
-      # the final human publish checkpoint.
-      - name: Upload signed artifacts
-        run: gh release upload "${{ needs.release-please.outputs.tag_name }}" release/*.dmg release/*.zip release/latest-mac.yml --clobber
-
-      # release-please's notes are just the changelog, and it names the release
-      # after the bare tag — restore both by hand, same as the old
-      # scripts/release.mjs always did, so a draft never ships without them.
-      - name: Set release title and append install instructions
-        env:
-          TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: |
-          dmg=$(basename release/*.dmg)
-          gh release view "$TAG" --json body -q .body > notes.md
-          cat >> notes.md <<EOF
-
-          ## Install
-
-          Download \`$dmg\`, open it, and drag Folio to Applications. This release is
-          signed with an Apple Developer ID certificate and notarized by Apple, so
-          macOS Gatekeeper can verify it normally.
-          EOF
-          gh release edit "$TAG" --title "Folio $TAG" --notes-file notes.md
+          gh release upload "$TAG" "$dmg_path" "$zip_path" release/latest-mac.yml --clobber
+          gh release view "$TAG" --json body -q .body > "$RECOVERY_DIR/notes.md"
+          node scripts/macos-notarization.mjs notes \
+            --input "$RECOVERY_DIR/notes.md" \
+            --output "$RECOVERY_DIR/notes.updated.md" \
+            --dmg "$(basename "$dmg_path")"
+          gh release edit "$TAG" --title "Folio $TAG" --notes-file "$RECOVERY_DIR/notes.updated.md"
 
       - name: Remove temporary notarization key
         if: always()
         run: rm -f "${APPLE_API_KEY_PATH:-${RUNNER_TEMP}/folio-notary-api-key.p8}"
 
-  validate-macos-signing:
+  resume-macos:
     if: github.event_name == 'workflow_dispatch'
-    permissions:
-      contents: read
     runs-on: macos-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
     env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      SUBMISSION_ID: ${{ inputs.submission_id }}
       CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12 }}
       CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
       APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
       APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      RECOVERY_DIR: ${{ runner.temp }}/folio-macos-recovery-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.ref }}
 
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
 
-      - run: npm ci
+      - name: Validate resume inputs
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]] || { echo "source_run_id must be numeric" >&2; exit 1; }
+          [[ "$SUBMISSION_ID" =~ ^[A-Za-z0-9-]+$ ]] || { echo "submission_id has invalid characters" >&2; exit 1; }
 
       - name: Validate signing credentials
         run: |
+          set -euo pipefail
           test -n "${CSC_LINK:-}" || { echo "MACOS_CERTIFICATE_P12 is required" >&2; exit 1; }
           test -n "${CSC_KEY_PASSWORD:-}" || { echo "MACOS_CERTIFICATE_PASSWORD is required" >&2; exit 1; }
           test -n "${APPLE_API_KEY_P8:-}" || { echo "APPLE_API_KEY_P8 is required" >&2; exit 1; }
@@ -143,25 +273,130 @@ jobs:
 
       - name: Prepare App Store Connect API key
         run: |
+          set -euo pipefail
           key_path="${RUNNER_TEMP}/folio-notary-api-key.p8"
           printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$key_path"
           chmod 600 "$key_path"
           echo "APPLE_API_KEY=$key_path" >> "$GITHUB_ENV"
           echo "APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
-      - run: npm run dist:mac
-
-      - name: Verify signed and notarized artifacts
+      - name: Check existing Apple submission once
+        id: check
         run: |
-          app_path="release/mac-arm64/Folio.app"
-          dmg_path=$(printf '%s\n' release/*.dmg | head -n 1)
+          set -euo pipefail
+          if ! info_output=$(xcrun notarytool info "$SUBMISSION_ID" \
+            --key "$APPLE_API_KEY" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            --output-format json 2>&1); then
+            status=transient
+            submission_name=''
+          else
+            status=$(printf '%s' "$info_output" | node scripts/macos-notarization.mjs status || printf 'transient')
+            submission_name=$(printf '%s' "$info_output" | node scripts/macos-notarization.mjs name || printf '')
+          fi
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "submission_name=$submission_name" >> "$GITHUB_OUTPUT"
+          if [ "$status" = pending ] || [ "$status" = transient ]; then
+            node scripts/macos-notarization.mjs summary \
+              --source-run-id "$SOURCE_RUN_ID" \
+              --submission-id "$SUBMISSION_ID" \
+              --repository "$GITHUB_REPOSITORY" \
+              --reason "$status" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Block resume while notarization is incomplete
+        if: steps.check.outputs.status == 'pending' || steps.check.outputs.status == 'transient'
+        run: exit 1
+
+      - name: Retrieve Apple rejection log
+        if: steps.check.outputs.status == 'invalid' || steps.check.outputs.status == 'rejected'
+        run: |
+          set -euo pipefail
+          xcrun notarytool log "$SUBMISSION_ID" \
+            --key "$APPLE_API_KEY" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            --output-format json
+          exit 1
+
+      - name: Download recovery artifact from source run
+        if: steps.check.outputs.status == 'accepted'
+        run: |
+          set -euo pipefail
+          rm -rf "$RECOVERY_DIR"
+          mkdir -p "$RECOVERY_DIR"
+          gh run download "$SOURCE_RUN_ID" \
+            --name "folio-macos-notarization-$SOURCE_RUN_ID" \
+            --dir "$RECOVERY_DIR"
+
+      - name: Read recovery manifest
+        id: manifest
+        if: steps.check.outputs.status == 'accepted'
+        run: |
+          set -euo pipefail
+          node scripts/macos-notarization.mjs manifest-fields \
+            --manifest "$RECOVERY_DIR/notarization-manifest.json" >> "$GITHUB_OUTPUT"
+
+      - name: Validate Apple submission name
+        if: steps.check.outputs.status == 'accepted'
+        run: |
+          set -euo pipefail
+          test -n "${{ steps.check.outputs.submission_name }}"
+          test "${{ steps.check.outputs.submission_name }}" = "${{ steps.manifest.outputs.archiveName }}"
+
+      - name: Check out the exact release commit
+        if: steps.check.outputs.status == 'accepted'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.manifest.outputs.commit }}
+
+      - name: Install release dependencies
+        if: steps.check.outputs.status == 'accepted'
+        run: npm ci
+
+      - name: Validate recovery archive and manifest
+        if: steps.check.outputs.status == 'accepted'
+        run: |
+          set -euo pipefail
+          node scripts/macos-notarization.mjs manifest-validate \
+            --manifest "$RECOVERY_DIR/notarization-manifest.json" \
+            --archive "$RECOVERY_DIR/${{ steps.manifest.outputs.archiveName }}" \
+            --tag "${{ steps.manifest.outputs.tag }}" \
+            --commit "${{ steps.manifest.outputs.commit }}" \
+            --submission-id "$SUBMISSION_ID" \
+            --submission-name "${{ steps.check.outputs.submission_name }}"
+
+      - name: Restore app and package accepted release
+        if: steps.check.outputs.status == 'accepted'
+        env:
+          TAG: ${{ steps.manifest.outputs.tag }}
+        run: |
+          set -euo pipefail
+          archive_path="$RECOVERY_DIR/${{ steps.manifest.outputs.archiveName }}"
+          extract_dir="$RECOVERY_DIR/extracted"
+          rm -rf "$extract_dir"
+          ditto -x -k "$archive_path" "$extract_dir"
+          app_path="$extract_dir/Folio.app"
           test -d "$app_path"
-          test -f "$dmg_path"
-          test -f release/latest-mac.yml
+          xcrun stapler staple "$app_path"
           codesign --verify --deep --strict --verbose=2 "$app_path"
           xcrun stapler validate "$app_path"
           spctl --assess --type execute --verbose=4 "$app_path"
+          npx --no-install electron-builder --prepackaged "$app_path" --mac --arm64 --publish never --config.mac.notarize=false
+          dmg_path=$(printf '%s\n' release/*.dmg | head -n 1)
+          zip_path=$(printf '%s\n' release/*.zip | head -n 1)
+          test -f "$dmg_path"
+          test -f "$zip_path"
+          test -f release/latest-mac.yml
           spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg_path"
+          gh release upload "$TAG" "$dmg_path" "$zip_path" release/latest-mac.yml --clobber
+          gh release view "$TAG" --json body -q .body > "$RECOVERY_DIR/notes.md"
+          node scripts/macos-notarization.mjs notes \
+            --input "$RECOVERY_DIR/notes.md" \
+            --output "$RECOVERY_DIR/notes.updated.md" \
+            --dmg "$(basename "$dmg_path")"
+          gh release edit "$TAG" --title "Folio $TAG" --notes-file "$RECOVERY_DIR/notes.updated.md"
 
       - name: Remove temporary notarization key
         if: always()
