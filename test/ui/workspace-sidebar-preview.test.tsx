@@ -178,19 +178,18 @@ describe("WorkspaceSidebar preview navigation", () => {
     };
     const { container, getByRole } = render(<WorkspaceSidebar {...props} />);
     const workHeading = getByRole("button", { name: /Work/ });
-    const workTree = container.querySelector("#bundle-tree-work")!;
-
     expect(workHeading).toHaveAttribute("aria-expanded", "true");
-    expect(workTree).not.toHaveAttribute("hidden");
+    expect(container.querySelector("#bundle-tree-work")).toBeInTheDocument();
+    expect(container.querySelector("#bundle-tree-personal")).not.toBeInTheDocument();
 
     fireEvent.click(workHeading);
     expect(workHeading).toHaveAttribute("aria-expanded", "false");
-    expect(workTree).toHaveAttribute("hidden");
+    expect(container.querySelector("#bundle-tree-work")).not.toBeInTheDocument();
     expect(selectBundle).not.toHaveBeenCalled();
 
     fireEvent.click(workHeading);
     expect(workHeading).toHaveAttribute("aria-expanded", "true");
-    expect(workTree).not.toHaveAttribute("hidden");
+    expect(container.querySelector("#bundle-tree-work")).toBeInTheDocument();
   });
 
   it("activates and expands an inactive bundle in one click", () => {
@@ -229,8 +228,7 @@ describe("WorkspaceSidebar preview navigation", () => {
     );
     const personalHeading = getByRole("button", { name: /Personal/ });
     expect(personalHeading).toHaveAttribute("aria-expanded", "true");
-    expect(container.querySelector("#bundle-tree-personal")).not.toHaveAttribute(
-      "hidden",
-    );
+    expect(container.querySelector("#bundle-tree-personal")).toBeInTheDocument();
+    expect(container.querySelector("#bundle-tree-work")).not.toBeInTheDocument();
   });
 });

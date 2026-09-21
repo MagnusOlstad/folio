@@ -297,11 +297,10 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                       <span className="bundle-explorer-name">{bundle.name}</span>
                       {active ? <span className="bundle-explorer-active" aria-label="Active bundle" /> : null}
                     </button>
-                    {active ? (
+                    {active && expanded ? (
                       <div
                         className="bundle-explorer-content"
                         id={`bundle-tree-${bundle.id}`}
-                        hidden={!expanded}
                       >
                         {treePanel}
                       </div>
