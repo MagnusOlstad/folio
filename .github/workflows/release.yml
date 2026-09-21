@@ -221,7 +221,39 @@ jobs:
           test -f "$dmg_path"
           test -f "$zip_path"
           test -f release/latest-mac.yml
-          spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg_path"
+          verification_dir=$(mktemp -d "${RUNNER_TEMP}/folio-artifact-verification.XXXXXX")
+          mount_dir="$verification_dir/dmg"
+          zip_extract_dir="$verification_dir/zip"
+          dmg_mounted=0
+          cleanup_verification() {
+            status=$?
+            if [ "$dmg_mounted" -eq 1 ]; then
+              hdiutil detach "$mount_dir" -force >/dev/null 2>&1 || true
+            fi
+            rm -rf "$verification_dir" || true
+            trap - EXIT
+            exit "$status"
+          }
+          trap cleanup_verification EXIT
+          mkdir -p "$mount_dir" "$zip_extract_dir"
+          verify_app() {
+            local app_path="$1"
+            test -d "$app_path"
+            codesign --verify --deep --strict --verbose=2 "$app_path"
+            xcrun stapler validate "$app_path"
+            syspolicy_check distribution "$app_path"
+            spctl --assess --type execute --verbose=4 "$app_path"
+          }
+          hdiutil verify "$dmg_path"
+          hdiutil attach "$dmg_path" -readonly -nobrowse -mountpoint "$mount_dir"
+          dmg_mounted=1
+          verify_app "$mount_dir/Folio.app"
+          hdiutil detach "$mount_dir"
+          dmg_mounted=0
+          ditto -x -k "$zip_path" "$zip_extract_dir"
+          verify_app "$zip_extract_dir/Folio.app"
+          rm -rf "$verification_dir"
+          trap - EXIT
           gh release upload "$TAG" "$dmg_path" "$zip_path" release/latest-mac.yml --clobber
           gh release view "$TAG" --json body -q .body > "$RECOVERY_DIR/notes.md"
           node scripts/macos-notarization.mjs notes \
@@ -398,7 +430,39 @@ jobs:
           test -f "$dmg_path"
           test -f "$zip_path"
           test -f release/latest-mac.yml
-          spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg_path"
+          verification_dir=$(mktemp -d "${RUNNER_TEMP}/folio-artifact-verification.XXXXXX")
+          mount_dir="$verification_dir/dmg"
+          zip_extract_dir="$verification_dir/zip"
+          dmg_mounted=0
+          cleanup_verification() {
+            status=$?
+            if [ "$dmg_mounted" -eq 1 ]; then
+              hdiutil detach "$mount_dir" -force >/dev/null 2>&1 || true
+            fi
+            rm -rf "$verification_dir" || true
+            trap - EXIT
+            exit "$status"
+          }
+          trap cleanup_verification EXIT
+          mkdir -p "$mount_dir" "$zip_extract_dir"
+          verify_app() {
+            local app_path="$1"
+            test -d "$app_path"
+            codesign --verify --deep --strict --verbose=2 "$app_path"
+            xcrun stapler validate "$app_path"
+            syspolicy_check distribution "$app_path"
+            spctl --assess --type execute --verbose=4 "$app_path"
+          }
+          hdiutil verify "$dmg_path"
+          hdiutil attach "$dmg_path" -readonly -nobrowse -mountpoint "$mount_dir"
+          dmg_mounted=1
+          verify_app "$mount_dir/Folio.app"
+          hdiutil detach "$mount_dir"
+          dmg_mounted=0
+          ditto -x -k "$zip_path" "$zip_extract_dir"
+          verify_app "$zip_extract_dir/Folio.app"
+          rm -rf "$verification_dir"
+          trap - EXIT
           gh release upload "$TAG" "$dmg_path" "$zip_path" release/latest-mac.yml --clobber
           gh release view "$TAG" --json body -q .body > "$RECOVERY_DIR/notes.md"
           node scripts/macos-notarization.mjs notes \
