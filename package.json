@@ -20,6 +20,7 @@
     "test:e2e:local": "playwright test --config=playwright.local.config.ts",
     "desktop": "npm run build && electron .",
     "dist:mac": "npm run build && electron-builder --mac --arm64 --publish never",
+    "dist:mac:staged": "npm run build && electron-builder --mac dir --arm64 --publish never --config.mac.notarize=false",
     "lint": "oxlint",
     "preview": "vite preview",
     "start": "node server/index.js"
