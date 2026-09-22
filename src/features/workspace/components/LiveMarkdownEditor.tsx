@@ -362,7 +362,6 @@ export function LiveMarkdownEditor({
         Math.min(selection.from, maxPosition),
         Math.min(selection.to, maxPosition),
       ),
-      scrollIntoView: true,
     });
   }, [value]);
 

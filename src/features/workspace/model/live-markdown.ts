@@ -354,6 +354,14 @@ function buildDecorations(
         );
       }
     }
+    if (task?.[1].toLowerCase() === "x" && line.from + task[0].length < line.to) {
+      ranges.push(
+        Decoration.mark({ class: "cm-live-markdown-task-complete" }).range(
+          line.from + task[0].length,
+          line.to,
+        ),
+      );
+    }
     if (/^```/.test(text)) addHidden(ranges, line.from, line.to, !reveal(line.from, line.to));
     addLinkDecorations(ranges, text, line.from, reveal);
   }

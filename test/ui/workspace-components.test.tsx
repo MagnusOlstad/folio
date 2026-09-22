@@ -495,6 +495,23 @@ describe("workspace editor components", () => {
     expect(screen.getByText("Removed").tagName).toBe("DEL");
   });
 
+  it("marks completed rendered tasks as task-list items for line-through styling", () => {
+    const { container } = render(
+      <RenderedMarkdown
+        document={{ ...document, content: "- [x] Completed" }}
+        groupId="secondary"
+        saving={false}
+        onOpenDocument={vi.fn().mockResolvedValue(undefined)}
+        onToggleTask={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const checkbox = screen.getByRole("checkbox");
+    expect(checkbox).toBeChecked();
+    expect(checkbox.closest("li")).toHaveClass("task-list-item");
+    expect(container.querySelector(".task-list-item:has(input[type='checkbox']:checked)")).not.toBeNull();
+  });
+
   it("renders three hyphens as a horizontal rule without shifting task source lines", () => {
     const onToggleTask = vi.fn().mockResolvedValue(undefined);
     const renderedDocument = {
