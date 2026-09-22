@@ -354,13 +354,27 @@ app.whenReady().then(async () => {
     await fs.writeFile(filePath, pdf)
     return { canceled: false }
   })
-  ipcMain.handle('folio:select-obsidian-vault', async () => {
+  ipcMain.handle('folio:select-obsidian-vault', async (_event, bundleId) => {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: 'Choose Obsidian vault',
       properties: ['openDirectory'],
     })
     if (result.canceled || !result.filePaths[0]) return null
-    return localRuntime.scanObsidianFilesystem(result.filePaths[0])
+    const manager = localRuntime.bundleManager
+    const entry = typeof bundleId === 'string' ? manager?.registry.get(bundleId) : null
+    const scan = manager && entry
+      ? await manager.prepare(entry).then(() => manager.run(entry, () => manager.activeRuntime().scanObsidianFilesystem(result.filePaths[0])))
+      : manager
+        ? await manager.preparePending().then(() => manager.runPending(() => manager.activeRuntime().scanObsidianFilesystem(result.filePaths[0])))
+        : localRuntime.scanObsidianFilesystem(result.filePaths[0])
+    return scan
+  })
+  ipcMain.handle('folio:select-folder', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Choose folder',
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    return result.canceled || !result.filePaths[0] ? null : result.filePaths[0]
   })
   ipcMain.handle('folio:start-obsidian-import', (_event, scanId) => localRuntime.startObsidianImport(scanId))
   ipcMain.handle('folio:get-obsidian-import-job', (_event, jobId) => localRuntime.getObsidianImportJob(jobId))
@@ -386,6 +400,7 @@ app.on('before-quit', () => {
   ipcMain.removeHandler('folio:save-markdown-export')
   ipcMain.removeHandler('folio:save-pdf-export')
   ipcMain.removeHandler('folio:select-obsidian-vault')
+  ipcMain.removeHandler('folio:select-folder')
   ipcMain.removeHandler('folio:start-obsidian-import')
   ipcMain.removeHandler('folio:get-obsidian-import-job')
   ipcMain.removeHandler('folio:cancel-obsidian-import')

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BundleFile, Note } from "../../../domain/types.ts";
-import { api } from "../../../lib/api.ts";
+import { api, apiForBundle, setActiveBundleId } from "../../../lib/api.ts";
 import type { WorkspaceShellProps } from "../components/WorkspaceShell.tsx";
 import { useWorkspaceBootstrap } from "./useWorkspaceBootstrap.ts";
 import { useWorkspaceLayout } from "./useWorkspaceLayout.ts";
@@ -21,7 +21,9 @@ import { useObsidianImport } from "../../settings/hooks/useObsidianImport.ts";
 import {
   useWorkspaceSessionPersistence,
 } from "./useWorkspaceSessionPersistence.ts";
-import { loadWorkspaceSessionState } from "../model/workspace-state.ts";
+import { loadWorkspaceSessionState, parseWorkspaceSessionState, reconcileWorkspaceSessionState } from "../model/workspace-state.ts";
+import { readStorageItem, writeStorageItem } from "../../../lib/storage.ts";
+import { useBundleSetup } from "../../settings/hooks/useBundleSetup.ts";
 
 function draftTitle(content: string) {
   const firstLine = content
@@ -33,9 +35,15 @@ function draftTitle(content: string) {
 
 export function useWorkspaceController(): WorkspaceShellProps {
   const [message, setMessage] = useState("");
-  const [initialWorkspaceState] = useState(loadWorkspaceSessionState);
   const noteExport = useNoteExport({ setMessage });
   const themeSettings = useThemeSettings();
+  const bundleSetup = useBundleSetup();
+  const rendererBundleId = bundleSetup.activeBundleId || "legacy-bundle";
+  const [initialWorkspaceState] = useState(() =>
+    bundleSetup.activeBundleId ? loadWorkspaceSessionState(rendererBundleId) : null,
+  );
+  const [persistenceBundleId, setPersistenceBundleId] = useState(rendererBundleId);
+  const persistenceEnabled = bundleSetup.ready && persistenceBundleId === rendererBundleId;
   const [editorFocusRequest, setEditorFocusRequest] = useState<{
     id: number;
     groupId: string;
@@ -44,18 +52,23 @@ export function useWorkspaceController(): WorkspaceShellProps {
   const editorFocusRequestIdRef = useRef(0);
   const embeddingRevisionsRef = useRef(new Map<string, number>());
   const embeddingFinalizationsRef = useRef(new Map<string, Promise<void>>());
-  const explorer = useWorkspaceExplorerState(setMessage, initialWorkspaceState);
+  const explorer = useWorkspaceExplorerState(setMessage, initialWorkspaceState, rendererBundleId);
   const {
     files: explorerFiles,
+    setExplorerScrollTop,
     setExpandedDirectories,
     setFiles,
     setNotes,
   } = explorer;
-  const refreshAfterObsidianImport = useCallback(async () => {
+  const refreshAfterObsidianImport = useCallback(async (_job: import("../../settings/model/obsidian-import.ts").ObsidianImportJob, bundleId: string | null) => {
+    if (bundleId && bundleId !== bundleSetup.activeBundleId) return;
     const previousIds = new Set(explorerFiles.map((file) => file.id));
+    const request = <T,>(url: string) => bundleId
+      ? apiForBundle<T>(bundleId, url)
+      : api<T>(url);
     const [filesResult, notesResult] = await Promise.allSettled([
-      api<BundleFile[]>("/api/files"),
-      api<Note[]>("/api/notes"),
+      request<BundleFile[]>("/api/files"),
+      request<Note[]>("/api/notes"),
     ]);
     if (filesResult.status === "fulfilled") {
       const newFiles = filesResult.value.filter((file) => !previousIds.has(file.id));
@@ -71,15 +84,17 @@ export function useWorkspaceController(): WorkspaceShellProps {
     if (filesResult.status === "rejected" || notesResult.status === "rejected") {
       setMessage("The import finished, but the file explorer could not be fully refreshed.");
     }
-  }, [explorerFiles, setExpandedDirectories, setFiles, setNotes]);
+  }, [bundleSetup.activeBundleId, explorerFiles, setExpandedDirectories, setFiles, setNotes]);
   const obsidianImport = useObsidianImport({
-    onImportFinished: refreshAfterObsidianImport,
+    onImportFinishedForBundle: refreshAfterObsidianImport,
   });
   const documents = useWorkspaceDocumentState({
     expandedDirectories: explorer.expandedDirectories,
     expandedDirectoriesReady: explorer.expandedDirectoriesReady,
+    bundleId: persistenceBundleId,
+    persistenceEnabled,
   });
-  const layout = useWorkspaceLayout();
+  const layout = useWorkspaceLayout(initialWorkspaceState?.splitPosition);
   const models = useWorkspaceModels(setMessage);
   const tabs = useWorkspaceTabs({
     documents: documents.documents,
@@ -175,6 +190,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
 
   const session = useWorkspaceSessionPersistence({
     initialState: initialWorkspaceState,
+    bundleId: persistenceBundleId,
     documents: documents.documents,
     notes: explorer.notes,
     files: explorer.files,
@@ -182,13 +198,134 @@ export function useWorkspaceController(): WorkspaceShellProps {
     activeGroupId: tabs.activeGroupId,
     sidebarMode: explorer.sidebarMode,
     explorerScrollTop: explorer.explorerScrollTop,
+    splitPosition: layout.splitPosition,
     setGroups: tabs.setGroups,
     setActiveGroupId: tabs.setActiveGroupId,
     loadDocument: navigation.loadDocument,
     onLoadError: (_documentId, error) => {
       setMessage(error instanceof Error ? error.message : "Could not restore document");
     },
+    enabled: persistenceEnabled,
   });
+
+  const bundleSwitchRevisionRef = useRef(0);
+  const initialBundleIdRef = useRef<string | null | undefined>(undefined);
+  const previousBundleIdRef = useRef<string | null>(null);
+  const switchBundle = useCallback(async (bundleId: string, previousBundleId: string | null) => {
+    const revision = ++bundleSwitchRevisionRef.current;
+    explorer.setFilesLoading(true);
+    explorer.discovery.clearDiscovery();
+    if (previousBundleId) {
+      const currentSession = session.flush();
+      if (currentSession) writeStorageItem(`folio:workspace-state:v2:${previousBundleId}`, JSON.stringify({
+        ...currentSession,
+        expandedDirectories: [...explorer.expandedDirectories],
+      }));
+    }
+    try {
+      const [notes, files, drafts, status] = await Promise.all([
+        apiForBundle<Note[]>(bundleId, "/api/notes"),
+        apiForBundle<BundleFile[]>(bundleId, "/api/files"),
+        apiForBundle<import("../../../domain/types.ts").StoredDraft[]>(bundleId, "/api/drafts"),
+        apiForBundle<import("../../../domain/types.ts").ModelStatus>(bundleId, "/api/status"),
+      ]);
+      if (revision !== bundleSwitchRevisionRef.current) return;
+      explorer.setNotes(notes);
+      explorer.setFiles(files);
+      models.setStatus(status);
+      explorer.setExpandedDirectories(expandedPathsForFiles(files));
+      {
+      const nextDocuments = Object.fromEntries(drafts.map((draft) => [draft.id, {
+        id: draft.id, title: draftTitle(draft.content), type: "Local draft", description: "", tags: [], createdAt: draft.createdAt,
+        content: draft.content, deletable: true, movable: false, status: "draft" as const, staleAfter: null, stale: false,
+        filedBy: null, filedAt: null, links: [], backlinks: [], suggestions: [], updatedAt: draft.updatedAt,
+      }]));
+      documents.setDocuments(nextDocuments);
+      documents.setDrafts(Object.fromEntries(drafts.map((draft) => [draft.id, draft.content])));
+      }
+      const stored = readStorageItem(`folio:workspace-state:v2:${bundleId}`);
+      const parsedStored = stored ? JSON.parse(stored) as { state?: unknown; expandedDirectories?: string[]; splitPosition?: number } : null;
+      const restored = parseWorkspaceSessionState(parsedStored?.state || parsedStored);
+      const reconciled = restored
+        ? reconcileWorkspaceSessionState(restored, new Set([
+          ...notes.map((note) => note.id),
+          ...files.map((file) => file.id),
+          ...drafts.map((draft) => draft.id),
+        ]))
+        : { groups: [{ id: "primary", tabs: [], activeId: null, previewId: null }], activeGroupId: "primary" };
+      tabs.setGroups(reconciled.groups);
+      tabs.setActiveGroupId(reconciled.activeGroupId);
+      explorer.setSidebarMode(restored?.sidebarMode || "explore");
+      explorer.setExpandedDirectories(parsedStored?.expandedDirectories ? new Set(parsedStored.expandedDirectories) : expandedPathsForFiles(files));
+      setExplorerScrollTop(restored?.explorerScrollTop || 0);
+      session.restoreDocumentScrollTops(restored?.documentScrollTops || {});
+      layout.setSplitPosition(
+        restored?.splitPosition
+        ?? (typeof parsedStored?.splitPosition === "number" ? parsedStored.splitPosition : 50),
+      );
+      setPersistenceBundleId(bundleId);
+      explorer.setFilesLoading(false);
+      const restoredGroups = reconciled.groups;
+      session.skipInitialRestore();
+      const noteIds = new Set(notes.map((note) => note.id));
+      for (const group of restoredGroups) {
+        if (group.activeId) void navigation.loadDocument(group.activeId, noteIds.has(group.activeId) ? "note" : "file");
+      }
+    } catch (error) {
+      if (revision === bundleSwitchRevisionRef.current) {
+        bundleSetup.restoreBundle(previousBundleId);
+        setActiveBundleId(previousBundleId);
+        explorer.setFilesLoading(false);
+        setMessage(error instanceof Error ? error.message : "Could not switch bundles.");
+      }
+    }
+  }, [bundleSetup, documents, explorer, layout, models, navigation, session, setExplorerScrollTop, setPersistenceBundleId, tabs]);
+
+  useEffect(() => {
+    const id = bundleSetup.activeBundleId;
+    if (!id) return;
+    if (initialBundleIdRef.current === id) return;
+    const previousBundleId = initialBundleIdRef.current || previousBundleIdRef.current;
+    initialBundleIdRef.current = id;
+    previousBundleIdRef.current = id;
+    void switchBundle(id, previousBundleId);
+  }, [bundleSetup.activeBundleId, switchBundle]);
+
+  const selectBundle = useCallback((bundleId: string) => {
+    void Promise.all([finalizeAllFiledDocuments(), documents.flushDrafts()])
+      .then(() => bundleSetup.selectBundle(bundleId))
+      .catch((error) => {
+        setMessage(error instanceof Error ? error.message : "Could not save the current bundle before switching.");
+      });
+  }, [bundleSetup, documents, finalizeAllFiledDocuments]);
+  const clearEmptyWorkspace = useCallback(() => {
+    documents.setDocuments({});
+    documents.setDrafts({});
+    tabs.setGroups([{ id: "primary", tabs: [], activeId: null, previewId: null }]);
+    tabs.setActiveGroupId("primary");
+    setPersistenceBundleId("legacy-bundle");
+    explorer.setExpandedDirectories(new Set());
+    explorer.setExpandedDirectoriesReady(true);
+    explorer.setNotes([]);
+    explorer.setFiles([]);
+    explorer.setFilesLoading(false);
+  }, [documents, explorer, tabs]);
+  const setupBundle = useCallback(async (input: Parameters<typeof bundleSetup.setupBundle>[0]) => {
+    await Promise.all([finalizeAllFiledDocuments(), documents.flushDrafts()]);
+    return bundleSetup.setupBundle(input);
+  }, [bundleSetup, documents, finalizeAllFiledDocuments]);
+  const detachBundle = useCallback(async (bundleId: string) => {
+    await Promise.all([finalizeAllFiledDocuments(), documents.flushDrafts()]);
+    await bundleSetup.detachBundle(bundleId);
+    if (bundleSetup.activeBundleId === bundleId && bundleSetup.bundles.length === 1)
+      clearEmptyWorkspace();
+  }, [bundleSetup, clearEmptyWorkspace, documents, finalizeAllFiledDocuments]);
+  const settingsBundleSetup = {
+    ...bundleSetup,
+    selectBundle,
+    setupBundle,
+    detachBundle,
+  };
 
   const ensureDocumentLoaded = useCallback((documentId: string) => {
     if (documents.documents[documentId] || documents.loadingDocuments.has(documentId)) return;
@@ -225,6 +362,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
     setExpandedDirectories: explorer.setExpandedDirectories,
     setExpandedDirectoriesReady: explorer.setExpandedDirectoriesReady,
     onWorkspaceDataReady: session.markWorkspaceDataReady,
+    onNoBundle: clearEmptyWorkspace,
+    enabled: bundleSetup.ready,
   });
 
   useEffect(() => {
@@ -286,6 +425,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
       void finalizeAllFiledDocuments();
       return navigation.openDocument(...args);
     },
+    bundleSetup: settingsBundleSetup,
+    openSettings: themeSettings.openSettings,
   });
 
   return {
@@ -306,6 +447,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       themeId: themeSettings.themeId,
       onSelectTheme: themeSettings.selectTheme,
       obsidianImport,
+      bundleSetup: settingsBundleSetup,
       onClose: themeSettings.closeSettings,
     },
     sidebar,

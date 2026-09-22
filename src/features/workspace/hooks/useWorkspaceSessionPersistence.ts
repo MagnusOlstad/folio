@@ -18,10 +18,13 @@ type UseWorkspaceSessionPersistenceOptions = {
   activeGroupId: string;
   sidebarMode: SidebarMode;
   explorerScrollTop: number;
+  splitPosition: number;
   setGroups: React.Dispatch<React.SetStateAction<TabGroup[]>>;
   setActiveGroupId: React.Dispatch<React.SetStateAction<string>>;
   loadDocument: (id: string, source: "note" | "file") => Promise<void>;
   onLoadError?: (documentId: string, error: unknown) => void;
+  bundleId: string;
+  enabled?: boolean;
 };
 
 const PERSIST_DEBOUNCE_MS = 400;
@@ -35,10 +38,13 @@ export function useWorkspaceSessionPersistence({
   activeGroupId,
   sidebarMode,
   explorerScrollTop,
+  splitPosition,
   setGroups,
   setActiveGroupId,
   loadDocument,
   onLoadError,
+  bundleId,
+  enabled = true,
 }: UseWorkspaceSessionPersistenceOptions) {
   const [workspaceDataReady, setWorkspaceDataReady] = useState(initialState === null);
   const [workspaceRestored, setWorkspaceRestored] = useState(initialState === null);
@@ -50,6 +56,7 @@ export function useWorkspaceSessionPersistence({
     groups: TabGroup[];
     activeGroupId: string;
     sidebarMode: SidebarMode;
+    splitPosition: number;
   } | null>(null);
   const persistTimerRef = useRef<number | null>(null);
   const restoreStartedRef = useRef(false);
@@ -58,18 +65,18 @@ export function useWorkspaceSessionPersistence({
 
   useEffect(() => {
     explorerScrollTopRef.current = explorerScrollTop;
-    latestStateRef.current = { groups, activeGroupId, sidebarMode };
+    latestStateRef.current = { groups, activeGroupId, sidebarMode, splitPosition };
     workspaceRestoredRef.current = workspaceRestored;
     validIdsRef.current = new Set([
       ...Object.keys(documents),
       ...notes.map((note) => note.id),
       ...files.map((file) => file.id),
     ]);
-  }, [activeGroupId, documents, explorerScrollTop, files, groups, notes, sidebarMode, workspaceRestored]);
+  }, [activeGroupId, documents, explorerScrollTop, files, groups, notes, sidebarMode, splitPosition, workspaceRestored]);
 
   const save = useCallback(() => {
     const current = latestStateRef.current;
-    if (!workspaceRestoredRef.current || !current) return;
+    if (!enabled || !workspaceRestoredRef.current || !current) return;
     const state = {
       ...current,
       explorerScrollTop: explorerScrollTopRef.current,
@@ -79,26 +86,46 @@ export function useWorkspaceSessionPersistence({
       ),
     };
     writeStorageItem(
-      WORKSPACE_STATE_STORAGE_KEY,
+      `${WORKSPACE_STATE_STORAGE_KEY}:v2:${bundleId}`,
       JSON.stringify({ version: WORKSPACE_STATE_VERSION, ...state }),
     );
+  }, [bundleId, enabled]);
+
+  const snapshot = useCallback((): WorkspaceSessionState | null => {
+    const current = latestStateRef.current;
+    if (!current) return null;
+    return {
+      version: WORKSPACE_STATE_VERSION,
+      ...current,
+      explorerScrollTop: explorerScrollTopRef.current,
+      documentScrollTops: pruneDocumentScrollTops(
+        documentScrollTopsRef.current,
+        validIdsRef.current,
+      ),
+    };
   }, []);
 
+  const flush = useCallback(() => {
+    const current = snapshot();
+    save();
+    return current;
+  }, [save, snapshot]);
+
   const scheduleSave = useCallback(() => {
-    if (!workspaceRestored) return;
+    if (!enabled || !workspaceRestored) return;
     if (persistTimerRef.current !== null) window.clearTimeout(persistTimerRef.current);
     persistTimerRef.current = window.setTimeout(() => {
       persistTimerRef.current = null;
       save();
     }, PERSIST_DEBOUNCE_MS);
-  }, [save, workspaceRestored]);
+  }, [enabled, save, workspaceRestored]);
 
   useEffect(() => {
-    if (workspaceRestored) scheduleSave();
-  }, [activeGroupId, groups, scheduleSave, sidebarMode, workspaceRestored]);
+    if (enabled && workspaceRestored) scheduleSave();
+  }, [activeGroupId, bundleId, enabled, groups, scheduleSave, sidebarMode, splitPosition, workspaceRestored]);
 
   useEffect(() => {
-    if (!workspaceDataReady || workspaceRestored || restoreStartedRef.current || !initialState)
+    if (!enabled || !workspaceDataReady || workspaceRestored || restoreStartedRef.current || !initialState)
       return;
     restoreStartedRef.current = true;
     const validIds = new Set([
@@ -131,7 +158,7 @@ export function useWorkspaceSessionPersistence({
       void loadDocument(document.id, document.source).catch((error) =>
         onLoadError?.(document.id, error),
       );
-  }, [activeGroupId, documents, files, groups, initialState, loadDocument, notes, onLoadError, setActiveGroupId, setGroups, workspaceDataReady, workspaceRestored]);
+  }, [activeGroupId, documents, enabled, files, groups, initialState, loadDocument, notes, onLoadError, setActiveGroupId, setGroups, workspaceDataReady, workspaceRestored]);
 
   useEffect(() => {
     const flush = () => {
@@ -139,14 +166,14 @@ export function useWorkspaceSessionPersistence({
         window.clearTimeout(persistTimerRef.current);
         persistTimerRef.current = null;
       }
-      save();
+      if (enabled) save();
     };
     window.addEventListener("pagehide", flush);
     return () => {
       window.removeEventListener("pagehide", flush);
       flush();
     };
-  }, [save]);
+  }, [enabled, save]);
 
   const rememberDocumentScrollTop = useCallback((documentId: string, scrollTop: number) => {
     if (!Number.isFinite(scrollTop) || scrollTop < 0) return;
@@ -162,10 +189,25 @@ export function useWorkspaceSessionPersistence({
     [],
   );
 
+  const restoreDocumentScrollTops = useCallback((entries: Record<string, number>) => {
+    documentScrollTopsRef.current = pruneDocumentScrollTops(entries);
+  }, []);
+
+  const skipInitialRestore = useCallback(() => {
+    restoreStartedRef.current = true;
+    workspaceRestoredRef.current = true;
+    setWorkspaceDataReady(true);
+    setWorkspaceRestored(true);
+  }, []);
+
   return {
     workspaceDataReady,
     markWorkspaceDataReady: () => setWorkspaceDataReady(true),
     getDocumentScrollTop,
     rememberDocumentScrollTop,
+    restoreDocumentScrollTops,
+    skipInitialRestore,
+    snapshot,
+    flush,
   };
 }

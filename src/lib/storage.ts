@@ -59,13 +59,16 @@ export function removeStorageItem(key: string): void {
   }
 }
 
-export function loadExpandedDirectoryState(): ExpandedDirectoryState {
+export function loadExpandedDirectoryState(bundleId = "legacy-bundle"): ExpandedDirectoryState {
   try {
-    const stored = readStorageItem("folio:expanded-directories");
+    const scopedKey = `folio:expanded-directories:v2:${bundleId}`;
+    const scoped = readStorageItem(scopedKey);
+    const stored = scoped || (bundleId === "legacy-bundle" ? readStorageItem("folio:expanded-directories") : null);
     if (stored === null) return { directories: new Set(), restored: false };
     const parsed = JSON.parse(stored);
     if (!Array.isArray(parsed))
       throw new Error("Invalid expanded directory state");
+    if (!scoped && bundleId === "legacy-bundle") writeStorageItem(scopedKey, JSON.stringify(parsed));
     return {
       directories: new Set(
         parsed.filter((path): path is string => typeof path === "string"),
@@ -78,17 +81,24 @@ export function loadExpandedDirectoryState(): ExpandedDirectoryState {
 }
 
 /** Restores the existing browser draft cache without changing its on-disk format. */
-export function loadLocalDrafts(): ViewerDocument[] {
+export function loadLocalDrafts(bundleId = "legacy-bundle"): ViewerDocument[] {
   if (typeof window === "undefined") return [];
   let storedDrafts: string;
+  let hasScopedDrafts = false;
   try {
-    storedDrafts = readStorageItem("folio:drafts") || "[]";
+    const scoped = readStorageItem(`folio:drafts:v2:${bundleId}`);
+    hasScopedDrafts = scoped !== null;
+    storedDrafts = scoped
+      || (bundleId === "legacy-bundle" ? readStorageItem("folio:drafts") : null)
+      || "[]";
   } catch {
     return [];
   }
   try {
     const parsed: unknown = JSON.parse(storedDrafts);
     if (!Array.isArray(parsed)) return [];
+    if (!hasScopedDrafts && bundleId === "legacy-bundle")
+      writeStorageItem(`folio:drafts:v2:${bundleId}`, JSON.stringify(parsed));
     return parsed.flatMap((draft) => {
       if (!draft || typeof draft !== "object") return [];
       const value = draft as Record<string, unknown>;
@@ -119,7 +129,6 @@ export function loadLocalDrafts(): ViewerDocument[] {
         `folio:drafts-recovery:${Date.now()}`,
         storedDrafts,
       );
-      removeStorageItem("folio:drafts");
     } catch {
       /* storage unavailable */
     }

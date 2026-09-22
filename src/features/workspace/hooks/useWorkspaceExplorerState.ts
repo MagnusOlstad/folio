@@ -7,8 +7,9 @@ import type { WorkspaceSessionState } from "../model/workspace-state.ts";
 export function useWorkspaceExplorerState(
   setMessage: (message: string) => void,
   initialState?: WorkspaceSessionState | null,
+  bundleId = "legacy-bundle",
 ) {
-  const [initialExpandedDirectoryState] = useState(loadExpandedDirectoryState);
+  const [initialExpandedDirectoryState] = useState(() => loadExpandedDirectoryState(bundleId));
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>(
     initialState?.sidebarMode ?? "explore",
   );

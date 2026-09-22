@@ -12,16 +12,20 @@ import type { FilingQueueEntry } from "../model/filing.ts";
 type UseWorkspaceDocumentStateOptions = {
   expandedDirectories: Set<string>;
   expandedDirectoriesReady: boolean;
+  bundleId?: string;
+  persistenceEnabled?: boolean;
 };
 
 export function useWorkspaceDocumentState({
   expandedDirectories,
   expandedDirectoriesReady,
+  bundleId = "legacy-bundle",
+  persistenceEnabled = true,
 }: UseWorkspaceDocumentStateOptions) {
   const [documents, setDocuments] = useState<Record<string, ViewerDocument>>(
     () =>
       Object.fromEntries(
-        loadLocalDrafts().map((document) => [document.id, document]),
+        loadLocalDrafts(bundleId).map((document) => [document.id, document]),
       ),
   );
   const [loadingDocuments, setLoadingDocuments] = useState<Set<string>>(
@@ -109,6 +113,12 @@ export function useWorkspaceDocumentState({
     }));
   }
 
+  async function flushDrafts() {
+    if (!persistenceEnabled) return;
+    await Promise.all(draftSnapshotRef.current.map(queueDraftSync));
+    await Promise.all(Object.values(draftSyncQueues.current));
+  }
+
   useWorkspacePersistence({
     documents,
     drafts,
@@ -117,6 +127,8 @@ export function useWorkspaceDocumentState({
     queueDraftSync,
     expandedDirectories,
     expandedDirectoriesReady,
+    bundleId,
+    enabled: persistenceEnabled,
   });
 
   useEffect(() => {
@@ -150,6 +162,7 @@ export function useWorkspaceDocumentState({
     documentsRef,
     mergeRemoteDrafts,
     changeDraftContent,
+    flushDrafts,
   };
 }
 

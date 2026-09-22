@@ -12,6 +12,7 @@ import type { WorkspaceSidebarProps } from "../../sidebar/WorkspaceSidebar.tsx";
 import type { WorkspaceDocumentState } from "./useWorkspaceDocumentState.ts";
 import type { WorkspaceExplorerState } from "./useWorkspaceExplorerState.ts";
 import type { ReturnTypeOfWorkspaceModels } from "./useWorkspaceModels.ts";
+import type { useBundleSetup } from "../../settings/hooks/useBundleSetup.ts";
 
 type Options = {
   explorer: WorkspaceExplorerState;
@@ -24,6 +25,8 @@ type Options = {
   openLocalDraft: (id: string) => void;
   deleteLocalDraft: (id: string) => Promise<void>;
   openDocument: WorkspaceSidebarProps["openDocument"];
+  bundleSetup: ReturnType<typeof useBundleSetup>;
+  openSettings: () => void;
 };
 
 export function useWorkspaceSidebarProps({
@@ -37,6 +40,8 @@ export function useWorkspaceSidebarProps({
   openLocalDraft,
   deleteLocalDraft,
   openDocument,
+  bundleSetup,
+  openSettings,
 }: Options): {
   sidebar: WorkspaceSidebarProps;
   moveBundleFile: ReturnType<typeof useWorkspaceBundleActions>["moveBundleFile"];
@@ -111,6 +116,10 @@ export function useWorkspaceSidebarProps({
       setDraggedFileId: explorer.setDraggedFileId,
       setDropDirectoryPath: explorer.setDropDirectoryPath,
       moveBundleFile,
+      bundles: bundleSetup.bundles,
+      activeBundleId: bundleSetup.activeBundleId,
+      selectBundle: bundleSetup.selectBundle,
+      openSettings,
       status: models.status,
       notes: explorer.notes,
       searchInputRef: explorer.searchInputRef,

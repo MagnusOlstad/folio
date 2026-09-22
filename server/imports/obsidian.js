@@ -3,6 +3,8 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 const IGNORED_DIRECTORIES = new Set(['.obsidian', '.trash', '.git'])
+const activeScans = new Map()
+const activeJobs = new Map()
 
 function hash(value) {
   return crypto.createHash('sha256').update(value).digest('hex')
@@ -143,8 +145,8 @@ async function collectFilesystemFiles(root, directory = root) {
 }
 
 export function createObsidianImportService(runtime) {
-  const scans = new Map()
-  const jobs = new Map()
+  const scans = activeScans
+  const jobs = activeJobs
 
   function vaultRoot(vaultId) {
     return path.join(runtime.importsRoot, 'obsidian', vaultId)
@@ -207,6 +209,12 @@ export function createObsidianImportService(runtime) {
 
   function publicScan(scan) {
     return { id: scan.id, vaultId: scan.vaultId, name: scan.name, provider: scan.provider, total: scan.files.length, counts: scan.counts, requiredUploads: scan.requiredUploads }
+  }
+
+  async function refreshObsidianScan(scanId) {
+    const scan = scans.get(scanId)
+    if (!scan) throw new Error('Import scan not found.')
+    return finishScan(scan)
   }
 
   async function scanObsidianFilesystem(vaultPath) {
@@ -410,5 +418,5 @@ export function createObsidianImportService(runtime) {
     return getObsidianImportJob(jobId)
   }
 
-  return { scanObsidianFilesystem, scanObsidianBrowser, stageBrowserFile, startObsidianImport, getObsidianImportJob, cancelObsidianImport }
+  return { scanObsidianFilesystem, scanObsidianBrowser, refreshObsidianScan, stageBrowserFile, startObsidianImport, getObsidianImportJob, cancelObsidianImport }
 }

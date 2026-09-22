@@ -3,13 +3,15 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 export function registerRoutes(app, runtime) {
-  const { embedModel, rawRoot, bundleRoot, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, normalizeDraftId, queueDraftMutation,
+  const { embedModel, getRawRoot, getBundleRoot, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, normalizeDraftId, queueDraftMutation,
     readDraft, writeDraft, resolveBundleMarkdownPath, readBundleDocuments, bundleFileId, parseMarkdownFile, queueMarkdownMutation, reindexBundle,
     normalizeInlineText, markdownDocument, embeddingInputHash, persistEmbeddingUpdates, refreshRecordEmbeddings, embedDocument, boundedEmbeddingText,
     embeddingSchemaVersion, classify, openingSpecialKind, rawDocument,
     slugify, confirmationIdFor, destinationFor, availableConceptFilename, findExactConceptFile, appendConceptDocument, appendAggregateDocument, filingActor,
     conceptDocument, validTimeZone, dateKeyInTimeZone, normalizeClassification, embeddingDimension,
     normalizeMarkdownBreaks, creationRelationships } = runtime
+  const rawRootForRequest = typeof getRawRoot === 'function' ? getRawRoot : () => runtime.rawRoot
+  const bundleRootForRequest = typeof getBundleRoot === 'function' ? getBundleRoot : () => runtime.bundleRoot
 app.post('/api/notes', async (request, response, next) => {
   try {
     const content = String(request.body?.content || '').trim()
@@ -46,7 +48,7 @@ app.post('/api/notes', async (request, response, next) => {
     const rawId = `/references/inbox/${rawFile}`
     const confirmationId = confirmationIdFor(rawId)
     await queueMarkdownMutation(() => (
-      fs.writeFile(path.join(rawRoot, rawFile), rawDocument(rawTitle, content, createdAt), { flag: 'wx' })
+      fs.writeFile(path.join(rawRootForRequest(), rawFile), rawDocument(rawTitle, content, createdAt), { flag: 'wx' })
     ))
 
     const records = await readRecords()
@@ -93,7 +95,7 @@ app.post('/api/notes', async (request, response, next) => {
       const dateKey = dateKeyInTimeZone(new Date(createdAt), timeZone)
       classification.id = classification.kind === 'todo' ? '/todo-list.md' : `/daily/${dateKey}.md`
       const aggregate = await queueMarkdownMutation(() => appendAggregateDocument({
-        filePath: path.join(bundleRoot, classification.id.replace(/^\//, '')),
+        filePath: path.join(bundleRootForRequest(), classification.id.replace(/^\//, '')),
         id: classification.id,
         kind: classification.kind,
         rawId,
@@ -110,7 +112,7 @@ app.post('/api/notes', async (request, response, next) => {
       classification.relatedIds = classification.relationships.map((relationship) => relationship.id)
 
       const relatedConcepts = new Map(records.map((record) => [record.id, record]))
-      const targetFolder = path.join(bundleRoot, folder)
+      const targetFolder = path.join(bundleRootForRequest(), folder)
       await queueMarkdownMutation(async () => {
         await fs.mkdir(targetFolder, { recursive: true })
         const existingFile = await findExactConceptFile(targetFolder, classification.title)
@@ -196,7 +198,7 @@ app.post('/api/notes', async (request, response, next) => {
       }
     }
     const standaloneFilename = await availableConceptFilename(
-      path.join(bundleRoot, classification.path.join('/')),
+      path.join(bundleRootForRequest(), classification.path.join('/')),
       classification.title,
       createdAt.slice(0, 10),
       pendingStandaloneFilenames,

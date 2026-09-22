@@ -1,9 +1,11 @@
 import { useState } from "react";
 import type { PointerEvent } from "react";
 
-export function useWorkspaceLayout() {
+export function useWorkspaceLayout(initialSplitPosition?: number) {
   const [sidebarWidth, setSidebarWidth] = useState<number | null>(null);
-  const [splitPosition, setSplitPosition] = useState(50);
+  const [splitPosition, setSplitPosition] = useState(
+    initialSplitPosition ?? 50,
+  );
 
   function beginHorizontalResize(event: PointerEvent<HTMLElement>) {
     if (event.button !== 0) return;

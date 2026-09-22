@@ -28,7 +28,10 @@ export function registerRoutes(app, runtime) {
     response.set('Cache-Control', 'no-store')
     response.attachment(backupFilename())
     archive.pipe(response)
-    archive.directory(runtime.bundleRoot, 'bundle')
+    archive.directory(
+      typeof runtime.getBundleRoot === 'function' ? runtime.getBundleRoot() : runtime.bundleRoot,
+      'bundle',
+    )
     void archive.finalize().catch(fail)
   })
 }

@@ -1,5 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useState } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { FileTree } from "../explorer/FileTree.tsx";
 import type {
@@ -11,6 +12,7 @@ import type {
   TreeDirectory,
   ViewerDocument,
 } from "../../domain/types.ts";
+import type { Bundle } from "../../domain/types.ts";
 
 type OpenDocument = (
   id: string,
@@ -71,6 +73,10 @@ export type WorkspaceSidebarProps = {
   answer: AskResult | null;
   conceptUrl: (id: string) => string;
   formatDate: (value: string) => string;
+  bundles: Bundle[];
+  activeBundleId: string | null;
+  selectBundle: (id: string) => void;
+  openSettings: () => void;
 };
 
 export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
@@ -126,7 +132,119 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
     answer,
     conceptUrl,
     formatDate,
+    bundles,
+    activeBundleId,
+    selectBundle,
+    openSettings,
   } = props;
+  const [collapsedBundleId, setCollapsedBundleId] = useState<string | null>(
+    null,
+  );
+
+  function handleBundleClick(bundleId: string) {
+    if (bundleId === activeBundleId) {
+      setCollapsedBundleId((current) =>
+        current === bundleId ? null : bundleId,
+      );
+      return;
+    }
+    setCollapsedBundleId(null);
+    selectBundle(bundleId);
+  }
+
+  const treePanel = (
+    <div
+      className="tree-scroll"
+      style={{ overflowAnchor: "none" }}
+      onScroll={(event) => onExplorerScroll(event.currentTarget.scrollTop)}
+      ref={(element) => {
+        if (element && element.scrollTop !== explorerScrollTop)
+          element.scrollTop = explorerScrollTop;
+      }}
+    >
+      {filesLoading ? (
+        <p className="sidebar-empty">Reading bundle...</p>
+      ) : (
+        <>
+          {localDraftDocuments.length > 0 && (
+            <div className="tree-branch local-drafts">
+              <div
+                className="tree-row tree-directory static"
+                style={{ "--tree-depth": 0 } as React.CSSProperties}
+              >
+                <span className="tree-chevron">v</span>
+                <span className="tree-folder" aria-hidden="true" />
+                <span>Drafts</span>
+                <small>{localDraftDocuments.length}</small>
+              </div>
+              {localDraftDocuments.map((draft) => (
+                <div
+                  className="tree-row tree-file draft-tree-row"
+                  style={{ "--tree-depth": 1 } as React.CSSProperties}
+                  key={draft.id}
+                >
+                  <button
+                    type="button"
+                    className="draft-tree-open"
+                    onClick={() => openLocalDraft(draft.id)}
+                    title="Local draft"
+                  >
+                    <span className="tree-file-mark">D</span>
+                    <span>
+                      {draftTitle(drafts[draft.id] ?? draft.content)}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="draft-tree-delete"
+                    onClick={() => void deleteLocalDraft(draft.id)}
+                    disabled={
+                      deletingDraftIds.has(draft.id) ||
+                      savingDocuments.has(draft.id)
+                    }
+                    title="Delete draft"
+                    aria-label={`Delete ${draftTitle(drafts[draft.id] ?? draft.content)}`}
+                  >
+                    x
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <FileTree
+            directory={fileTree}
+            depth={0}
+            expanded={expandedDirectories}
+            draggedFileId={draggedFileId}
+            dropDirectoryPath={dropDirectoryPath}
+            movingFileId={movingFileId}
+            blockedFileIds={blockedFileIds}
+            onToggle={(path) =>
+              setExpandedDirectories((current: Set<string>) => {
+                const next = new Set(current);
+                if (next.has(path)) next.delete(path);
+                else next.add(path);
+                return next;
+              })
+            }
+            onOpen={(id, disposition) =>
+              void openDocument(id, "file", undefined, disposition)
+            }
+            onFileDragStart={setDraggedFileId}
+            onFileDragEnd={() => {
+              setDraggedFileId(null);
+              setDropDirectoryPath(null);
+            }}
+            onDirectoryDragOver={setDropDirectoryPath}
+            onMove={(id, directory) =>
+              void moveBundleFile(id, directory)
+            }
+          />
+        </>
+      )}
+    </div>
+  );
+
   return (
     <aside className="workbench-sidebar">
       <nav className="sidebar-tabs" aria-label="Sidebar tools">
@@ -156,96 +274,42 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                 {reindexing ? "..." : "Reindex"}
               </button>
             </div>
-            <div
-              className="tree-scroll"
-              style={{ overflowAnchor: "none" }}
-              onScroll={(event) => onExplorerScroll(event.currentTarget.scrollTop)}
-              ref={(element) => {
-                if (element && element.scrollTop !== explorerScrollTop)
-                  element.scrollTop = explorerScrollTop;
-              }}
-            >
-              {filesLoading ? (
-                <p className="sidebar-empty">Reading bundle...</p>
-              ) : (
-                <>
-                  {localDraftDocuments.length > 0 && (
-                    <div className="tree-branch local-drafts">
+            {bundles.length > 0 ? (
+              <div className="bundle-explorer-list" aria-label="Bundles">
+                {bundles.map((bundle) => {
+                  const active = bundle.id === activeBundleId;
+                  const expanded = active && bundle.id !== collapsedBundleId;
+                  return (
+                  <div
+                    className={`bundle-explorer-root${active ? " active" : ""}${expanded ? " expanded" : ""}`}
+                    key={bundle.id}
+                  >
+                    <button
+                      type="button"
+                      aria-expanded={expanded}
+                      aria-controls={active ? `bundle-tree-${bundle.id}` : undefined}
+                      className={`bundle-explorer-heading${active ? " active" : ""}${expanded ? " expanded" : ""}`}
+                      onClick={() => handleBundleClick(bundle.id)}
+                      title={bundle.markdownPath}
+                    >
+                      <span className="bundle-explorer-chevron" aria-hidden="true">›</span>
+                      <span className="bundle-explorer-icon" aria-hidden="true">▱</span>
+                      <span className="bundle-explorer-name">{bundle.name}</span>
+                      {active ? <span className="bundle-explorer-active" aria-label="Active bundle" /> : null}
+                    </button>
+                    {active && expanded ? (
                       <div
-                        className="tree-row tree-directory static"
-                        style={{ "--tree-depth": 0 } as React.CSSProperties}
+                        className="bundle-explorer-content"
+                        id={`bundle-tree-${bundle.id}`}
                       >
-                        <span className="tree-chevron">v</span>
-                        <span className="tree-folder" aria-hidden="true" />
-                        <span>Drafts</span>
-                        <small>{localDraftDocuments.length}</small>
+                        {treePanel}
                       </div>
-                      {localDraftDocuments.map((draft) => (
-                        <div
-                          className="tree-row tree-file draft-tree-row"
-                          style={{ "--tree-depth": 1 } as React.CSSProperties}
-                          key={draft.id}
-                        >
-                          <button
-                            type="button"
-                            className="draft-tree-open"
-                            onClick={() => openLocalDraft(draft.id)}
-                            title="Local draft"
-                          >
-                            <span className="tree-file-mark">D</span>
-                            <span>
-                              {draftTitle(drafts[draft.id] ?? draft.content)}
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            className="draft-tree-delete"
-                            onClick={() => void deleteLocalDraft(draft.id)}
-                            disabled={
-                              deletingDraftIds.has(draft.id) ||
-                              savingDocuments.has(draft.id)
-                            }
-                            title="Delete draft"
-                            aria-label={`Delete ${draftTitle(drafts[draft.id] ?? draft.content)}`}
-                          >
-                            x
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <FileTree
-                    directory={fileTree}
-                    depth={0}
-                    expanded={expandedDirectories}
-                    draggedFileId={draggedFileId}
-                    dropDirectoryPath={dropDirectoryPath}
-                    movingFileId={movingFileId}
-                    blockedFileIds={blockedFileIds}
-                    onToggle={(path) =>
-                      setExpandedDirectories((current: Set<string>) => {
-                        const next = new Set(current);
-                        if (next.has(path)) next.delete(path);
-                        else next.add(path);
-                        return next;
-                      })
-                    }
-                    onOpen={(id, disposition) =>
-                      void openDocument(id, "file", undefined, disposition)
-                    }
-                    onFileDragStart={setDraggedFileId}
-                    onFileDragEnd={() => {
-                      setDraggedFileId(null);
-                      setDropDirectoryPath(null);
-                    }}
-                    onDirectoryDragOver={setDropDirectoryPath}
-                    onMove={(id, directory) =>
-                      void moveBundleFile(id, directory)
-                    }
-                  />
-                </>
-              )}
-            </div>
+                    ) : null}
+                  </div>
+                  );
+                })}
+              </div>
+            ) : <div className="bundle-explorer-empty"><span aria-hidden="true">▱</span><strong>A space for your notes</strong><p>Create a bundle or open an existing Folio bundle to get started.</p><button type="button" className="bundle-setup-cta" onClick={openSettings}>Add or import bundle</button></div>}
           </>
         ) : sidebarMode === "search" ? (
           <>

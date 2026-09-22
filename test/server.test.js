@@ -152,6 +152,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   await listen(ollama)
   const ollamaPort = ollama.address().port
   process.env.FOLIO_DATA_ROOT = dataRoot
+  await fs.mkdir(path.join(dataRoot, 'bundle'), { recursive: true })
   process.env.FOLIO_DIST_ROOT = path.join(dataRoot, 'dist')
   process.env.OLLAMA_URL = `http://127.0.0.1:${ollamaPort}`
 

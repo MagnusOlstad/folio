@@ -11,6 +11,8 @@ export function useWorkspacePersistence({
   queueDraftSync,
   expandedDirectories,
   expandedDirectoriesReady,
+  bundleId,
+  enabled,
 }: {
   documents: Record<string, ViewerDocument>;
   drafts: Record<string, string>;
@@ -19,10 +21,13 @@ export function useWorkspacePersistence({
   queueDraftSync: (draft: StoredDraft) => Promise<void>;
   expandedDirectories: Set<string>;
   expandedDirectoriesReady: boolean;
+  bundleId: string;
+  enabled: boolean;
 }) {
   // Keep the original synchronization cadence: it follows draft changes, not callback identity.
   useEffect(() => {
     documentsRef.current = documents;
+    if (!enabled) return;
     const localDrafts: StoredDraft[] = Object.values(documents)
       .filter((document) => isUntitledId(document.id))
       .map((document) => ({
@@ -34,7 +39,7 @@ export function useWorkspacePersistence({
     const nonemptyDrafts = localDrafts.filter((draft) => draft.content.trim());
     draftSnapshotRef.current = nonemptyDrafts;
     try {
-      writeStorageItem("folio:drafts", JSON.stringify(nonemptyDrafts));
+      writeStorageItem(`folio:drafts:v2:${bundleId}`, JSON.stringify(nonemptyDrafts));
     } catch {
       /* server copy remains authoritative */
     }
@@ -43,17 +48,17 @@ export function useWorkspacePersistence({
     }, 450);
     return () => window.clearTimeout(syncTimer);
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [documents, drafts]);
+  }, [bundleId, documents, drafts, enabled]);
 
   useEffect(() => {
-    if (!expandedDirectoriesReady) return;
+    if (!enabled || !expandedDirectoriesReady) return;
     try {
       writeStorageItem(
-        "folio:expanded-directories",
+        `folio:expanded-directories:v2:${bundleId}`,
         JSON.stringify([...expandedDirectories]),
       );
     } catch {
       /* optional persistence */
     }
-  }, [expandedDirectories, expandedDirectoriesReady]);
+  }, [bundleId, expandedDirectories, expandedDirectoriesReady, enabled]);
 }

@@ -64,6 +64,7 @@ export function WorkspaceShell({
           themeId={settings.themeId}
           onSelectTheme={settings.onSelectTheme}
           obsidianImport={settings.obsidianImport}
+          bundleSetup={settings.bundleSetup}
           onClose={settings.onClose}
         />
       ) : null}
