@@ -185,6 +185,36 @@ test("renders one clickable control for a task-list marker", async ({ page }) =>
   await task.click();
 
   await expect(task).toBeChecked();
+  await expect(editor.locator(".cm-live-markdown-task-complete")).toHaveCSS(
+    "text-decoration-line",
+    "line-through",
+  );
+});
+
+test("keeps outer scroll stable when toggling a task away from the selection", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTitle("New note (Cmd+T)").click();
+  const editor = page.getByLabel("Write a new note");
+  const surface = liveSurface(page);
+  const scroller = scrollSurface(page);
+  const filler = Array.from({ length: 45 }, (_, index) => `filler ${index + 1}`).join("\n");
+  await editor.fill(`- [ ] Task\n${filler}`);
+
+  const selectedLine = surface.locator(".cm-line").filter({ hasText: "filler 40" });
+  await selectedLine.click();
+  const selectedLineIndex = await caretLineIndex(editor);
+  expect(selectedLineIndex).toBeGreaterThan(0);
+  await scroller.evaluate((element) => {
+    element.scrollTop = 120;
+  });
+  const checkbox = surface.getByRole("checkbox", { name: "Toggle task on line 1" });
+  await expect(checkbox).toBeVisible();
+  const scrollBefore = await scroller.evaluate((element) => element.scrollTop);
+
+  await checkbox.click();
+
+  await expect(checkbox).toBeChecked();
+  expect(Math.abs((await scroller.evaluate((element) => element.scrollTop)) - scrollBefore)).toBeLessThanOrEqual(1);
 });
 
 test("opens a bare web URL from the live editor with a modifier-click", async ({ page }) => {

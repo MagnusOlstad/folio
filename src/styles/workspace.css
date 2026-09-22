@@ -1353,6 +1353,10 @@ body.resizing-horizontal * {
   vertical-align: -1px;
 }
 
+.live-markdown-editor .cm-live-markdown-task-complete {
+  text-decoration: line-through;
+}
+
 .live-markdown-editor .cm-live-markdown-table {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.88em;
@@ -1479,6 +1483,10 @@ body.resizing-horizontal * {
   height: 15px;
   margin-right: 8px;
   accent-color: var(--acid);
+}
+
+.document-content .task-list-item:has(> input[type='checkbox']:checked) {
+  text-decoration: line-through;
 }
 
 .document-content code {
