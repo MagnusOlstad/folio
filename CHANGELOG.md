@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/MagnusOlstad/folio/compare/v0.5.0...v0.6.0) (2026-09-22)
+
+
+### Features
+
+* add multiple bundle workspaces ([#67](https://github.com/MagnusOlstad/folio/issues/67)) ([8b403d4](https://github.com/MagnusOlstad/folio/commit/8b403d44e20c0616f4d4663441a8d9caa1efea4a))
+
+
+### Bug Fixes
+
+* **ci:** verify packaged macos app artifacts ([#65](https://github.com/MagnusOlstad/folio/issues/65)) ([ab91ca3](https://github.com/MagnusOlstad/folio/commit/ab91ca3c1236226ba51cf9517b8225ea0188c411))
+* **editor:** preserve task checkbox scroll position ([#68](https://github.com/MagnusOlstad/folio/issues/68)) ([6ff24b6](https://github.com/MagnusOlstad/folio/commit/6ff24b6f0c52ca3873e3ad917954ae1f853cc6d0))
+
 ## [0.5.0](https://github.com/MagnusOlstad/folio/compare/v0.4.0...v0.5.0) (2026-09-21)
 
 
