@@ -7,9 +7,12 @@ import type {
   TabDrag,
 } from "../types.ts";
 
+export type TabDropSlot = { groupId: string; index: number };
+
 export function useWorkspaceEditorUi() {
   const [draggedTab, setDraggedTab] = useState<TabDrag | null>(null);
   const [dropGroupId, setDropGroupId] = useState<string | null>(null);
+  const [dropTabSlot, setDropTabSlot] = useState<TabDropSlot | null>(null);
   const [metadataDrafts, setMetadataDrafts] = useState<Record<string, string>>(
     {},
   );
@@ -123,6 +126,8 @@ export function useWorkspaceEditorUi() {
     setDraggedTab,
     dropGroupId,
     setDropGroupId,
+    dropTabSlot,
+    setDropTabSlot,
     metadataDrafts,
     editingMetadataKey,
     beginMetadataEditing,

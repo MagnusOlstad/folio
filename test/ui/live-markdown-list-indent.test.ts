@@ -62,6 +62,13 @@ describe("changeLiveMarkdownListIndentation", () => {
 });
 
 describe("continueLiveMarkdownList", () => {
+  it("inserts an unchecked task before a checked item at its first content position", () => {
+    expect(continueLiveMarkdownList("- [x] done", "- [x] ".length, "- [x] ".length)).toEqual({
+      value: "- [ ] \n- [x] done",
+      caret: "- [ ] ".length,
+    });
+  });
+
   it("renumbers direct ordered siblings after inserting a list item", () => {
     expect(continueLiveMarkdownList("1. first\n2. second", 8, 8)).toEqual({
       value: "1. first\n2. \n3. second",

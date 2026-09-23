@@ -114,11 +114,13 @@ class TaskCheckboxWidget extends WidgetType {
 class ListMarkerWidget extends WidgetType {
   private readonly marker: string;
   private readonly nested: boolean;
+  private readonly contentStart: number;
 
-  constructor(marker: string, nested: boolean) {
+  constructor(marker: string, nested: boolean, contentStart: number) {
     super();
     this.marker = marker;
     this.nested = nested;
+    this.contentStart = contentStart;
   }
 
   eq(other: ListMarkerWidget) {
@@ -141,6 +143,14 @@ class ListMarkerWidget extends WidgetType {
         ? "◦"
         : "•";
     marker.setAttribute("aria-hidden", "true");
+    marker.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      marker.dispatchEvent(new CustomEvent<number>("folio-select-list-content", {
+        bubbles: true,
+        detail: this.contentStart,
+      }));
+    });
     return marker;
   }
 }
@@ -336,12 +346,18 @@ function buildDecorations(
                 lineNumber,
                 configuration.callbacks,
               ),
+              side: 1,
             }).range(markerStart, line.from + task[0].length),
           );
         } else {
           ranges.push(
             Decoration.replace({
-              widget: new ListMarkerWidget(list[2], listIndent >= 2),
+              widget: new ListMarkerWidget(
+                list[2],
+                listIndent >= 2,
+                markerEnd,
+              ),
+              side: 1,
             }).range(markerStart, markerEnd),
           );
         }
@@ -457,6 +473,27 @@ export function continueLiveMarkdownList(
   if (!match) return null;
   const [, prefix, marker, spacing, taskState, taskSpacing = "", itemContent] = match;
   const markerLength = prefix.length + marker.length + spacing.length + (taskState === undefined ? 0 : taskSpacing.length + 3);
+  if (
+    taskState !== undefined &&
+    itemContent.trim() &&
+    selectionStart === lineStart + markerLength
+  ) {
+    const blankPrefix = `${prefix}${marker}${spacing}[ ]${taskSpacing}`;
+    return {
+      value: `${value.slice(0, lineStart)}${blankPrefix}\n${value.slice(lineStart)}`,
+      caret: lineStart + blankPrefix.length,
+    };
+  }
+  // Splitting at the very start of an existing item inserts a fresh item
+  // before it. A new task must always start unchecked; the source item (and
+  // its checked state) remains intact on the following line.
+  if (selectionStart === lineStart && itemContent.trim()) {
+    const nextPrefix = `${prefix}${marker}${spacing}${taskState === undefined ? "" : `[ ]${taskSpacing}`}`;
+    return {
+      value: `${value.slice(0, lineStart)}${nextPrefix}\n${value.slice(lineStart)}`,
+      caret: lineStart + nextPrefix.length,
+    };
+  }
   if (selectionStart - lineStart < markerLength) return null;
   if (!itemContent.trim())
     return {

@@ -87,9 +87,20 @@ export function moveGroupTab(
   documentId: string,
   sourceGroupId: string,
   targetGroupId: string,
+  targetIndex?: number,
 ) {
-  if (sourceGroupId === targetGroupId)
-    return pinGroupTab(groups, sourceGroupId, documentId);
+  if (sourceGroupId === targetGroupId) {
+    if (targetIndex === undefined) return groups;
+    return groups.map((group) => {
+      if (group.id !== sourceGroupId) return group;
+      const currentIndex = group.tabs.indexOf(documentId);
+      if (currentIndex === -1) return group;
+      const tabs = group.tabs.filter((id) => id !== documentId);
+      const insertionIndex = Math.max(0, Math.min(targetIndex, tabs.length));
+      tabs.splice(insertionIndex, 0, documentId);
+      return { ...group, tabs };
+    });
+  }
   return groups.map((group) => {
     if (group.id === sourceGroupId) {
       const tabIndex = group.tabs.indexOf(documentId);
@@ -117,6 +128,10 @@ export function moveGroupTab(
     }
     return group;
   });
+}
+
+export function reorderGroupTab(groups: TabGroup[], groupId: string, documentId: string, targetIndex: number) {
+  return moveGroupTab(groups, documentId, groupId, groupId, targetIndex);
 }
 
 export function mergeClosedGroup(groups: TabGroup[], groupId: string) {

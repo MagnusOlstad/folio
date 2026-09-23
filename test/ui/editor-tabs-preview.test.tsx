@@ -35,4 +35,34 @@ describe("EditorTabs preview tabs", () => {
     fireEvent.doubleClick(previewTab);
     expect(onPinTab).toHaveBeenCalledWith("primary", "preview");
   });
+
+  it("forwards tab drops to support reordering within a group", () => {
+    const onDropTab = vi.fn();
+    render(
+      <EditorTabs
+        group={{ id: "primary", tabs: ["first", "second"], activeId: "first", previewId: null }}
+        groupCount={1}
+        titleForId={(id) => id}
+        isUntitledId={() => false}
+        onActivate={vi.fn()}
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+        onDropTab={onDropTab}
+        onCloseTab={vi.fn()}
+        onNewTab={vi.fn()}
+        onSplit={vi.fn()}
+        onCloseGroup={vi.fn()}
+        onPinTab={vi.fn()}
+      />,
+    );
+
+    fireEvent.drop(screen.getByTitle("second"), {
+      dataTransfer: { getData: () => "" },
+    });
+    expect(onDropTab).toHaveBeenCalledWith(
+      expect.anything(),
+      "second",
+      "primary",
+    );
+  });
 });

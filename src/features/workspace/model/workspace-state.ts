@@ -12,12 +12,14 @@ export type WorkspaceSessionState = {
   explorerScrollTop: number;
   splitPosition?: number;
   documentScrollTops: Record<string, number>;
+  documentSelections?: Record<string, { from: number; to: number }>;
 };
 
 const sidebarModes = new Set<SidebarMode>(["explore", "search", "ask"]);
 const workspaceGroupIds = new Set(["primary", "secondary"]);
 export const MAX_TABS_PER_GROUP = 100;
 export const MAX_DOCUMENT_SCROLL_ENTRIES = 200;
+export const MAX_DOCUMENT_SELECTION_ENTRIES = 200;
 
 function validId(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 500;
@@ -83,10 +85,34 @@ export function parseWorkspaceSessionState(value: unknown): WorkspaceSessionStat
         documentScrollTops[id] = top;
     }
   }
+  const documentSelections: Record<string, { from: number; to: number }> = {};
+  if (candidate.documentSelections && typeof candidate.documentSelections === "object") {
+    for (const [id, selection] of Object.entries(candidate.documentSelections).slice(-MAX_DOCUMENT_SELECTION_ENTRIES)) {
+      if (!validId(id) || !selection || typeof selection !== "object") continue;
+      const candidateSelection = selection as Record<string, unknown>;
+      const from = candidateSelection.from;
+      const to = candidateSelection.to;
+      if (
+        typeof from === "number" && Number.isInteger(from) && from >= 0 &&
+        typeof to === "number" && Number.isInteger(to) && to >= from
+      ) documentSelections[id] = { from, to };
+    }
+  }
   const splitPosition = typeof candidate.splitPosition === "number" && Number.isFinite(candidate.splitPosition) && candidate.splitPosition >= 0 && candidate.splitPosition <= 100
     ? candidate.splitPosition
     : undefined;
-  return { version: 1, groups, activeGroupId, sidebarMode, explorerScrollTop, splitPosition, documentScrollTops };
+  return {
+    version: 1,
+    groups,
+    activeGroupId,
+    sidebarMode,
+    explorerScrollTop,
+    splitPosition,
+    documentScrollTops,
+    ...(candidate.documentSelections && typeof candidate.documentSelections === "object"
+      ? { documentSelections }
+      : {}),
+  };
 }
 
 export function pruneDocumentScrollTops(
@@ -97,6 +123,22 @@ export function pruneDocumentScrollTops(
     ([id, top]) => validId(id) && Number.isFinite(top) && top >= 0 && (!validIds || validIds.has(id)),
   );
   return Object.fromEntries(candidates.slice(-MAX_DOCUMENT_SCROLL_ENTRIES));
+}
+
+export function pruneDocumentSelections(
+  entries: Record<string, { from: number; to: number }>,
+  validIds?: ReadonlySet<string>,
+): Record<string, { from: number; to: number }> {
+  const candidates = Object.entries(entries).filter(
+    ([id, selection]) =>
+      validId(id) &&
+      Number.isInteger(selection.from) &&
+      Number.isInteger(selection.to) &&
+      selection.from >= 0 &&
+      selection.to >= selection.from &&
+      (!validIds || validIds.has(id)),
+  );
+  return Object.fromEntries(candidates.slice(-MAX_DOCUMENT_SELECTION_ENTRIES));
 }
 
 export function reconcileWorkspaceSessionState(

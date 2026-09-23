@@ -5,6 +5,8 @@ import {
   defaultKeymap,
   history,
   historyKeymap,
+  indentLess,
+  indentMore,
   selectAll,
 } from "@codemirror/commands";
 import { Compartment, EditorSelection, EditorState } from "@codemirror/state";
@@ -33,6 +35,8 @@ export type LiveMarkdownEditorProps = {
   onFile?: () => void;
   onOpenLink?: (href: string) => void;
   onToggleTask?: (lineNumber: number, checked: boolean) => void | Promise<void>;
+  initialSelection?: { from: number; to: number };
+  onSelectionChange?: (from: number, to: number) => void;
   autoFocus?: boolean;
   focusRequestId?: number;
   onFocusRequestConsumed?: () => void;
@@ -77,6 +81,14 @@ function changeListIndentation(
   return true;
 }
 
+function changeIndentation(
+  view: EditorView,
+  direction: "indent" | "outdent",
+) {
+  if (changeListIndentation(view, direction)) return true;
+  return direction === "indent" ? indentMore(view) : indentLess(view);
+}
+
 function isInsideMarkdownCode(view: EditorView) {
   const initialNode = syntaxTree(view.state).resolveInner(
     view.state.selection.main.from,
@@ -102,6 +114,8 @@ export function LiveMarkdownEditor({
   focusRequestId,
   onFocusRequestConsumed,
   ariaLabel,
+  initialSelection,
+  onSelectionChange,
 }: LiveMarkdownEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -110,6 +124,9 @@ export function LiveMarkdownEditor({
   const onBlurRef = useRef(onBlur);
   const onFocusRef = useRef(onFocus);
   const onFileRef = useRef(onFile);
+  const onToggleTaskRef = useRef(onToggleTask);
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  const initialSelectionRef = useRef(initialSelection);
   const pendingLocalValuesRef = useRef<string[]>([]);
   const focusRequestFrameRef = useRef<number | null>(null);
   const ariaLabelRef = useRef(ariaLabel);
@@ -125,6 +142,8 @@ export function LiveMarkdownEditor({
     onBlurRef.current = onBlur;
     onFocusRef.current = onFocus;
     onFileRef.current = onFile;
+    onToggleTaskRef.current = onToggleTask;
+    onSelectionChangeRef.current = onSelectionChange;
     onFocusRequestConsumedRef.current = onFocusRequestConsumed;
     ariaLabelRef.current = ariaLabel;
     callbacksRef.current = { onOpenLink, onToggleTask };
@@ -137,6 +156,7 @@ export function LiveMarkdownEditor({
     onFocusRequestConsumed,
     onOpenLink,
     onToggleTask,
+    onSelectionChange,
   ]);
 
   useLayoutEffect(() => {
@@ -148,6 +168,12 @@ export function LiveMarkdownEditor({
     const view = new EditorView({
       state: EditorState.create({
         doc: valueRef.current,
+        selection: initialSelectionRef.current
+          ? EditorSelection.range(
+              Math.min(initialSelectionRef.current.from, valueRef.current.length),
+              Math.min(initialSelectionRef.current.to, valueRef.current.length),
+            )
+          : undefined,
         extensions: [
           markdown({
             base: markdownLanguage,
@@ -185,12 +211,24 @@ export function LiveMarkdownEditor({
           keymap.of([
             { key: "Mod-a", run: selectAll },
             {
+              key: "Shift-Space",
+              run: (editor) => {
+                if (isInsideMarkdownCode(editor)) return false;
+                const selection = editor.state.selection.main;
+                const line = editor.state.doc.lineAt(selection.head);
+                const task = /^(?:\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+)\[([ xX])\](?=\s|$)/.exec(line.text);
+                if (!task || !onToggleTaskRef.current) return false;
+                void onToggleTaskRef.current(line.number, task[1].toLowerCase() !== "x");
+                return true;
+              },
+            },
+            {
               key: "Tab",
-              run: (editor) => changeListIndentation(editor, "indent"),
+              run: (editor) => changeIndentation(editor, "indent"),
             },
             {
               key: "Shift-Tab",
-              run: (editor) => changeListIndentation(editor, "outdent"),
+              run: (editor) => changeIndentation(editor, "outdent"),
             },
             {
               key: "Mod-Enter",
@@ -245,6 +283,11 @@ export function LiveMarkdownEditor({
           ]),
           liveMarkdownExtensions({ callbacks: callbacksRef }),
           EditorView.updateListener.of((update) => {
+            if (update.selectionSet)
+              onSelectionChangeRef.current?.(
+                update.state.selection.main.from,
+                update.state.selection.main.to,
+              );
             if (!update.docChanged) return;
             const nextValue = update.state.doc.toString();
             if (nextValue === valueRef.current) return;
@@ -268,6 +311,13 @@ export function LiveMarkdownEditor({
         host.closest<HTMLElement>("[data-document-scroll]")?.scrollTop ?? 0,
       );
     const focus = () => onFocusRef.current?.();
+    const selectListContent = (event: Event) => {
+      const contentStart = (event as CustomEvent<number>).detail;
+      if (typeof contentStart !== "number") return;
+      event.preventDefault();
+      view.dispatch({ selection: EditorSelection.cursor(contentStart) });
+      view.focus();
+    };
     const find = () => {
       const documentScroll = host.closest<HTMLElement>("[data-document-scroll]");
       const scrollTop = documentScroll?.scrollTop;
@@ -287,6 +337,7 @@ export function LiveMarkdownEditor({
       });
     };
     view.contentDOM.addEventListener("folio-format", format);
+    view.contentDOM.addEventListener("folio-select-list-content", selectListContent);
     view.contentDOM.addEventListener("blur", blur);
     view.contentDOM.addEventListener("focus", focus);
     host.addEventListener("folio-find", find);
@@ -297,6 +348,7 @@ export function LiveMarkdownEditor({
     return () => {
       if (focusFrame !== null) window.cancelAnimationFrame(focusFrame);
       view.contentDOM.removeEventListener("folio-format", format);
+      view.contentDOM.removeEventListener("folio-select-list-content", selectListContent);
       view.contentDOM.removeEventListener("blur", blur);
       view.contentDOM.removeEventListener("focus", focus);
       host.removeEventListener("folio-find", find);
@@ -311,11 +363,6 @@ export function LiveMarkdownEditor({
       focusRequestFrameRef.current = null;
       const view = viewRef.current;
       if (!view) return;
-      const end = view.state.doc.length;
-      view.dispatch({
-        selection: EditorSelection.cursor(end),
-        scrollIntoView: true,
-      });
       view.focus();
       onFocusRequestConsumedRef.current?.();
     });

@@ -5,7 +5,6 @@ import {
   BundleSettings,
   type BundleSettingsControls,
 } from "./BundleSettings.tsx";
-import { getActiveBundleId } from "../../../lib/api.ts";
 
 export type SettingsDialogProps = {
   themeId: ThemeId;
@@ -38,9 +37,7 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const titleId = useId();
   const dialogRef = useRef<HTMLElement>(null);
-  const activeBundleId = bundleSetup
-    ? bundleSetup.activeBundleId
-    : getActiveBundleId();
+  const hasAttachedBundles = (bundleSetup || UNAVAILABLE_SETUP).bundles.length > 0;
 
   useEffect(() => {
     const previouslyFocused = document.activeElement;
@@ -139,20 +136,20 @@ export function SettingsDialog({
           <div className="settings-section-copy">
             <h2 id={`${titleId}-backup`}>Keep a copy</h2>
             <p>
-              Download the active bundle as a ZIP file, including its Markdown
-              and attachments.
+              Download all attached bundles as one ZIP file, including their
+              Markdown and attachments.
             </p>
           </div>
-          {activeBundleId || !bundleSetup ? (
+          {hasAttachedBundles ? (
             <a
               className="settings-action"
-              href={`/api/backup${activeBundleId ? `?bundle=${encodeURIComponent(activeBundleId)}` : ""}`}
+              href="/api/backup"
             >
-              Download bundle backup <span aria-hidden="true">↓</span>
+              Download all bundle backups <span aria-hidden="true">↓</span>
             </a>
           ) : (
             <p className="settings-import-message">
-              Open a bundle to download a backup.
+              Add a bundle to download a backup.
             </p>
           )}
         </section>
