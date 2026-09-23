@@ -38,10 +38,10 @@ test('changes and restores the color theme from browser settings', async ({ page
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'editorial')
 })
 
-test('downloads a bundle backup from settings', async ({ page }) => {
+test('downloads all attached bundle backups from settings', async ({ page }) => {
   await page.getByRole('button', { name: 'Settings' }).click()
   const downloadPromise = page.waitForEvent('download')
-  await page.getByRole('link', { name: 'Download bundle backup' }).click()
+  await page.getByRole('link', { name: 'Download all bundle backups' }).click()
   const download = await downloadPromise
 
   expect(download.suggestedFilename()).toMatch(/^folio-bundle-backup-.+\.zip$/)

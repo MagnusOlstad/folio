@@ -69,6 +69,7 @@ export async function createApp(runtime = createRuntime()) {
   const app = express()
   app.use(express.json({ limit: '1mb' }))
   registerBundleRoutes(app, manager)
+  registerBackupRoutes(app, manager)
   app.use((request, response, next) => {
     const requestedId = request.header('x-folio-bundle') || request.header('x-folio-bundle-id') || String(request.query.bundle || '') || null
     const entry = requestedId ? manager.registry.get(requestedId) : manager.registry.list()[0] || null
@@ -93,7 +94,6 @@ export async function createApp(runtime = createRuntime()) {
   })
   const scopedRuntime = manager.proxyRuntime()
   registerImportRoutes(app, scopedRuntime)
-  registerBackupRoutes(app, scopedRuntime)
   registerSystemRoutes(app, scopedRuntime)
   registerFileRoutes(app, scopedRuntime)
   registerCaptureRoutes(app, scopedRuntime)
