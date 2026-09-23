@@ -158,21 +158,31 @@ test('marks the prospective right-strip tab slot and reorders tabs within a grou
   )).toEqual(['Todo List', 'Start Here'])
 })
 
-test('Cmd/Ctrl+number selects local draft tabs and focuses at the document end', async ({ page }) => {
+test('tab selection preserves each local draft cursor for mouse and Cmd/Ctrl+number', async ({ page }) => {
   await page.getByTitle('New note (Cmd+T)').click()
   const firstEditor = page.getByLabel('Write a new note')
   await firstEditor.fill('First local draft')
+  await firstEditor.press('Home')
+  await firstEditor.press('ArrowRight')
 
   await page.getByTitle('New note (Cmd+T)').click()
   const secondEditor = page.getByLabel('Write a new note')
   await secondEditor.fill('Second local draft')
+  await secondEditor.press('Home')
+  for (let offset = 0; offset < 7; offset += 1) {
+    await secondEditor.press('ArrowRight')
+  }
 
-  await page.keyboard.press(`${modifier}+1`)
-  const selectedEditor = page.getByLabel('Write a new note')
-  await expect(selectedEditor).toBeFocused()
-  await page.keyboard.type(' at the end')
-  await expect(selectedEditor).toHaveText('First local draft at the end')
-  await expect(page.locator('.editor-tab').filter({ hasText: 'First local draft at the end' })).toHaveClass(/active/)
+  await page.locator('.editor-tab').filter({ hasText: 'First local draft' }).click()
+  await expect(firstEditor).toBeFocused()
+  await page.keyboard.type('X')
+  await expect(firstEditor).toHaveText('FXirst local draft')
+
+  await page.keyboard.press(`${modifier}+2`)
+  await expect(secondEditor).toBeFocused()
+  await page.keyboard.type('Y')
+  await expect(secondEditor).toHaveText('Second Ylocal draft')
+  await expect(page.locator('.editor-tab').filter({ hasText: 'Second Ylocal draft' })).toHaveClass(/active/)
 })
 
 // Cmd/Ctrl+T, +S, +B, +I, +K, and +Shift+F are documented as working in both the

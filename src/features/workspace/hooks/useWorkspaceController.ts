@@ -384,7 +384,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       setEditorFocusRequest(null);
       tabs.createNewTab();
     },
-    activateTabAtEnd: (groupId, documentId) => {
+    activateTab: (groupId, documentId) => {
       const group = tabs.groups.find((candidate) => candidate.id === groupId);
       if (groupId !== tabs.activeGroupId || group?.activeId !== documentId)
         void finalizeAllFiledDocuments();
@@ -495,12 +495,16 @@ export function useWorkspaceController(): WorkspaceShellProps {
         },
         titleForId: tabs.titleForId,
         activateTab: (groupId, documentId) => {
-          setEditorFocusRequest(null);
           const group = tabs.groups.find((candidate) => candidate.id === groupId);
           if (groupId !== tabs.activeGroupId || group?.activeId !== documentId)
             void finalizeAllFiledDocuments();
           tabs.activateTab(groupId, documentId);
           ensureDocumentLoaded(documentId);
+          setEditorFocusRequest({
+            id: ++editorFocusRequestIdRef.current,
+            groupId,
+            documentId,
+          });
         },
         pinTab: tabs.pinTab,
         consumeEditorFocusRequest: (requestId) =>

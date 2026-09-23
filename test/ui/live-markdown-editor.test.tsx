@@ -9,7 +9,7 @@ import {
 } from "../../src/features/workspace/model/live-markdown.ts";
 
 describe("LiveMarkdownEditor", () => {
-  it("focuses and collapses the caret at the end for a focus request", () => {
+  it("focuses without changing the restored selection for a focus request", () => {
     const frames: FrameRequestCallback[] = [];
     const requestAnimationFrame = vi
       .spyOn(window, "requestAnimationFrame")
@@ -26,16 +26,17 @@ describe("LiveMarkdownEditor", () => {
         onChange={vi.fn()}
         focusRequestId={1}
         onFocusRequestConsumed={onFocusRequestConsumed}
+        initialSelection={{ from: 4, to: 4 }}
         ariaLabel="Focus note"
       />,
     );
 
     const view = EditorView.findFromDOM(screen.getByLabelText("Focus note"));
-    expect(view.state.selection.main.head).toBe(0);
+    expect(view.state.selection.main.head).toBe(4);
     act(() => frames.at(-1)?.(0));
 
-    expect(view.state.selection.main.from).toBe(view.state.doc.length);
-    expect(view.state.selection.main.to).toBe(view.state.doc.length);
+    expect(view.state.selection.main.from).toBe(4);
+    expect(view.state.selection.main.to).toBe(4);
     expect(view.hasFocus).toBe(true);
     expect(onFocusRequestConsumed).toHaveBeenCalledOnce();
     requestAnimationFrame.mockRestore();
