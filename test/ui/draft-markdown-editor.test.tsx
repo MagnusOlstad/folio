@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DraftMarkdownEditor } from "../../src/features/workspace/components/DraftMarkdownEditor.tsx";
 
 describe("DraftMarkdownEditor", () => {
-  it("forwards focus requests to the live editor", () => {
+  it("focuses the live editor without moving its selection", () => {
     const frames: FrameRequestCallback[] = [];
     vi
       .spyOn(window, "requestAnimationFrame")
@@ -25,6 +25,7 @@ describe("DraftMarkdownEditor", () => {
         focusRequestId={7}
         onFocusRequestConsumed={onFocusRequestConsumed}
         ariaLabel="Write a new note"
+        initialSelection={{ from: 2, to: 7 }}
       />,
     );
 
@@ -33,7 +34,8 @@ describe("DraftMarkdownEditor", () => {
       frames.forEach((frame) => frame(0));
     });
 
-    expect(view.state.selection.main.head).toBe(view.state.doc.length);
+    expect(view.state.selection.main.from).toBe(2);
+    expect(view.state.selection.main.to).toBe(7);
     expect(view.hasFocus).toBe(true);
     expect(onFocusRequestConsumed).toHaveBeenCalledOnce();
     vi.restoreAllMocks();
