@@ -12,6 +12,7 @@ export type EditorTabsProps = {
     groupId: string,
   ) => void;
   onDragEnd: () => void;
+  onDropTab?: (event: React.DragEvent<HTMLButtonElement>, id: string, groupId: string) => void;
   onCloseTab: (groupId: string, id: string) => void;
   onNewTab: (groupId: string) => void;
   onSplit: () => void;
@@ -27,6 +28,7 @@ export function EditorTabs({
   onActivate,
   onDragStart,
   onDragEnd,
+  onDropTab,
   onCloseTab,
   onNewTab,
   onSplit,
@@ -45,6 +47,11 @@ export function EditorTabs({
             draggable
             onDragStart={(event) => onDragStart(event, id, group.id)}
             onDragEnd={onDragEnd}
+            onDragOver={(event) => {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+            }}
+            onDrop={(event) => onDropTab?.(event, id, group.id)}
             title={titleForId(id)}
             key={id}
           >

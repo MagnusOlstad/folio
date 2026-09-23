@@ -7,6 +7,7 @@ import {
 import {
   loadWorkspaceSessionState,
   parseWorkspaceSessionState,
+  pruneDocumentSelections,
   pruneDocumentScrollTops,
   reconcileWorkspaceSessionState,
 } from "../../src/features/workspace/model/workspace-state.ts";
@@ -232,6 +233,17 @@ describe("workspace session storage", () => {
     expect(Object.keys(result)).toHaveLength(200);
     expect(result["/notes/0.md"]).toBeUndefined();
     expect(result["/notes/204.md"]).toBe(204);
+  });
+
+  it("sanitizes and caps persisted editor selections", () => {
+    const entries = Object.fromEntries(
+      Array.from({ length: 205 }, (_, index) => [`/notes/${index}.md`, { from: index, to: index + 1 }]),
+    );
+    entries.invalid = { from: -1, to: 4 };
+    const result = pruneDocumentSelections(entries);
+    expect(Object.keys(result)).toHaveLength(200);
+    expect(result["/notes/0.md"]).toBeUndefined();
+    expect(result["/notes/204.md"]).toEqual({ from: 204, to: 205 });
   });
 
   it("reconciles restored tabs without loading or selecting documents", () => {

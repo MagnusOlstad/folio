@@ -110,6 +110,31 @@ export function EditorGroup({
           );
           ui.setDraggedTab(payload);
         }}
+        onDropTab={(event, targetId, targetGroupId) => {
+          event.preventDefault();
+          event.stopPropagation();
+          let tab = ui.draggedTab;
+          const payload = event.dataTransfer.getData("application/x-folio-tab");
+          if (payload) {
+            try {
+              const parsed = JSON.parse(payload) as { documentId?: unknown; groupId?: unknown };
+              if (typeof parsed.documentId === "string" && typeof parsed.groupId === "string")
+                tab = { documentId: parsed.documentId, groupId: parsed.groupId };
+            } catch {
+              tab = null;
+            }
+          }
+          if (!tab) return;
+          const targetIndex = group.tabs.indexOf(targetId) +
+            (event.clientX >= event.currentTarget.getBoundingClientRect().left + event.currentTarget.getBoundingClientRect().width / 2 ? 1 : 0);
+          const sourceIndex = tab.groupId === targetGroupId ? group.tabs.indexOf(tab.documentId) : -1;
+          const adjustedIndex = sourceIndex !== -1 && sourceIndex < targetIndex
+            ? targetIndex - 1
+            : targetIndex;
+          actions.moveTabToGroup(tab.documentId, tab.groupId, targetGroupId, adjustedIndex);
+          ui.setDraggedTab(null);
+          ui.setDropGroupId(null);
+        }}
         onDragEnd={() => {
           ui.setDraggedTab(null);
           ui.setDropGroupId(null);
@@ -148,7 +173,9 @@ export function EditorGroup({
             pathDraft={ui.pathDrafts[document.id]}
             tagDraft={ui.tagDrafts[document.id]}
             getScrollTop={actions.getDocumentScrollTop}
+            getSelection={actions.getDocumentSelection}
             onScroll={actions.rememberDocumentScrollTop}
+            onSelectionChange={actions.rememberDocumentSelection}
             onBeginMetadataEditing={ui.beginMetadataEditing}
             onChangeMetadataDraft={ui.changeMetadataDraft}
             onFinishMetadataEditing={(key, target, field, value) =>

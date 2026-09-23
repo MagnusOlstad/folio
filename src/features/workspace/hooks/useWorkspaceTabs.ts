@@ -153,10 +153,10 @@ export function useWorkspaceTabs({
     documentId: string,
     sourceGroupId: string,
     targetGroupId: string,
+    targetIndex?: number,
   ) {
-    if (sourceGroupId === targetGroupId) return;
     setGroups((current) =>
-      moveGroupTab(current, documentId, sourceGroupId, targetGroupId),
+      moveGroupTab(current, documentId, sourceGroupId, targetGroupId, targetIndex),
     );
     setActiveGroupId(targetGroupId);
     setEditingKey(null);

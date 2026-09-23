@@ -259,6 +259,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       explorer.setExpandedDirectories(parsedStored?.expandedDirectories ? new Set(parsedStored.expandedDirectories) : expandedPathsForFiles(files));
       setExplorerScrollTop(restored?.explorerScrollTop || 0);
       session.restoreDocumentScrollTops(restored?.documentScrollTops || {});
+      session.restoreDocumentSelections(restored?.documentSelections || {});
       layout.setSplitPosition(
         restored?.splitPosition
         ?? (typeof parsedStored?.splitPosition === "number" ? parsedStored.splitPosition : 50),
@@ -560,6 +561,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
         getDocumentScrollTop: (documentId) =>
           session.getDocumentScrollTop(documentId),
         rememberDocumentScrollTop: session.rememberDocumentScrollTop,
+        getDocumentSelection: session.getDocumentSelection,
+        rememberDocumentSelection: session.rememberDocumentSelection,
         exportDocument: (document, format) =>
           void noteExport.exportDocument(
             document,

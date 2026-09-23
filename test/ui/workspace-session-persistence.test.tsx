@@ -118,4 +118,17 @@ describe("workspace session persistence", () => {
     expect(storageWrite).toHaveBeenCalledTimes(1);
     expect(JSON.parse(storageWrite.mock.calls[0][1]).groups[0].activeId).toBe("/two.md");
   });
+
+  it("persists and restores a selection for each document", () => {
+    const { result, rerender } = renderHook(() => useTestSession(null, vi.fn().mockResolvedValue(undefined)));
+    act(() => {
+      result.current.setGroups([group("primary", ["/one.md"], "/one.md")]);
+      result.current.rememberDocumentSelection("/one.md", 4, 8);
+    });
+    act(() => vi.advanceTimersByTime(400));
+    const stored = JSON.parse(vi.mocked(window.folio!.setStorage!).mock.calls.at(-1)?.[1] ?? "{}");
+    expect(stored.documentSelections).toEqual({ "/one.md": { from: 4, to: 8 } });
+    rerender();
+    expect(result.current.getDocumentSelection("/one.md")).toEqual({ from: 4, to: 8 });
+  });
 });

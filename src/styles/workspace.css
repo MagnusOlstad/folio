@@ -1337,6 +1337,8 @@ body.resizing-horizontal * {
 }
 
 .live-markdown-editor .cm-live-markdown-list-marker {
+  box-sizing: border-box;
+  width: 22px;
   padding-right: 6px;
   color: var(--muted);
 }
@@ -1570,7 +1572,8 @@ body.resizing-horizontal * {
   z-index: 0;
   inset: 0 0 auto;
   height: var(--steering-height);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 2px solid var(--line);
+  box-shadow: 0 8px 18px rgba(var(--shadow-rgb), 0.08);
   background: var(--surface-band);
   pointer-events: none;
 }

@@ -4,7 +4,9 @@ import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { LiveMarkdownEditor } from "../../src/features/workspace/components/LiveMarkdownEditor.tsx";
-import { continueLiveMarkdownList } from "../../src/features/workspace/model/live-markdown.ts";
+import {
+  continueLiveMarkdownList,
+} from "../../src/features/workspace/model/live-markdown.ts";
 
 describe("LiveMarkdownEditor", () => {
   it("focuses and collapses the caret at the end for a focus request", () => {
@@ -195,6 +197,63 @@ describe("LiveMarkdownEditor", () => {
       value: "- [x] done\n- [ ] ",
       caret: 17,
     });
+  });
+
+  it("inserts an unchecked item before a checked item at the top of a list", () => {
+    const onChange = vi.fn();
+    render(
+      <LiveMarkdownEditor
+        value="- [x] done"
+        onChange={onChange}
+        ariaLabel="Edit top task"
+      />,
+    );
+    const editor = screen.getByLabelText("Edit top task");
+    const view = EditorView.findFromDOM(editor);
+    act(() => view.dispatch({ selection: { anchor: "- [x] ".length } }));
+
+    fireEvent.keyDown(editor, { key: "Enter" });
+
+    expect(view.state.doc.toString()).toBe("- [ ] \n- [x] done");
+    expect(onChange).toHaveBeenLastCalledWith("- [ ] \n- [x] done");
+  });
+
+  it("toggles the current task with Shift+Space", () => {
+    const onChange = vi.fn();
+    render(
+      <LiveMarkdownEditor
+        value="- [ ] next\nplain"
+        onChange={onChange}
+        onToggleTask={(lineNumber, checked) => {
+          const next = lineNumber === 1 ? "- [x] next\nplain" : "- [ ] next\nplain";
+          if (checked) onChange(next);
+        }}
+        ariaLabel="Edit task keyboard"
+      />,
+    );
+    const editor = screen.getByLabelText("Edit task keyboard");
+    const view = EditorView.findFromDOM(editor);
+    act(() => view.dispatch({ selection: { anchor: 5 } }));
+    fireEvent.keyDown(editor, { key: " ", shiftKey: true });
+    expect(onChange).toHaveBeenCalledWith("- [x] next\nplain");
+  });
+
+  it("indents and outdents list items with Tab without leaving the editor", () => {
+    const editor = render(
+      <LiveMarkdownEditor
+        value="- item"
+        onChange={vi.fn()}
+        ariaLabel="Edit indentation"
+      />,
+    );
+    const element = screen.getByLabelText("Edit indentation");
+    const view = EditorView.findFromDOM(element);
+    act(() => view.dispatch({ selection: { anchor: view.state.doc.length } }));
+    fireEvent.keyDown(element, { key: "Tab" });
+    expect(view.state.doc.toString()).toBe("  - item");
+    fireEvent.keyDown(element, { key: "Tab", shiftKey: true });
+    expect(view.state.doc.toString()).toBe("- item");
+    editor.unmount();
   });
 
   it("reveals only the task syntax under the cursor", () => {

@@ -33,6 +33,8 @@ export type LiveMarkdownEditorProps = {
   onFile?: () => void;
   onOpenLink?: (href: string) => void;
   onToggleTask?: (lineNumber: number, checked: boolean) => void | Promise<void>;
+  initialSelection?: { from: number; to: number };
+  onSelectionChange?: (from: number, to: number) => void;
   autoFocus?: boolean;
   focusRequestId?: number;
   onFocusRequestConsumed?: () => void;
@@ -102,6 +104,8 @@ export function LiveMarkdownEditor({
   focusRequestId,
   onFocusRequestConsumed,
   ariaLabel,
+  initialSelection,
+  onSelectionChange,
 }: LiveMarkdownEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -110,6 +114,9 @@ export function LiveMarkdownEditor({
   const onBlurRef = useRef(onBlur);
   const onFocusRef = useRef(onFocus);
   const onFileRef = useRef(onFile);
+  const onToggleTaskRef = useRef(onToggleTask);
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  const initialSelectionRef = useRef(initialSelection);
   const pendingLocalValuesRef = useRef<string[]>([]);
   const focusRequestFrameRef = useRef<number | null>(null);
   const ariaLabelRef = useRef(ariaLabel);
@@ -125,6 +132,8 @@ export function LiveMarkdownEditor({
     onBlurRef.current = onBlur;
     onFocusRef.current = onFocus;
     onFileRef.current = onFile;
+    onToggleTaskRef.current = onToggleTask;
+    onSelectionChangeRef.current = onSelectionChange;
     onFocusRequestConsumedRef.current = onFocusRequestConsumed;
     ariaLabelRef.current = ariaLabel;
     callbacksRef.current = { onOpenLink, onToggleTask };
@@ -137,6 +146,7 @@ export function LiveMarkdownEditor({
     onFocusRequestConsumed,
     onOpenLink,
     onToggleTask,
+    onSelectionChange,
   ]);
 
   useLayoutEffect(() => {
@@ -148,6 +158,12 @@ export function LiveMarkdownEditor({
     const view = new EditorView({
       state: EditorState.create({
         doc: valueRef.current,
+        selection: initialSelectionRef.current
+          ? EditorSelection.range(
+              Math.min(initialSelectionRef.current.from, valueRef.current.length),
+              Math.min(initialSelectionRef.current.to, valueRef.current.length),
+            )
+          : undefined,
         extensions: [
           markdown({
             base: markdownLanguage,
@@ -184,6 +200,18 @@ export function LiveMarkdownEditor({
           ),
           keymap.of([
             { key: "Mod-a", run: selectAll },
+            {
+              key: "Shift-Space",
+              run: (editor) => {
+                if (isInsideMarkdownCode(editor)) return false;
+                const selection = editor.state.selection.main;
+                const line = editor.state.doc.lineAt(selection.head);
+                const task = /^(?:\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+)\[([ xX])\](?=\s|$)/.exec(line.text);
+                if (!task || !onToggleTaskRef.current) return false;
+                void onToggleTaskRef.current(line.number, task[1].toLowerCase() !== "x");
+                return true;
+              },
+            },
             {
               key: "Tab",
               run: (editor) => changeListIndentation(editor, "indent"),
@@ -245,6 +273,11 @@ export function LiveMarkdownEditor({
           ]),
           liveMarkdownExtensions({ callbacks: callbacksRef }),
           EditorView.updateListener.of((update) => {
+            if (update.selectionSet)
+              onSelectionChangeRef.current?.(
+                update.state.selection.main.from,
+                update.state.selection.main.to,
+              );
             if (!update.docChanged) return;
             const nextValue = update.state.doc.toString();
             if (nextValue === valueRef.current) return;
