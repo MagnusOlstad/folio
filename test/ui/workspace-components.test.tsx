@@ -691,7 +691,7 @@ describe("workspace editor components", () => {
     );
   });
 
-  it("passes a same-group drop index through the editor-group action contract", () => {
+  it("moves a same-group tab to the end from the editor-group right strip", () => {
     const moveTabToGroup = vi.fn();
 
     function GroupHarness() {
@@ -805,10 +805,10 @@ describe("workspace editor components", () => {
     fireEvent.dragStart(dragged, {
       dataTransfer: { setData: vi.fn() },
     });
-    const finalDragOver = createEvent.dragOver(target, { dataTransfer: {} });
-    Object.defineProperty(finalDragOver, "clientX", { value: 75 });
-    fireEvent(target, finalDragOver);
-    const drop = createEvent.drop(target, {
+    const tabStrip = container.querySelector(".tab-strip")!;
+    fireEvent.dragOver(tabStrip, { dataTransfer: {} });
+    expect(target).toHaveClass("drop-after");
+    fireEvent.drop(tabStrip, {
       dataTransfer: {
         getData: () =>
           JSON.stringify({
@@ -817,8 +817,6 @@ describe("workspace editor components", () => {
           }),
       },
     });
-    Object.defineProperty(drop, "clientX", { value: 75 });
-    fireEvent(target, drop);
 
     expect(moveTabToGroup).toHaveBeenCalledWith(
       "/notes/current.md",

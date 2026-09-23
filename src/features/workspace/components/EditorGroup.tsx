@@ -92,8 +92,21 @@ export function EditorGroup({
             tab = null;
           }
         }
-        if (tab)
-          actions.moveTabToGroup(tab.documentId, tab.groupId, group.id);
+        if (tab) {
+          const dropIndex = ui.dropTabSlot?.groupId === group.id
+            ? ui.dropTabSlot.index
+            : undefined;
+          const sourceIndex = tab.groupId === group.id
+            ? group.tabs.indexOf(tab.documentId)
+            : -1;
+          const targetIndex = dropIndex !== undefined && sourceIndex !== -1 && sourceIndex < dropIndex
+            ? dropIndex - 1
+            : dropIndex;
+          if (targetIndex === undefined)
+            actions.moveTabToGroup(tab.documentId, tab.groupId, group.id);
+          else
+            actions.moveTabToGroup(tab.documentId, tab.groupId, group.id, targetIndex);
+        }
         ui.setDraggedTab(null);
         ui.setDropGroupId(null);
         ui.setDropTabSlot(null);
