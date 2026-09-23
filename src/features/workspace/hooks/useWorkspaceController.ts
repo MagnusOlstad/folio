@@ -489,9 +489,9 @@ export function useWorkspaceController(): WorkspaceShellProps {
           }
           tabs.setActiveGroupId(groupId);
         },
-        moveTabToGroup: (documentId, sourceGroupId, targetGroupId) => {
+        moveTabToGroup: (documentId, sourceGroupId, targetGroupId, targetIndex) => {
           setEditorFocusRequest(null);
-          tabs.moveTabToGroup(documentId, sourceGroupId, targetGroupId);
+          tabs.moveTabToGroup(documentId, sourceGroupId, targetGroupId, targetIndex);
         },
         titleForId: tabs.titleForId,
         activateTab: (groupId, documentId) => {

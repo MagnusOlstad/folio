@@ -5,6 +5,8 @@ import {
   defaultKeymap,
   history,
   historyKeymap,
+  indentLess,
+  indentMore,
   selectAll,
 } from "@codemirror/commands";
 import { Compartment, EditorSelection, EditorState } from "@codemirror/state";
@@ -77,6 +79,14 @@ function changeListIndentation(
     scrollIntoView: true,
   });
   return true;
+}
+
+function changeIndentation(
+  view: EditorView,
+  direction: "indent" | "outdent",
+) {
+  if (changeListIndentation(view, direction)) return true;
+  return direction === "indent" ? indentMore(view) : indentLess(view);
 }
 
 function isInsideMarkdownCode(view: EditorView) {
@@ -214,11 +224,11 @@ export function LiveMarkdownEditor({
             },
             {
               key: "Tab",
-              run: (editor) => changeListIndentation(editor, "indent"),
+              run: (editor) => changeIndentation(editor, "indent"),
             },
             {
               key: "Shift-Tab",
-              run: (editor) => changeListIndentation(editor, "outdent"),
+              run: (editor) => changeIndentation(editor, "outdent"),
             },
             {
               key: "Mod-Enter",
@@ -301,6 +311,13 @@ export function LiveMarkdownEditor({
         host.closest<HTMLElement>("[data-document-scroll]")?.scrollTop ?? 0,
       );
     const focus = () => onFocusRef.current?.();
+    const selectListContent = (event: Event) => {
+      const contentStart = (event as CustomEvent<number>).detail;
+      if (typeof contentStart !== "number") return;
+      event.preventDefault();
+      view.dispatch({ selection: EditorSelection.cursor(contentStart) });
+      view.focus();
+    };
     const find = () => {
       const documentScroll = host.closest<HTMLElement>("[data-document-scroll]");
       const scrollTop = documentScroll?.scrollTop;
@@ -320,6 +337,7 @@ export function LiveMarkdownEditor({
       });
     };
     view.contentDOM.addEventListener("folio-format", format);
+    view.contentDOM.addEventListener("folio-select-list-content", selectListContent);
     view.contentDOM.addEventListener("blur", blur);
     view.contentDOM.addEventListener("focus", focus);
     host.addEventListener("folio-find", find);
@@ -330,6 +348,7 @@ export function LiveMarkdownEditor({
     return () => {
       if (focusFrame !== null) window.cancelAnimationFrame(focusFrame);
       view.contentDOM.removeEventListener("folio-format", format);
+      view.contentDOM.removeEventListener("folio-select-list-content", selectListContent);
       view.contentDOM.removeEventListener("blur", blur);
       view.contentDOM.removeEventListener("focus", focus);
       host.removeEventListener("folio-find", find);

@@ -114,11 +114,13 @@ class TaskCheckboxWidget extends WidgetType {
 class ListMarkerWidget extends WidgetType {
   private readonly marker: string;
   private readonly nested: boolean;
+  private readonly contentStart: number;
 
-  constructor(marker: string, nested: boolean) {
+  constructor(marker: string, nested: boolean, contentStart: number) {
     super();
     this.marker = marker;
     this.nested = nested;
+    this.contentStart = contentStart;
   }
 
   eq(other: ListMarkerWidget) {
@@ -141,6 +143,14 @@ class ListMarkerWidget extends WidgetType {
         ? "◦"
         : "•";
     marker.setAttribute("aria-hidden", "true");
+    marker.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      marker.dispatchEvent(new CustomEvent<number>("folio-select-list-content", {
+        bubbles: true,
+        detail: this.contentStart,
+      }));
+    });
     return marker;
   }
 }
@@ -342,7 +352,11 @@ function buildDecorations(
         } else {
           ranges.push(
             Decoration.replace({
-              widget: new ListMarkerWidget(list[2], listIndent >= 2),
+              widget: new ListMarkerWidget(
+                list[2],
+                listIndent >= 2,
+                markerEnd,
+              ),
               side: 1,
             }).range(markerStart, markerEnd),
           );

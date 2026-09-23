@@ -256,6 +256,29 @@ describe("LiveMarkdownEditor", () => {
     editor.unmount();
   });
 
+  it("indents and outdents plain-text lines with Tab without leaving the editor", () => {
+    const editor = render(
+      <LiveMarkdownEditor
+        value={"first\nsecond"}
+        onChange={vi.fn()}
+        ariaLabel="Edit plain indentation"
+      />,
+    );
+    const element = screen.getByLabelText("Edit plain indentation");
+    const view = EditorView.findFromDOM(element);
+    element.focus();
+    act(() => view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }));
+
+    fireEvent.keyDown(element, { key: "Tab" });
+    expect(view.state.doc.toString()).toBe("  first\n  second");
+    expect(view.hasFocus).toBe(true);
+
+    fireEvent.keyDown(element, { key: "Tab", shiftKey: true });
+    expect(view.state.doc.toString()).toBe("first\nsecond");
+    expect(view.hasFocus).toBe(true);
+    editor.unmount();
+  });
+
   it("reveals only the task syntax under the cursor", () => {
     render(
       <LiveMarkdownEditor
@@ -313,6 +336,26 @@ describe("LiveMarkdownEditor", () => {
       ".cm-live-markdown-list-source",
     );
     expect(revealedPrefix?.textContent).toBe("- ");
+  });
+
+  it("places the caret at the first list-content character when a rendered marker is clicked", () => {
+    render(
+      <LiveMarkdownEditor
+        value="- item"
+        onChange={vi.fn()}
+        ariaLabel="Edit marker click"
+      />,
+    );
+
+    const editor = screen.getByLabelText("Edit marker click");
+    const view = EditorView.findFromDOM(editor);
+    const marker = document.querySelector<HTMLElement>(".cm-live-markdown-list-marker");
+    expect(marker).not.toBeNull();
+
+    fireEvent.mouseDown(marker!);
+
+    expect(view.state.selection.main).toMatchObject({ from: 2, to: 2 });
+    expect(view.hasFocus).toBe(true);
   });
 
   it("shows multi-digit markers intact and nested ordered markers as letters", () => {

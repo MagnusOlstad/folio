@@ -594,6 +594,7 @@ body.resizing-horizontal * {
 }
 
 .editor-tab {
+  position: relative;
   min-width: 112px;
   max-width: 200px;
   height: 38px;
@@ -608,6 +609,25 @@ body.resizing-horizontal * {
   background: var(--surface-deep);
   font-size: 11px;
   text-align: left;
+}
+
+.editor-tab.drop-before::before,
+.editor-tab.drop-after::after {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--acid);
+  content: "";
+  pointer-events: none;
+}
+
+.editor-tab.drop-before::before {
+  left: -1px;
+}
+
+.editor-tab.drop-after::after {
+  right: -1px;
 }
 
 .editor-tab > span:nth-child(2) {

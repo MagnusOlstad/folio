@@ -129,6 +129,29 @@ test('opens sidebar notes as a replaceable preview until the editor is focused',
   await expect(todoTab).not.toHaveClass(/preview/)
 })
 
+test('marks the prospective tab slot and reorders tabs within a group', async ({ page }) => {
+  await page.getByRole('button', { name: 'Start Here', exact: true }).dblclick()
+  await page.getByRole('button', { name: 'Todo List', exact: true }).dblclick()
+
+  const startHereTab = page.locator('.editor-tab').filter({ hasText: 'Start Here' })
+  const todoTab = page.locator('.editor-tab').filter({ hasText: 'Todo List' })
+  const startBox = await startHereTab.boundingBox()
+  const todoBox = await todoTab.boundingBox()
+  expect(startBox).not.toBeNull()
+  expect(todoBox).not.toBeNull()
+
+  await page.mouse.move(startBox!.x + startBox!.width / 2, startBox!.y + startBox!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(todoBox!.x + todoBox!.width - 4, todoBox!.y + todoBox!.height / 2, { steps: 8 })
+  await expect(todoTab).toHaveClass(/drop-after/)
+  await page.mouse.up()
+
+  await expect(todoTab).not.toHaveClass(/drop-after/)
+  expect(await page.locator('.editor-tab').evaluateAll((tabs) =>
+    tabs.map((tab) => tab.getAttribute('title')),
+  )).toEqual(['Todo List', 'Start Here'])
+})
+
 test('Cmd/Ctrl+number selects local draft tabs and focuses at the document end', async ({ page }) => {
   await page.getByTitle('New note (Cmd+T)').click()
   const firstEditor = page.getByLabel('Write a new note')

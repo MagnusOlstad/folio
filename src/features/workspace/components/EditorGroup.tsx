@@ -60,10 +60,14 @@ export function EditorGroup({
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
         ui.setDropGroupId(group.id);
+        if (!(event.target instanceof Element) || !event.target.closest(".editor-tab"))
+          ui.setDropTabSlot({ groupId: group.id, index: group.tabs.length });
       }}
       onDragLeave={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node))
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) {
           ui.setDropGroupId(null);
+          ui.setDropTabSlot(null);
+        }
       }}
       onDrop={(event) => {
         event.preventDefault();
@@ -92,6 +96,7 @@ export function EditorGroup({
           actions.moveTabToGroup(tab.documentId, tab.groupId, group.id);
         ui.setDraggedTab(null);
         ui.setDropGroupId(null);
+        ui.setDropTabSlot(null);
       }}
     >
       <EditorTabs
@@ -101,6 +106,7 @@ export function EditorGroup({
         isUntitledId={isUntitledId}
         onActivate={actions.activateTab}
         onPinTab={actions.pinTab}
+        dropIndex={ui.dropTabSlot?.groupId === group.id ? ui.dropTabSlot.index : null}
         onDragStart={(event, id, groupId) => {
           const payload = { documentId: id, groupId };
           event.dataTransfer.effectAllowed = "move";
@@ -109,6 +115,13 @@ export function EditorGroup({
             JSON.stringify(payload),
           );
           ui.setDraggedTab(payload);
+        }}
+        onDragOverTab={(event, targetId, targetGroupId) => {
+          if (!ui.draggedTab) return;
+          const targetIndex = group.tabs.indexOf(targetId) +
+            (event.clientX >= event.currentTarget.getBoundingClientRect().left + event.currentTarget.getBoundingClientRect().width / 2 ? 1 : 0);
+          ui.setDropGroupId(targetGroupId);
+          ui.setDropTabSlot({ groupId: targetGroupId, index: targetIndex });
         }}
         onDropTab={(event, targetId, targetGroupId) => {
           event.preventDefault();
@@ -134,10 +147,12 @@ export function EditorGroup({
           actions.moveTabToGroup(tab.documentId, tab.groupId, targetGroupId, adjustedIndex);
           ui.setDraggedTab(null);
           ui.setDropGroupId(null);
+          ui.setDropTabSlot(null);
         }}
         onDragEnd={() => {
           ui.setDraggedTab(null);
           ui.setDropGroupId(null);
+          ui.setDropTabSlot(null);
         }}
         onCloseTab={actions.closeTab}
         onNewTab={actions.createNewTab}
