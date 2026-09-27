@@ -432,7 +432,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
 
   return {
     exportPreview: noteExport.preview,
-    topBar: {
+    app: {
       versionInfo: models.versionInfo,
       status: models.status,
       missingModels: models.missingModels,
@@ -454,10 +454,17 @@ export function useWorkspaceController(): WorkspaceShellProps {
     sidebar,
     layout: {
       sidebarWidth: layout.sidebarWidth,
+      rightPaneWidth: layout.rightPaneWidth,
+      sidebarOpen: layout.sidebarOpen,
+      rightPaneOpen: layout.rightPaneOpen,
+      setSidebarOpen: layout.setSidebarOpen,
+      setRightPaneOpen: layout.setRightPaneOpen,
       beginHorizontalResize: layout.beginHorizontalResize,
       finishHorizontalResize: layout.finishHorizontalResize,
       resizeSidebar: layout.resizeSidebar,
+      resizeRightPane: layout.resizeRightPane,
       resetSidebar: () => layout.setSidebarWidth(null),
+      resetRightPane: () => layout.setRightPaneWidth(null),
     },
     editor: {
       model: {

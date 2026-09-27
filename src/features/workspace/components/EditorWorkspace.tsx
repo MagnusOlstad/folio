@@ -6,7 +6,7 @@ import type { EditorWorkspaceProps } from "../types.ts";
 import { WorkspaceSplitHandle } from "./WorkspaceSplitHandle.tsx";
 import { filingOwnerGroupIds } from "../model/filing.ts";
 
-export function EditorWorkspace({ model, actions }: EditorWorkspaceProps) {
+export function EditorWorkspace({ model, actions, paneControls }: EditorWorkspaceProps) {
   const ui = useWorkspaceEditorUi();
   const owners = filingOwnerGroupIds(
     model.groups,
@@ -86,6 +86,11 @@ export function EditorWorkspace({ model, actions }: EditorWorkspaceProps) {
             model={groupModel}
             actions={groupActions}
             ui={ui}
+            paneControls={paneControls ? {
+              ...paneControls,
+              leftOpen: groupIndex > 0 || paneControls.leftOpen,
+              rightOpen: groupIndex < model.groups.length - 1 || paneControls.rightOpen,
+            } : undefined}
           />
         </Fragment>
       ))}

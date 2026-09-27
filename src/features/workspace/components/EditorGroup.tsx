@@ -25,6 +25,12 @@ type EditorGroupProps = {
     | "dismissMessage"
   >;
   ui: WorkspaceEditorUi;
+  paneControls?: {
+    leftOpen: boolean;
+    rightOpen: boolean;
+    onToggleLeft: () => void;
+    onToggleRight: () => void;
+  };
 };
 
 export function EditorGroup({
@@ -33,6 +39,7 @@ export function EditorGroup({
   model,
   actions,
   ui,
+  paneControls,
 }: EditorGroupProps) {
   const document = group.activeId ? model.documents[group.activeId] : null;
   const loading = Boolean(
@@ -119,6 +126,7 @@ export function EditorGroup({
         isUntitledId={isUntitledId}
         onActivate={actions.activateTab}
         onPinTab={actions.pinTab}
+        paneControls={paneControls}
         dropIndex={ui.dropTabSlot?.groupId === group.id ? ui.dropTabSlot.index : null}
         onDragStart={(event, id, groupId) => {
           const payload = { documentId: id, groupId };

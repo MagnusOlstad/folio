@@ -5,7 +5,7 @@ import {
   loadStoredTheme,
   useThemeSettings,
 } from "../../src/features/settings/hooks/useThemeSettings.ts";
-import { TopBar } from "../../src/features/status/TopBar.tsx";
+import { WorkspaceLeftPaneHeader } from "../../src/features/workspace/components/WorkspaceLeftPaneHeader.tsx";
 import { useObsidianImport } from "../../src/features/settings/hooks/useObsidianImport.ts";
 
 describe("theme settings", () => {
@@ -172,21 +172,11 @@ describe("theme settings", () => {
     expect(setupBundle).toHaveBeenCalledOnce();
   });
 
-  it("always shows the top-bar Settings button", () => {
+  it("keeps Folio identity and Settings in the left pane header", () => {
     const onOpenSettings = vi.fn();
-    const topBarProps = {
-      versionInfo: null,
-      status: null,
-      missingModels: [],
-      modelInstallInProgress: false,
-      modelEndpoints: [],
-      togglingService: null,
-      onInstall: vi.fn(),
-      onToggle: vi.fn(),
-      onOpenSettings,
-    };
-    render(<TopBar {...topBarProps} />);
+    render(<WorkspaceLeftPaneHeader versionInfo={null} onOpenSettings={onOpenSettings} sidebarOpen onToggleSidebar={() => {}} />);
 
+    expect(screen.getByRole("link", { name: "Folio home" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });

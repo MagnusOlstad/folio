@@ -6,6 +6,7 @@ type WorkspaceSidebarHandleProps = {
   onResize: (clientX: number, handle: HTMLElement) => void;
   onPointerEnd: (event: PointerEvent<HTMLElement>) => void;
   onReset: () => void;
+  side?: "left" | "right";
 };
 
 export function WorkspaceSidebarHandle({
@@ -14,13 +15,14 @@ export function WorkspaceSidebarHandle({
   onResize,
   onPointerEnd,
   onReset,
+  side = "left",
 }: WorkspaceSidebarHandleProps) {
   return (
     <div
-      className="horizontal-resize-handle sidebar-resize-handle"
+      className={`horizontal-resize-handle sidebar-resize-handle ${side === "right" ? "right-pane-resize-handle" : ""}`}
       role="separator"
       tabIndex={0}
-      aria-label="Resize sidebar"
+      aria-label={side === "right" ? "Resize right sidebar" : "Resize sidebar"}
       aria-orientation="vertical"
       aria-valuemin={220}
       aria-valuemax={520}
@@ -36,17 +38,17 @@ export function WorkspaceSidebarHandle({
       onKeyDown={(event) => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         event.preventDefault();
-        const currentWidth =
-          width ||
-          event.currentTarget.previousElementSibling?.getBoundingClientRect()
-            .width ||
-          310;
-        const workspaceLeft =
-          event.currentTarget.parentElement?.getBoundingClientRect().left || 0;
+        const adjacentPane = side === "right"
+          ? event.currentTarget.parentElement?.querySelector(".workspace-right-pane")
+          : event.currentTarget.previousElementSibling;
+        const currentWidth = width ?? adjacentPane?.getBoundingClientRect().width ?? 310;
+        const workspaceBounds = event.currentTarget.parentElement?.getBoundingClientRect();
+        const workspaceLeft = workspaceBounds?.left || 0;
+        const movement = event.key === "ArrowLeft" ? -16 : 16;
         onResize(
-          workspaceLeft +
-            currentWidth +
-            (event.key === "ArrowLeft" ? -16 : 16),
+          side === "right"
+            ? (workspaceBounds?.right || 0) - currentWidth + movement
+            : workspaceLeft + currentWidth + movement,
           event.currentTarget,
         );
       }}
