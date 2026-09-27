@@ -1,4 +1,4 @@
-import { createEvent, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { createEvent, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { act, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ViewerDocument } from "../../src/domain/types.ts";
@@ -11,6 +11,8 @@ import { RenderedMarkdown } from "../../src/features/workspace/components/Render
 import { WorkspaceSplitHandle } from "../../src/features/workspace/components/WorkspaceSplitHandle.tsx";
 import { WorkspaceLeftPaneHeader } from "../../src/features/workspace/components/WorkspaceLeftPaneHeader.tsx";
 import { WorkspaceRightPane } from "../../src/features/workspace/components/WorkspaceRightPane.tsx";
+import { NoteHistoryPanel } from "../../src/features/workspace/components/NoteHistoryPanel.tsx";
+import { EditorTabs } from "../../src/features/tabs/EditorTabs.tsx";
 import { useWorkspaceEditorUi } from "../../src/features/workspace/hooks/useWorkspaceEditorUi.ts";
 import { moveGroupTab } from "../../src/features/workspace/model/tab-state.ts";
 import type { FilingQueueEntry } from "../../src/features/workspace/model/filing.ts";
@@ -112,6 +114,48 @@ describe("workspace editor components", () => {
     );
     expect(screen.getByText("Answer model")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop Answer model" })).toBeInTheDocument();
+  });
+
+  it("keeps history closed and unavailable for an unfiled active tab", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<EditorTabs
+      group={{ id: "primary", tabs: ["untitled-1"], activeId: "untitled-1", previewId: null }}
+      groupCount={1}
+      titleForId={() => "Untitled"}
+      isUntitledId={() => true}
+      onActivate={vi.fn()} onDragStart={vi.fn()} onDragEnd={vi.fn()} onCloseTab={vi.fn()} onNewTab={vi.fn()} onSplit={vi.fn()} onCloseGroup={vi.fn()} onPinTab={vi.fn()}
+      historyAvailable={false}
+      onOpenHistory={vi.fn()}
+    />);
+    expect(screen.getByRole("button", { name: "History" })).toBeDisabled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("loads history lazily, previews a version, and restores after confirmation", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [{ revision: "a".repeat(40), authoredAt: "2026-09-27T09:00:00.000Z", title: "First" }], nextCursor: null }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision: "a".repeat(40), note: { title: "First", description: "", tags: ["one"], status: "stable", staleAfter: null, content: "# Earlier" }, diff: "-# Earlier\n+# Current" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ note: document, warning: "Embedding refresh is pending." }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [], nextCursor: null }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+    const restored = vi.fn().mockResolvedValue(undefined);
+    let finishFlush: (() => void) | null = null;
+    const beforeRestore = vi.fn(() => new Promise<void>((resolve) => { finishFlush = resolve; }));
+    render(<NoteHistoryPanel documentId="/notes/current.md" onClose={vi.fn()} onBeforeRestore={beforeRestore} onRestored={restored} />);
+    await screen.findByRole("button", { name: /First/ });
+    fireEvent.click(screen.getByRole("button", { name: /First/ }));
+    await screen.findByText("Earlier");
+    fireEvent.click(screen.getByRole("button", { name: "Restore version" }));
+    await waitFor(() => expect(beforeRestore).toHaveBeenCalledWith("/notes/current.md"));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    finishFlush?.();
+    await waitFor(() => expect(restored).toHaveBeenCalledWith("/notes/current.md"));
+    expect(screen.getByText("Embedding refresh is pending.")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/note/history/version"), expect.any(Object));
+    vi.unstubAllGlobals();
   });
 
   it("moves from preparing to a ready filing dialog without changing hook order", () => {

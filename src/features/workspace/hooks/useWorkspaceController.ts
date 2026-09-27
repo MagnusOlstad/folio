@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BundleFile, Note } from "../../../domain/types.ts";
+import type { BundleFile, Note, NoteDetail, ViewerDocument } from "../../../domain/types.ts";
 import { api, apiForBundle, setActiveBundleId } from "../../../lib/api.ts";
 import type { WorkspaceShellProps } from "../components/WorkspaceShell.tsx";
 import { useWorkspaceBootstrap } from "./useWorkspaceBootstrap.ts";
@@ -49,6 +49,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
     groupId: string;
     documentId: string;
   } | null>(null);
+  const [historyTarget, setHistoryTarget] = useState<{ groupId: string; documentId: string } | null>(null);
   const editorFocusRequestIdRef = useRef(0);
   const embeddingRevisionsRef = useRef(new Map<string, number>());
   const embeddingFinalizationsRef = useRef(new Map<string, Promise<void>>());
@@ -175,6 +176,41 @@ export function useWorkspaceController(): WorkspaceShellProps {
       Array.from(embeddingRevisionsRef.current.keys(), finalizeFiledDocument),
     );
   }
+  useEffect(() => {
+    if (!historyTarget) return;
+    const activeGroup = tabs.groups.find((group) => group.id === tabs.activeGroupId);
+    const documentId = activeGroup?.activeId;
+    const document = documentId ? documents.documents[documentId] : null;
+    const nextTarget = !documentId || !document || isUntitledId(documentId) || !document.deletable
+      ? null
+      : historyTarget.groupId !== tabs.activeGroupId || historyTarget.documentId !== documentId
+        ? { groupId: tabs.activeGroupId, documentId }
+        : historyTarget;
+    if (nextTarget === historyTarget) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setHistoryTarget(nextTarget);
+    });
+    return () => { cancelled = true; };
+  }, [documents.documents, historyTarget, tabs.activeGroupId, tabs.groups]);
+  const refreshAfterHistoryRestore = useCallback(async (documentId: string) => {
+    const [detail, notes, files] = await Promise.all([
+      api<NoteDetail>(`/api/note?id=${encodeURIComponent(documentId)}`),
+      api<Note[]>("/api/notes"),
+      api<BundleFile[]>("/api/files"),
+    ]);
+    documents.setDocuments((current) => ({
+      ...current,
+      [documentId]: { ...detail, deletable: true } as ViewerDocument,
+    }));
+    documents.setDrafts((current) => {
+      const next = { ...current };
+      delete next[documentId];
+      return next;
+    });
+    setNotes(notes);
+    setFiles(files);
+  }, [documents, setFiles, setNotes]);
   const navigation = useWorkspaceDocumentNavigation({
     documents,
     groups: tabs.groups,
@@ -483,6 +519,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
         editorFocusRequest,
         message,
         exportingNoteId: noteExport.exportingNoteId,
+        historyTarget,
       },
       actions: {
         beginHorizontalResize: layout.beginHorizontalResize,
@@ -580,6 +617,14 @@ export function useWorkspaceController(): WorkspaceShellProps {
             documents.drafts[document.id],
             format,
           ),
+        openHistory: async (groupId, document) => {
+          if (isUntitledId(document.id) || !document.deletable) return;
+          await finalizeFiledDocument(document.id);
+          setHistoryTarget({ groupId, documentId: document.id });
+        },
+        closeHistory: () => setHistoryTarget(null),
+        beforeHistoryRestore: finalizeFiledDocument,
+        historyRestored: refreshAfterHistoryRestore,
         dismissMessage: () => setMessage(""),
       },
     },

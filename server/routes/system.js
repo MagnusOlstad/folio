@@ -4,7 +4,7 @@ export function registerRoutes(app, runtime) {
   const { appVersion, updateRepo, embedModel, fetchLatestRelease, compareVersions, ollamaStatus, hasOllamaModel, refreshMissingEmbeddingsInBackground,
     toggleOllamaService, installConfiguredModels, readRecords, publicRecord, readDrafts, normalizeDraftId, draftFilePath, queueDraftMutation, readDraft,
     writeDraft, resolveBundleMarkdownPath, isMovableConceptId, queueMarkdownMutation, reindexBundle,
-    relationshipIndex, recordIsStale, semanticSuggestionSummaries, removeEmptyBundleDirectories } = runtime
+    relationshipIndex, recordIsStale, semanticSuggestionSummaries, removeEmptyBundleDirectories, history } = runtime
   const ollamaServiceToggles = new Map()
 app.get('/api/version', async (request, response) => {
   const payload = { version: appVersion, repo: updateRepo }
@@ -172,7 +172,14 @@ app.delete('/api/note', async (request, response, next) => {
     if (!record) return response.status(404).json({ error: 'Note not found.' })
 
     await reindexBundle()
-    response.json({ deletedId: id, rawId: record.rawId })
+    let warning = null
+    try {
+      await history.reconcile(`Deleted ${id}`, [id])
+    } catch (error) {
+      console.error(`The note deleted, but its history checkpoint failed: ${error.message}`)
+      warning = 'The note was deleted, but its history checkpoint could not be saved.'
+    }
+    response.json({ deletedId: id, rawId: record.rawId, ...(warning ? { warning } : {}) })
   } catch (error) {
     next(error)
   }

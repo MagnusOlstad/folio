@@ -15,6 +15,7 @@ import { createSearchService } from './knowledge/search.js'
 import { createFilingService } from './filing/service.js'
 import { createReleaseService } from './updates/service.js'
 import { createObsidianImportService } from './imports/obsidian.js'
+import { createHistoryService } from './history/service.js'
 import { registerRoutes as registerSystemRoutes } from './routes/system.js'
 import { registerRoutes as registerFileRoutes } from './routes/files.js'
 import { registerRoutes as registerCaptureRoutes } from './routes/capture.js'
@@ -23,6 +24,7 @@ import { registerRoutes as registerAskRoutes } from './routes/ask.js'
 import { registerRoutes as registerImportRoutes } from './routes/imports.js'
 import { registerRoutes as registerBackupRoutes } from './routes/backup.js'
 import { registerRoutes as registerBundleRoutes } from './routes/bundles.js'
+import { registerRoutes as registerHistoryRoutes } from './routes/history.js'
 import { createBundleRuntimeManager } from './bundles/registry.js'
 
 export function createRuntime(env = process.env) {
@@ -37,6 +39,7 @@ export function createRuntime(env = process.env) {
   Object.assign(runtime, createFilingService(runtime))
   Object.assign(runtime, createReleaseService(runtime))
   Object.assign(runtime, createObsidianImportService(runtime))
+  Object.assign(runtime, { history: createHistoryService(runtime) })
   return runtime
 }
 
@@ -52,6 +55,8 @@ export async function createApp(runtime = createRuntime()) {
       FOLIO_DRAFTS_ROOT: bundleConfig.draftsRoot,
       FOLIO_IMPORTS_ROOT: bundleConfig.importsRoot,
       FOLIO_INDEX_PATH: bundleConfig.indexPath,
+      FOLIO_HISTORY_BUNDLE_ID: bundleConfig.historyBundleId,
+      FOLIO_HISTORY_GIT_DIR: bundleConfig.historyGitDir,
     }),
   })
   const initialBundles = await manager.initialize()
@@ -63,7 +68,14 @@ export async function createApp(runtime = createRuntime()) {
       fs.mkdir(runtime.importsRoot, { recursive: true }),
     ])
     await runtime.reindexBundle()
-    void runtime.refreshMissingEmbeddingsInBackground()
+    manager.trackBackground(
+      runtime.history.reconcile('Baseline'),
+      'Could not initialize note history.',
+    )
+    manager.trackBackground(
+      runtime.refreshMissingEmbeddingsInBackground(),
+      'Could not refresh the semantic index.',
+    )
   }
 
   const app = express()
@@ -96,6 +108,7 @@ export async function createApp(runtime = createRuntime()) {
   registerImportRoutes(app, scopedRuntime)
   registerSystemRoutes(app, scopedRuntime)
   registerFileRoutes(app, scopedRuntime)
+  registerHistoryRoutes(app, scopedRuntime)
   registerCaptureRoutes(app, scopedRuntime)
   registerConfirmationRoutes(app, scopedRuntime)
   registerAskRoutes(app, scopedRuntime)

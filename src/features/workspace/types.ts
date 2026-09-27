@@ -30,6 +30,7 @@ export type EditorWorkspaceModel = {
   editorFocusRequest: EditorFocusRequest | null;
   message: string;
   exportingNoteId: string | null;
+  historyTarget: { groupId: string; documentId: string } | null;
 };
 
 export type EditorWorkspaceActions = {
@@ -93,6 +94,10 @@ export type EditorWorkspaceActions = {
     document: ViewerDocument,
     format: NoteExportFormat,
   ) => void;
+  openHistory: (groupId: string, document: ViewerDocument) => Promise<void>;
+  closeHistory: () => void;
+  beforeHistoryRestore: (documentId: string) => Promise<void>;
+  historyRestored: (documentId: string) => Promise<void>;
   dismissMessage: () => void;
   getDocumentScrollTop: (documentId: string) => number;
   rememberDocumentScrollTop: (documentId: string, scrollTop: number) => void;

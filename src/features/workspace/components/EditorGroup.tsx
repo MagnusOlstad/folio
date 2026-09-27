@@ -13,7 +13,7 @@ import type {
 type EditorGroupProps = {
   group: TabGroup;
   groupCount: number;
-  model: Omit<EditorWorkspaceModel, "groups" | "splitPosition" | "message"> & {
+  model: Omit<EditorWorkspaceModel, "groups" | "splitPosition" | "message" | "historyTarget"> & {
     filingOwnerGroupIds: Record<string, string>;
   };
   actions: Omit<
@@ -23,6 +23,9 @@ type EditorGroupProps = {
     | "finishHorizontalResize"
     | "resetSplit"
     | "dismissMessage"
+    | "closeHistory"
+    | "beforeHistoryRestore"
+    | "historyRestored"
   >;
   ui: WorkspaceEditorUi;
   paneControls?: {
@@ -179,6 +182,10 @@ export function EditorGroup({
         onNewTab={actions.createNewTab}
         onSplit={actions.splitWorkspace}
         onCloseGroup={actions.closeGroup}
+        historyAvailable={Boolean(document?.deletable && !isUntitledId(document.id))}
+        onOpenHistory={() => {
+          if (document) void actions.openHistory(group.id, document);
+        }}
       />
 
       <DocumentPane

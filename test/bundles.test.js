@@ -61,12 +61,15 @@ test('malformed registries refuse mutations and missing legacy roots stay absent
 
 test('createApp does not fabricate a legacy bundle when setup is empty', async (context) => {
   const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-empty-app-'))
-  context.after(() => fs.rm(dataRoot, { recursive: true, force: true }))
   const app = await createApp(createRuntime({ ...process.env, FOLIO_DATA_ROOT: dataRoot, OLLAMA_URL: 'http://127.0.0.1:9' }))
   const server = await new Promise((resolve) => {
     const listener = app.listen(0, '127.0.0.1', () => resolve(listener))
   })
-  context.after(() => server.close())
+  context.after(async () => {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+    await app.bundleManager.waitForBackground()
+    await fs.rm(dataRoot, { recursive: true, force: true })
+  })
   const baseUrl = `http://127.0.0.1:${server.address().port}`
   for (const endpoint of ['/api/status', '/api/notes', '/api/files', '/api/drafts']) {
     const response = await fetch(`${baseUrl}${endpoint}`)
@@ -86,7 +89,6 @@ test('createApp does not fabricate a legacy bundle when setup is empty', async (
 
 test('scoped runtimes isolate same file and draft IDs', async (context) => {
   const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-isolation-'))
-  context.after(() => fs.rm(dataRoot, { recursive: true, force: true }))
   const firstPath = path.join(dataRoot, 'first')
   const secondPath = path.join(dataRoot, 'second')
   await Promise.all([
@@ -103,7 +105,11 @@ test('scoped runtimes isolate same file and draft IDs', async (context) => {
   const server = await new Promise((resolve) => {
     const listener = app.listen(0, '127.0.0.1', () => resolve(listener))
   })
-  context.after(() => server.close())
+  context.after(async () => {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+    await app.bundleManager.waitForBackground()
+    await fs.rm(dataRoot, { recursive: true, force: true })
+  })
   const baseUrl = `http://127.0.0.1:${server.address().port}`
   const headers = (id) => ({ 'x-folio-bundle': id })
   const firstFiles = await fetch(`${baseUrl}/api/files`, { headers: headers(first.id) }).then((response) => response.json())

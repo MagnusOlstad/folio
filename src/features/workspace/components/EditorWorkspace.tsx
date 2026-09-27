@@ -5,6 +5,7 @@ import { EditorGroup } from "./EditorGroup.tsx";
 import type { EditorWorkspaceProps } from "../types.ts";
 import { WorkspaceSplitHandle } from "./WorkspaceSplitHandle.tsx";
 import { filingOwnerGroupIds } from "../model/filing.ts";
+import { NoteHistoryPanel } from "./NoteHistoryPanel.tsx";
 
 export function EditorWorkspace({ model, actions, paneControls }: EditorWorkspaceProps) {
   const ui = useWorkspaceEditorUi();
@@ -58,18 +59,16 @@ export function EditorWorkspace({ model, actions, paneControls }: EditorWorkspac
     rememberDocumentScrollTop: actions.rememberDocumentScrollTop,
     getDocumentSelection: actions.getDocumentSelection,
     rememberDocumentSelection: actions.rememberDocumentSelection,
+    openHistory: actions.openHistory,
   };
 
   return (
-    <section
-      className={`editor-workspace ${model.groups.length === 2 ? "is-split" : ""}`}
-      style={
-        {
-          "--split-position": `${model.splitPosition}%`,
-        } as CSSProperties
-      }
-    >
-      {model.groups.map((group, groupIndex) => (
+    <section className={`editor-workspace ${model.historyTarget ? "with-history" : ""}`}>
+      <div
+        className={`editor-groups ${model.groups.length === 2 ? "is-split" : ""}`}
+        style={{ "--split-position": `${model.splitPosition}%` } as CSSProperties}
+      >
+        {model.groups.map((group, groupIndex) => (
         <Fragment key={group.id}>
           {groupIndex === 1 && (
             <WorkspaceSplitHandle
@@ -93,7 +92,17 @@ export function EditorWorkspace({ model, actions, paneControls }: EditorWorkspac
             } : undefined}
           />
         </Fragment>
-      ))}
+        ))}
+      </div>
+      {model.historyTarget && (
+        <NoteHistoryPanel
+          key={model.historyTarget.documentId}
+          documentId={model.historyTarget.documentId}
+          onClose={actions.closeHistory}
+          onBeforeRestore={actions.beforeHistoryRestore}
+          onRestored={actions.historyRestored}
+        />
+      )}
       {model.message && (
         <button
           type="button"

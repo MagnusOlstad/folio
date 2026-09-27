@@ -5,7 +5,7 @@ export function registerRoutes(app, runtime) {
   const { embedModel, embeddingSchemaVersion, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, queueDraftMutation, readDraft, writeDraft, resolveBundleMarkdownPath,
     listBundleMarkdownFiles, bundleFileId, parseMarkdownFile, isMovableConceptId, queueMarkdownMutation, moveConceptMarkdown, reindexBundle, normalizeInlineText,
     markdownDocument, updatedGenerated, filingPreviousPaths, embeddingInputHash, persistEmbeddingUpdates, refreshRecordEmbeddings, normalizeConfirmationFields, captureContribution,
-    restoreCaptureMetadata, captureMarker, removeEmptyBundleDirectories } = runtime
+    restoreCaptureMetadata, captureMarker, removeEmptyBundleDirectories, history } = runtime
   let filingConfirmationQueue = Promise.resolve()
 app.post(['/api/filing/confirm', '/api/notes/confirm'], async (request, response, next) => {
   let releaseFilingConfirmation
@@ -213,6 +213,12 @@ app.post(['/api/filing/confirm', '/api/notes/confirm'], async (request, response
       if (draft) await writeDraft({ ...draft, filedId: targetId, filing: confirmation, confirmation, updatedAt: confirmedAt })
     })
     const note = publicRecord(record)
+    try {
+      await history.reconcile(`Confirmed ${targetId}`)
+    } catch (error) {
+      console.error(`The filing was confirmed, but its history checkpoint failed: ${error.message}`)
+      embeddingWarning ||= 'The filing was confirmed, but its history checkpoint could not be saved.'
+    }
     if (embeddingWarning) void refreshMissingEmbeddingsInBackground()
     response.json({ note, notes: currentRecords.map(publicRecord), warning: embeddingWarning, oldId: receipt.id, newId: targetId, appended: receipt.confirmation.mode !== 'new', sourceRemoved, filing: confirmation, idempotent: false })
   } catch (error) {

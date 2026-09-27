@@ -227,6 +227,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const baseUrl = `http://127.0.0.1:${apiPort}`
   context.after(async () => {
     await close(api)
+    await api.waitForBackground?.()
     await close(ollama)
     await fs.rm(dataRoot, { recursive: true, force: true })
   })
