@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BundleFile, Note, NoteDetail, ViewerDocument } from "../../../domain/types.ts";
 import { api, apiForBundle, setActiveBundleId } from "../../../lib/api.ts";
 import type { WorkspaceShellProps } from "../components/WorkspaceShell.tsx";
@@ -13,6 +13,9 @@ import { useWorkspaceExplorerState } from "./useWorkspaceExplorerState.ts";
 import { useWorkspaceSidebarProps } from "./useWorkspaceSidebarProps.ts";
 import { useWorkspaceShortcutActions } from "./useWorkspaceShortcutActions.ts";
 import { useFiledDocumentAutosave } from "./useFiledDocumentAutosave.ts";
+import { useNoteHistoryCheckpoint } from "./useNoteHistoryCheckpoint.ts";
+import { resolveHistoryTarget } from "../model/history-target.ts";
+import { prepareFiledDocumentHistory } from "../model/history-actions.ts";
 import { expandedPathsForFiles, isUntitledId } from "../../../lib/workspace.ts";
 import { bundleDirectories } from "../model/directory-suggestions.ts";
 import { useNoteExport } from "./useNoteExport.ts";
@@ -134,6 +137,36 @@ export function useWorkspaceController(): WorkspaceShellProps {
       );
     },
   });
+  const checkpointContextRef = useRef({
+    bundleId: persistenceBundleId,
+    movingFileId: explorer.movingFileId,
+    deletingNoteId: documents.deletingNoteId,
+  });
+  useLayoutEffect(() => {
+    checkpointContextRef.current = {
+      bundleId: persistenceBundleId,
+      movingFileId: explorer.movingFileId,
+      deletingNoteId: documents.deletingNoteId,
+    };
+  }, [documents.deletingNoteId, explorer.movingFileId, persistenceBundleId]);
+  const checkpointEditedNote = useNoteHistoryCheckpoint({
+    checkpoint: async (documentId, scopeId) => {
+      if (checkpointContextRef.current.bundleId !== scopeId) return;
+      const bundleId = scopeId;
+      await autosave.flushSave(documentId);
+      if (autosave.isDirty(documentId)) throw new Error("Could not save the note before its history checkpoint.");
+      const document = documents.documentsRef.current[documentId];
+      const context = checkpointContextRef.current;
+      if (!document || isUntitledId(documentId) || !document.deletable || context.bundleId !== bundleId || context.movingFileId === documentId || context.deletingNoteId === documentId) return;
+      await apiForBundle(bundleId, "/api/note/history/checkpoint", {
+        method: "POST",
+        body: JSON.stringify({ id: documentId }),
+      });
+    },
+    onError: (_documentId, error) => {
+      setMessage(error instanceof Error ? error.message : "Could not save a note history checkpoint.");
+    },
+  });
 
   function markEmbeddingDirty(documentId: string) {
     embeddingRevisionsRef.current.set(
@@ -171,6 +204,15 @@ export function useWorkspaceController(): WorkspaceShellProps {
     return finalization;
   }
 
+  async function prepareHistoryDocument(documentId: string) {
+    await prepareFiledDocumentHistory(
+      documentId,
+      autosave.flushSave,
+      finalizeFiledDocument,
+      autosave.isDirty,
+    );
+  }
+
   function finalizeAllFiledDocuments() {
     return Promise.all(
       Array.from(embeddingRevisionsRef.current.keys(), finalizeFiledDocument),
@@ -181,18 +223,20 @@ export function useWorkspaceController(): WorkspaceShellProps {
     const activeGroup = tabs.groups.find((group) => group.id === tabs.activeGroupId);
     const documentId = activeGroup?.activeId;
     const document = documentId ? documents.documents[documentId] : null;
-    const nextTarget = !documentId || !document || isUntitledId(documentId) || !document.deletable
-      ? null
-      : historyTarget.groupId !== tabs.activeGroupId || historyTarget.documentId !== documentId
-        ? { groupId: tabs.activeGroupId, documentId }
-        : historyTarget;
+    const nextTarget = resolveHistoryTarget(
+      historyTarget,
+      tabs.activeGroupId,
+      documentId,
+      document,
+      Boolean(documentId && documents.loadingDocuments.has(documentId)),
+    );
     if (nextTarget === historyTarget) return;
     let cancelled = false;
     queueMicrotask(() => {
       if (!cancelled) setHistoryTarget(nextTarget);
     });
     return () => { cancelled = true; };
-  }, [documents.documents, historyTarget, tabs.activeGroupId, tabs.groups]);
+  }, [documents.documents, documents.loadingDocuments, historyTarget, tabs.activeGroupId, tabs.groups]);
   const refreshAfterHistoryRestore = useCallback(async (documentId: string) => {
     const [detail, notes, files] = await Promise.all([
       api<NoteDetail>(`/api/note?id=${encodeURIComponent(documentId)}`),
@@ -573,6 +617,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
           documents.changeDraftContent(document, content);
           if (!isUntitledId(document.id)) {
             markEmbeddingDirty(document.id);
+            if (document.deletable) checkpointEditedNote(document.id, persistenceBundleId);
             autosave.scheduleSave(document.id, content);
           }
         },
@@ -619,11 +664,17 @@ export function useWorkspaceController(): WorkspaceShellProps {
           ),
         openHistory: async (groupId, document) => {
           if (isUntitledId(document.id) || !document.deletable) return;
-          await finalizeFiledDocument(document.id);
+          try {
+            await prepareHistoryDocument(document.id);
+          } catch (error) {
+            setMessage(error instanceof Error ? error.message : "Could not save the note before opening history.");
+            return;
+          }
           setHistoryTarget({ groupId, documentId: document.id });
+          layout.setRightPaneOpen(true);
         },
         closeHistory: () => setHistoryTarget(null),
-        beforeHistoryRestore: finalizeFiledDocument,
+        beforeHistoryRestore: prepareHistoryDocument,
         historyRestored: refreshAfterHistoryRestore,
         dismissMessage: () => setMessage(""),
       },

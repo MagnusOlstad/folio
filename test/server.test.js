@@ -1014,6 +1014,15 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const offline = await jsonRequest(`${baseUrl}/api/notes`, { content: 'Offline capture', timeZone: 'America/New_York' })
   assert.equal(offline.filing.actor, 'process:folio-fallback')
   assert.match(await fs.readFile(path.join(dataRoot, 'bundle', offline.note.id.slice(1)), 'utf8'), /filing:\n  by: process:folio-fallback/)
+  const historyCheckpointResponse = await fetch(`${baseUrl}/api/note/history/checkpoint`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: offline.note.id }),
+  })
+  assert.equal(historyCheckpointResponse.status, 200)
+  assert.deepEqual(await historyCheckpointResponse.json(), { checkpointed: true })
+  const unfiledHistoryResponse = await fetch(`${baseUrl}/api/note/history/checkpoint`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'untitled:note' }),
+  })
+  assert.equal(unfiledHistoryResponse.status, 400)
 
   const nestedDeleteDirectory = path.join(dataRoot, 'bundle', 'temporary', 'sole', 'deep')
   const nestedDeleteId = '/temporary/sole/deep/only-note.md'

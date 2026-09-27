@@ -165,6 +165,10 @@
   min-height: 0;
 }
 
+.right-pane-content.has-history {
+  overflow: auto;
+}
+
 .right-pane-status {
   min-width: 0;
   padding: 10px 12px;

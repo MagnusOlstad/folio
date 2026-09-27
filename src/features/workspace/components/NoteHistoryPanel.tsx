@@ -1,17 +1,17 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { NoteHistoryEntry, NoteHistoryPage, NoteHistorySnapshot } from "../../../domain/types.ts";
 import { api } from "../../../lib/api.ts";
 
-type NoteHistoryPanelProps = { documentId: string; onClose: () => void; onBeforeRestore: (documentId: string) => Promise<void>; onRestored: (documentId: string) => Promise<void> };
+type NoteHistoryPanelProps = { documentId: string; title: string; onBeforeRestore: (documentId: string) => Promise<void>; onRestored: (documentId: string) => Promise<void> };
 
 function dateLabel(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
-function NoteHistoryPanelComponent({ documentId, onClose, onBeforeRestore, onRestored }: NoteHistoryPanelProps) {
+function NoteHistoryPanelComponent({ documentId, title, onBeforeRestore, onRestored }: NoteHistoryPanelProps) {
   const [entries, setEntries] = useState<NoteHistoryEntry[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [selected, setSelected] = useState<NoteHistorySnapshot | null>(null);
@@ -20,6 +20,7 @@ function NoteHistoryPanelComponent({ documentId, onClose, onBeforeRestore, onRes
   const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
+  const selectionRequestRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,11 +31,19 @@ function NoteHistoryPanelComponent({ documentId, onClose, onBeforeRestore, onRes
     return () => { cancelled = true; };
   }, [documentId]);
 
+  useEffect(() => () => { selectionRequestRef.current += 1; }, []);
+
   async function selectRevision(revision: string) {
+    const requestId = ++selectionRequestRef.current;
     setError("");
+    setSelected(null);
     try {
-      setSelected(await api<NoteHistorySnapshot>(`/api/note/history/version?id=${encodeURIComponent(documentId)}&revision=${encodeURIComponent(revision)}`));
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load that version."); }
+      const snapshot = await api<NoteHistorySnapshot>(`/api/note/history/version?id=${encodeURIComponent(documentId)}&revision=${encodeURIComponent(revision)}`);
+      if (selectionRequestRef.current === requestId) setSelected(snapshot);
+    } catch (cause) {
+      if (selectionRequestRef.current === requestId)
+        setError(cause instanceof Error ? cause.message : "Could not load that version.");
+    }
   }
   async function loadMore() {
     if (!cursor || loadingMore) return;
@@ -63,18 +72,19 @@ function NoteHistoryPanelComponent({ documentId, onClose, onBeforeRestore, onRes
     ? entries.find((entry) => entry.revision === selected.revision)
     : null;
 
-  return <aside className="note-history-panel" aria-label="Note history">
-    <header className="note-history-heading"><div><span>History</span><strong>{documentId.split("/").pop()?.replace(/\.md$/, "") || "Note"}</strong></div><button type="button" onClick={onClose} aria-label="Close history">Close</button></header>
+  return <section className="note-history-panel" aria-label="Note history">
+    <header className="note-history-heading"><span>History</span><strong title={title}>{title}</strong></header>
     {error && <p className="note-history-error" role="alert">{error}</p>}
     {warning && <p className="note-history-warning" role="status">{warning}</p>}
     <div className="note-history-body">
       <nav className="note-history-timeline" aria-label="Versions">
+        <h2>Timeline</h2>
         {loading && <p>Loading history…</p>}
         {!loading && entries.length === 0 && <p>No history is available yet.</p>}
-        {entries.map((entry) => <button type="button" className={selected?.revision === entry.revision ? "active" : ""} onClick={() => void selectRevision(entry.revision)} key={entry.revision}><strong>{entry.title}</strong><small>{dateLabel(entry.authoredAt)}</small></button>)}
+        {entries.map((entry) => <button type="button" className={selected?.revision === entry.revision ? "active" : ""} aria-current={selected?.revision === entry.revision ? "true" : undefined} aria-pressed={selected?.revision === entry.revision} onClick={() => void selectRevision(entry.revision)} key={entry.revision}><strong>{entry.title}</strong><small>{dateLabel(entry.authoredAt)}</small></button>)}
         {cursor && <button type="button" className="note-history-more" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load more"}</button>}
       </nav>
-      <section className="note-history-version" aria-live="polite">
+      <section className="note-history-version" aria-live="polite" aria-label="Version preview">
         {selected ? <>
           <div className="note-history-version-heading"><div><span>Selected version</span><strong>{selectedEntry ? dateLabel(selectedEntry.authoredAt) : "Selected revision"}</strong></div><button type="button" onClick={() => void restoreSelected()} disabled={restoring}>{restoring ? "Restoring…" : "Restore version"}</button></div>
           <dl className="note-history-metadata"><div><dt>Title</dt><dd>{selected.note.title}</dd></div><div><dt>Tags</dt><dd>{selected.note.tags.map((tag) => `#${tag}`).join(" ") || "None"}</dd></div><div><dt>Status</dt><dd>{selected.note.status}</dd></div></dl>
@@ -83,7 +93,7 @@ function NoteHistoryPanelComponent({ documentId, onClose, onBeforeRestore, onRes
         </> : <p>Select a version to inspect its preview and changes.</p>}
       </section>
     </div>
-  </aside>;
+  </section>;
 }
 
 // This only mounts after the explicit History action, keeping network/rendering work out of typing.

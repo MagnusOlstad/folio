@@ -5,7 +5,6 @@ import { EditorGroup } from "./EditorGroup.tsx";
 import type { EditorWorkspaceProps } from "../types.ts";
 import { WorkspaceSplitHandle } from "./WorkspaceSplitHandle.tsx";
 import { filingOwnerGroupIds } from "../model/filing.ts";
-import { NoteHistoryPanel } from "./NoteHistoryPanel.tsx";
 
 export function EditorWorkspace({ model, actions, paneControls }: EditorWorkspaceProps) {
   const ui = useWorkspaceEditorUi();
@@ -63,7 +62,7 @@ export function EditorWorkspace({ model, actions, paneControls }: EditorWorkspac
   };
 
   return (
-    <section className={`editor-workspace ${model.historyTarget ? "with-history" : ""}`}>
+    <section className="editor-workspace">
       <div
         className={`editor-groups ${model.groups.length === 2 ? "is-split" : ""}`}
         style={{ "--split-position": `${model.splitPosition}%` } as CSSProperties}
@@ -94,15 +93,6 @@ export function EditorWorkspace({ model, actions, paneControls }: EditorWorkspac
         </Fragment>
         ))}
       </div>
-      {model.historyTarget && (
-        <NoteHistoryPanel
-          key={model.historyTarget.documentId}
-          documentId={model.historyTarget.documentId}
-          onClose={actions.closeHistory}
-          onBeforeRestore={actions.beforeHistoryRestore}
-          onRestored={actions.historyRestored}
-        />
-      )}
       {model.message && (
         <button
           type="button"

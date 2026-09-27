@@ -12,6 +12,7 @@ import { NoteExportPreview } from "./NoteExportPreview.tsx";
 import { WorkspaceRightPane } from "./WorkspaceRightPane.tsx";
 import { WorkspaceLeftPaneHeader } from "./WorkspaceLeftPaneHeader.tsx";
 import type { NoteExportSnapshot } from "../model/note-export.ts";
+import { NoteHistoryPanel } from "./NoteHistoryPanel.tsx";
 
 type WorkspaceAppProps = WorkspaceStatusProps & {
   versionInfo: VersionInfo | null;
@@ -98,7 +99,23 @@ export function WorkspaceShell({
           />
         ) : null}
         {layout.rightPaneOpen ? (
-          <WorkspaceRightPane {...app} onHide={() => layout.setRightPaneOpen(false)} />
+          <WorkspaceRightPane
+            {...app}
+            onHide={() => layout.setRightPaneOpen(false)}
+            historyContent={editor.model.historyTarget ? (
+              editor.model.documents[editor.model.historyTarget.documentId]?.deletable ? (
+              <NoteHistoryPanel
+                key={editor.model.historyTarget.documentId}
+                documentId={editor.model.historyTarget.documentId}
+                title={editor.model.documents[editor.model.historyTarget.documentId]?.title || "Note"}
+                onBeforeRestore={editor.actions.beforeHistoryRestore}
+                onRestored={editor.actions.historyRestored}
+              />
+              ) : editor.model.loadingDocuments.has(editor.model.historyTarget.documentId) ? (
+                <p className="right-pane-placeholder" role="status">Loading note…</p>
+              ) : null
+            ) : null}
+          />
         ) : null}
       </section>
       {exportPreview ? <NoteExportPreview snapshot={exportPreview} /> : null}

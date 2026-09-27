@@ -9,6 +9,22 @@ function noteId(request) {
 }
 
 export function registerRoutes(app, runtime) {
+  app.post('/api/note/history/checkpoint', async (request, response) => {
+    const id = noteId(request)
+    const filePath = runtime.resolveBundleMarkdownPath(id)
+    if (!filePath) return response.status(400).json({ error: 'Invalid note path.' })
+    try {
+      const stat = await fs.stat(filePath)
+      if (!stat.isFile()) return response.status(404).json({ error: 'Note not found.' })
+      await runtime.history.reconcile(`Checkpoint ${id}`, [id])
+      response.json({ checkpointed: true })
+    } catch (error) {
+      if (error.code === 'ENOENT') return response.status(404).json({ error: 'Note not found.' })
+      console.error(`Could not checkpoint note history for ${id}: ${error.message}`)
+      return response.status(503).json({ error: 'Could not save a history checkpoint. Your note remains saved.' })
+    }
+  })
+
   app.get('/api/note/history', async (request, response, next) => {
     try {
       response.json(await runtime.history.entries(noteId(request), request.query.cursor || null, request.query.limit))
