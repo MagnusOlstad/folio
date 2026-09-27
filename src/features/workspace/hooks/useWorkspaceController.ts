@@ -259,6 +259,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       explorer.setExpandedDirectories(parsedStored?.expandedDirectories ? new Set(parsedStored.expandedDirectories) : expandedPathsForFiles(files));
       setExplorerScrollTop(restored?.explorerScrollTop || 0);
       session.restoreDocumentScrollTops(restored?.documentScrollTops || {});
+      session.restoreDocumentSelections(restored?.documentSelections || {});
       layout.setSplitPosition(
         restored?.splitPosition
         ?? (typeof parsedStored?.splitPosition === "number" ? parsedStored.splitPosition : 50),
@@ -291,13 +292,13 @@ export function useWorkspaceController(): WorkspaceShellProps {
     void switchBundle(id, previousBundleId);
   }, [bundleSetup.activeBundleId, switchBundle]);
 
-  const selectBundle = useCallback((bundleId: string) => {
+  function selectBundle(bundleId: string) {
     void Promise.all([finalizeAllFiledDocuments(), documents.flushDrafts()])
       .then(() => bundleSetup.selectBundle(bundleId))
       .catch((error) => {
         setMessage(error instanceof Error ? error.message : "Could not save the current bundle before switching.");
       });
-  }, [bundleSetup, documents, finalizeAllFiledDocuments]);
+  }
   const clearEmptyWorkspace = useCallback(() => {
     documents.setDocuments({});
     documents.setDrafts({});
@@ -310,16 +311,16 @@ export function useWorkspaceController(): WorkspaceShellProps {
     explorer.setFiles([]);
     explorer.setFilesLoading(false);
   }, [documents, explorer, tabs]);
-  const setupBundle = useCallback(async (input: Parameters<typeof bundleSetup.setupBundle>[0]) => {
+  async function setupBundle(input: Parameters<typeof bundleSetup.setupBundle>[0]) {
     await Promise.all([finalizeAllFiledDocuments(), documents.flushDrafts()]);
     return bundleSetup.setupBundle(input);
-  }, [bundleSetup, documents, finalizeAllFiledDocuments]);
-  const detachBundle = useCallback(async (bundleId: string) => {
+  }
+  async function detachBundle(bundleId: string) {
     await Promise.all([finalizeAllFiledDocuments(), documents.flushDrafts()]);
     await bundleSetup.detachBundle(bundleId);
     if (bundleSetup.activeBundleId === bundleId && bundleSetup.bundles.length === 1)
       clearEmptyWorkspace();
-  }, [bundleSetup, clearEmptyWorkspace, documents, finalizeAllFiledDocuments]);
+  }
   const settingsBundleSetup = {
     ...bundleSetup,
     selectBundle,
@@ -383,7 +384,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       setEditorFocusRequest(null);
       tabs.createNewTab();
     },
-    activateTabAtEnd: (groupId, documentId) => {
+    activateTab: (groupId, documentId) => {
       const group = tabs.groups.find((candidate) => candidate.id === groupId);
       if (groupId !== tabs.activeGroupId || group?.activeId !== documentId)
         void finalizeAllFiledDocuments();
@@ -488,18 +489,22 @@ export function useWorkspaceController(): WorkspaceShellProps {
           }
           tabs.setActiveGroupId(groupId);
         },
-        moveTabToGroup: (documentId, sourceGroupId, targetGroupId) => {
+        moveTabToGroup: (documentId, sourceGroupId, targetGroupId, targetIndex) => {
           setEditorFocusRequest(null);
-          tabs.moveTabToGroup(documentId, sourceGroupId, targetGroupId);
+          tabs.moveTabToGroup(documentId, sourceGroupId, targetGroupId, targetIndex);
         },
         titleForId: tabs.titleForId,
         activateTab: (groupId, documentId) => {
-          setEditorFocusRequest(null);
           const group = tabs.groups.find((candidate) => candidate.id === groupId);
           if (groupId !== tabs.activeGroupId || group?.activeId !== documentId)
             void finalizeAllFiledDocuments();
           tabs.activateTab(groupId, documentId);
           ensureDocumentLoaded(documentId);
+          setEditorFocusRequest({
+            id: ++editorFocusRequestIdRef.current,
+            groupId,
+            documentId,
+          });
         },
         pinTab: tabs.pinTab,
         consumeEditorFocusRequest: (requestId) =>
@@ -560,6 +565,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
         getDocumentScrollTop: (documentId) =>
           session.getDocumentScrollTop(documentId),
         rememberDocumentScrollTop: session.rememberDocumentScrollTop,
+        getDocumentSelection: session.getDocumentSelection,
+        rememberDocumentSelection: session.rememberDocumentSelection,
         exportDocument: (document, format) =>
           void noteExport.exportDocument(
             document,

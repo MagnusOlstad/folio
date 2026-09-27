@@ -81,15 +81,32 @@ describe("theme settings", () => {
           clearScan: () => {},
         }}
         onClose={onClose}
+        bundleSetup={{
+          bundles: [{
+            id: "bundle-1",
+            name: "Work vault",
+            markdownPath: "/bundles/work-vault",
+            managed: true,
+            detached: false,
+          }],
+          activeBundleId: "bundle-1",
+          error: "",
+          selectBundle: () => {},
+          setupBundle: async () => {
+            throw new Error("Not used.");
+          },
+          renameBundle: async () => {},
+          detachBundle: async () => {},
+        }}
       />,
     );
 
     expect(screen.getAllByRole("radio", { name: /Original|Editorial|Light|Dark/ })).toHaveLength(4);
     expect(
-      screen.getByText(/Download the active bundle as a ZIP file/i),
+      screen.getByText(/Download all attached bundles as one ZIP file/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "Download bundle backup" }),
+      screen.getByRole("link", { name: "Download all bundle backups" }),
     ).toHaveAttribute("href", "/api/backup");
     expect(screen.getByRole("radio", { name: /Original/ })).toBeChecked();
     expect(screen.getByRole("button", { name: "Close" })).toHaveFocus();

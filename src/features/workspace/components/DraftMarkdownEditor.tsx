@@ -10,6 +10,8 @@ type DraftMarkdownEditorProps = {
   focusRequestId?: number;
   onFocusRequestConsumed?: () => void;
   ariaLabel: string;
+  initialSelection?: { from: number; to: number };
+  onSelectionChange?: (from: number, to: number) => void;
 };
 
 const steeringPlaceholder =
@@ -29,6 +31,8 @@ export function DraftMarkdownEditor({
   focusRequestId,
   onFocusRequestConsumed,
   ariaLabel,
+  initialSelection,
+  onSelectionChange,
 }: DraftMarkdownEditorProps) {
   const shellRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
@@ -75,6 +79,8 @@ export function DraftMarkdownEditor({
         onFile={onFile}
         onOpenLink={onOpenLink}
         onToggleTask={onToggleTask}
+        initialSelection={initialSelection}
+        onSelectionChange={onSelectionChange}
         focusRequestId={focusRequestId}
         onFocusRequestConsumed={onFocusRequestConsumed}
         autoFocus

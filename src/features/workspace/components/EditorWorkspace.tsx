@@ -56,6 +56,8 @@ export function EditorWorkspace({ model, actions }: EditorWorkspaceProps) {
     exportDocument: actions.exportDocument,
     getDocumentScrollTop: actions.getDocumentScrollTop,
     rememberDocumentScrollTop: actions.rememberDocumentScrollTop,
+    getDocumentSelection: actions.getDocumentSelection,
+    rememberDocumentSelection: actions.rememberDocumentSelection,
   };
 
   return (

@@ -4,10 +4,12 @@ import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { LiveMarkdownEditor } from "../../src/features/workspace/components/LiveMarkdownEditor.tsx";
-import { continueLiveMarkdownList } from "../../src/features/workspace/model/live-markdown.ts";
+import {
+  continueLiveMarkdownList,
+} from "../../src/features/workspace/model/live-markdown.ts";
 
 describe("LiveMarkdownEditor", () => {
-  it("focuses and collapses the caret at the end for a focus request", () => {
+  it("focuses without changing the restored selection for a focus request", () => {
     const frames: FrameRequestCallback[] = [];
     const requestAnimationFrame = vi
       .spyOn(window, "requestAnimationFrame")
@@ -24,16 +26,17 @@ describe("LiveMarkdownEditor", () => {
         onChange={vi.fn()}
         focusRequestId={1}
         onFocusRequestConsumed={onFocusRequestConsumed}
+        initialSelection={{ from: 4, to: 4 }}
         ariaLabel="Focus note"
       />,
     );
 
     const view = EditorView.findFromDOM(screen.getByLabelText("Focus note"));
-    expect(view.state.selection.main.head).toBe(0);
+    expect(view.state.selection.main.head).toBe(4);
     act(() => frames.at(-1)?.(0));
 
-    expect(view.state.selection.main.from).toBe(view.state.doc.length);
-    expect(view.state.selection.main.to).toBe(view.state.doc.length);
+    expect(view.state.selection.main.from).toBe(4);
+    expect(view.state.selection.main.to).toBe(4);
     expect(view.hasFocus).toBe(true);
     expect(onFocusRequestConsumed).toHaveBeenCalledOnce();
     requestAnimationFrame.mockRestore();
@@ -197,6 +200,86 @@ describe("LiveMarkdownEditor", () => {
     });
   });
 
+  it("inserts an unchecked item before a checked item at the top of a list", () => {
+    const onChange = vi.fn();
+    render(
+      <LiveMarkdownEditor
+        value="- [x] done"
+        onChange={onChange}
+        ariaLabel="Edit top task"
+      />,
+    );
+    const editor = screen.getByLabelText("Edit top task");
+    const view = EditorView.findFromDOM(editor);
+    act(() => view.dispatch({ selection: { anchor: "- [x] ".length } }));
+
+    fireEvent.keyDown(editor, { key: "Enter" });
+
+    expect(view.state.doc.toString()).toBe("- [ ] \n- [x] done");
+    expect(onChange).toHaveBeenLastCalledWith("- [ ] \n- [x] done");
+  });
+
+  it("toggles the current task with Shift+Space", () => {
+    const onChange = vi.fn();
+    render(
+      <LiveMarkdownEditor
+        value="- [ ] next\nplain"
+        onChange={onChange}
+        onToggleTask={(lineNumber, checked) => {
+          const next = lineNumber === 1 ? "- [x] next\nplain" : "- [ ] next\nplain";
+          if (checked) onChange(next);
+        }}
+        ariaLabel="Edit task keyboard"
+      />,
+    );
+    const editor = screen.getByLabelText("Edit task keyboard");
+    const view = EditorView.findFromDOM(editor);
+    act(() => view.dispatch({ selection: { anchor: 5 } }));
+    fireEvent.keyDown(editor, { key: " ", shiftKey: true });
+    expect(onChange).toHaveBeenCalledWith("- [x] next\nplain");
+  });
+
+  it("indents and outdents list items with Tab without leaving the editor", () => {
+    const editor = render(
+      <LiveMarkdownEditor
+        value="- item"
+        onChange={vi.fn()}
+        ariaLabel="Edit indentation"
+      />,
+    );
+    const element = screen.getByLabelText("Edit indentation");
+    const view = EditorView.findFromDOM(element);
+    act(() => view.dispatch({ selection: { anchor: view.state.doc.length } }));
+    fireEvent.keyDown(element, { key: "Tab" });
+    expect(view.state.doc.toString()).toBe("  - item");
+    fireEvent.keyDown(element, { key: "Tab", shiftKey: true });
+    expect(view.state.doc.toString()).toBe("- item");
+    editor.unmount();
+  });
+
+  it("indents and outdents plain-text lines with Tab without leaving the editor", () => {
+    const editor = render(
+      <LiveMarkdownEditor
+        value={"first\nsecond"}
+        onChange={vi.fn()}
+        ariaLabel="Edit plain indentation"
+      />,
+    );
+    const element = screen.getByLabelText("Edit plain indentation");
+    const view = EditorView.findFromDOM(element);
+    element.focus();
+    act(() => view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }));
+
+    fireEvent.keyDown(element, { key: "Tab" });
+    expect(view.state.doc.toString()).toBe("  first\n  second");
+    expect(view.hasFocus).toBe(true);
+
+    fireEvent.keyDown(element, { key: "Tab", shiftKey: true });
+    expect(view.state.doc.toString()).toBe("first\nsecond");
+    expect(view.hasFocus).toBe(true);
+    editor.unmount();
+  });
+
   it("reveals only the task syntax under the cursor", () => {
     render(
       <LiveMarkdownEditor
@@ -254,6 +337,26 @@ describe("LiveMarkdownEditor", () => {
       ".cm-live-markdown-list-source",
     );
     expect(revealedPrefix?.textContent).toBe("- ");
+  });
+
+  it("places the caret at the first list-content character when a rendered marker is clicked", () => {
+    render(
+      <LiveMarkdownEditor
+        value="- item"
+        onChange={vi.fn()}
+        ariaLabel="Edit marker click"
+      />,
+    );
+
+    const editor = screen.getByLabelText("Edit marker click");
+    const view = EditorView.findFromDOM(editor);
+    const marker = document.querySelector<HTMLElement>(".cm-live-markdown-list-marker");
+    expect(marker).not.toBeNull();
+
+    fireEvent.mouseDown(marker!);
+
+    expect(view.state.selection.main).toMatchObject({ from: 2, to: 2 });
+    expect(view.hasFocus).toBe(true);
   });
 
   it("shows multi-digit markers intact and nested ordered markers as letters", () => {

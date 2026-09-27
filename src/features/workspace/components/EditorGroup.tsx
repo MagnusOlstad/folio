@@ -60,10 +60,14 @@ export function EditorGroup({
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
         ui.setDropGroupId(group.id);
+        if (!(event.target instanceof Element) || !event.target.closest(".editor-tab"))
+          ui.setDropTabSlot({ groupId: group.id, index: group.tabs.length });
       }}
       onDragLeave={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node))
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) {
           ui.setDropGroupId(null);
+          ui.setDropTabSlot(null);
+        }
       }}
       onDrop={(event) => {
         event.preventDefault();
@@ -88,10 +92,24 @@ export function EditorGroup({
             tab = null;
           }
         }
-        if (tab)
-          actions.moveTabToGroup(tab.documentId, tab.groupId, group.id);
+        if (tab) {
+          const dropIndex = ui.dropTabSlot?.groupId === group.id
+            ? ui.dropTabSlot.index
+            : undefined;
+          const sourceIndex = tab.groupId === group.id
+            ? group.tabs.indexOf(tab.documentId)
+            : -1;
+          const targetIndex = dropIndex !== undefined && sourceIndex !== -1 && sourceIndex < dropIndex
+            ? dropIndex - 1
+            : dropIndex;
+          if (targetIndex === undefined)
+            actions.moveTabToGroup(tab.documentId, tab.groupId, group.id);
+          else
+            actions.moveTabToGroup(tab.documentId, tab.groupId, group.id, targetIndex);
+        }
         ui.setDraggedTab(null);
         ui.setDropGroupId(null);
+        ui.setDropTabSlot(null);
       }}
     >
       <EditorTabs
@@ -101,6 +119,7 @@ export function EditorGroup({
         isUntitledId={isUntitledId}
         onActivate={actions.activateTab}
         onPinTab={actions.pinTab}
+        dropIndex={ui.dropTabSlot?.groupId === group.id ? ui.dropTabSlot.index : null}
         onDragStart={(event, id, groupId) => {
           const payload = { documentId: id, groupId };
           event.dataTransfer.effectAllowed = "move";
@@ -110,9 +129,43 @@ export function EditorGroup({
           );
           ui.setDraggedTab(payload);
         }}
+        onDragOverTab={(event, targetId, targetGroupId) => {
+          if (!ui.draggedTab) return;
+          const targetIndex = group.tabs.indexOf(targetId) +
+            (event.clientX >= event.currentTarget.getBoundingClientRect().left + event.currentTarget.getBoundingClientRect().width / 2 ? 1 : 0);
+          ui.setDropGroupId(targetGroupId);
+          ui.setDropTabSlot({ groupId: targetGroupId, index: targetIndex });
+        }}
+        onDropTab={(event, targetId, targetGroupId) => {
+          event.preventDefault();
+          event.stopPropagation();
+          let tab = ui.draggedTab;
+          const payload = event.dataTransfer.getData("application/x-folio-tab");
+          if (payload) {
+            try {
+              const parsed = JSON.parse(payload) as { documentId?: unknown; groupId?: unknown };
+              if (typeof parsed.documentId === "string" && typeof parsed.groupId === "string")
+                tab = { documentId: parsed.documentId, groupId: parsed.groupId };
+            } catch {
+              tab = null;
+            }
+          }
+          if (!tab) return;
+          const targetIndex = group.tabs.indexOf(targetId) +
+            (event.clientX >= event.currentTarget.getBoundingClientRect().left + event.currentTarget.getBoundingClientRect().width / 2 ? 1 : 0);
+          const sourceIndex = tab.groupId === targetGroupId ? group.tabs.indexOf(tab.documentId) : -1;
+          const adjustedIndex = sourceIndex !== -1 && sourceIndex < targetIndex
+            ? targetIndex - 1
+            : targetIndex;
+          actions.moveTabToGroup(tab.documentId, tab.groupId, targetGroupId, adjustedIndex);
+          ui.setDraggedTab(null);
+          ui.setDropGroupId(null);
+          ui.setDropTabSlot(null);
+        }}
         onDragEnd={() => {
           ui.setDraggedTab(null);
           ui.setDropGroupId(null);
+          ui.setDropTabSlot(null);
         }}
         onCloseTab={actions.closeTab}
         onNewTab={actions.createNewTab}
@@ -148,7 +201,9 @@ export function EditorGroup({
             pathDraft={ui.pathDrafts[document.id]}
             tagDraft={ui.tagDrafts[document.id]}
             getScrollTop={actions.getDocumentScrollTop}
+            getSelection={actions.getDocumentSelection}
             onScroll={actions.rememberDocumentScrollTop}
+            onSelectionChange={actions.rememberDocumentSelection}
             onBeginMetadataEditing={ui.beginMetadataEditing}
             onChangeMetadataDraft={ui.changeMetadataDraft}
             onFinishMetadataEditing={(key, target, field, value) =>

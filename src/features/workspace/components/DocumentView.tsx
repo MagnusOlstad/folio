@@ -26,6 +26,8 @@ export type DocumentViewProps = {
   pathDraft: string | undefined;
   tagDraft: string | undefined;
   getScrollTop: (documentId: string) => number;
+  getSelection: (documentId: string) => { from: number; to: number } | undefined;
+  onSelectionChange: (documentId: string, from: number, to: number) => void;
   onScroll: (documentId: string, scrollTop: number) => void;
   onBeginMetadataEditing: (
     groupId: string,
@@ -121,6 +123,8 @@ export function DocumentView(props: DocumentViewProps) {
           onFileDraft={props.onFileDraft}
           onFinishEditing={props.onFinishEditing}
           onBeginEditing={props.onBeginEditing}
+          getSelection={props.getSelection}
+          onSelectionChange={props.onSelectionChange}
           onOpenDocument={props.onOpenDocument}
           onToggleTask={props.onToggleTask}
         />

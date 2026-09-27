@@ -1,5 +1,5 @@
-import { fireEvent, render, renderHook, screen } from "@testing-library/react";
-import { act } from "react";
+import { createEvent, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { act, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ViewerDocument } from "../../src/domain/types.ts";
 import { DocumentFooter } from "../../src/features/workspace/components/DocumentFooter.tsx";
@@ -10,6 +10,7 @@ import { EditorGroup } from "../../src/features/workspace/components/EditorGroup
 import { RenderedMarkdown } from "../../src/features/workspace/components/RenderedMarkdown.tsx";
 import { WorkspaceSplitHandle } from "../../src/features/workspace/components/WorkspaceSplitHandle.tsx";
 import { useWorkspaceEditorUi } from "../../src/features/workspace/hooks/useWorkspaceEditorUi.ts";
+import { moveGroupTab } from "../../src/features/workspace/model/tab-state.ts";
 import type { FilingQueueEntry } from "../../src/features/workspace/model/filing.ts";
 
 const document: ViewerDocument = {
@@ -688,6 +689,146 @@ describe("workspace editor components", () => {
       "primary",
       "secondary",
     );
+  });
+
+  it("moves a same-group tab to the end from the editor-group right strip", () => {
+    const moveTabToGroup = vi.fn();
+
+    function GroupHarness() {
+      const ui = useWorkspaceEditorUi();
+      const [tabs, setTabs] = useState([
+        "/notes/current.md",
+        "/notes/target.md",
+      ]);
+      return (
+        <EditorGroup
+          group={{
+            id: "primary",
+            tabs,
+            activeId: null,
+            previewId: null,
+          }}
+          groupCount={2}
+          model={{
+            activeGroupId: "primary",
+            documents: {},
+            loadingDocuments: new Set(),
+            savingDocuments: new Set(),
+            editingKey: null,
+            drafts: {},
+            deletingNoteId: null,
+            movingFileId: null,
+            editorFocusRequest: null,
+          }}
+          actions={{
+            activateGroup: vi.fn(),
+            moveTabToGroup: (documentId, sourceGroupId, targetGroupId, targetIndex) => {
+              moveTabToGroup(documentId, sourceGroupId, targetGroupId, targetIndex);
+              setTabs((current) =>
+                moveGroupTab(
+                  [{ id: "primary", tabs: current, activeId: null, previewId: null }],
+                  documentId,
+                  sourceGroupId,
+                  targetGroupId,
+                  targetIndex,
+                )[0].tabs,
+              );
+            },
+            titleForId: (id) => id,
+            activateTab: vi.fn(),
+            pinTab: vi.fn(),
+            consumeEditorFocusRequest: vi.fn(),
+            createNewTab: vi.fn(),
+            splitWorkspace: vi.fn(),
+            closeGroup: vi.fn(),
+            closeTab: vi.fn(),
+            changeDraftContent: vi.fn(),
+            fileDraft: vi.fn(),
+            beginEditing: vi.fn(),
+            finishEditing: vi.fn(),
+            openDocument: vi.fn().mockResolvedValue(undefined),
+            toggleTaskCheckbox: vi.fn().mockResolvedValue(undefined),
+            deleteFiledNote: vi.fn().mockResolvedValue(undefined),
+            persistDocument: vi.fn(),
+            persistMetadata: vi.fn(),
+            moveBundleFile: vi.fn().mockResolvedValue(undefined),
+          }}
+          ui={ui}
+        />
+      );
+    }
+
+    const { container } = render(<GroupHarness />);
+    const dragged = screen.getByTitle("/notes/current.md");
+    const target = screen.getByTitle("/notes/target.md");
+    vi.spyOn(dragged, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 20,
+      top: 0,
+      right: 100,
+      bottom: 20,
+      left: 0,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(target, "getBoundingClientRect").mockReturnValue({
+      x: -100,
+      y: 0,
+      width: 100,
+      height: 20,
+      top: 0,
+      right: 0,
+      bottom: 20,
+      left: -100,
+      toJSON: () => ({}),
+    });
+    fireEvent.dragStart(dragged, {
+      dataTransfer: { setData: vi.fn() },
+    });
+    fireEvent.dragOver(dragged, {
+      clientX: 25,
+      dataTransfer: {},
+    });
+    expect(dragged).toHaveClass("drop-before");
+    fireEvent.dragLeave(dragged, { relatedTarget: document.body });
+    expect(dragged).not.toHaveClass("drop-before");
+    fireEvent.dragStart(dragged, {
+      dataTransfer: { setData: vi.fn() },
+    });
+    const afterLastDragOver = createEvent.dragOver(target, { dataTransfer: {} });
+    Object.defineProperty(afterLastDragOver, "clientX", { value: 75 });
+    fireEvent(target, afterLastDragOver);
+    expect(target).toHaveClass("drop-after");
+    fireEvent.dragEnd(dragged);
+    expect(target).not.toHaveClass("drop-after");
+    fireEvent.dragStart(dragged, {
+      dataTransfer: { setData: vi.fn() },
+    });
+    const tabStrip = container.querySelector(".tab-strip")!;
+    fireEvent.dragOver(tabStrip, { dataTransfer: {} });
+    expect(target).toHaveClass("drop-after");
+    fireEvent.drop(tabStrip, {
+      dataTransfer: {
+        getData: () =>
+          JSON.stringify({
+            documentId: "/notes/current.md",
+            groupId: "primary",
+          }),
+      },
+    });
+
+    expect(moveTabToGroup).toHaveBeenCalledWith(
+      "/notes/current.md",
+      "primary",
+      "primary",
+      1,
+    );
+    expect(target).not.toHaveClass("drop-before", "drop-after");
+    expect(Array.from(container.querySelectorAll<HTMLButtonElement>(".editor-tab")).map((tab) => tab.title)).toEqual([
+      "/notes/target.md",
+      "/notes/current.md",
+    ]);
   });
 
   it("keeps metadata, path, tag, and drag state inside the workspace hook", () => {

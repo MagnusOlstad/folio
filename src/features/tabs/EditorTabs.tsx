@@ -12,6 +12,13 @@ export type EditorTabsProps = {
     groupId: string,
   ) => void;
   onDragEnd: () => void;
+  onDragOverTab?: (
+    event: React.DragEvent<HTMLButtonElement>,
+    id: string,
+    groupId: string,
+  ) => void;
+  onDropTab?: (event: React.DragEvent<HTMLButtonElement>, id: string, groupId: string) => void;
+  dropIndex?: number | null;
   onCloseTab: (groupId: string, id: string) => void;
   onNewTab: (groupId: string) => void;
   onSplit: () => void;
@@ -27,6 +34,9 @@ export function EditorTabs({
   onActivate,
   onDragStart,
   onDragEnd,
+  onDragOverTab,
+  onDropTab,
+  dropIndex,
   onCloseTab,
   onNewTab,
   onSplit,
@@ -39,12 +49,18 @@ export function EditorTabs({
         {group.tabs.map((id) => (
           <button
             type="button"
-            className={`editor-tab ${group.activeId === id ? "active" : ""} ${group.previewId === id ? "preview" : ""}`}
+            className={`editor-tab ${group.activeId === id ? "active" : ""} ${group.previewId === id ? "preview" : ""} ${dropIndex === group.tabs.indexOf(id) ? "drop-before" : ""} ${dropIndex === group.tabs.length && group.tabs.indexOf(id) === group.tabs.length - 1 ? "drop-after" : ""}`}
             onClick={() => onActivate(group.id, id)}
             onDoubleClick={() => onPinTab(group.id, id)}
             draggable
             onDragStart={(event) => onDragStart(event, id, group.id)}
             onDragEnd={onDragEnd}
+            onDragOver={(event) => {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              onDragOverTab?.(event, id, group.id);
+            }}
+            onDrop={(event) => onDropTab?.(event, id, group.id)}
             title={titleForId(id)}
             key={id}
           >

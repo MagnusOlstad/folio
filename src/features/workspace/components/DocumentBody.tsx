@@ -24,6 +24,8 @@ type DocumentBodyProps = {
     groupId: string,
     document: ViewerDocument,
   ) => void;
+  getSelection: (documentId: string) => { from: number; to: number } | undefined;
+  onSelectionChange: (documentId: string, from: number, to: number) => void;
   onOpenDocument: (
     id: string,
     source?: "note" | "file",
@@ -48,6 +50,8 @@ export function DocumentBody({
   onFileDraft,
   onFinishEditing,
   onBeginEditing,
+  getSelection,
+  onSelectionChange,
   onOpenDocument,
   onToggleTask,
 }: DocumentBodyProps) {
@@ -70,6 +74,8 @@ export function DocumentBody({
           const content = toggleTaskAtLine(draft ?? document.content, lineNumber, checked);
           if (content) onChangeContent(document, content);
         }}
+        initialSelection={getSelection(document.id)}
+        onSelectionChange={(from, to) => onSelectionChange(document.id, from, to)}
         focusRequestId={focusRequestId}
         onFocusRequestConsumed={onFocusRequestConsumed}
         ariaLabel="Write a new note"
@@ -100,6 +106,8 @@ export function DocumentBody({
           const content = toggleTaskAtLine(value, lineNumber, checked);
           if (content) onChangeContent(document, content);
         }}
+        initialSelection={getSelection(document.id)}
+        onSelectionChange={(from, to) => onSelectionChange(document.id, from, to)}
         focusRequestId={focusRequestId}
         onFocusRequestConsumed={onFocusRequestConsumed}
         ariaLabel={`Edit ${document.title}`}

@@ -488,6 +488,43 @@ test("draft notes use live line rendering and list-aware Tab indentation", async
   );
 });
 
+test("draft plain text uses Tab indentation without leaving the editor", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTitle("New note (Cmd+T)").click();
+  const editor = page.getByLabel("Write a new note");
+  const surface = liveSurface(page);
+
+  await editor.fill("plain text");
+  await editor.press("Tab");
+  await expect.poll(() => visibleSurfaceText(surface)).toBe("  plain text");
+  await expect(editor).toBeFocused();
+
+  await editor.press("Shift+Tab");
+  await expect.poll(() => visibleSurfaceText(surface)).toBe("plain text");
+  await expect(editor).toBeFocused();
+});
+
+test("clicking a rendered list marker starts editing at its first content character", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTitle("New note (Cmd+T)").click();
+  const editor = page.getByLabel("Write a new note");
+  const surface = liveSurface(page);
+
+  await editor.fill("- item\nplain");
+  const listLine = surface.locator(".cm-line").filter({ hasText: "item" });
+  const marker = listLine.locator(".cm-live-markdown-list-marker");
+  await expect(marker).toBeVisible();
+  const previewContentX = await textX(listLine, "item");
+
+  await marker.click();
+  await expect(listLine.locator(".cm-live-markdown-list-source")).toBeVisible();
+  expect(Math.abs((await textX(listLine, "item")) - previewContentX)).toBeLessThanOrEqual(1);
+  await expect(editor).toBeFocused();
+
+  await editor.press("x");
+  await expect.poll(() => visibleSurfaceText(surface)).toBe("- xitem\nplain");
+});
+
 test("draft Find stays over the editor and reports match progress", async ({ page }) => {
   await page.goto("/");
   await page.getByTitle("New note (Cmd+T)").click();

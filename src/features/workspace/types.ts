@@ -42,6 +42,7 @@ export type EditorWorkspaceActions = {
     documentId: string,
     sourceGroupId: string,
     targetGroupId: string,
+    targetIndex?: number,
   ) => void;
   titleForId: (id: string) => string;
   activateTab: (groupId: string, documentId: string) => void;
@@ -95,6 +96,8 @@ export type EditorWorkspaceActions = {
   dismissMessage: () => void;
   getDocumentScrollTop: (documentId: string) => number;
   rememberDocumentScrollTop: (documentId: string, scrollTop: number) => void;
+  getDocumentSelection: (documentId: string) => { from: number; to: number } | undefined;
+  rememberDocumentSelection: (documentId: string, from: number, to: number) => void;
 };
 
 export type EditorWorkspaceProps = {

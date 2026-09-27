@@ -38,10 +38,10 @@ test('changes and restores the color theme from browser settings', async ({ page
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'editorial')
 })
 
-test('downloads a bundle backup from settings', async ({ page }) => {
+test('downloads all attached bundle backups from settings', async ({ page }) => {
   await page.getByRole('button', { name: 'Settings' }).click()
   const downloadPromise = page.waitForEvent('download')
-  await page.getByRole('link', { name: 'Download bundle backup' }).click()
+  await page.getByRole('link', { name: 'Download all bundle backups' }).click()
   const download = await downloadPromise
 
   expect(download.suggestedFilename()).toMatch(/^folio-bundle-backup-.+\.zip$/)
@@ -129,21 +129,60 @@ test('opens sidebar notes as a replaceable preview until the editor is focused',
   await expect(todoTab).not.toHaveClass(/preview/)
 })
 
-test('Cmd/Ctrl+number selects local draft tabs and focuses at the document end', async ({ page }) => {
+test('marks the prospective right-strip tab slot and reorders tabs within a group', async ({ page }) => {
+  await page.getByRole('button', { name: 'Start Here', exact: true }).dblclick()
+  await page.getByRole('button', { name: 'Todo List', exact: true }).dblclick()
+
+  const startHereTab = page.locator('.editor-tab').filter({ hasText: 'Start Here' })
+  const todoTab = page.locator('.editor-tab').filter({ hasText: 'Todo List' })
+  const startBox = await startHereTab.boundingBox()
+  const todoBox = await todoTab.boundingBox()
+  const tabStripBox = await page.locator('.tab-strip').boundingBox()
+  expect(startBox).not.toBeNull()
+  expect(todoBox).not.toBeNull()
+  expect(tabStripBox).not.toBeNull()
+
+  await page.mouse.move(startBox!.x + startBox!.width / 2, startBox!.y + startBox!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(
+    Math.min(todoBox!.x + todoBox!.width + 8, tabStripBox!.x + tabStripBox!.width - 4),
+    todoBox!.y + todoBox!.height / 2,
+    { steps: 8 },
+  )
+  await expect(todoTab).toHaveClass(/drop-after/)
+  await page.mouse.up()
+
+  await expect(todoTab).not.toHaveClass(/drop-after/)
+  expect(await page.locator('.editor-tab').evaluateAll((tabs) =>
+    tabs.map((tab) => tab.getAttribute('title')),
+  )).toEqual(['Todo List', 'Start Here'])
+})
+
+test('tab selection preserves each local draft cursor for mouse and Cmd/Ctrl+number', async ({ page }) => {
   await page.getByTitle('New note (Cmd+T)').click()
   const firstEditor = page.getByLabel('Write a new note')
   await firstEditor.fill('First local draft')
+  await firstEditor.press('Home')
+  await firstEditor.press('ArrowRight')
 
   await page.getByTitle('New note (Cmd+T)').click()
   const secondEditor = page.getByLabel('Write a new note')
   await secondEditor.fill('Second local draft')
+  await secondEditor.press('Home')
+  for (let offset = 0; offset < 7; offset += 1) {
+    await secondEditor.press('ArrowRight')
+  }
 
-  await page.keyboard.press(`${modifier}+1`)
-  const selectedEditor = page.getByLabel('Write a new note')
-  await expect(selectedEditor).toBeFocused()
-  await page.keyboard.type(' at the end')
-  await expect(selectedEditor).toHaveText('First local draft at the end')
-  await expect(page.locator('.editor-tab').filter({ hasText: 'First local draft at the end' })).toHaveClass(/active/)
+  await page.locator('.editor-tab').filter({ hasText: 'First local draft' }).click()
+  await expect(firstEditor).toBeFocused()
+  await page.keyboard.type('X')
+  await expect(firstEditor).toHaveText('FXirst local draft')
+
+  await page.keyboard.press(`${modifier}+2`)
+  await expect(secondEditor).toBeFocused()
+  await page.keyboard.type('Y')
+  await expect(secondEditor).toHaveText('Second Ylocal draft')
+  await expect(page.locator('.editor-tab').filter({ hasText: 'Second Ylocal draft' })).toHaveClass(/active/)
 })
 
 // Cmd/Ctrl+T, +S, +B, +I, +K, and +Shift+F are documented as working in both the

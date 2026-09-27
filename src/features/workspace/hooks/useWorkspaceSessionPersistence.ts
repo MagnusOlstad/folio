@@ -5,6 +5,7 @@ import {
   reconcileWorkspaceSessionState,
   WORKSPACE_STATE_STORAGE_KEY,
   WORKSPACE_STATE_VERSION,
+  pruneDocumentSelections,
   type WorkspaceSessionState,
 } from "../model/workspace-state.ts";
 import { writeStorageItem } from "../../../lib/storage.ts";
@@ -51,6 +52,9 @@ export function useWorkspaceSessionPersistence({
   const documentScrollTopsRef = useRef<Record<string, number>>(
     initialState?.documentScrollTops ?? {},
   );
+  const documentSelectionsRef = useRef<Record<string, { from: number; to: number }>>(
+    initialState?.documentSelections ?? {},
+  );
   const explorerScrollTopRef = useRef(initialState?.explorerScrollTop ?? 0);
   const latestStateRef = useRef<{
     groups: TabGroup[];
@@ -84,6 +88,10 @@ export function useWorkspaceSessionPersistence({
         documentScrollTopsRef.current,
         validIdsRef.current,
       ),
+      documentSelections: pruneDocumentSelections(
+        documentSelectionsRef.current,
+        validIdsRef.current,
+      ),
     };
     writeStorageItem(
       `${WORKSPACE_STATE_STORAGE_KEY}:v2:${bundleId}`,
@@ -100,6 +108,10 @@ export function useWorkspaceSessionPersistence({
       explorerScrollTop: explorerScrollTopRef.current,
       documentScrollTops: pruneDocumentScrollTops(
         documentScrollTopsRef.current,
+        validIdsRef.current,
+      ),
+      documentSelections: pruneDocumentSelections(
+        documentSelectionsRef.current,
         validIdsRef.current,
       ),
     };
@@ -141,6 +153,10 @@ export function useWorkspaceSessionPersistence({
     );
     documentScrollTopsRef.current = pruneDocumentScrollTops(
       documentScrollTopsRef.current,
+      validIds,
+    );
+    documentSelectionsRef.current = pruneDocumentSelections(
+      documentSelectionsRef.current,
       validIds,
     );
     setGroups(reconciled.groups);
@@ -193,6 +209,24 @@ export function useWorkspaceSessionPersistence({
     documentScrollTopsRef.current = pruneDocumentScrollTops(entries);
   }, []);
 
+  const rememberDocumentSelection = useCallback((documentId: string, from: number, to: number) => {
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from) return;
+    const next = { ...documentSelectionsRef.current };
+    delete next[documentId];
+    next[documentId] = { from, to };
+    documentSelectionsRef.current = pruneDocumentSelections(next);
+    scheduleSave();
+  }, [scheduleSave]);
+
+  const getDocumentSelection = useCallback(
+    (documentId: string) => documentSelectionsRef.current[documentId],
+    [],
+  );
+
+  const restoreDocumentSelections = useCallback((entries: Record<string, { from: number; to: number }>) => {
+    documentSelectionsRef.current = pruneDocumentSelections(entries);
+  }, []);
+
   const skipInitialRestore = useCallback(() => {
     restoreStartedRef.current = true;
     workspaceRestoredRef.current = true;
@@ -206,6 +240,9 @@ export function useWorkspaceSessionPersistence({
     getDocumentScrollTop,
     rememberDocumentScrollTop,
     restoreDocumentScrollTops,
+    getDocumentSelection,
+    rememberDocumentSelection,
+    restoreDocumentSelections,
     skipInitialRestore,
     snapshot,
     flush,

@@ -7,6 +7,7 @@ import {
   moveGroupTab,
   openPreviewTab,
   pinGroupTab,
+  reorderGroupTab,
 } from "../../src/features/workspace/model/tab-state.ts";
 
 const groups: TabGroup[] = [
@@ -77,6 +78,15 @@ describe("workspace tab state", () => {
         previewId: null,
       },
     ]);
+  });
+
+  it("reorders tabs within a group without changing the active tab", () => {
+    expect(reorderGroupTab(groups, "left", "a", 2)[0]).toEqual({
+      id: "left",
+      tabs: ["b", "a"],
+      activeId: "b",
+      previewId: null,
+    });
   });
 
   it("clears a preview when it closes and pins previews during merge", () => {
