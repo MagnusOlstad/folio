@@ -33,6 +33,11 @@ function markdownFrontmatter(markdown) {
   return YAML.parse(markdown.slice(4, end))
 }
 
+function markdownManagedMetadata(markdown) {
+  const frontmatter = markdownFrontmatter(markdown)
+  return { generated: frontmatter.generated, filing: frontmatter.filing }
+}
+
 test('files whole notes hierarchically and appends todo and daily captures', async (context) => {
   const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-test-'))
   let classificationRequests = 0
@@ -786,8 +791,8 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     .map((filename) => fs.readFile(path.join(dataRoot, 'bundle', 'references', 'inbox', filename), 'utf8')))
   assert.ok(dailyRawCaptures.some((rawCapture) => /release route only/.test(rawCapture)))
 
-  const todoMetadataBeforeAccept = (await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g)
-  const dailyMetadataBeforeAccept = (await fs.readFile(path.join(dataRoot, 'bundle', firstDaily.note.id.slice(1)), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g)
+  const todoMetadataBeforeAccept = markdownManagedMetadata(await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8'))
+  const dailyMetadataBeforeAccept = markdownManagedMetadata(await fs.readFile(path.join(dataRoot, 'bundle', firstDaily.note.id.slice(1)), 'utf8'))
   for (const filing of [secondTodo.filing, secondDaily.filing]) {
     const accepted = await fetch(`${baseUrl}/api/filing/confirm`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -798,15 +803,15 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     assert.equal(acceptedBody.newId, filing.destinationId)
     assert.ok(acceptedBody.notes.length >= 8)
   }
-  assert.deepEqual((await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g), todoMetadataBeforeAccept)
-  assert.deepEqual((await fs.readFile(path.join(dataRoot, 'bundle', firstDaily.note.id.slice(1)), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g), dailyMetadataBeforeAccept)
+  assert.deepEqual(markdownManagedMetadata(await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')), todoMetadataBeforeAccept)
+  assert.deepEqual(markdownManagedMetadata(await fs.readFile(path.join(dataRoot, 'bundle', firstDaily.note.id.slice(1)), 'utf8')), dailyMetadataBeforeAccept)
 
   const existingAppend = await jsonRequest(`${baseUrl}/api/notes`, {
     content: 'Project Aurora details\nA third capture that must stay appended.',
     timeZone: 'America/New_York',
   })
   assert.equal(existingAppend.appended, true)
-  const existingMetadataBeforeAccept = (await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g)
+  const existingMetadataBeforeAccept = markdownManagedMetadata(await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8'))
   const acceptedExisting = await fetch(`${baseUrl}/api/filing/confirm`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ filingId: existingAppend.filing.id, action: 'accept', fields: existingAppend.filing.proposal }),
@@ -814,7 +819,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const acceptedExistingBody = await acceptedExisting.json()
   assert.equal(acceptedExisting.status, 200, JSON.stringify(acceptedExistingBody))
   assert.equal(acceptedExistingBody.newId, auroraId)
-  assert.deepEqual((await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g), existingMetadataBeforeAccept)
+  assert.deepEqual(markdownManagedMetadata(await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8')), existingMetadataBeforeAccept)
 
   await fs.writeFile(path.join(dataRoot, 'bundle', 'linked.md'), `---\ntitle: Linked\ntype: Note\n---\n\n[Semantic](${semantic.note.id})\n`)
   await fetch(`${baseUrl}/api/reindex`, { method: 'POST' })
