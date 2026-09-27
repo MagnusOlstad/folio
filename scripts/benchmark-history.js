@@ -24,9 +24,13 @@ try {
     files.push(filepath)
   }
   await Promise.all(files.map((filepath, index) => fs.writeFile(filepath, `---\ntitle: Note ${index}\nstatus: stable\n---\nBody ${index}\n`)))
+  await fs.mkdir(path.join(bundleRoot, '.git', 'objects'), { recursive: true })
+  await fs.writeFile(path.join(bundleRoot, '.git', 'objects', 'benchmark.md'), '# User Git metadata\n')
+  await fs.writeFile(path.join(bundleRoot, '.gitignore'), 'note-*.md\n')
   const runtime = {
     bundleRoot,
-    historyGitDir: path.join(root, 'state', 'history.git'),
+    historyGitDir: path.join(bundleRoot, '.folio', 'history.git'),
+    legacyHistoryGitDir: path.join(root, 'state', 'history.git'),
     listBundleMarkdownFiles: async () => files,
     parseMarkdownFile: (markdown) => ({ title: '', description: '', tags: [], status: '', staleAfter: null, content: markdown, frontmatter: {} }),
   }

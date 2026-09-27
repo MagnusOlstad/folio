@@ -6,13 +6,17 @@ import path from 'node:path'
 import test from 'node:test'
 import * as git from 'isomorphic-git'
 
+import { createBundleRuntimeManager } from '../server/bundles/registry.js'
+import { createConfig } from '../server/config.js'
 import { createHistoryService } from '../server/history/service.js'
+import { createFileStorage } from '../server/storage/files.js'
+import { createTextHelpers } from '../server/core/text.js'
 
-async function markdownFiles(root) {
-  const entries = await fsp.readdir(root, { withFileTypes: true })
+async function markdownFiles(root, directory = root) {
+  const entries = await fsp.readdir(directory, { withFileTypes: true })
   return (await Promise.all(entries.map(async (entry) => {
-    const target = path.join(root, entry.name)
-    if (entry.isDirectory()) return markdownFiles(target)
+    const target = path.join(directory, entry.name)
+    if (entry.isDirectory()) return entry.name === '.git' || target === path.join(root, '.folio') ? [] : markdownFiles(root, target)
     return entry.isFile() && entry.name.endsWith('.md') ? [target] : []
   }))).flat()
 }
@@ -30,13 +34,14 @@ function parseMarkdownFile(markdown) {
 async function setup() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'folio-history-'))
   const bundleRoot = path.join(root, 'bundle')
-  const historyGitDir = path.join(root, 'state', 'history.git')
+  const historyGitDir = path.join(bundleRoot, '.folio', 'history.git')
+  const legacyHistoryGitDir = path.join(root, 'state', 'history.git')
   await fsp.mkdir(bundleRoot)
-  const runtime = { bundleRoot, historyGitDir, listBundleMarkdownFiles: () => markdownFiles(bundleRoot), parseMarkdownFile }
-  return { root, bundleRoot, historyGitDir, history: createHistoryService(runtime) }
+  const runtime = { bundleRoot, historyGitDir, legacyHistoryGitDir, listBundleMarkdownFiles: () => markdownFiles(bundleRoot), parseMarkdownFile }
+  return { root, bundleRoot, historyGitDir, legacyHistoryGitDir, runtime, history: createHistoryService(runtime) }
 }
 
-test('history uses an external gitdir, skips no-ops, scopes edits, and resolves previous paths', async (t) => {
+test('history uses its bundled gitdir, skips no-ops, scopes edits, and resolves previous paths', async (t) => {
   const fixture = await setup()
   t.after(() => fsp.rm(fixture.root, { recursive: true, force: true }))
   await fsp.writeFile(path.join(fixture.bundleRoot, 'first.md'), '---\ntitle: First\n---\nOne\n')
@@ -60,6 +65,197 @@ test('history uses an external gitdir, skips no-ops, scopes edits, and resolves 
   assert.doesNotMatch(version.diff, /filing|generated/)
   await assert.rejects(fixture.history.entries('/archive/first.md', 'bad-cursor'), /Invalid history cursor/)
   await assert.rejects(fixture.history.version('/archive/first.md', 'not-an-oid'), /Invalid note version|not found/i)
+})
+
+test('bundled history coexists with user git metadata and ignored Markdown', async (t) => {
+  const fixture = await setup()
+  t.after(() => fsp.rm(fixture.root, { recursive: true, force: true }))
+  await git.init({ fs, dir: fixture.bundleRoot })
+  const userHeadBefore = await fsp.readFile(path.join(fixture.bundleRoot, '.git', 'HEAD'))
+  const userConfigBefore = await fsp.readFile(path.join(fixture.bundleRoot, '.git', 'config'))
+  await fsp.mkdir(path.join(fixture.bundleRoot, '.git', 'docs'), { recursive: true })
+  await fsp.writeFile(path.join(fixture.bundleRoot, '.gitignore'), 'ignored.md\n')
+  await fsp.writeFile(path.join(fixture.bundleRoot, 'ignored.md'), 'ignored by user Git\n')
+  await fsp.writeFile(path.join(fixture.bundleRoot, '.git', 'docs', 'private.md'), 'Git metadata\n')
+  await fsp.mkdir(path.join(fixture.bundleRoot, '.folio'), { recursive: true })
+  await fsp.writeFile(path.join(fixture.bundleRoot, '.folio', 'private.md'), 'Folio metadata\n')
+  await fsp.mkdir(path.join(fixture.bundleRoot, 'notes', '.folio'), { recursive: true })
+  await fsp.writeFile(path.join(fixture.bundleRoot, 'notes', '.folio', 'kept.md'), 'Nested user content\n')
+
+  assert.equal(await fixture.history.reconcile('Deleted before checkpoint', ['/deleted-before-checkpoint.md']), null)
+  const revision = await fixture.history.reconcile('Baseline')
+  assert.ok(revision)
+  assert.equal((await fixture.history.entries('/ignored.md')).entries.length, 1)
+  assert.deepEqual(await fsp.readFile(path.join(fixture.bundleRoot, '.git', 'HEAD')), userHeadBefore)
+  assert.deepEqual(await fsp.readFile(path.join(fixture.bundleRoot, '.git', 'config')), userConfigBefore)
+  const storage = createFileStorage({
+    ...createTextHelpers(),
+    bundleRoot: fixture.bundleRoot,
+    indexPath: path.join(fixture.root, 'index.json'),
+    draftsRoot: path.join(fixture.root, 'drafts'),
+  })
+  assert.deepEqual(await storage.listBundleMarkdownFiles(), [
+    path.join(fixture.bundleRoot, 'ignored.md'),
+    path.join(fixture.bundleRoot, 'notes', '.folio', 'kept.md'),
+  ])
+  assert.equal(storage.resolveBundleMarkdownPath('/.folio/private.md'), null)
+  assert.equal(storage.resolveBundleMarkdownPath('/.git/docs/private.md'), null)
+  assert.equal(storage.resolveBundleMarkdownPath('/notes/../.folio/private.md'), null)
+  assert.equal((await fixture.history.entries('/notes/.folio/kept.md')).entries.length, 1)
+  assert.equal(await fixture.history.entries('/.folio/private.md').then(() => 'accepted', () => 'rejected'), 'rejected')
+})
+
+test('history stays with a copied bundle and migrates legacy history without deleting its source', async (t) => {
+  const fixture = await setup()
+  t.after(() => fsp.rm(fixture.root, { recursive: true, force: true }))
+  await fsp.writeFile(path.join(fixture.bundleRoot, 'traveler.md'), '---\ntitle: Traveler\n---\nBefore\n')
+  const baseline = await fixture.history.reconcile('Baseline')
+  await fsp.writeFile(path.join(fixture.bundleRoot, 'traveler.md'), '---\ntitle: Traveler\n---\nAfter\n')
+  await fixture.history.reconcile('Edited')
+
+  const copiedRoot = path.join(fixture.root, 'copied-bundle')
+  await fsp.cp(fixture.bundleRoot, copiedRoot, { recursive: true })
+  const copied = createHistoryService({ ...fixture.runtime, bundleRoot: copiedRoot, historyGitDir: path.join(copiedRoot, '.folio', 'history.git'), legacyHistoryGitDir: path.join(fixture.root, 'missing-legacy.git'), listBundleMarkdownFiles: () => markdownFiles(copiedRoot) })
+  assert.ok((await copied.entries('/traveler.md')).entries.some((entry) => entry.revision === baseline))
+
+  const externalRoot = path.join(fixture.root, 'legacy-bundle')
+  await fsp.mkdir(externalRoot)
+  const legacyGitDir = path.join(fixture.root, 'state', 'legacy.git')
+  await fsp.writeFile(path.join(externalRoot, 'legacy.md'), '# Legacy\n')
+  await git.init({ fs, dir: externalRoot, gitdir: legacyGitDir })
+  await git.add({ fs, dir: externalRoot, gitdir: legacyGitDir, filepath: 'legacy.md' })
+  await git.commit({ fs, dir: externalRoot, gitdir: legacyGitDir, message: 'Legacy baseline', author: { name: 'Test', email: 'test@example.test' } })
+  const bundledGitDir = path.join(externalRoot, '.folio', 'history.git')
+  const migrated = createHistoryService({ ...fixture.runtime, bundleRoot: externalRoot, historyGitDir: bundledGitDir, legacyHistoryGitDir: legacyGitDir, listBundleMarkdownFiles: () => markdownFiles(externalRoot) })
+  assert.equal((await migrated.entries('/legacy.md')).entries[0].title, 'Legacy baseline')
+  assert.ok(await fsp.stat(path.join(legacyGitDir, 'HEAD')))
+  assert.ok(await fsp.stat(path.join(bundledGitDir, 'HEAD')))
+})
+
+test('history preserves a bundled repository and legacy recovery copy across startup', async (t) => {
+  const fixture = await setup()
+  t.after(() => fsp.rm(fixture.root, { recursive: true, force: true }))
+  await fsp.writeFile(path.join(fixture.bundleRoot, 'note.md'), 'Current\n')
+  await git.init({ fs, dir: fixture.bundleRoot, gitdir: fixture.historyGitDir })
+  await git.add({ fs, dir: fixture.bundleRoot, gitdir: fixture.historyGitDir, filepath: 'note.md' })
+  await git.commit({ fs, dir: fixture.bundleRoot, gitdir: fixture.historyGitDir, message: 'Bundled history', author: { name: 'Test', email: 'test@example.test' } })
+  await fsp.mkdir(fixture.legacyHistoryGitDir, { recursive: true })
+  await fsp.writeFile(path.join(fixture.legacyHistoryGitDir, 'HEAD'), 'legacy contents\n')
+  const bundledHead = await fsp.readFile(path.join(fixture.historyGitDir, 'HEAD'))
+  await fixture.history.reconcile('Baseline')
+  const restarted = createHistoryService(fixture.runtime)
+  assert.equal((await restarted.entries('/note.md')).entries[0].title, 'Bundled history')
+  assert.deepEqual(await fsp.readFile(path.join(fixture.historyGitDir, 'HEAD')), bundledHead)
+  assert.equal(await fsp.readFile(path.join(fixture.legacyHistoryGitDir, 'HEAD'), 'utf8'), 'legacy contents\n')
+})
+
+test('bundle runtime migrates the ID-scoped legacy repository into its bundle', async (t) => {
+  const fixture = await setup()
+  t.after(() => fsp.rm(fixture.root, { recursive: true, force: true }))
+  const bundleRoot = path.join(fixture.root, 'managed-bundle')
+  const dataRoot = path.join(fixture.root, 'app-data')
+  await fsp.mkdir(bundleRoot)
+  await fsp.writeFile(path.join(bundleRoot, 'carried.md'), '# Carried\n')
+  const config = {
+    dataRoot,
+    bundleRoot: path.join(dataRoot, 'bundle'),
+    historyBundleId: 'legacy-bundle',
+    legacyHistoryGitDir: path.join(dataRoot, 'state', 'bundles', 'legacy-bundle', 'history.git'),
+  }
+  const manager = createBundleRuntimeManager({
+    config,
+    defaultRuntime: {},
+    createRuntimeForBundle: (bundleConfig) => {
+      const runtimeConfig = createConfig({
+        FOLIO_DATA_ROOT: bundleConfig.dataRoot,
+        FOLIO_BUNDLE_ROOT: bundleConfig.bundleRoot,
+        FOLIO_HISTORY_GIT_DIR: bundleConfig.historyGitDir,
+        FOLIO_LEGACY_HISTORY_GIT_DIR: bundleConfig.legacyHistoryGitDir,
+      })
+      return createHistoryService({
+        ...runtimeConfig,
+        bundleRoot: bundleConfig.bundleRoot,
+        historyGitDir: runtimeConfig.historyGitDir,
+        listBundleMarkdownFiles: () => markdownFiles(bundleConfig.bundleRoot),
+        parseMarkdownFile,
+      })
+    },
+  })
+  await manager.initialize()
+  const bundle = await manager.registry.setup({ name: 'Traveling', markdownPath: bundleRoot, source: 'existing' })
+  const legacyGitDir = path.join(dataRoot, 'state', 'bundles', bundle.id, 'history.git')
+  await git.init({ fs, dir: bundleRoot, gitdir: legacyGitDir })
+  await git.add({ fs, dir: bundleRoot, gitdir: legacyGitDir, filepath: 'carried.md' })
+  await git.commit({ fs, dir: bundleRoot, gitdir: legacyGitDir, message: 'Original bundle history', author: { name: 'Test', email: 'test@example.test' } })
+
+  const runtime = manager.runtimeFor(bundle)
+  assert.equal((await runtime.entries('/carried.md')).entries[0].title, 'Original bundle history')
+  assert.ok(await fsp.stat(path.join(bundleRoot, '.folio', 'history.git', 'HEAD')))
+  assert.ok(await fsp.stat(path.join(legacyGitDir, 'HEAD')))
+})
+
+test('history rejects symlinked Folio storage paths without writing outside the bundle', async (t) => {
+  const fixture = await setup()
+  t.after(() => fsp.rm(fixture.root, { recursive: true, force: true }))
+  const outside = path.join(fixture.root, 'outside')
+  await fsp.mkdir(outside)
+  await fsp.symlink(outside, path.join(fixture.bundleRoot, '.folio'))
+  await assert.rejects(fixture.history.reconcile('Baseline'), /non-directory Folio history path/)
+  assert.deepEqual(await fsp.readdir(outside), [])
+})
+
+test('history refuses a symlinked legacy repository and retains its target', async (t) => {
+  const fixture = await setup()
+  t.after(() => fsp.rm(fixture.root, { recursive: true, force: true }))
+  const actualRepository = path.join(fixture.root, 'actual-history.git')
+  await git.init({ fs, dir: fixture.bundleRoot, gitdir: actualRepository })
+  await fsp.mkdir(path.dirname(fixture.legacyHistoryGitDir), { recursive: true })
+  await fsp.symlink(actualRepository, fixture.legacyHistoryGitDir, 'dir')
+  await fsp.writeFile(path.join(fixture.bundleRoot, 'note.md'), '# Note\n')
+
+  await assert.rejects(fixture.history.reconcile('Baseline'), /Existing note history repository is incomplete/)
+  assert.ok(await fsp.stat(path.join(actualRepository, 'HEAD')))
+  await assert.rejects(fsp.access(fixture.historyGitDir))
+})
+
+test('history refuses symlinks inside a legacy repository', async (t) => {
+  const fixture = await setup()
+  t.after(() => fsp.rm(fixture.root, { recursive: true, force: true }))
+  await fsp.mkdir(path.join(fixture.legacyHistoryGitDir, 'objects'), { recursive: true })
+  await fsp.writeFile(path.join(fixture.legacyHistoryGitDir, 'HEAD'), 'ref: refs/heads/main\n')
+  const externalObjects = path.join(fixture.root, 'external-objects')
+  await fsp.mkdir(externalObjects)
+  const objectLink = path.join(fixture.legacyHistoryGitDir, 'objects', 'external')
+  await fsp.symlink(externalObjects, objectLink, 'dir')
+
+  await assert.rejects(fixture.history.reconcile('Baseline'), /Symlinks are not allowed in note history repository/)
+  assert.ok((await fsp.lstat(objectLink)).isSymbolicLink())
+  await assert.rejects(fsp.access(fixture.historyGitDir))
+})
+
+test('history rejects a dangling legacy repository symlink', async (t) => {
+  const fixture = await setup()
+  t.after(() => fsp.rm(fixture.root, { recursive: true, force: true }))
+  await fsp.mkdir(path.dirname(fixture.legacyHistoryGitDir), { recursive: true })
+  await fsp.symlink(path.join(fixture.root, 'missing-repository.git'), fixture.legacyHistoryGitDir, 'dir')
+
+  await assert.rejects(fixture.history.reconcile('Baseline'), /Existing note history repository is incomplete/)
+  assert.ok((await fsp.lstat(fixture.legacyHistoryGitDir)).isSymbolicLink())
+  await assert.rejects(fsp.access(fixture.historyGitDir))
+})
+
+test('history rejects nested symlinks in an existing bundled repository', async (t) => {
+  const fixture = await setup()
+  t.after(() => fsp.rm(fixture.root, { recursive: true, force: true }))
+  await git.init({ fs, dir: fixture.bundleRoot, gitdir: fixture.historyGitDir })
+  const outsideRef = path.join(fixture.root, 'outside-ref')
+  await fsp.writeFile(outsideRef, 'ref contents\n')
+  const refLink = path.join(fixture.historyGitDir, 'refs', 'heads', 'external')
+  await fsp.symlink(outsideRef, refLink)
+
+  await assert.rejects(fixture.history.reconcile('Baseline'), /Symlinks are not allowed in note history repository/)
+  assert.equal(await fsp.readFile(outsideRef, 'utf8'), 'ref contents\n')
+  assert.ok((await fsp.lstat(refLink)).isSymbolicLink())
 })
 
 test('history pagination reaches a note after more than 500 unrelated commits', async (t) => {

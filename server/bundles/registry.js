@@ -226,7 +226,10 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
         importsRoot: path.join(config.dataRoot, 'state', 'bundles', entry.id, 'imports'),
         indexPath: path.join(config.dataRoot, 'state', 'bundles', entry.id, 'search-index.json'),
         historyBundleId: entry.id,
-        historyGitDir: path.join(config.dataRoot, 'state', 'bundles', entry.id, 'history.git'),
+        historyGitDir: path.join(entry.markdownPath, '.folio', 'history.git'),
+        legacyHistoryGitDir: entry.id === config.historyBundleId
+          ? config.legacyHistoryGitDir
+          : path.join(config.dataRoot, 'state', 'bundles', entry.id, 'history.git'),
       }
       const runtime = (entry.id === 'legacy-bundle' && entry.markdownPath === config.bundleRoot)
         ? defaultRuntime

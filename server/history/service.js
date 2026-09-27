@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import * as git from 'isomorphic-git'
 
 import { createSerialQueue } from '../core/queue.js'
@@ -9,8 +10,100 @@ const AUTHOR = { name: 'Folio', email: 'history@folio.local' }
 
 function historyPath(fileId) {
   const normalized = String(fileId || '').replaceAll('\\', '/').replace(/^\/+/, '')
-  if (!normalized || normalized.split('/').some((part) => part === '.' || part === '..') || path.posix.extname(normalized) !== '.md') return null
+  const parts = normalized.split('/')
+  if (!normalized || parts.some((part) => part === '.' || part === '..' || part === '.git')
+    || parts[0] === '.folio'
+    || path.posix.extname(normalized) !== '.md') return null
   return normalized
+}
+
+async function exists(filePath) {
+  try {
+    await fsp.lstat(filePath)
+    return true
+  } catch (error) {
+    if (error.code === 'ENOENT') return false
+    throw error
+  }
+}
+
+async function isFile(filePath) {
+  try {
+    return (await fsp.stat(filePath)).isFile()
+  } catch (error) {
+    if (error.code === 'ENOENT') return false
+    throw error
+  }
+}
+
+async function assertSafeBundledGitDir(historyGitDir) {
+  const folioDirectory = path.dirname(historyGitDir)
+  for (const candidate of [folioDirectory, historyGitDir]) {
+    try {
+      const stat = await fsp.lstat(candidate)
+      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`Refusing to use non-directory Folio history path: ${candidate}`)
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
+  }
+}
+
+async function assertRepositoryDirectory(directory) {
+  const directoryStat = await fsp.lstat(directory)
+  if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) {
+    throw new Error(`Existing note history repository is incomplete: ${directory}`)
+  }
+  const [headStat, objectsStat] = await Promise.all([
+    fsp.lstat(path.join(directory, 'HEAD')),
+    fsp.lstat(path.join(directory, 'objects')),
+  ])
+  if (headStat.isSymbolicLink() || !headStat.isFile()
+    || objectsStat.isSymbolicLink() || !objectsStat.isDirectory()) {
+    throw new Error(`Existing note history repository is incomplete: ${directory}`)
+  }
+}
+
+async function assertNoSymlinks(directory) {
+  const pending = [directory]
+  while (pending.length) {
+    const current = pending.pop()
+    const entries = await fsp.readdir(current, { withFileTypes: true })
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name)
+      if (entry.isSymbolicLink()) throw new Error(`Symlinks are not allowed in note history repository: ${entryPath}`)
+      if (entry.isDirectory()) pending.push(entryPath)
+    }
+  }
+}
+
+async function migrateLegacyRepository(historyGitDir, legacyHistoryGitDir) {
+  if (!legacyHistoryGitDir || path.resolve(legacyHistoryGitDir) === path.resolve(historyGitDir)) return
+  const [hasTarget, hasLegacy] = await Promise.all([exists(historyGitDir), exists(legacyHistoryGitDir)])
+  if (hasTarget) {
+    await assertRepositoryDirectory(historyGitDir)
+    await assertNoSymlinks(historyGitDir)
+    // A successful earlier migration leaves the old repository as a recovery copy.
+    return
+  }
+  if (!hasLegacy) return
+
+  const stagingGitDir = `${historyGitDir}.migrating-${process.pid}-${crypto.randomBytes(5).toString('hex')}`
+  await fsp.mkdir(path.dirname(historyGitDir), { recursive: true })
+  try {
+    await assertRepositoryDirectory(legacyHistoryGitDir)
+    await assertNoSymlinks(legacyHistoryGitDir)
+    await fsp.cp(legacyHistoryGitDir, stagingGitDir, { recursive: true, errorOnExist: true, force: false })
+    // Confirm the copy is an isomorphic-git repository before making it visible.
+    await assertRepositoryDirectory(stagingGitDir)
+    await assertNoSymlinks(stagingGitDir)
+    await fsp.rename(stagingGitDir, historyGitDir)
+    await assertSafeBundledGitDir(historyGitDir)
+    await assertRepositoryDirectory(historyGitDir)
+    // The legacy repository is intentionally retained as a recoverable copy.
+  } catch (error) {
+    await fsp.rm(stagingGitDir, { recursive: true, force: true }).catch(() => {})
+    throw new Error(`Could not migrate legacy note history: ${error.message}`)
+  }
 }
 
 function titleFor(message) {
@@ -60,7 +153,7 @@ function userFacingMarkdown(parsed) {
 }
 
 export function createHistoryService(runtime) {
-  const { bundleRoot, historyGitDir, listBundleMarkdownFiles } = runtime
+  const { bundleRoot, historyGitDir, legacyHistoryGitDir, listBundleMarkdownFiles } = runtime
   const queue = createSerialQueue()
   let initialized = false
   let initialization = null
@@ -70,6 +163,8 @@ export function createHistoryService(runtime) {
     if (!initialization) {
       initialization = (async () => {
         await fsp.mkdir(bundleRoot, { recursive: true })
+        await assertSafeBundledGitDir(historyGitDir)
+        await migrateLegacyRepository(historyGitDir, legacyHistoryGitDir)
         await fsp.mkdir(path.dirname(historyGitDir), { recursive: true })
         await git.init({ fs, dir: bundleRoot, gitdir: historyGitDir, defaultBranch: 'main' })
         initialized = true
@@ -80,8 +175,7 @@ export function createHistoryService(runtime) {
 
   async function trackedMarkdownPaths() {
     const worktree = (await listBundleMarkdownFiles()).map((filePath) => path.relative(bundleRoot, filePath).split(path.sep).join('/'))
-    const matrix = await git.statusMatrix({ fs, dir: bundleRoot, gitdir: historyGitDir })
-    const tracked = matrix.map(([filepath]) => filepath).filter((filepath) => filepath.endsWith('.md'))
+    const tracked = (await git.listFiles({ fs, dir: bundleRoot, gitdir: historyGitDir })).filter((filepath) => historyPath(`/${filepath}`))
     return Array.from(new Set([...worktree, ...tracked])).sort()
   }
 
@@ -145,7 +239,7 @@ export function createHistoryService(runtime) {
       fs,
       dir: bundleRoot,
       gitdir: historyGitDir,
-      filepaths: scopedPaths || undefined,
+      filepaths: scopedPaths || paths,
     })).map((entry) => [entry[0], entry]))
     let changed = false
     for (const filepath of paths) {
@@ -153,8 +247,9 @@ export function createHistoryService(runtime) {
       if (workdir === 0 && head === 1) {
         await git.remove({ fs, dir: bundleRoot, gitdir: historyGitDir, filepath })
         changed = true
-      } else if (workdir !== stage) {
-        await git.add({ fs, dir: bundleRoot, gitdir: historyGitDir, filepath })
+      } else if (workdir !== stage || (head === 0 && workdir === 0 && stage === 0)) {
+        if (head === 0 && workdir === 0 && stage === 0 && !(await isFile(path.join(bundleRoot, filepath)))) continue
+        await git.add({ fs, dir: bundleRoot, gitdir: historyGitDir, filepath, force: true })
         changed = true
       }
     }

@@ -91,7 +91,10 @@ function bundleFileId(filePath) {
 }
 
 function resolveBundleMarkdownPath(fileId) {
-  const filePath = path.resolve(bundleRoot, String(fileId).replace(/^[/\\]+/, ''))
+  const relativePath = String(fileId).replaceAll('\\', '/').replace(/^[/\\]+/, '')
+  const parts = relativePath.split('/')
+  if (parts.some((part) => part === '.' || part === '..' || part === '.git') || parts[0] === '.folio') return null
+  const filePath = path.resolve(bundleRoot, relativePath)
   const isInsideBundle = filePath.startsWith(`${bundleRoot}${path.sep}`)
   return isInsideBundle && path.extname(filePath) === '.md' ? filePath : null
 }
@@ -128,6 +131,7 @@ async function listBundleMarkdownFiles(directory = bundleRoot) {
   for (const entry of entries) {
     const entryPath = path.join(directory, entry.name)
     if (entry.isDirectory()) {
+      if (entry.name === '.git' || path.resolve(entryPath) === path.resolve(bundleRoot, '.folio')) continue
       files.push(...await listBundleMarkdownFiles(entryPath))
     } else if (entry.isFile() && path.extname(entry.name) === '.md') {
       files.push(entryPath)

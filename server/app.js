@@ -57,6 +57,7 @@ export async function createApp(runtime = createRuntime()) {
       FOLIO_INDEX_PATH: bundleConfig.indexPath,
       FOLIO_HISTORY_BUNDLE_ID: bundleConfig.historyBundleId,
       FOLIO_HISTORY_GIT_DIR: bundleConfig.historyGitDir,
+      FOLIO_LEGACY_HISTORY_GIT_DIR: bundleConfig.legacyHistoryGitDir,
     }),
   })
   const initialBundles = await manager.initialize()
