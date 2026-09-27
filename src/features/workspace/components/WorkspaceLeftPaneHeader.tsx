@@ -27,7 +27,10 @@ export function WorkspaceLeftPaneHeader({
         aria-label={`${sidebarOpen ? "Hide" : "Show"} left sidebar`}
         title={`${sidebarOpen ? "Hide" : "Show"} left sidebar`}
       >
-        <span aria-hidden="true">{sidebarOpen ? "‹" : "›"}</span>
+        <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
+          <rect x="2.25" y="2.25" width="11.5" height="11.5" rx="1.5" />
+          <path d="M6 2.75v10.5" />
+        </svg>
       </button>
     </header>
   );

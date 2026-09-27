@@ -103,4 +103,10 @@ export type EditorWorkspaceActions = {
 export type EditorWorkspaceProps = {
   model: EditorWorkspaceModel;
   actions: EditorWorkspaceActions;
+  paneControls?: {
+    leftOpen: boolean;
+    rightOpen: boolean;
+    onToggleLeft: () => void;
+    onToggleRight: () => void;
+  };
 };

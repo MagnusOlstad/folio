@@ -9,6 +9,8 @@ import { FilingConfirmation } from "../../src/features/workspace/components/Fili
 import { EditorGroup } from "../../src/features/workspace/components/EditorGroup.tsx";
 import { RenderedMarkdown } from "../../src/features/workspace/components/RenderedMarkdown.tsx";
 import { WorkspaceSplitHandle } from "../../src/features/workspace/components/WorkspaceSplitHandle.tsx";
+import { WorkspaceLeftPaneHeader } from "../../src/features/workspace/components/WorkspaceLeftPaneHeader.tsx";
+import { WorkspaceRightPane } from "../../src/features/workspace/components/WorkspaceRightPane.tsx";
 import { useWorkspaceEditorUi } from "../../src/features/workspace/hooks/useWorkspaceEditorUi.ts";
 import { moveGroupTab } from "../../src/features/workspace/model/tab-state.ts";
 import type { FilingQueueEntry } from "../../src/features/workspace/model/filing.ts";
@@ -34,6 +36,84 @@ const document: ViewerDocument = {
 };
 
 describe("workspace editor components", () => {
+  it("keeps the open left-pane toggle beside Settings in its reserved header slot", () => {
+    const { container } = render(
+      <WorkspaceLeftPaneHeader
+        versionInfo={null}
+        onOpenSettings={vi.fn()}
+        sidebarOpen
+        onToggleSidebar={vi.fn()}
+      />,
+    );
+
+    const header = container.querySelector(".sidebar-app-header");
+    const toggle = screen.getByRole("button", { name: "Hide left sidebar" });
+    expect(header).toContainElement(screen.getByRole("link", { name: "Folio home" }));
+    expect(header).toContainElement(screen.getByRole("button", { name: "Settings" }));
+    expect(header).toContainElement(toggle);
+    expect(toggle.parentElement).toBe(header);
+  });
+
+  it("puts the right-pane hide control in its top header", () => {
+    const onHide = vi.fn();
+    const props = {
+      status: {
+        online: false,
+        canLaunch: false,
+        classifierModel: "",
+        answerModel: "",
+        answerModels: [],
+        embedModel: "",
+        configuredModels: [],
+        missingModels: [],
+        installingModels: [],
+        installed: [],
+        running: [],
+        embeddingCoverage: {
+          conceptsEmbedded: 0,
+          conceptsTotal: 0,
+          chunksEmbedded: 0,
+          chunksTotal: 0,
+          refreshing: false,
+        },
+      },
+      missingModels: [],
+      modelInstallInProgress: false,
+      modelEndpoints: [],
+      togglingService: null,
+      onInstall: vi.fn(),
+      onToggle: vi.fn(),
+      onHide,
+    };
+    const { container, rerender } = render(
+      <WorkspaceRightPane {...props} />,
+    );
+
+    const header = container.querySelector(".right-pane-header");
+    const toggle = screen.getByRole("button", { name: "Hide right sidebar" });
+    expect(header).toContainElement(toggle);
+    expect(header).toHaveClass("right-pane-header");
+    expect(screen.getByText("Install or start Ollama first.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Get Ollama" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set up" })).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(onHide).toHaveBeenCalledOnce();
+
+    const onlineStatus = {
+      ...props.status,
+      online: true,
+    };
+    rerender(
+      <WorkspaceRightPane
+        {...props}
+        status={onlineStatus}
+        modelEndpoints={[{ id: "answer", label: "Answer model", model: "local", state: "online" }]}
+      />,
+    );
+    expect(screen.getByText("Answer model")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop Answer model" })).toBeInTheDocument();
+  });
+
   it("moves from preparing to a ready filing dialog without changing hook order", () => {
     const entry = {
       filing: {

@@ -78,7 +78,15 @@ export function WorkspaceShell({
             onReset={layout.resetSidebar}
           />
         ) : null}
-        <EditorWorkspace {...editor} />
+        <EditorWorkspace
+          {...editor}
+          paneControls={{
+            leftOpen: layout.sidebarOpen,
+            rightOpen: layout.rightPaneOpen,
+            onToggleLeft: () => layout.setSidebarOpen(!layout.sidebarOpen),
+            onToggleRight: () => layout.setRightPaneOpen(!layout.rightPaneOpen),
+          }}
+        />
         {layout.rightPaneOpen ? (
           <WorkspaceSidebarHandle
             width={layout.rightPaneWidth}
@@ -89,27 +97,9 @@ export function WorkspaceShell({
             onReset={layout.resetRightPane}
           />
         ) : null}
-        {!layout.sidebarOpen ? (
-          <button
-            type="button"
-            className="pane-toggle pane-toggle-left"
-            onClick={() => layout.setSidebarOpen(true)}
-            aria-label="Show left sidebar"
-            title="Show left sidebar"
-          >
-            <span aria-hidden="true">›</span>
-          </button>
+        {layout.rightPaneOpen ? (
+          <WorkspaceRightPane {...app} onHide={() => layout.setRightPaneOpen(false)} />
         ) : null}
-        {layout.rightPaneOpen ? <WorkspaceRightPane {...app} /> : null}
-        <button
-          type="button"
-          className="pane-toggle pane-toggle-right"
-          onClick={() => layout.setRightPaneOpen(!layout.rightPaneOpen)}
-          aria-label={`${layout.rightPaneOpen ? "Hide" : "Show"} right sidebar`}
-          title={`${layout.rightPaneOpen ? "Hide" : "Show"} right sidebar`}
-        >
-          <span aria-hidden="true">{layout.rightPaneOpen ? "›" : "‹"}</span>
-        </button>
       </section>
       {exportPreview ? <NoteExportPreview snapshot={exportPreview} /> : null}
       {settings.open ? (

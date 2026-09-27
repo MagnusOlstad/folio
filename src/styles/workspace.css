@@ -528,7 +528,7 @@
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: 39px minmax(0, 1fr);
+  grid-template-rows: var(--workspace-topbar-height) minmax(0, 1fr);
   background: var(--paper);
 }
 
@@ -537,10 +537,34 @@
 }
 
 .editor-tabs {
+  height: var(--workspace-topbar-height);
+  box-sizing: border-box;
   min-width: 0;
   display: flex;
   border-bottom: 1px solid var(--line);
   background: var(--surface-deep);
+}
+
+.editor-pane-control-left,
+.editor-pane-control-right {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+}
+
+.editor-pane-control-left {
+  border-right: 1px solid var(--line);
+}
+
+.editor-pane-control-right {
+  border-left: 1px solid var(--line);
+}
+
+.editor-pane-control-left .pane-toggle,
+.editor-pane-control-right .pane-toggle {
+  width: 30px;
+  height: var(--workspace-topbar-height);
 }
 
 .tab-strip {
@@ -559,7 +583,7 @@
   position: relative;
   min-width: 112px;
   max-width: 200px;
-  height: 38px;
+  height: var(--workspace-topbar-height);
   padding: 0 8px 0 11px;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -2020,10 +2044,6 @@
     --sidebar-width: 270px;
   }
 
-  .model-setup > span {
-    display: none;
-  }
-
   .ollama-status,
   .endpoint-statuses {
     gap: 7px;
@@ -2044,10 +2064,6 @@
 }
 
 @media (max-width: 760px) {
-  .endpoint-status > span:last-child {
-    display: none;
-  }
-
   .workbench-sidebar {
     grid-template-rows: 36px minmax(0, 3fr) minmax(105px, 1fr);
   }

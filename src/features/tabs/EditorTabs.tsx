@@ -1,5 +1,23 @@
 import type { TabGroup } from "../../domain/types.ts";
 
+function PaneToggle({ side, open, onClick }: { side: "left" | "right"; open: boolean; onClick: () => void }) {
+  const action = open ? "Hide" : "Show";
+  return (
+    <button
+      type="button"
+      className={`pane-toggle pane-toggle-${side}`}
+      onClick={onClick}
+      aria-label={`${action} ${side} sidebar`}
+      title={`${action} ${side} sidebar`}
+    >
+      <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
+        <rect x="2.25" y="2.25" width="11.5" height="11.5" rx="1.5" />
+        {side === "left" ? <path d="M6 2.75v10.5" /> : <path d="M10 2.75v10.5" />}
+      </svg>
+    </button>
+  );
+}
+
 export type EditorTabsProps = {
   group: TabGroup;
   groupCount: number;
@@ -24,6 +42,12 @@ export type EditorTabsProps = {
   onSplit: () => void;
   onCloseGroup: (groupId: string) => void;
   onPinTab: (groupId: string, id: string) => void;
+  paneControls?: {
+    leftOpen: boolean;
+    rightOpen: boolean;
+    onToggleLeft: () => void;
+    onToggleRight: () => void;
+  };
 };
 
 export function EditorTabs({
@@ -42,9 +66,15 @@ export function EditorTabs({
   onSplit,
   onCloseGroup,
   onPinTab,
+  paneControls,
 }: EditorTabsProps) {
   return (
     <div className="editor-tabs">
+      {paneControls && !paneControls.leftOpen ? (
+        <div className="editor-pane-control-left" role="group" aria-label="Left sidebar">
+            <PaneToggle side="left" open={false} onClick={paneControls.onToggleLeft} />
+        </div>
+      ) : null}
       <div className="tab-strip">
         {group.tabs.map((id) => (
           <button
@@ -113,6 +143,15 @@ export function EditorTabs({
           </button>
         )}
       </div>
+      {paneControls && !paneControls.rightOpen ? (
+        <div className="editor-pane-control-right" role="group" aria-label="Right sidebar">
+          <PaneToggle
+            side="right"
+            open={paneControls.rightOpen}
+            onClick={paneControls.onToggleRight}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
