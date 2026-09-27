@@ -292,6 +292,11 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
     return preparations.get('pending-import')
   }
 
+  async function close() {
+    const allRuntimes = new Set([defaultRuntime, pendingRuntime, ...runtimes.values()])
+    await Promise.allSettled(Array.from(allRuntimes, (runtime) => runtime.history?.close?.()))
+  }
+
   function proxyRuntime() {
     return new Proxy(defaultRuntime, {
       get(_target, property) {
@@ -345,6 +350,7 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
     context: contexts,
     trackBackground,
     waitForBackground,
+    close,
   }
 }
 

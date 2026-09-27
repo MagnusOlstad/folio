@@ -14,7 +14,6 @@ import { WorkspaceRightPane } from "../../src/features/workspace/components/Work
 import { NoteHistoryPanel } from "../../src/features/workspace/components/NoteHistoryPanel.tsx";
 import { EditorTabs } from "../../src/features/tabs/EditorTabs.tsx";
 import { useWorkspaceEditorUi } from "../../src/features/workspace/hooks/useWorkspaceEditorUi.ts";
-import { resolveHistoryTarget } from "../../src/features/workspace/model/history-target.ts";
 import { prepareFiledDocumentHistory } from "../../src/features/workspace/model/history-actions.ts";
 import { moveGroupTab } from "../../src/features/workspace/model/tab-state.ts";
 import type { FilingQueueEntry } from "../../src/features/workspace/model/filing.ts";
@@ -40,14 +39,6 @@ const document: ViewerDocument = {
 };
 
 describe("workspace editor components", () => {
-  it("retargets history through an active filed tab load", () => {
-    const previous = { groupId: "primary", documentId: "/notes/first.md" };
-    const targetWhileLoading = resolveHistoryTarget(previous, "primary", "/notes/second.md", null, true);
-    expect(targetWhileLoading).toEqual({ groupId: "primary", documentId: "/notes/second.md" });
-    expect(resolveHistoryTarget(targetWhileLoading, "primary", "/notes/second.md", document, false)).toBe(targetWhileLoading);
-    expect(resolveHistoryTarget(targetWhileLoading, "primary", "untitled:new", null, false)).toBeNull();
-  });
-
   it("flushes before history actions and rejects when the save remains dirty", async () => {
     const flushSave = vi.fn().mockResolvedValue(undefined);
     const finalize = vi.fn().mockResolvedValue(undefined);
@@ -119,7 +110,7 @@ describe("workspace editor components", () => {
     expect(screen.getByRole("link", { name: "Get Ollama" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Set up" })).toBeInTheDocument();
     expect(screen.getByText("History timeline")).toBeInTheDocument();
-    expect(screen.getByRole("complementary", { name: "Note history" })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Workspace tools" })).toBeInTheDocument();
     fireEvent.click(toggle);
     expect(onHide).toHaveBeenCalledOnce();
 
@@ -138,7 +129,7 @@ describe("workspace editor components", () => {
     expect(screen.getByRole("button", { name: "Stop Answer model" })).toBeInTheDocument();
   });
 
-  it("keeps history closed and unavailable for an unfiled active tab", () => {
+  it("keeps history out of editor tab actions", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     render(<EditorTabs
@@ -147,10 +138,8 @@ describe("workspace editor components", () => {
       titleForId={() => "Untitled"}
       isUntitledId={() => true}
       onActivate={vi.fn()} onDragStart={vi.fn()} onDragEnd={vi.fn()} onCloseTab={vi.fn()} onNewTab={vi.fn()} onSplit={vi.fn()} onCloseGroup={vi.fn()} onPinTab={vi.fn()}
-      historyAvailable={false}
-      onOpenHistory={vi.fn()}
     />);
-    expect(screen.getByRole("button", { name: "History" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "History" })).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
@@ -164,17 +153,14 @@ describe("workspace editor components", () => {
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
     const restored = vi.fn().mockResolvedValue(undefined);
-    let finishFlush: (() => void) | null = null;
-    const beforeRestore = vi.fn(() => new Promise<void>((resolve) => { finishFlush = resolve; }));
-    render(<NoteHistoryPanel documentId="/notes/current.md" title="Current note" onBeforeRestore={beforeRestore} onRestored={restored} />);
+    const beforeRestore = vi.fn().mockResolvedValue(undefined);
+    render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={beforeRestore} onRestored={restored} />);
     await screen.findByRole("button", { name: /First/ });
     fireEvent.click(screen.getByRole("button", { name: /First/ }));
-    await screen.findByText("Earlier");
+    await screen.findByText("+# Current");
     expect(screen.getByRole("button", { name: /First/ })).toHaveAttribute("aria-current", "true");
-    fireEvent.click(screen.getByRole("button", { name: "Restore version" }));
-    await waitFor(() => expect(beforeRestore).toHaveBeenCalledWith("/notes/current.md"));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    finishFlush?.();
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(beforeRestore).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(restored).toHaveBeenCalledWith("/notes/current.md"));
     expect(screen.getByText("Embedding refresh is pending.")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/note/history/version"), expect.any(Object));
@@ -187,10 +173,12 @@ describe("workspace editor components", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ revision: "b".repeat(40), note: { title: "Earlier", description: "", tags: [], status: "stable", staleAfter: null, content: "Before edit" }, diff: "-Before edit\n+Unsaved edit" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
-    const beforeRestore = vi.fn().mockRejectedValue(new Error("Could not save the note before continuing with history."));
-    render(<NoteHistoryPanel documentId="/notes/current.md" title="Current note" onBeforeRestore={beforeRestore} onRestored={vi.fn()} />);
+    const beforeRestore = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("Could not save the note before continuing with history."));
+    render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={beforeRestore} onRestored={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: /Earlier/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Restore version" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not save the note");
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/restore"))).toBe(false);
@@ -209,12 +197,12 @@ describe("workspace editor components", () => {
       .mockImplementationOnce(() => new Promise<Response>((resolve) => { finishOlder = resolve; }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ revision: newerRevision, note: { title: "Newer", description: "", tags: [], status: "stable", staleAfter: null, content: "Newer preview" }, diff: "" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    render(<NoteHistoryPanel documentId="/notes/current.md" title="Current note" onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} />);
+    render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: /Older/ }));
     fireEvent.click(screen.getByRole("button", { name: /Newer/ }));
-    await screen.findByText("Newer preview");
+    await screen.findByText("Newer");
     finishOlder?.(new Response(JSON.stringify({ revision: olderRevision, note: { title: "Older", description: "", tags: [], status: "stable", staleAfter: null, content: "Stale older preview" }, diff: "" }), { status: 200 }));
-    expect(await screen.findByText("Newer preview")).toBeInTheDocument();
+    expect(await screen.findByText("Current → selected")).toBeInTheDocument();
     expect(screen.queryByText("Stale older preview")).not.toBeInTheDocument();
     vi.unstubAllGlobals();
   });

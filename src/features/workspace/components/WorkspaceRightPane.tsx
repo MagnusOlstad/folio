@@ -10,7 +10,7 @@ type WorkspaceRightPaneProps = WorkspaceStatusProps & {
 /** A deliberately empty extension surface for future workspace tools. */
 export function WorkspaceRightPane({ onHide, historyContent, ...props }: WorkspaceRightPaneProps) {
   return (
-    <aside className="workspace-right-pane" aria-label={historyContent ? "Note history" : "Workspace tools"}>
+    <aside className="workspace-right-pane" aria-label="Workspace tools">
       <header className="right-pane-header">
         <button
           type="button"
@@ -25,7 +25,7 @@ export function WorkspaceRightPane({ onHide, historyContent, ...props }: Workspa
           </svg>
         </button>
       </header>
-      <div className={`right-pane-content${historyContent ? " has-history" : ""}`}>{historyContent}</div>
+      <div className="right-pane-content">{historyContent}</div>
       <footer className="right-pane-status"><OllamaStatus {...props} /></footer>
     </aside>
   );

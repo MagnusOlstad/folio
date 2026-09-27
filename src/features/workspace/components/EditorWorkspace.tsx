@@ -58,7 +58,6 @@ export function EditorWorkspace({ model, actions, paneControls }: EditorWorkspac
     rememberDocumentScrollTop: actions.rememberDocumentScrollTop,
     getDocumentSelection: actions.getDocumentSelection,
     rememberDocumentSelection: actions.rememberDocumentSelection,
-    openHistory: actions.openHistory,
   };
 
   return (

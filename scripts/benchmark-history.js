@@ -14,6 +14,7 @@ function percentile(values, ratio) {
   return ordered[Math.min(ordered.length - 1, Math.ceil(ordered.length * ratio) - 1)]
 }
 let root = null
+let history = null
 try {
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-history-bench-'))
   const bundleRoot = path.join(root, 'bundle')
@@ -34,7 +35,7 @@ try {
     listBundleMarkdownFiles: async () => files,
     parseMarkdownFile: (markdown) => ({ title: '', description: '', tags: [], status: '', staleAfter: null, content: markdown, frontmatter: {} }),
   }
-  const history = createHistoryService(runtime)
+  history = createHistoryService(runtime)
   const started = performance.now()
   await history.reconcile('Baseline')
   const baselineMs = performance.now() - started
@@ -65,5 +66,6 @@ try {
     historyPageAndVersionDiffUnder750ms: historyPageMs < 750 && versionDiffMs < 750,
   }, null, 2))
 } finally {
+  await history?.close()
   if (root) await fs.rm(root, { recursive: true, force: true })
 }

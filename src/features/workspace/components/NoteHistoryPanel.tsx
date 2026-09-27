@@ -1,17 +1,15 @@
 import { memo, useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import type { NoteHistoryEntry, NoteHistoryPage, NoteHistorySnapshot } from "../../../domain/types.ts";
 import { api } from "../../../lib/api.ts";
 
-type NoteHistoryPanelProps = { documentId: string; title: string; onBeforeRestore: (documentId: string) => Promise<void>; onRestored: (documentId: string) => Promise<void> };
+type NoteHistoryPanelProps = { documentId: string; onBeforeRestore: (documentId: string) => Promise<void>; onRestored: (documentId: string) => Promise<void> };
 
 function dateLabel(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
-function NoteHistoryPanelComponent({ documentId, title, onBeforeRestore, onRestored }: NoteHistoryPanelProps) {
+function NoteHistoryPanelComponent({ documentId, onBeforeRestore, onRestored }: NoteHistoryPanelProps) {
   const [entries, setEntries] = useState<NoteHistoryEntry[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [selected, setSelected] = useState<NoteHistorySnapshot | null>(null);
@@ -24,12 +22,20 @@ function NoteHistoryPanelComponent({ documentId, title, onBeforeRestore, onResto
 
   useEffect(() => {
     let cancelled = false;
-    void api<NoteHistoryPage>(`/api/note/history?id=${encodeURIComponent(documentId)}`)
-      .then((page) => { if (!cancelled) { setEntries(page.entries); setCursor(page.nextCursor); } })
-      .catch((cause: unknown) => { if (!cancelled) setError(cause instanceof Error ? cause.message : "Could not load note history."); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+    async function prepareAndLoad() {
+      try {
+        await onBeforeRestore(documentId);
+        const page = await api<NoteHistoryPage>(`/api/note/history?id=${encodeURIComponent(documentId)}`);
+        if (!cancelled) { setEntries(page.entries); setCursor(page.nextCursor); }
+      } catch (cause) {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : "Could not load note history.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void prepareAndLoad();
     return () => { cancelled = true; };
-  }, [documentId]);
+  }, [documentId, onBeforeRestore]);
 
   useEffect(() => () => { selectionRequestRef.current += 1; }, []);
 
@@ -68,33 +74,34 @@ function NoteHistoryPanelComponent({ documentId, title, onBeforeRestore, onResto
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not restore that version."); }
     finally { setRestoring(false); }
   }
-  const selectedEntry = selected
-    ? entries.find((entry) => entry.revision === selected.revision)
-    : null;
-
   return <section className="note-history-panel" aria-label="Note history">
-    <header className="note-history-heading"><span>History</span><strong title={title}>{title}</strong></header>
     {error && <p className="note-history-error" role="alert">{error}</p>}
     {warning && <p className="note-history-warning" role="status">{warning}</p>}
     <div className="note-history-body">
-      <nav className="note-history-timeline" aria-label="Versions">
-        <h2>Timeline</h2>
+      <nav className="note-history-timeline" aria-label="Note versions">
+        <h2>Versions</h2>
         {loading && <p>Loading history…</p>}
-        {!loading && entries.length === 0 && <p>No history is available yet.</p>}
+        {!loading && entries.length === 0 && <p>No saved versions yet.</p>}
         {entries.map((entry) => <button type="button" className={selected?.revision === entry.revision ? "active" : ""} aria-current={selected?.revision === entry.revision ? "true" : undefined} aria-pressed={selected?.revision === entry.revision} onClick={() => void selectRevision(entry.revision)} key={entry.revision}><strong>{entry.title}</strong><small>{dateLabel(entry.authoredAt)}</small></button>)}
         {cursor && <button type="button" className="note-history-more" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load more"}</button>}
       </nav>
-      <section className="note-history-version" aria-live="polite" aria-label="Version preview">
+      <section className="note-history-version" aria-live="polite" aria-label="Selected version changes">
         {selected ? <>
-          <div className="note-history-version-heading"><div><span>Selected version</span><strong>{selectedEntry ? dateLabel(selectedEntry.authoredAt) : "Selected revision"}</strong></div><button type="button" onClick={() => void restoreSelected()} disabled={restoring}>{restoring ? "Restoring…" : "Restore version"}</button></div>
-          <dl className="note-history-metadata"><div><dt>Title</dt><dd>{selected.note.title}</dd></div><div><dt>Tags</dt><dd>{selected.note.tags.map((tag) => `#${tag}`).join(" ") || "None"}</dd></div><div><dt>Status</dt><dd>{selected.note.status}</dd></div></dl>
-          <div className="note-history-preview"><ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.note.content}</ReactMarkdown></div>
-          <details className="note-history-diff" open><summary>Changes from current</summary><pre>{selected.diff || "No content changes."}</pre></details>
-        </> : <p>Select a version to inspect its preview and changes.</p>}
+          <div className="note-history-version-heading"><span>Current → selected</span><button type="button" onClick={() => void restoreSelected()} disabled={restoring}>{restoring ? "Restoring…" : "Restore"}</button></div>
+          <pre className="note-history-diff" aria-label="Unified diff">{selected.diff ? selected.diff.split("\n").map((line, index) => {
+            const kind = line.startsWith("+") && !line.startsWith("+++")
+              ? "added"
+              : line.startsWith("-") && !line.startsWith("---")
+                ? "removed"
+                : line.startsWith("@@")
+                  ? "hunk"
+                  : "context";
+            return <span className={`note-history-diff-line is-${kind}`} key={`${index}-${line}`}>{line || "\u00a0"}{"\n"}</span>;
+          }) : "No content changes."}</pre>
+        </> : <p>Select a version to see its changes.</p>}
       </section>
     </div>
   </section>;
 }
 
-// This only mounts after the explicit History action, keeping network/rendering work out of typing.
 export const NoteHistoryPanel = memo(NoteHistoryPanelComponent);

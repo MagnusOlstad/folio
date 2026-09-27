@@ -48,8 +48,6 @@ export type EditorTabsProps = {
     onToggleLeft: () => void;
     onToggleRight: () => void;
   };
-  historyAvailable: boolean;
-  onOpenHistory: (groupId: string) => void;
 };
 
 export function EditorTabs({
@@ -69,8 +67,6 @@ export function EditorTabs({
   onCloseGroup,
   onPinTab,
   paneControls,
-  historyAvailable,
-  onOpenHistory,
 }: EditorTabsProps) {
   return (
     <div className="editor-tabs">
@@ -125,14 +121,6 @@ export function EditorTabs({
         ))}
       </div>
       <div className="group-actions">
-        <button
-          type="button"
-          onClick={() => onOpenHistory(group.id)}
-          disabled={!historyAvailable}
-          title={historyAvailable ? "Note history" : "History is available for filed notes"}
-        >
-          History
-        </button>
         <button
           type="button"
           onClick={() => onNewTab(group.id)}

@@ -2,9 +2,12 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import { fork } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import * as git from 'isomorphic-git'
 
 import { createSerialQueue } from '../core/queue.js'
+import { unifiedDiff, userFacingMarkdown } from './diff.js'
 
 const AUTHOR = { name: 'Folio', email: 'history@folio.local' }
 
@@ -110,49 +113,7 @@ function titleFor(message) {
   return String(message || '').split('\n')[0].trim() || 'Updated note'
 }
 
-function lines(value) {
-  return String(value || '').replaceAll('\r\n', '\n').split('\n')
-}
-
-// A compact unified line diff. Keeping the unchanged prefix/suffix as context avoids
-// the unhelpful remove-and-readd-the-entire-note output for ordinary edits.
-function unifiedDiff(previous, next, filename) {
-  if (previous === next) return ''
-  const oldLines = lines(previous)
-  const newLines = lines(next)
-  let prefix = 0
-  while (prefix < oldLines.length && prefix < newLines.length && oldLines[prefix] === newLines[prefix]) prefix += 1
-  let suffix = 0
-  while (suffix < oldLines.length - prefix && suffix < newLines.length - prefix
-    && oldLines[oldLines.length - suffix - 1] === newLines[newLines.length - suffix - 1]) suffix += 1
-  const context = 3
-  const start = Math.max(0, prefix - context)
-  const oldEnd = Math.min(oldLines.length, oldLines.length - suffix + context)
-  const newEnd = Math.min(newLines.length, newLines.length - suffix + context)
-  return [
-    `--- a/${filename}`,
-    `+++ b/${filename}`,
-    `@@ -${start + 1},${oldEnd - start} +${start + 1},${newEnd - start} @@`,
-    ...oldLines.slice(start, prefix).map((line) => ` ${line}`),
-    ...oldLines.slice(prefix, oldLines.length - suffix).map((line) => `-${line}`),
-    ...newLines.slice(prefix, newLines.length - suffix).map((line) => `+${line}`),
-    ...oldLines.slice(oldLines.length - suffix, oldEnd).map((line) => ` ${line}`),
-  ].join('\n')
-}
-
-function userFacingMarkdown(parsed) {
-  return [
-    `title: ${parsed.title || ''}`,
-    `description: ${parsed.description || ''}`,
-    `tags: ${(parsed.tags || []).join(', ')}`,
-    `status: ${parsed.status || ''}`,
-    `stale_after: ${parsed.staleAfter || ''}`,
-    '',
-    parsed.content || '',
-  ].join('\n')
-}
-
-export function createHistoryService(runtime) {
+export function createInProcessHistoryService(runtime) {
   const { bundleRoot, historyGitDir, legacyHistoryGitDir, listBundleMarkdownFiles } = runtime
   const queue = createSerialQueue()
   let initialized = false
@@ -319,7 +280,7 @@ export function createHistoryService(runtime) {
     const current = await fsp.readFile(path.join(bundleRoot, currentPath), 'utf8').catch(() => '')
     const historicNote = runtime.parseMarkdownFile(markdown, currentPath)
     const currentNote = runtime.parseMarkdownFile(current, currentPath)
-    return { revision, markdown, diff: unifiedDiff(userFacingMarkdown(historicNote), userFacingMarkdown(currentNote), currentPath) }
+    return { revision, markdown, diff: unifiedDiff(userFacingMarkdown(currentNote), userFacingMarkdown(historicNote), currentPath) }
   }
 
   function version(fileId, revision) {
@@ -327,4 +288,113 @@ export function createHistoryService(runtime) {
   }
 
   return { init, reconcile, entries, version }
+}
+
+function workerConfig(runtime) {
+  return {
+    bundleRoot: runtime.bundleRoot,
+    historyGitDir: runtime.historyGitDir,
+    legacyHistoryGitDir: runtime.legacyHistoryGitDir,
+  }
+}
+
+export function createHistoryService(runtime) {
+  const defaultWorkerPath = fileURLToPath(new URL('./worker.js', import.meta.url))
+  let child = null
+  let starting = null
+  let nextId = 1
+  const pending = new Map()
+  let closed = false
+  let idleTimer = null
+
+  function scheduleIdleStop() {
+    clearTimeout(idleTimer)
+    if (pending.size || !child || closed) return
+    child.unref?.()
+    child.channel?.unref?.()
+    idleTimer = setTimeout(() => stopWorker(), 60_000)
+    idleTimer.unref?.()
+  }
+
+  function stopWorker(reason = new Error('Note history helper process stopped.')) {
+    const current = child
+    child = null
+    if (!current) return
+    current.removeAllListeners()
+    for (const { reject } of pending.values()) reject(reason)
+    pending.clear()
+    try { current.kill() } catch { /* already exited */ }
+  }
+
+  async function startWorker() {
+    if (child) return child
+    if (closed) throw new Error('Note history service is closed.')
+    if (!starting) {
+      starting = (async () => {
+        let processChild
+        let electronProcess = false
+        if (process.versions.electron) {
+          // Electron's utility process is a separate OS process and resolves this
+          // packaged ASAR entry point through Electron's module loader.
+          const { utilityProcess } = await import('electron')
+          processChild = utilityProcess.fork(runtime.historyWorkerPath || defaultWorkerPath, [], { serviceName: 'Folio note history' })
+          electronProcess = true
+        } else {
+          processChild = fork(runtime.historyWorkerPath || defaultWorkerPath, [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] })
+        }
+        if (closed) {
+          processChild.kill()
+          throw new Error('Note history service is closed.')
+        }
+        child = processChild
+        const handleMessage = (...args) => {
+          const message = electronProcess ? args.at(-1) : args[0]
+          const request = pending.get(message.id)
+          if (!request) return
+          pending.delete(message.id)
+          if (message.error) request.reject(new Error(message.error))
+          else request.resolve(message.value)
+          scheduleIdleStop()
+        }
+        processChild.on('message', handleMessage)
+        processChild.on('error', (error) => stopWorker(error))
+        processChild.on('exit', (code, signal) => {
+          if (child === processChild) stopWorker(new Error(`Note history helper exited (${signal || code}).`))
+        })
+        return processChild
+      })().finally(() => { starting = null })
+    }
+    return starting
+  }
+
+  async function request(method, args = []) {
+    const processChild = await startWorker()
+    processChild.ref?.()
+    processChild.channel?.ref?.()
+    const id = nextId++
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject })
+      clearTimeout(idleTimer)
+      try {
+        if (process.versions.electron) processChild.postMessage({ id, method, args, config: workerConfig(runtime) })
+        else processChild.send({ id, method, args, config: workerConfig(runtime) })
+      } catch (error) {
+        pending.delete(id)
+        reject(error)
+      }
+    })
+  }
+
+  return {
+    init: () => request('init'),
+    reconcile: (...args) => request('reconcile', args),
+    entries: (...args) => request('entries', args),
+    version: (...args) => request('version', args),
+    close: async () => {
+      closed = true
+      clearTimeout(idleTimer)
+      if (starting) await starting.catch(() => {})
+      stopWorker(new Error('Note history service is closed.'))
+    },
+  }
 }

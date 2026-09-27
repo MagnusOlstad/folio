@@ -13,6 +13,7 @@ import { WorkspaceRightPane } from "./WorkspaceRightPane.tsx";
 import { WorkspaceLeftPaneHeader } from "./WorkspaceLeftPaneHeader.tsx";
 import type { NoteExportSnapshot } from "../model/note-export.ts";
 import { NoteHistoryPanel } from "./NoteHistoryPanel.tsx";
+import { isUntitledId } from "../../../lib/workspace.ts";
 
 type WorkspaceAppProps = WorkspaceStatusProps & {
   versionInfo: VersionInfo | null;
@@ -49,6 +50,23 @@ export function WorkspaceShell({
   exportPreview,
   layout,
 }: WorkspaceShellProps) {
+  const activeGroup = editor.model.groups.find((group) => group.id === editor.model.activeGroupId);
+  const activeDocumentId = activeGroup?.activeId ?? null;
+  const activeDocument = activeDocumentId ? editor.model.documents[activeDocumentId] : null;
+  const historyContent = !activeDocumentId ? (
+    <p className="right-pane-placeholder">Open a filed note to see its history.</p>
+  ) : activeDocument && activeDocument.deletable && !isUntitledId(activeDocumentId) ? (
+    <NoteHistoryPanel
+      key={activeDocumentId}
+      documentId={activeDocumentId}
+      onBeforeRestore={editor.actions.beforeHistoryRestore}
+      onRestored={editor.actions.historyRestored}
+    />
+  ) : editor.model.loadingDocuments.has(activeDocumentId) ? (
+    <p className="right-pane-placeholder" role="status">Loading note…</p>
+  ) : (
+    <p className="right-pane-placeholder">History is available for filed notes.</p>
+  );
   return (
     <main className="shell">
       <section
@@ -102,19 +120,7 @@ export function WorkspaceShell({
           <WorkspaceRightPane
             {...app}
             onHide={() => layout.setRightPaneOpen(false)}
-            historyContent={editor.model.historyTarget ? (
-              editor.model.documents[editor.model.historyTarget.documentId]?.deletable ? (
-              <NoteHistoryPanel
-                key={editor.model.historyTarget.documentId}
-                documentId={editor.model.historyTarget.documentId}
-                title={editor.model.documents[editor.model.historyTarget.documentId]?.title || "Note"}
-                onBeforeRestore={editor.actions.beforeHistoryRestore}
-                onRestored={editor.actions.historyRestored}
-              />
-              ) : editor.model.loadingDocuments.has(editor.model.historyTarget.documentId) ? (
-                <p className="right-pane-placeholder" role="status">Loading note…</p>
-              ) : null
-            ) : null}
+            historyContent={historyContent}
           />
         ) : null}
       </section>

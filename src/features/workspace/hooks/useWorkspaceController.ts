@@ -14,7 +14,6 @@ import { useWorkspaceSidebarProps } from "./useWorkspaceSidebarProps.ts";
 import { useWorkspaceShortcutActions } from "./useWorkspaceShortcutActions.ts";
 import { useFiledDocumentAutosave } from "./useFiledDocumentAutosave.ts";
 import { useNoteHistoryCheckpoint } from "./useNoteHistoryCheckpoint.ts";
-import { resolveHistoryTarget } from "../model/history-target.ts";
 import { prepareFiledDocumentHistory } from "../model/history-actions.ts";
 import { expandedPathsForFiles, isUntitledId } from "../../../lib/workspace.ts";
 import { bundleDirectories } from "../model/directory-suggestions.ts";
@@ -52,7 +51,6 @@ export function useWorkspaceController(): WorkspaceShellProps {
     groupId: string;
     documentId: string;
   } | null>(null);
-  const [historyTarget, setHistoryTarget] = useState<{ groupId: string; documentId: string } | null>(null);
   const editorFocusRequestIdRef = useRef(0);
   const embeddingRevisionsRef = useRef(new Map<string, number>());
   const embeddingFinalizationsRef = useRef(new Map<string, Promise<void>>());
@@ -218,25 +216,6 @@ export function useWorkspaceController(): WorkspaceShellProps {
       Array.from(embeddingRevisionsRef.current.keys(), finalizeFiledDocument),
     );
   }
-  useEffect(() => {
-    if (!historyTarget) return;
-    const activeGroup = tabs.groups.find((group) => group.id === tabs.activeGroupId);
-    const documentId = activeGroup?.activeId;
-    const document = documentId ? documents.documents[documentId] : null;
-    const nextTarget = resolveHistoryTarget(
-      historyTarget,
-      tabs.activeGroupId,
-      documentId,
-      document,
-      Boolean(documentId && documents.loadingDocuments.has(documentId)),
-    );
-    if (nextTarget === historyTarget) return;
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) setHistoryTarget(nextTarget);
-    });
-    return () => { cancelled = true; };
-  }, [documents.documents, documents.loadingDocuments, historyTarget, tabs.activeGroupId, tabs.groups]);
   const refreshAfterHistoryRestore = useCallback(async (documentId: string) => {
     const [detail, notes, files] = await Promise.all([
       api<NoteDetail>(`/api/note?id=${encodeURIComponent(documentId)}`),
@@ -255,6 +234,22 @@ export function useWorkspaceController(): WorkspaceShellProps {
     setNotes(notes);
     setFiles(files);
   }, [documents, setFiles, setNotes]);
+  const historyRestoreActionsRef = useRef<{
+    before: (documentId: string) => Promise<void>;
+    after: (documentId: string) => Promise<void>;
+  }>({ before: async () => {}, after: async () => {} });
+  historyRestoreActionsRef.current = {
+    before: prepareHistoryDocument,
+    after: refreshAfterHistoryRestore,
+  };
+  const beforeHistoryRestore = useCallback(
+    (documentId: string) => historyRestoreActionsRef.current.before(documentId),
+    [],
+  );
+  const historyRestored = useCallback(
+    (documentId: string) => historyRestoreActionsRef.current.after(documentId),
+    [],
+  );
   const navigation = useWorkspaceDocumentNavigation({
     documents,
     groups: tabs.groups,
@@ -563,7 +558,6 @@ export function useWorkspaceController(): WorkspaceShellProps {
         editorFocusRequest,
         message,
         exportingNoteId: noteExport.exportingNoteId,
-        historyTarget,
       },
       actions: {
         beginHorizontalResize: layout.beginHorizontalResize,
@@ -662,20 +656,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
             documents.drafts[document.id],
             format,
           ),
-        openHistory: async (groupId, document) => {
-          if (isUntitledId(document.id) || !document.deletable) return;
-          try {
-            await prepareHistoryDocument(document.id);
-          } catch (error) {
-            setMessage(error instanceof Error ? error.message : "Could not save the note before opening history.");
-            return;
-          }
-          setHistoryTarget({ groupId, documentId: document.id });
-          layout.setRightPaneOpen(true);
-        },
-        closeHistory: () => setHistoryTarget(null),
-        beforeHistoryRestore: prepareHistoryDocument,
-        historyRestored: refreshAfterHistoryRestore,
+        beforeHistoryRestore,
+        historyRestored,
         dismissMessage: () => setMessage(""),
       },
     },
