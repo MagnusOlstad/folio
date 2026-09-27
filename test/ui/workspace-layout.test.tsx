@@ -1,0 +1,145 @@
+import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { WorkspaceSidebarHandle } from "../../src/features/workspace/components/WorkspaceSidebarHandle.tsx";
+import { WorkspaceLeftPaneHeader } from "../../src/features/workspace/components/WorkspaceLeftPaneHeader.tsx";
+import { WorkspaceRightPane } from "../../src/features/workspace/components/WorkspaceRightPane.tsx";
+import { useWorkspaceLayout } from "../../src/features/workspace/hooks/useWorkspaceLayout.ts";
+import type { ModelStatus } from "../../src/domain/types.ts";
+
+describe("workspace pane layout", () => {
+  it("keeps both panes independently collapsible", () => {
+    const { result } = renderHook(() => useWorkspaceLayout());
+    expect(result.current.sidebarOpen).toBe(true);
+    expect(result.current.rightPaneOpen).toBe(true);
+
+    act(() => {
+      result.current.setSidebarOpen(false);
+      result.current.setRightPaneOpen(false);
+    });
+
+    expect(result.current.sidebarOpen).toBe(false);
+    expect(result.current.rightPaneOpen).toBe(false);
+  });
+
+  it("starts narrow windows with the right pane closed and preserves choices when resized", () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 640 });
+
+    try {
+      const { result, unmount } = renderHook(() => useWorkspaceLayout());
+      expect(result.current.sidebarOpen).toBe(true);
+      expect(result.current.rightPaneOpen).toBe(false);
+
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 1_200 });
+      fireEvent.resize(window);
+      expect(result.current.rightPaneOpen).toBe(false);
+
+      act(() => result.current.setRightPaneOpen(true));
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 640 });
+      fireEvent.resize(window);
+      expect(result.current.rightPaneOpen).toBe(true);
+      unmount();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+    }
+  });
+
+  it("places app identity and the left pane toggle in its header", () => {
+    const toggle = vi.fn();
+    render(
+      <WorkspaceLeftPaneHeader
+        versionInfo={{ version: "1.2.3", repo: "folio", updateAvailable: false, latest: null }}
+        onOpenSettings={() => {}}
+        sidebarOpen
+        onToggleSidebar={toggle}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "Folio home" })).toBeInTheDocument();
+    expect(screen.getByText("v1.2.3")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Hide left sidebar" }));
+    expect(toggle).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the right pane available as an empty feature surface with Ollama status below", () => {
+    render(
+      <WorkspaceRightPane
+        status={{
+          online: false,
+          canLaunch: false,
+          classifierModel: "",
+          answerModel: "",
+          answerModels: [],
+          embedModel: "",
+          configuredModels: [],
+          missingModels: [],
+          installingModels: [],
+          installed: [],
+          running: [],
+          embeddingCoverage: {
+            conceptsEmbedded: 0,
+            conceptsTotal: 0,
+            chunksEmbedded: 0,
+            chunksTotal: 0,
+            refreshing: false,
+          },
+        } satisfies ModelStatus}
+        missingModels={[]}
+        modelInstallInProgress={false}
+        modelEndpoints={[]}
+        togglingService={null}
+        onInstall={() => {}}
+        onToggle={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole("complementary", { name: "Workspace tools" })).toBeInTheDocument();
+    expect(screen.getByText("Ollama offline")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Get Ollama" })).toBeInTheDocument();
+  });
+
+  it("resizes the right pane from its inside edge and supports keyboard control", () => {
+    const { result } = renderHook(() => useWorkspaceLayout());
+    const handle = document.createElement("div");
+    const workspace = document.createElement("div");
+    workspace.append(handle);
+    vi.spyOn(workspace, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, width: 1_200, height: 600, top: 0, left: 0, right: 1_200, bottom: 600, toJSON: () => ({}),
+    });
+
+    act(() => result.current.resizeRightPane(900, handle));
+    expect(result.current.rightPaneWidth).toBe(300);
+
+    const onResize = vi.fn();
+    render(<div><WorkspaceSidebarHandle width={300} side="right" onPointerDown={vi.fn()} onResize={onResize} onPointerEnd={vi.fn()} onReset={vi.fn()} /></div>);
+    const separator = screen.getByRole("separator");
+    vi.spyOn(separator.parentElement!, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, width: 900, height: 600, top: 0, left: 0, right: 900, bottom: 600, toJSON: () => ({}),
+    });
+    fireEvent.keyDown(separator, { key: "ArrowRight" });
+    expect(onResize).toHaveBeenCalledWith(616, separator);
+  });
+
+  it("uses the right pane's rendered width for its initial keyboard resize", () => {
+    const onResize = vi.fn();
+    render(
+      <div>
+        <WorkspaceSidebarHandle width={null} side="right" onPointerDown={vi.fn()} onResize={onResize} onPointerEnd={vi.fn()} onReset={vi.fn()} />
+        <button type="button" aria-label="Show left sidebar" />
+        <aside className="workspace-right-pane" data-testid="right-pane" />
+      </div>,
+    );
+    const separator = screen.getByRole("separator", { name: "Resize right sidebar" });
+    const workspace = separator.parentElement!;
+    vi.spyOn(workspace, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, width: 900, height: 600, top: 0, left: 0, right: 900, bottom: 600, toJSON: () => ({}),
+    });
+    vi.spyOn(screen.getByTestId("right-pane"), "getBoundingClientRect").mockReturnValue({
+      x: 630, y: 0, width: 270, height: 600, top: 0, left: 630, right: 900, bottom: 600, toJSON: () => ({}),
+    });
+
+    fireEvent.keyDown(separator, { key: "ArrowRight" });
+
+    expect(onResize).toHaveBeenCalledWith(646, separator);
+  });
+});
