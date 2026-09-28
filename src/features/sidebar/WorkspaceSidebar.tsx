@@ -214,6 +214,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
           <FileTree
             directory={fileTree}
             depth={0}
+            hideRoot
             expanded={expandedDirectories}
             draggedFileId={draggedFileId}
             dropDirectoryPath={dropDirectoryPath}

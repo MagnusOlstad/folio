@@ -168,6 +168,11 @@
   box-shadow: inset 2px 0 0 var(--acid);
 }
 
+.tree-branch.drop-target {
+  background: rgba(var(--acid-rgb), 0.1);
+  box-shadow: inset 2px 0 0 var(--acid);
+}
+
 .tree-file[draggable='true'] {
   cursor: grab;
 }

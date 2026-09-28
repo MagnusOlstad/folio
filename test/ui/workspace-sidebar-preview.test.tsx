@@ -231,4 +231,64 @@ describe("WorkspaceSidebar preview navigation", () => {
     expect(container.querySelector("#bundle-tree-personal")).toBeInTheDocument();
     expect(container.querySelector("#bundle-tree-work")).not.toBeInTheDocument();
   });
+
+  it("shows bundle root files and folders directly under the bundle heading", () => {
+    const moveBundleFile = vi.fn().mockResolvedValue(undefined);
+    const props = {
+      ...sidebarProps(vi.fn().mockResolvedValue(undefined)),
+      sidebarMode: "explore" as const,
+      moveBundleFile,
+      fileTree: buildFileTree([
+        {
+          id: "/root-note.md",
+          name: "root-note.md",
+          title: "Root note",
+          createdAt: "2026-09-28T12:00:00.000Z",
+          directory: "/",
+          type: "Note",
+          deletable: true,
+          movable: true,
+          filedBy: null,
+          filedAt: null,
+        },
+        {
+          id: "/projects/plan.md",
+          name: "plan.md",
+          title: "Plan",
+          createdAt: "2026-09-28T12:00:00.000Z",
+          directory: "/projects",
+          type: "Note",
+          deletable: true,
+          movable: true,
+          filedBy: null,
+          filedAt: null,
+        },
+      ]),
+      bundles: [
+        {
+          id: "work",
+          name: "Work",
+          markdownPath: "/notes/work",
+          managed: false,
+          detached: false,
+        },
+      ],
+      activeBundleId: "work",
+    };
+    const { container, getByRole } = render(<WorkspaceSidebar {...props} />);
+
+    const bundleHeading = getByRole("button", { name: /Work/ });
+    const bundleContent = container.querySelector("#bundle-tree-work")!;
+    const projectDirectory = bundleContent.querySelector("button.tree-directory");
+    expect(bundleHeading).toHaveAttribute("aria-expanded", "true");
+    expect(bundleContent).toContainElement(getByRole("button", { name: "Root note" }));
+    expect(bundleContent.querySelectorAll("button.tree-directory")).toHaveLength(1);
+    expect(projectDirectory).toHaveTextContent("projects");
+    expect(projectDirectory).not.toHaveTextContent("Bundle");
+
+    fireEvent.drop(bundleContent.querySelector(".tree-branch")!, {
+      dataTransfer: { getData: () => "/root-note.md" },
+    });
+    expect(moveBundleFile).toHaveBeenCalledWith("/root-note.md", "/");
+  });
 });
