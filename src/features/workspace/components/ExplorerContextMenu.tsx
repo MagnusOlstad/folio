@@ -142,7 +142,7 @@ export function ExplorerContextMenu({
           ) : (
             <>
               <label htmlFor="explorer-context-name">
-                {formMode === "rename" ? "Rename" : formMode === "create-file" ? "New Markdown file" : "New folder"}
+                {formMode === "rename" ? "Rename" : formMode === "create-file" ? "New note" : "New folder"}
               </label>
               <input
                 id="explorer-context-name"
@@ -162,17 +162,8 @@ export function ExplorerContextMenu({
         </form>
       ) : (
         <div role="menu" aria-label={`${explorerTargetName(target)} actions`} onKeyDown={moveMenuFocus}>
-          {target.kind === "directory" ? (
-            <>
-              <button role="menuitem" type="button" onClick={() => openForm("create-file")}>New Markdown file</button>
-              <button role="menuitem" type="button" onClick={() => openForm("create-folder")}>New folder</button>
-            </>
-          ) : (
-            <>
-              <button role="menuitem" type="button" onClick={() => openForm("create-file")}>New Markdown file here</button>
-              <button role="menuitem" type="button" onClick={() => openForm("create-folder")}>New folder here</button>
-            </>
-          )}
+          <button role="menuitem" type="button" onClick={() => openForm("create-file")}>New note</button>
+          <button role="menuitem" type="button" onClick={() => openForm("create-folder")}>New folder</button>
           {target.kind === "file" ? (
             <button role="menuitem" type="button" disabled={!canRename} onClick={() => openForm("rename")}>Rename file</button>
           ) : null}

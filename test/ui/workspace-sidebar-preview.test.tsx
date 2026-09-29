@@ -358,8 +358,8 @@ describe("WorkspaceSidebar preview navigation", () => {
     const { getByRole } = render(<WorkspaceSidebar {...props} />);
 
     fireEvent.contextMenu(getByRole("button", { name: "Plan" }), { clientX: 30, clientY: 40 });
-    fireEvent.click(getByRole("menuitem", { name: "New Markdown file here" }));
-    fireEvent.change(getByRole("textbox", { name: "New Markdown file" }), { target: { value: "meeting-notes" } });
+    fireEvent.click(getByRole("menuitem", { name: "New note" }));
+    fireEvent.change(getByRole("textbox", { name: "New note" }), { target: { value: "meeting-notes" } });
     fireEvent.click(within(getByRole("dialog")).getByRole("button", { name: "Save" }));
     expect(actions.createFile).toHaveBeenCalledWith("/projects", "meeting-notes");
   });

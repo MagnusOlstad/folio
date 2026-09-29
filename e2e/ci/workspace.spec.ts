@@ -37,8 +37,8 @@ test('creates and opens a Markdown file from the bundle root context menu', asyn
     const folder = page.locator('.tree-directory').filter({ hasText: folderName })
     await expect(folder).toBeVisible()
     await folder.click({ button: 'right' })
-    await page.getByRole('menuitem', { name: 'New Markdown file', exact: true }).click()
-    await page.getByRole('textbox', { name: 'New Markdown file' }).fill(title)
+    await page.getByRole('menuitem', { name: 'New note', exact: true }).click()
+    await page.getByRole('textbox', { name: 'New note' }).fill(title)
     await page.getByRole('button', { name: 'Save', exact: true }).click()
 
     await expect(page.locator('button.tree-file[aria-label]').filter({ hasText: title })).toBeVisible()
