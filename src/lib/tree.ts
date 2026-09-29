@@ -1,7 +1,10 @@
-import type { BundleFile, TreeDirectory } from "../domain/types.ts";
+import type { BundleDirectory, BundleFile, TreeDirectory } from "../domain/types.ts";
 import { isInternalBundlePath } from "./paths.ts";
 
-export function buildFileTree(files: BundleFile[]): TreeDirectory {
+export function buildFileTree(
+  files: BundleFile[],
+  directories: BundleDirectory[] = [],
+): TreeDirectory {
   type MutableTree = Omit<TreeDirectory, "directories"> & {
     directories: Map<string, MutableTree>;
   };
@@ -11,23 +14,30 @@ export function buildFileTree(files: BundleFile[]): TreeDirectory {
     directories: new Map(),
     files: [],
   };
-  for (const file of files) {
-    if (isInternalBundlePath(file.id)) continue;
-    const parts = file.id.split("/").filter(Boolean);
-    parts.pop();
+  function ensureDirectory(directoryPath: string) {
+    const parts = directoryPath.split("/").filter(Boolean);
     let current = root;
-    let path = "";
+    let currentPath = "";
     for (const part of parts) {
-      path += `/${part}`;
+      currentPath += `/${part}`;
       if (!current.directories.has(part))
         current.directories.set(part, {
           name: part,
-          path,
+          path: currentPath,
           directories: new Map(),
           files: [],
         });
       current = current.directories.get(part)!;
     }
+    return current;
+  }
+  for (const directory of directories) {
+    if (directory.path === "/" || isInternalBundlePath(directory.path)) continue;
+    ensureDirectory(directory.path);
+  }
+  for (const file of files) {
+    if (isInternalBundlePath(file.id)) continue;
+    const current = ensureDirectory(file.id.split("/").slice(0, -1).join("/"));
     current.files.push(file);
   }
   const finalize = (directory: MutableTree): TreeDirectory => ({

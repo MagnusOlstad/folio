@@ -7,7 +7,36 @@ export function registerRoutes(app, runtime) {
     rankedRecords, normalizeInlineText, normalizeTag, normalizeMarkdownBreaks, markdownDocument, updatedGenerated,
     replaceIndexedConceptContent, embeddingInputHash, refreshRecordEmbeddings, queueIndexOperation,
     performReindexBundle, persistEmbeddingUpdatesNow, relationshipIndex, recordIsStale,
-    semanticSuggestionSummaries } = runtime
+    semanticSuggestionSummaries, listBundleDirectories, normalizeBundlePath, resolveBundlePath, assertNoBundleSymlinks } = runtime
+  const entryName = (value, { markdown = false } = {}) => {
+    let name = String(value || '').trim()
+    if (markdown) {
+      const extension = path.extname(name)
+      if (!extension) name += '.md'
+      else if (extension !== '.md') {
+        const error = new Error('Markdown file names must end in .md.')
+        error.status = 400
+        throw error
+      }
+    }
+    if (!name || name.length > 100 || name.startsWith('.') || name.endsWith('.') || name.endsWith(' ')
+      || !/^[A-Za-z0-9][A-Za-z0-9 _.-]*$/.test(name) || name === '.' || name === '..') {
+      const error = new Error('Use a simple file or folder name without path separators.')
+      error.status = 400
+      throw error
+    }
+    return name
+  }
+  const isReservedId = (id) => id === '/daily' || id === '/references' || id === '/index.md' || id === '/log.md' || id === '/todo-list.md'
+    || id.startsWith('/daily/') || id.startsWith('/references/')
+app.get('/api/directories', async (_request, response, next) => {
+  try {
+    response.json(await listBundleDirectories())
+  } catch (error) {
+    next(error)
+  }
+})
+
 app.get('/api/search', async (request, response, next) => {
   try {
     const query = String(request.query.q || '').trim()
@@ -51,6 +80,161 @@ app.get('/api/files', async (_request, response, next) => {
       }
     }))
   } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/file/folder', async (request, response, next) => {
+  try {
+    const parentId = normalizeBundlePath(String(request.body?.directory || '/'), { allowRoot: true })
+    if (!parentId) return response.status(400).json({ error: 'Choose a valid bundle folder.' })
+    const name = entryName(request.body?.name)
+    const id = parentId === '/' ? `/${name}` : `${parentId}/${name}`
+    const target = resolveBundlePath(id)
+    const parent = resolveBundlePath(parentId, { allowRoot: true })
+    if (!target || !parent || isReservedId(id)) return response.status(400).json({ error: 'Invalid or reserved folder path.' })
+    await queueMarkdownMutation(async () => {
+      await assertNoBundleSymlinks(parent.path)
+      await assertNoBundleSymlinks(target.path, { allowMissing: true })
+      if (!(await fs.stat(parent.path)).isDirectory()) {
+        const error = new Error('The destination folder does not exist.')
+        error.status = 400
+        throw error
+      }
+      try {
+        await fs.mkdir(target.path)
+      } catch (error) {
+        if (error.code === 'EEXIST') {
+          const conflict = new Error('A file or folder already has that name.')
+          conflict.status = 409
+          throw conflict
+        }
+        throw error
+      }
+    })
+    response.status(201).json({ path: id })
+  } catch (error) {
+    if (error.status) return response.status(error.status).json({ error: error.message })
+    next(error)
+  }
+})
+
+app.post('/api/file/create', async (request, response, next) => {
+  try {
+    const parentId = normalizeBundlePath(String(request.body?.directory || '/'), { allowRoot: true })
+    if (!parentId) return response.status(400).json({ error: 'Choose a valid bundle folder.' })
+    const filename = entryName(request.body?.name, { markdown: true })
+    const id = parentId === '/' ? `/${filename}` : `${parentId}/${filename}`
+    const target = resolveBundlePath(id)
+    const parent = resolveBundlePath(parentId, { allowRoot: true })
+    if (!target || !parent || isReservedId(id) || !isMovableConceptId(id)) {
+      return response.status(400).json({ error: 'That bundle path is reserved or cannot be edited.' })
+    }
+    const title = filename.replace(/\.md$/i, '')
+    const generatedAt = new Date().toISOString()
+    const markdown = markdownDocument(
+      { title, type: 'Note', generated: { by: 'human:local', at: generatedAt } },
+      `# ${title}`,
+    )
+    const createdId = await queueIndexOperation(() => queueMarkdownMutation(async () => {
+      await assertNoBundleSymlinks(parent.path)
+      await assertNoBundleSymlinks(target.path, { allowMissing: true })
+      if (!(await fs.stat(parent.path)).isDirectory()) {
+        const error = new Error('The destination folder does not exist.')
+        error.status = 400
+        throw error
+      }
+      try {
+        await fs.writeFile(target.path, markdown, { flag: 'wx' })
+      } catch (error) {
+        if (error.code === 'EEXIST') {
+          const conflict = new Error('A file or folder already has that name.')
+          conflict.status = 409
+          throw conflict
+        }
+        throw error
+      }
+      try {
+        await performReindexBundle({ markdownLocked: true })
+      } catch (error) {
+        await fs.unlink(target.path).catch(() => {})
+        throw error
+      }
+      return id
+    }))
+    response.status(201).json({ id: createdId })
+  } catch (error) {
+    if (error.status) return response.status(error.status).json({ error: error.message })
+    next(error)
+  }
+})
+
+app.post('/api/file/rename', async (request, response, next) => {
+  try {
+    const oldId = normalizeBundlePath(String(request.body?.id || ''))
+    if (!oldId) return response.status(400).json({ error: 'Invalid file path.' })
+    const filename = entryName(request.body?.name, { markdown: true })
+    const directoryId = path.posix.dirname(oldId)
+    const newId = directoryId === '/' ? `/${filename}` : `${directoryId}/${filename}`
+    const target = resolveBundlePath(newId)
+    if (!target || isReservedId(newId) || !isMovableConceptId(oldId)) {
+      return response.status(400).json({ error: 'This bundle file has a fixed OKF path and cannot be renamed.' })
+    }
+    await assertNoBundleSymlinks(resolveBundlePath(oldId).path)
+    await assertNoBundleSymlinks(target.path, { allowMissing: true })
+    const moveResult = await queueIndexOperation(() => queueMarkdownMutation(async () => {
+      const records = await readRecords()
+      if (!records.some((record) => record.id === oldId)) {
+        const error = new Error('Note not found.')
+        error.status = 404
+        throw error
+      }
+      const transaction = await moveConceptMarkdown(oldId, directoryId, new Date().toISOString(), {
+        filename,
+        directoryId,
+      })
+      try {
+        const missingEmbeddingIds = await migrateIndexedRecordsAfterMove(oldId, transaction.newId)
+        const reindexed = await performReindexBundle({ markdownLocked: true })
+        const record = reindexed.records.find((item) => item.id === transaction.newId)
+        if (!record) throw new Error('The renamed note could not be indexed.')
+        return {
+          oldId,
+          newId: transaction.newId,
+          record,
+          warning: missingEmbeddingIds.size ? 'The note was renamed, but part of its semantic index still needs refreshing.' : null,
+        }
+      } catch (error) {
+        try {
+          await transaction.rollback()
+          await writeRecords(records)
+        } catch (rollbackError) {
+          console.error(`Could not fully roll back file rename: ${rollbackError.message}`)
+        }
+        throw error
+      }
+    }))
+    const records = await readRecords()
+    const current = records.find((record) => record.id === moveResult.newId) || moveResult.record
+    const graph = await relationshipIndex()
+    if (moveResult.warning) void refreshMissingEmbeddingsInBackground()
+    response.json({
+      oldId: moveResult.oldId,
+      newId: moveResult.newId,
+      warning: moveResult.warning,
+      note: {
+        ...publicRecord(current),
+        content: current.content,
+        deletable: true,
+        movable: isMovableConceptId(moveResult.newId),
+        stale: recordIsStale(current),
+        links: graph.outgoing.get(moveResult.newId) || [],
+        backlinks: graph.incoming.get(moveResult.newId) || [],
+        suggestions: semanticSuggestionSummaries(current, records),
+      },
+    })
+  } catch (error) {
+    if (error.status) return response.status(error.status).json({ error: error.message })
     next(error)
   }
 })

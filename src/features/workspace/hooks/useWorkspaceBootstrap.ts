@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type {
   BundleFile,
+  BundleDirectory,
   ModelStatus,
   Note,
   StoredDraft,
@@ -17,6 +18,7 @@ type UseWorkspaceBootstrapOptions = {
   setMessage: Dispatch<SetStateAction<string>>;
   setNotes: Dispatch<SetStateAction<Note[]>>;
   setFiles: Dispatch<SetStateAction<BundleFile[]>>;
+  setDirectories: Dispatch<SetStateAction<BundleDirectory[]>>;
   setVersionInfo: Dispatch<SetStateAction<VersionInfo | null>>;
   mergeRemoteDrafts: (drafts: StoredDraft[]) => void;
   expandedDirectoriesReadyRef: MutableRefObject<boolean>;
@@ -33,6 +35,7 @@ export function useWorkspaceBootstrap({
   setMessage,
   setNotes,
   setFiles,
+  setDirectories,
   setVersionInfo,
   mergeRemoteDrafts,
   expandedDirectoriesReadyRef,
@@ -57,6 +60,7 @@ export function useWorkspaceBootstrap({
           setStatus(null);
           setNotes([]);
           setFiles([]);
+          setDirectories([]);
           setFilesLoading(false);
           onNoBundle?.();
           return;
@@ -72,10 +76,11 @@ export function useWorkspaceBootstrap({
         reconnectTimer = window.setTimeout(loadWorkspace, 2_000);
         return;
       }
-      const [notesResult, filesResult, draftsResult, versionResult] =
+      const [notesResult, filesResult, directoriesResult, draftsResult, versionResult] =
         await Promise.allSettled([
           api<Note[]>("/api/notes"),
           api<BundleFile[]>("/api/files"),
+          api<BundleDirectory[]>("/api/directories"),
           api<StoredDraft[]>("/api/drafts"),
           api<VersionInfo>("/api/version"),
         ]);
@@ -96,16 +101,18 @@ export function useWorkspaceBootstrap({
           setExpandedDirectoriesReady(true);
         }
       }
+      if (directoriesResult.status === "fulfilled") setDirectories(directoriesResult.value);
       if (versionResult.status === "fulfilled")
         setVersionInfo(versionResult.value);
       if (draftsResult.status === "fulfilled")
         mergeRemoteDrafts(draftsResult.value);
-      if (notesResult.status === "fulfilled" && filesResult.status === "fulfilled")
+      if (notesResult.status === "fulfilled" && filesResult.status === "fulfilled" && directoriesResult.status === "fulfilled")
         onWorkspaceDataReady?.();
       setFilesLoading(false);
       if (
         notesResult.status === "rejected" ||
-        filesResult.status === "rejected"
+        filesResult.status === "rejected" ||
+        directoriesResult.status === "rejected"
       ) {
         setMessage(reconnectMessage);
         reconnectTimer = window.setTimeout(loadWorkspace, 2_000);

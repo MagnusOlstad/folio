@@ -8,6 +8,8 @@ import {
   isUntitledId,
 } from "../../../lib/workspace.ts";
 import { useWorkspaceBundleActions } from "./useWorkspaceBundleActions.ts";
+import { useWorkspaceExplorerActions } from "./useWorkspaceExplorerActions.ts";
+import type { NoteExportFormat } from "../model/note-export.ts";
 import type { WorkspaceSidebarProps } from "../../sidebar/WorkspaceSidebar.tsx";
 import type { WorkspaceDocumentState } from "./useWorkspaceDocumentState.ts";
 import type { WorkspaceExplorerState } from "./useWorkspaceExplorerState.ts";
@@ -25,6 +27,8 @@ type Options = {
   openLocalDraft: (id: string) => void;
   deleteLocalDraft: (id: string) => Promise<void>;
   openDocument: WorkspaceSidebarProps["openDocument"];
+  deleteFiledNote: (file: Pick<import("../../../domain/types.ts").BundleFile, "id" | "title" | "deletable">) => Promise<void>;
+  exportFile: (file: import("../../../domain/types.ts").BundleFile, format: NoteExportFormat) => Promise<void>;
   bundleSetup: ReturnType<typeof useBundleSetup>;
   openSettings: () => void;
 };
@@ -40,6 +44,8 @@ export function useWorkspaceSidebarProps({
   openLocalDraft,
   deleteLocalDraft,
   openDocument,
+  deleteFiledNote,
+  exportFile,
   bundleSetup,
   openSettings,
 }: Options): {
@@ -61,6 +67,7 @@ export function useWorkspaceSidebarProps({
       setMessage,
       setNotes: explorer.setNotes,
       setFiles: explorer.setFiles,
+      setDirectories: explorer.setDirectories,
       setDocuments: documents.setDocuments,
       setGroups,
       setEditingKey: documents.setEditingKey,
@@ -87,6 +94,23 @@ export function useWorkspaceSidebarProps({
     new Set(explorer.notes.flatMap((note) => note.tags)),
   ).sort((left, right) => left.localeCompare(right));
   const discovery = explorer.discovery;
+  const explorerActions = useWorkspaceExplorerActions({
+    files: explorer.files,
+    groups,
+    editingKey: documents.editingKey,
+    savingDocuments: documents.savingDocuments,
+    setFiles: explorer.setFiles,
+    setDirectories: explorer.setDirectories,
+    setNotes: explorer.setNotes,
+    setDocuments: documents.setDocuments,
+    setDrafts: documents.setDrafts,
+    setGroups,
+    setExpandedDirectories: explorer.setExpandedDirectories,
+    setMessage,
+    openDocument,
+    deleteFiledNote,
+    exportFile,
+  });
 
   return {
     moveBundleFile,
@@ -105,7 +129,7 @@ export function useWorkspaceSidebarProps({
       deleteLocalDraft,
       deletingDraftIds: documents.deletingDraftIds,
       savingDocuments: documents.savingDocuments,
-      fileTree: buildFileTree(explorer.files),
+      fileTree: buildFileTree(explorer.files, explorer.directories),
       expandedDirectories: explorer.expandedDirectories,
       draggedFileId: explorer.draggedFileId,
       dropDirectoryPath: explorer.dropDirectoryPath,
@@ -116,6 +140,8 @@ export function useWorkspaceSidebarProps({
       setDraggedFileId: explorer.setDraggedFileId,
       setDropDirectoryPath: explorer.setDropDirectoryPath,
       moveBundleFile,
+      actions: explorerActions,
+      setMessage,
       bundles: bundleSetup.bundles,
       activeBundleId: bundleSetup.activeBundleId,
       selectBundle: bundleSetup.selectBundle,
