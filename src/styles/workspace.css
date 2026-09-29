@@ -617,36 +617,41 @@
 .history-entry button, .note-history-exit, .note-history-restore { border: 1px solid var(--line); background: var(--paper); color: var(--ink); padding: 8px 10px; font: inherit; cursor: pointer; }
 .history-entry button { width: 100%; display: flex; justify-content: space-between; margin-top: 20px; }
 .history-entry button:hover, .note-history-exit:hover, .note-history-restore:not(:disabled):hover { border-color: var(--acid); }
-.note-history-panel { display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; color: var(--muted); font-size: 12px; background: var(--paper); }
-.note-history-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 16px 0; }
+.note-history-panel { display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; color: var(--muted); font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--paper); }
+.note-history-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 21px 20px 18px; }
+.note-history-head h2 { margin: 0; color: var(--ink); font-size: 22px; font-weight: 600; letter-spacing: -.035em; }
 .note-history-eyebrow { color: var(--acid); font-size: 9px; font-weight: 700; letter-spacing: .16em; }
-.note-history-exit { padding: 5px 10px; }
-.note-history-instruction { margin: 0; padding: 0 16px 13px; color: var(--dim); line-height: 1.4; }
+.note-history-exit { padding: 5px 11px; border-radius: 7px; background: var(--paper-raised); color: var(--muted); font-size: 12px; }
+.note-history-exit:hover { border-color: color-mix(in srgb, var(--muted) 55%, var(--line)); color: var(--ink); }
 .note-history-error, .note-history-warning { margin: 0; padding: 8px 16px; color: var(--orange); }
 .note-history-error button { border: 0; border-bottom: 1px solid currentColor; padding: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
-.note-history-track-wrap { position: relative; flex: 1 1 auto; min-height: 0; container-type: size; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.note-history-focus { position: absolute; z-index: 0; top: 50%; left: 9px; right: 9px; height: 52px; transform: translateY(-50%); border: 1px solid color-mix(in srgb, var(--acid) 42%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--acid) 5%, transparent); box-shadow: 0 0 20px color-mix(in srgb, var(--acid) 5%, transparent); pointer-events: none; }
-.note-history-sticky-day { position: absolute; z-index: 2; top: 0; left: 0; right: 0; height: 34px; box-sizing: border-box; display: flex; align-items: center; gap: 14px; overflow: hidden; padding: 0 12px 0 21px; border-bottom: 1px solid var(--line); background: var(--paper); color: var(--dim); font-size: 10px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
-.note-history-tick.is-sticky-day-tick { width: 18px; flex-basis: 18px; background: var(--acid); }
+.note-history-track-wrap { position: relative; flex: 1 1 auto; min-height: 0; container-type: size; border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent); }
+.note-history-focus { position: absolute; z-index: 0; top: 50%; left: 10px; right: 10px; height: 52px; transform: translateY(-50%); border: 1px solid color-mix(in srgb, var(--line) 75%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--paper-raised) 76%, transparent); pointer-events: none; }
+.note-history-sticky-day { position: absolute; z-index: 2; top: 0; left: 0; right: 0; height: 38px; box-sizing: border-box; display: flex; align-items: center; gap: 14px; overflow: hidden; padding: 0 12px 0 21px; border-bottom: 1px solid var(--line); background: var(--paper); color: var(--muted); font-size: 11px; font-weight: 600; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.note-history-tick.is-sticky-day-tick { width: 20px; height: 2px; flex-basis: 20px; background: var(--muted); }
 .note-history-timeline { position: relative; z-index: 1; height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line) transparent; padding-block: max(20px, calc(50cqh - 26px)); box-sizing: border-box; touch-action: pan-y; cursor: grab; user-select: none; }
 .note-history-timeline:active { cursor: grabbing; }
 .note-history-timeline:focus-visible { outline: 2px solid color-mix(in srgb, var(--acid) 60%, transparent); outline-offset: -2px; }
-.note-history-stop { position: relative; display: flex; align-items: center; gap: 14px; width: 100%; height: 52px; min-height: 52px; padding: 0 12px 0 21px; border: 0; background: transparent; color: var(--muted); text-align: left; font: inherit; cursor: pointer; }
-.note-history-stop:hover, .note-history-stop.active { color: var(--ink); }
+.note-history-stop { position: relative; display: flex; align-items: center; gap: 14px; width: 100%; height: 52px; min-height: 52px; padding: 0 12px 0 21px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); text-align: left; font: inherit; cursor: pointer; transition: background-color .16s ease, color .16s ease; }
+.note-history-stop:hover { color: var(--ink); background: color-mix(in srgb, var(--paper-raised) 62%, transparent); }
+.note-history-stop.active { color: var(--ink); background: var(--paper-raised); }
 .note-history-tick { z-index: 2; width: 8px; height: 2px; flex: 0 0 8px; background: var(--dim); transition: width .18s, background .18s; }
-.note-history-stop.is-day-boundary .note-history-tick { width: 12px; flex-basis: 12px; }
-.note-history-stop.active .note-history-tick { width: 18px; flex-basis: 18px; background: var(--acid); }
+.note-history-stop.is-day-boundary .note-history-tick { width: 14px; flex-basis: 14px; background: var(--muted); }
+.note-history-stop.active .note-history-tick { width: 18px; flex-basis: 18px; background: var(--muted); }
 .note-history-stop-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.note-history-stop strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; }
-.note-history-stop small { overflow: hidden; color: var(--dim); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.note-history-stop strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.note-history-stop small { overflow: hidden; color: var(--dim); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.note-history-stop.is-day-boundary small { color: var(--muted); font-weight: 500; }
 .note-history-state { margin: 8px 16px; color: var(--dim); font-size: 11px; }
 .note-history-more { margin: 12px 16px 8px 43px; border: 0; border-bottom: 1px solid var(--line); padding: 5px 0; color: var(--muted); background: transparent; font: inherit; cursor: pointer; }
-.note-history-actions { display: flex; flex-direction: column; gap: 9px; padding: 12px 16px 16px; }
-.note-history-actions span { color: var(--dim); font-size: 10px; }
+.note-history-actions { display: flex; flex-direction: column; gap: 10px; padding: 16px 20px 20px; }
+.note-history-actions span { color: var(--dim); font-size: 11px; }
 .note-history-nav { display: flex; gap: 8px; }
-.note-history-nav button { flex: 1; border: 1px solid var(--line); padding: 6px 8px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.note-history-nav button { flex: 1; border: 1px solid var(--line); border-radius: 7px; padding: 7px 8px; background: var(--paper); color: var(--muted); font: inherit; cursor: pointer; }
+.note-history-nav button:not(:disabled):hover { border-color: color-mix(in srgb, var(--muted) 55%, var(--line)); color: var(--ink); }
 .note-history-nav button:disabled { opacity: .4; cursor: default; }
-.note-history-restore { width: 100%; background: var(--acid); border-color: var(--acid); color: var(--paper); }
+.note-history-restore { width: 100%; border-radius: 7px; background: var(--paper-raised); border-color: var(--line); color: var(--ink); font-size: 13px; font-weight: 550; }
+.note-history-restore:not(:disabled):hover { border-color: color-mix(in srgb, var(--muted) 55%, var(--line)); background: color-mix(in srgb, var(--paper-raised) 76%, var(--paper)); }
 .note-history-restore:disabled { opacity: .4; cursor: default; }
 .note-history-panel button:focus-visible, .history-entry button:focus-visible { outline: 2px solid var(--acid); outline-offset: 2px; }
 .history-editor-underlay { height: 100%; min-width: 0; }

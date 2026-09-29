@@ -222,8 +222,7 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
   const pending = Boolean(pendingRevision && pendingRevision === revision);
   const failed = revision !== null && previewFailed && !pending;
   return <section className="note-history-panel" aria-label="Note history">
-    <div className="note-history-head"><div><span className="note-history-eyebrow">NOTE HISTORY</span><h2>History</h2></div><button type="button" className="note-history-exit" onClick={onExit}>Done</button></div>
-    <p className="note-history-instruction">Drag or scroll to move through earlier moments.</p>
+    <div className="note-history-head"><h2>History</h2><button type="button" className="note-history-exit" onClick={onExit}>Done</button></div>
     {error && <p className="note-history-error" role="alert">{error} {failed && <button type="button" onClick={() => void select(revision, true)}>Retry</button>}</p>}
     {warning && <p className="note-history-warning" role="status">{warning}</p>}
     <div className="note-history-track-wrap"><div className="note-history-focus" aria-hidden="true" />
