@@ -17,6 +17,7 @@ import { createReleaseService } from './updates/service.js'
 import { createObsidianImportService } from './imports/obsidian.js'
 import { registerRoutes as registerSystemRoutes } from './routes/system.js'
 import { registerRoutes as registerFileRoutes } from './routes/files.js'
+import { registerRoutes as registerExplorerRoutes } from './routes/explorer.js'
 import { registerRoutes as registerCaptureRoutes } from './routes/capture.js'
 import { registerRoutes as registerConfirmationRoutes } from './routes/confirmation.js'
 import { registerRoutes as registerAskRoutes } from './routes/ask.js'
@@ -95,6 +96,7 @@ export async function createApp(runtime = createRuntime()) {
   const scopedRuntime = manager.proxyRuntime()
   registerImportRoutes(app, scopedRuntime)
   registerSystemRoutes(app, scopedRuntime)
+  registerExplorerRoutes(app, scopedRuntime)
   registerFileRoutes(app, scopedRuntime)
   registerCaptureRoutes(app, scopedRuntime)
   registerConfirmationRoutes(app, scopedRuntime)
