@@ -102,6 +102,7 @@ export type BundleFile = {
   filedBy: string | null;
   filedAt: string | null;
 };
+export type BundleDirectory = { path: string };
 export type Bundle = {
   id: string;
   name: string;

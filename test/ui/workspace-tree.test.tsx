@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { BundleFile } from "../../src/domain/types.ts";
-import { FileTree } from "../../src/features/explorer/FileTree.tsx";
+import { FileTree } from "../../src/features/workspace/components/FileTree.tsx";
 import { buildFileTree } from "../../src/lib/tree.ts";
 import {
   expandedPathsForFiles,

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BundleFile, Note, SidebarMode } from "../../../domain/types.ts";
+import type { BundleDirectory, BundleFile, Note, SidebarMode } from "../../../domain/types.ts";
 import { loadExpandedDirectoryState } from "../../../lib/storage.ts";
 import { useWorkspaceDiscovery } from "./useWorkspaceDiscovery.ts";
 import type { WorkspaceSessionState } from "../model/workspace-state.ts";
@@ -33,6 +33,7 @@ export function useWorkspaceExplorerState(
   }, []);
   const [notes, setNotes] = useState<Note[]>([]);
   const [files, setFiles] = useState<BundleFile[]>([]);
+  const [directories, setDirectories] = useState<BundleDirectory[]>([]);
   const [filesLoading, setFilesLoading] = useState(true);
   const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(
     initialExpandedDirectoryState.directories,
@@ -62,6 +63,8 @@ export function useWorkspaceExplorerState(
     setNotes,
     files,
     setFiles,
+    directories,
+    setDirectories,
     filesLoading,
     setFilesLoading,
     expandedDirectories,

@@ -226,13 +226,13 @@ async function removeEmptyBundleDirectories(directory) {
 
 async function moveConceptMarkdown(oldId, directory, movedAt, options = {}) {
   const oldPath = resolveBundleMarkdownPath(oldId)
-  const normalizedDirectory = normalizeMoveDirectory(directory)
+  const normalizedDirectory = options.directoryId || normalizeMoveDirectory(directory)
   if (!oldPath || !normalizedDirectory) {
     const error = new Error('Choose a valid destination with one to five directory names.')
     error.status = 400
     throw error
   }
-  const filename = path.posix.basename(oldId)
+  const filename = options.filename || path.posix.basename(oldId)
   const newId = normalizedDirectory === '/'
     ? `/${filename}`
     : `${normalizedDirectory}/${filename}`

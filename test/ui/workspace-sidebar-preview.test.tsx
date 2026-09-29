@@ -1,10 +1,11 @@
-import { fireEvent, render } from "@testing-library/react";
+import { fireEvent, render, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Note, SearchResult } from "../../src/domain/types.ts";
 import { WorkspaceSidebar } from "../../src/features/sidebar/WorkspaceSidebar.tsx";
 import type { WorkspaceSidebarProps } from "../../src/features/sidebar/WorkspaceSidebar.tsx";
 import { buildFileTree } from "../../src/lib/tree.ts";
+import type { ExplorerFileActions } from "../../src/features/workspace/model/explorer.ts";
 
 const note: Note = {
   id: "/notes/preview.md",
@@ -230,5 +231,227 @@ describe("WorkspaceSidebar preview navigation", () => {
     expect(personalHeading).toHaveAttribute("aria-expanded", "true");
     expect(container.querySelector("#bundle-tree-personal")).toBeInTheDocument();
     expect(container.querySelector("#bundle-tree-work")).not.toBeInTheDocument();
+  });
+
+  it("shows bundle root files and folders directly under the bundle heading", () => {
+    const moveBundleFile = vi.fn().mockResolvedValue(undefined);
+    const props = {
+      ...sidebarProps(vi.fn().mockResolvedValue(undefined)),
+      sidebarMode: "explore" as const,
+      moveBundleFile,
+      fileTree: buildFileTree([
+        {
+          id: "/root-note.md",
+          name: "root-note.md",
+          title: "Root note",
+          createdAt: "2026-09-28T12:00:00.000Z",
+          directory: "/",
+          type: "Note",
+          deletable: true,
+          movable: true,
+          filedBy: null,
+          filedAt: null,
+        },
+        {
+          id: "/projects/plan.md",
+          name: "plan.md",
+          title: "Plan",
+          createdAt: "2026-09-28T12:00:00.000Z",
+          directory: "/projects",
+          type: "Note",
+          deletable: true,
+          movable: true,
+          filedBy: null,
+          filedAt: null,
+        },
+      ]),
+      bundles: [
+        {
+          id: "work",
+          name: "Work",
+          markdownPath: "/notes/work",
+          managed: false,
+          detached: false,
+        },
+      ],
+      activeBundleId: "work",
+    };
+    const { container, getByRole } = render(<WorkspaceSidebar {...props} />);
+
+    const bundleHeading = getByRole("button", { name: /Work/ });
+    const bundleContent = container.querySelector("#bundle-tree-work")!;
+    const projectDirectory = bundleContent.querySelector("button.tree-directory");
+    expect(bundleHeading).toHaveAttribute("aria-expanded", "true");
+    expect(bundleContent).toContainElement(getByRole("button", { name: "Root note" }));
+    expect(bundleContent.querySelectorAll("button.tree-directory")).toHaveLength(1);
+    expect(projectDirectory).toHaveTextContent("projects");
+    expect(projectDirectory).not.toHaveTextContent("Bundle");
+
+    fireEvent.drop(bundleContent.querySelector(".tree-branch")!, {
+      dataTransfer: { getData: () => "/root-note.md" },
+    });
+    expect(moveBundleFile).toHaveBeenCalledWith("/root-note.md", "/");
+  });
+
+  it("opens an accessible file context menu with create and relative path actions", async () => {
+    const actions: ExplorerFileActions = {
+      renameFile: vi.fn().mockResolvedValue(undefined),
+      createFile: vi.fn().mockResolvedValue(undefined),
+      createDirectory: vi.fn().mockResolvedValue(undefined),
+      deleteFile: vi.fn().mockResolvedValue(undefined),
+      exportFile: vi.fn().mockResolvedValue(undefined),
+      copyText: vi.fn().mockResolvedValue(undefined),
+    };
+    const props = {
+      ...sidebarProps(vi.fn().mockResolvedValue(undefined)),
+      sidebarMode: "explore" as const,
+      fileTree: buildFileTree([
+        {
+          id: "/projects/plan.md",
+          name: "plan.md",
+          title: "Plan",
+          createdAt: "2026-09-28T12:00:00.000Z",
+          directory: "/projects",
+          type: "Note",
+          deletable: true,
+          movable: true,
+          filedBy: null,
+          filedAt: null,
+        },
+      ]),
+      bundles: [{ id: "work", name: "Work", markdownPath: "/notes/work", managed: false, detached: false }],
+      activeBundleId: "work",
+      expandedDirectories: new Set(["/", "/projects"]),
+      actions,
+      setMessage: vi.fn(),
+    };
+    const { getByRole } = render(<WorkspaceSidebar {...props} />);
+
+    fireEvent.contextMenu(getByRole("button", { name: "Plan" }), { clientX: 30, clientY: 40 });
+    const menu = getByRole("menu", { name: "plan.md actions" });
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Copy relative path" }));
+    expect(actions.copyText).toHaveBeenCalledWith("projects/plan.md");
+  });
+
+  it("offers file creation in the selected file's containing folder", () => {
+    const actions: ExplorerFileActions = {
+      renameFile: vi.fn().mockResolvedValue(undefined),
+      createFile: vi.fn().mockResolvedValue(undefined),
+      createDirectory: vi.fn().mockResolvedValue(undefined),
+      deleteFile: vi.fn().mockResolvedValue(undefined),
+      exportFile: vi.fn().mockResolvedValue(undefined),
+      copyText: vi.fn().mockResolvedValue(undefined),
+    };
+    const props = {
+      ...sidebarProps(vi.fn().mockResolvedValue(undefined)),
+      sidebarMode: "explore" as const,
+      fileTree: buildFileTree([{
+        id: "/projects/plan.md", name: "plan.md", title: "Plan", createdAt: "2026-09-28T12:00:00.000Z",
+        directory: "/projects", type: "Note", deletable: true, movable: true, filedBy: null, filedAt: null,
+      }]),
+      bundles: [{ id: "work", name: "Work", markdownPath: "/notes/work", managed: false, detached: false }],
+      activeBundleId: "work",
+      expandedDirectories: new Set(["/", "/projects"]),
+      actions,
+      setMessage: vi.fn(),
+    };
+    const { getByRole } = render(<WorkspaceSidebar {...props} />);
+
+    fireEvent.contextMenu(getByRole("button", { name: "Plan" }), { clientX: 30, clientY: 40 });
+    fireEvent.click(getByRole("menuitem", { name: "New note" }));
+    fireEvent.change(getByRole("textbox", { name: "New note" }), { target: { value: "meeting-notes" } });
+    fireEvent.click(within(getByRole("dialog")).getByRole("button", { name: "Save" }));
+    expect(actions.createFile).toHaveBeenCalledWith("/projects", "meeting-notes");
+  });
+
+  it("requires confirmation before deleting a file from its context menu", () => {
+    const actions: ExplorerFileActions = {
+      renameFile: vi.fn().mockResolvedValue(undefined),
+      createFile: vi.fn().mockResolvedValue(undefined),
+      createDirectory: vi.fn().mockResolvedValue(undefined),
+      deleteFile: vi.fn().mockResolvedValue(undefined),
+      exportFile: vi.fn().mockResolvedValue(undefined),
+      copyText: vi.fn().mockResolvedValue(undefined),
+    };
+    const props = {
+      ...sidebarProps(vi.fn().mockResolvedValue(undefined)),
+      sidebarMode: "explore" as const,
+      fileTree: buildFileTree([{
+        id: "/projects/plan.md", name: "plan.md", title: "Plan", createdAt: "2026-09-28T12:00:00.000Z",
+        directory: "/projects", type: "Note", deletable: true, movable: true, filedBy: null, filedAt: null,
+      }]),
+      bundles: [{ id: "work", name: "Work", markdownPath: "/notes/work", managed: false, detached: false }],
+      activeBundleId: "work",
+      expandedDirectories: new Set(["/", "/projects"]),
+      actions,
+      setMessage: vi.fn(),
+    };
+    const { getByRole } = render(<WorkspaceSidebar {...props} />);
+
+    fireEvent.contextMenu(getByRole("button", { name: "Plan" }), { clientX: 30, clientY: 40 });
+    fireEvent.click(getByRole("menuitem", { name: "Delete" }));
+    const dialog = getByRole("dialog", { name: "Confirm delete" });
+    expect(dialog).toHaveTextContent("Delete plan.md?");
+    expect(actions.deleteFile).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    expect(actions.deleteFile).toHaveBeenCalledWith(expect.objectContaining({ id: "/projects/plan.md" }));
+  });
+
+  it.each([
+    { movable: false, blockedFileIds: new Set<string>() },
+    { movable: true, blockedFileIds: new Set(["/projects/plan.md"]) },
+  ])("disables Delete for fixed or busy files", ({ movable, blockedFileIds }) => {
+    const actions: ExplorerFileActions = {
+      renameFile: vi.fn().mockResolvedValue(undefined),
+      createFile: vi.fn().mockResolvedValue(undefined),
+      createDirectory: vi.fn().mockResolvedValue(undefined),
+      deleteFile: vi.fn().mockResolvedValue(undefined),
+      exportFile: vi.fn().mockResolvedValue(undefined),
+      copyText: vi.fn().mockResolvedValue(undefined),
+    };
+    const props = {
+      ...sidebarProps(vi.fn().mockResolvedValue(undefined)),
+      sidebarMode: "explore" as const,
+      fileTree: buildFileTree([{
+        id: "/projects/plan.md", name: "plan.md", title: "Plan", createdAt: "2026-09-28T12:00:00.000Z",
+        directory: "/projects", type: "Note", deletable: true, movable, filedBy: null, filedAt: null,
+      }]),
+      bundles: [{ id: "work", name: "Work", markdownPath: "/notes/work", managed: false, detached: false }],
+      activeBundleId: "work",
+      expandedDirectories: new Set(["/", "/projects"]),
+      blockedFileIds,
+      actions,
+      setMessage: vi.fn(),
+    };
+    const { getByRole } = render(<WorkspaceSidebar {...props} />);
+
+    fireEvent.contextMenu(getByRole("button", { name: "Plan" }), { clientX: 30, clientY: 40 });
+    expect(getByRole("menuitem", { name: "Delete" })).toBeDisabled();
+  });
+
+  it("does not show active-bundle actions from an inactive bundle heading", () => {
+    const actions: ExplorerFileActions = {
+      renameFile: vi.fn().mockResolvedValue(undefined),
+      createFile: vi.fn().mockResolvedValue(undefined),
+      createDirectory: vi.fn().mockResolvedValue(undefined),
+      deleteFile: vi.fn().mockResolvedValue(undefined),
+      exportFile: vi.fn().mockResolvedValue(undefined),
+      copyText: vi.fn().mockResolvedValue(undefined),
+    };
+    const props = {
+      ...sidebarProps(vi.fn().mockResolvedValue(undefined)),
+      sidebarMode: "explore" as const,
+      bundles: [
+        { id: "work", name: "Work", markdownPath: "/notes/work", managed: false, detached: false },
+        { id: "personal", name: "Personal", markdownPath: "/notes/personal", managed: false, detached: false },
+      ],
+      activeBundleId: "work",
+      actions,
+      setMessage: vi.fn(),
+    };
+    const { getByRole, queryByRole } = render(<WorkspaceSidebar {...props} />);
+
+    fireEvent.contextMenu(getByRole("button", { name: /Personal/ }), { clientX: 30, clientY: 40 });
+    expect(queryByRole("menu")).not.toBeInTheDocument();
   });
 });

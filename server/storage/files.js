@@ -90,6 +90,59 @@ function bundleFileId(filePath) {
   return `/${path.relative(bundleRoot, filePath).split(path.sep).join('/')}`
 }
 
+function normalizeBundlePath(value, { allowRoot = false } = {}) {
+  const input = String(value || '')
+  if (!input.startsWith('/') || input.includes('\\') || input.includes('\0')) return null
+  if (input === '/') return allowRoot ? '/' : null
+  const parts = input.slice(1).split('/')
+  if (parts.some((part) => !part || part === '.' || part === '..' || part.startsWith('.'))) return null
+  if (path.posix.normalize(input) !== input) return null
+  return input
+}
+
+function resolveBundlePath(value, { allowRoot = false } = {}) {
+  const normalized = normalizeBundlePath(value, { allowRoot })
+  if (!normalized) return null
+  const target = normalized === '/' ? bundleRoot : path.resolve(bundleRoot, `.${normalized}`)
+  if (target !== bundleRoot && !target.startsWith(`${bundleRoot}${path.sep}`)) return null
+  return { id: normalized, path: target }
+}
+
+async function assertNoBundleSymlinks(filePath, { allowMissing = false } = {}) {
+  const relative = path.relative(bundleRoot, filePath)
+  let current = bundleRoot
+  if (!relative) return
+  for (const segment of relative.split(path.sep)) {
+    current = path.join(current, segment)
+    try {
+      const stat = await fs.lstat(current)
+      if (stat.isSymbolicLink()) {
+        const error = new Error('Symbolic links are not allowed in bundle paths.')
+        error.status = 400
+        throw error
+      }
+    } catch (error) {
+      if (allowMissing && error.code === 'ENOENT') return
+      throw error
+    }
+  }
+}
+
+async function listBundleDirectories(directory = bundleRoot, prefix = '') {
+  const directories = []
+  const entries = await fs.readdir(directory, { withFileTypes: true })
+  entries.sort((left, right) => left.name.localeCompare(right.name))
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name.startsWith('.')) continue
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name
+    const id = `/${relative}`
+    if (id === '/references' || id.startsWith('/references/')) continue
+    directories.push({ path: id })
+    directories.push(...await listBundleDirectories(path.join(directory, entry.name), relative))
+  }
+  return directories
+}
+
 function resolveBundleMarkdownPath(fileId) {
   const filePath = path.resolve(bundleRoot, String(fileId).replace(/^[/\\]+/, ''))
   const isInsideBundle = filePath.startsWith(`${bundleRoot}${path.sep}`)
@@ -140,5 +193,5 @@ async function listBundleMarkdownFiles(directory = bundleRoot) {
 
   return { readRecords, writeRecords, normalizeDraftId, draftFilePath, readDrafts, readDraft, queueDraftMutation, writeDraft,
     readOptionalFile, bundleFileId, resolveBundleMarkdownPath, isMovableConceptId, normalizeMoveDirectory,
-    listBundleMarkdownFiles }
+    normalizeBundlePath, resolveBundlePath, assertNoBundleSymlinks, listBundleDirectories, listBundleMarkdownFiles }
 }
