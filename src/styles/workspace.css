@@ -626,6 +626,8 @@
 .note-history-error button { border: 0; border-bottom: 1px solid currentColor; padding: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .note-history-track-wrap { position: relative; flex: 1 1 auto; min-height: 0; container-type: size; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .note-history-focus { position: absolute; z-index: 0; top: 50%; left: 9px; right: 9px; height: 52px; transform: translateY(-50%); border: 1px solid color-mix(in srgb, var(--acid) 42%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--acid) 5%, transparent); box-shadow: 0 0 20px color-mix(in srgb, var(--acid) 5%, transparent); pointer-events: none; }
+.note-history-sticky-day { position: absolute; z-index: 2; top: 0; left: 0; right: 0; height: 34px; box-sizing: border-box; display: flex; align-items: center; gap: 14px; overflow: hidden; padding: 0 12px 0 21px; border-bottom: 1px solid var(--line); background: var(--paper); color: var(--dim); font-size: 10px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.note-history-tick.is-sticky-day-tick { width: 18px; flex-basis: 18px; background: var(--acid); }
 .note-history-timeline { position: relative; z-index: 1; height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line) transparent; padding-block: max(20px, calc(50cqh - 26px)); box-sizing: border-box; touch-action: pan-y; cursor: grab; user-select: none; }
 .note-history-timeline:active { cursor: grabbing; }
 .note-history-timeline:focus-visible { outline: 2px solid color-mix(in srgb, var(--acid) 60%, transparent); outline-offset: -2px; }

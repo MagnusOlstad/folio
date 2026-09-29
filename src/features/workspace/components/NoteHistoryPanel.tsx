@@ -37,6 +37,7 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [stickyDay, setStickyDay] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
   const request = useRef(0);
@@ -50,6 +51,24 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
   const selectedRef = useRef<NoteHistorySnapshot | null>(null);
   const timeline = useRef<HTMLElement>(null);
   const loadingPage = useRef(false);
+
+  function updateStickyDay() {
+    const node = timeline.current;
+    if (!node) return;
+    const top = node.getBoundingClientRect().top;
+    const boundaries = [...node.querySelectorAll<HTMLButtonElement>("[data-history-stop].is-day-boundary")];
+    const crossed = boundaries.filter((item) => item.getBoundingClientRect().top <= top);
+    setStickyDay(crossed.at(-1)?.dataset.historyDay || null);
+  }
+
+  useEffect(() => {
+    updateStickyDay();
+    const node = timeline.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(updateStickyDay);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [entries]);
 
   useEffect(() => {
     let cancelled = false;
@@ -152,6 +171,7 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
   function onScroll() {
     const node = timeline.current;
     if (!node || restoring) return;
+    updateStickyDay();
     if (cursor && node.scrollHeight - node.scrollTop - node.clientHeight < 160) void loadMore();
     if (scrubIntent.current) settleScrub();
   }
@@ -207,6 +227,7 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
     {error && <p className="note-history-error" role="alert">{error} {failed && <button type="button" onClick={() => void select(revision, true)}>Retry</button>}</p>}
     {warning && <p className="note-history-warning" role="status">{warning}</p>}
     <div className="note-history-track-wrap"><div className="note-history-focus" aria-hidden="true" />
+      {stickyDay && <div className="note-history-sticky-day" aria-hidden="true"><span className="note-history-tick is-sticky-day-tick"/><span>{stickyDay}</span></div>}
       <nav ref={timeline} tabIndex={0} className="note-history-timeline" aria-label="Note timeline" onScroll={onScroll}
         onWheel={() => { scrubIntent.current = true; }} onTouchStart={() => { scrubIntent.current = true; }}
         onPointerDown={(event) => {
@@ -240,7 +261,7 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
         {!loading && entries.length === 0 && <p className="note-history-state">No earlier moments yet.</p>}
         {entries.map((entry, index) => {
           const dayBoundary = index === 0 || localDay(entry.authoredAt) !== localDay(entries[index - 1].authoredAt);
-          return <button type="button" disabled={restoring} data-history-stop={entry.revision} aria-label={`${entry.title || "Untitled"}, ${dayLabel(entry.authoredAt)}, ${timestamp(entry.authoredAt)}`} aria-current={revision === entry.revision ? "step" : undefined} className={`note-history-stop${dayBoundary ? " is-day-boundary" : ""}${revision === entry.revision ? " active" : ""}`} key={entry.revision} onClick={() => { if (dragMoved.current) { dragMoved.current = false; return; } moveTo(entry.revision); }}><span className="note-history-tick"/><span className="note-history-stop-copy"><strong>{timestamp(entry.authoredAt)}</strong><small>{dayBoundary ? dayLabel(entry.authoredAt) : "\u00a0"}</small></span></button>;
+          return <button type="button" disabled={restoring} data-history-stop={entry.revision} data-history-day={dayLabel(entry.authoredAt)} aria-label={`${entry.title || "Untitled"}, ${dayLabel(entry.authoredAt)}, ${timestamp(entry.authoredAt)}`} aria-current={revision === entry.revision ? "step" : undefined} className={`note-history-stop${dayBoundary ? " is-day-boundary" : ""}${revision === entry.revision ? " active" : ""}`} key={entry.revision} onClick={() => { if (dragMoved.current) { dragMoved.current = false; return; } moveTo(entry.revision); }}><span className="note-history-tick"/><span className="note-history-stop-copy"><strong>{timestamp(entry.authoredAt)}</strong><small>{dayBoundary ? dayLabel(entry.authoredAt) : "\u00a0"}</small></span></button>;
         })}
         {cursor && <button type="button" className="note-history-more" onClick={() => void loadMore()} disabled={loadingMore || restoring}>{loadingMore ? "Loading…" : "Load earlier"}</button>}
       </nav>

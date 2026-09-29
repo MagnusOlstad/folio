@@ -174,3 +174,41 @@ test('wheel and drag scrubbing select only the settled stop without moving the w
   }).toBeLessThan(2)
   if (process.env.FOLIO_HISTORY_SCREENSHOT) await page.screenshot({ path: process.env.FOLIO_HISTORY_SCREENSHOT, fullPage: false })
 })
+
+test('the sticky timeline date follows the day at the top while scrolling', async ({ page }) => {
+  const revisions = Array.from({ length: 24 }, (_, index) => ({
+    revision: `sticky-${index}`,
+    authoredAt: new Date(Date.UTC(2026, 8, 27 - Math.floor(index / 2), 11, 0)).toISOString(),
+    title: `Sticky moment ${index}`,
+  }))
+  await page.route('**/api/note/history**', async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname === '/api/note/history') {
+      await route.fulfill({ json: { entries: revisions, nextCursor: null } })
+      return
+    }
+    await route.continue()
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  await page.getByRole('button', { name: /Open history/ }).click()
+  const timeline = page.getByRole('navigation', { name: 'Note timeline' })
+  const stickyDay = page.locator('.note-history-sticky-day')
+  await expect(stickyDay).toBeHidden()
+
+  const visibleTopDay = () => timeline.evaluate(node => {
+    const top = node.getBoundingClientRect().top
+    return [...node.querySelectorAll('[data-history-stop].is-day-boundary')]
+      .filter(stop => stop.getBoundingClientRect().top <= top)
+      .at(-1)?.getAttribute('data-history-day') || ''
+  })
+  await timeline.evaluate(node => { node.scrollTop = 700 })
+  await expect(stickyDay).toBeVisible()
+  await expect.poll(async () => await stickyDay.textContent() === await visibleTopDay()).toBe(true)
+  const firstDay = await stickyDay.textContent()
+  await timeline.evaluate(node => { node.scrollTop += 208 })
+  await expect.poll(() => stickyDay.textContent()).not.toBe(firstDay)
+  await expect.poll(async () => await stickyDay.textContent() === await visibleTopDay()).toBe(true)
+  if (process.env.FOLIO_HISTORY_SCREENSHOT) await page.screenshot({ path: process.env.FOLIO_HISTORY_SCREENSHOT, fullPage: false })
+})
