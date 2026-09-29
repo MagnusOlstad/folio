@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type {
   BundleFile,
@@ -29,24 +29,16 @@ type UseWorkspaceBootstrapOptions = {
   enabled: boolean;
 };
 
-export function useWorkspaceBootstrap({
-  setStatus,
-  setFilesLoading,
-  setMessage,
-  setNotes,
-  setFiles,
-  setDirectories,
-  setVersionInfo,
-  mergeRemoteDrafts,
-  expandedDirectoriesReadyRef,
-  setExpandedDirectories,
-  setExpandedDirectoriesReady,
-  onWorkspaceDataReady,
-  onNoBundle,
-  enabled,
-}: UseWorkspaceBootstrapOptions) {
+export function useWorkspaceBootstrap(options: UseWorkspaceBootstrapOptions) {
+  const latestOptionsRef = useRef(options);
+  useEffect(() => {
+    latestOptionsRef.current = options;
+  }, [options]);
+  const { enabled } = options;
+
   useEffect(() => {
     if (!enabled) return;
+    const latest = () => latestOptionsRef.current;
     let cancelled = false;
     let reconnectTimer = 0;
     const reconnectMessage =
@@ -57,22 +49,22 @@ export function useWorkspaceBootstrap({
         const registry = await api<BundleRegistryResponse>("/api/bundles");
         if (!registry.bundles.length) {
           if (cancelled) return;
-          setStatus(null);
-          setNotes([]);
-          setFiles([]);
-          setDirectories([]);
-          setFilesLoading(false);
-          onNoBundle?.();
+          latest().setStatus(null);
+          latest().setNotes([]);
+          latest().setFiles([]);
+          latest().setDirectories([]);
+          latest().setFilesLoading(false);
+          latest().onNoBundle?.();
           return;
         }
         const currentStatus = await apiWithRetry<ModelStatus>("/api/status");
         if (cancelled) return;
-        setStatus(currentStatus);
+        latest().setStatus(currentStatus);
       } catch {
         if (cancelled) return;
-        setFilesLoading(false);
-        setStatus(null);
-        setMessage(reconnectMessage);
+        latest().setFilesLoading(false);
+        latest().setStatus(null);
+        latest().setMessage(reconnectMessage);
         reconnectTimer = window.setTimeout(loadWorkspace, 2_000);
         return;
       }
@@ -85,47 +77,47 @@ export function useWorkspaceBootstrap({
           api<VersionInfo>("/api/version"),
         ]);
       if (cancelled) return;
-      if (notesResult.status === "fulfilled") setNotes(notesResult.value);
+      if (notesResult.status === "fulfilled") latest().setNotes(notesResult.value);
       if (filesResult.status === "fulfilled") {
-        setFiles(filesResult.value);
-        if (!expandedDirectoriesReadyRef.current) {
+        latest().setFiles(filesResult.value);
+        if (!latest().expandedDirectoriesReadyRef.current) {
           const hasStarterGuides = filesResult.value.some(
             (file) => file.id === "/getting-started/start-here.md",
           );
-          expandedDirectoriesReadyRef.current = true;
-          setExpandedDirectories(
+          latest().expandedDirectoriesReadyRef.current = true;
+          latest().setExpandedDirectories(
             hasStarterGuides
               ? expandedPathsForFiles(filesResult.value)
               : new Set(),
           );
-          setExpandedDirectoriesReady(true);
+          latest().setExpandedDirectoriesReady(true);
         }
       }
-      if (directoriesResult.status === "fulfilled") setDirectories(directoriesResult.value);
+      if (directoriesResult.status === "fulfilled") latest().setDirectories(directoriesResult.value);
       if (versionResult.status === "fulfilled")
-        setVersionInfo(versionResult.value);
+        latest().setVersionInfo(versionResult.value);
       if (draftsResult.status === "fulfilled")
-        mergeRemoteDrafts(draftsResult.value);
+        latest().mergeRemoteDrafts(draftsResult.value);
       if (notesResult.status === "fulfilled" && filesResult.status === "fulfilled" && directoriesResult.status === "fulfilled")
-        onWorkspaceDataReady?.();
-      setFilesLoading(false);
+        latest().onWorkspaceDataReady?.();
+      latest().setFilesLoading(false);
       if (
         notesResult.status === "rejected" ||
         filesResult.status === "rejected" ||
         directoriesResult.status === "rejected"
       ) {
-        setMessage(reconnectMessage);
+        latest().setMessage(reconnectMessage);
         reconnectTimer = window.setTimeout(loadWorkspace, 2_000);
       } else {
-        setMessage((current) => (current === reconnectMessage ? "" : current));
+        latest().setMessage((current) => (current === reconnectMessage ? "" : current));
       }
     };
     void loadWorkspace();
 
     const refreshStatus = () => {
       api<ModelStatus>("/api/status")
-        .then(setStatus)
-        .catch(() => setStatus(null));
+        .then(latest().setStatus)
+        .catch(() => latest().setStatus(null));
     };
     const interval = window.setInterval(refreshStatus, 10_000);
     return () => {

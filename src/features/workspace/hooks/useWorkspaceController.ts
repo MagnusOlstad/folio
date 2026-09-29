@@ -59,6 +59,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
     setExpandedDirectories,
     setFiles,
     setNotes,
+    setDirectories,
   } = explorer;
   const refreshAfterObsidianImport = useCallback(async (_job: import("../../settings/model/obsidian-import.ts").ObsidianImportJob, bundleId: string | null) => {
     if (bundleId && bundleId !== bundleSetup.activeBundleId) return;
@@ -82,11 +83,11 @@ export function useWorkspaceController(): WorkspaceShellProps {
       }
     }
     if (notesResult.status === "fulfilled") setNotes(notesResult.value);
-    if (directoriesResult.status === "fulfilled") explorer.setDirectories(directoriesResult.value);
+    if (directoriesResult.status === "fulfilled") setDirectories(directoriesResult.value);
     if (filesResult.status === "rejected" || notesResult.status === "rejected") {
       setMessage("The import finished, but the file explorer could not be fully refreshed.");
     }
-  }, [bundleSetup.activeBundleId, explorerFiles, setExpandedDirectories, setFiles, setNotes, explorer.setDirectories]);
+  }, [bundleSetup.activeBundleId, explorerFiles, setDirectories, setExpandedDirectories, setFiles, setNotes]);
   const obsidianImport = useObsidianImport({
     onImportFinishedForBundle: refreshAfterObsidianImport,
   });
