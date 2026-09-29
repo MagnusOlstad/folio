@@ -106,3 +106,71 @@ test('a failed moment shows a retry state in the main note window', async ({ pag
   await expect(preview.getByText('Recovered history content')).toBeVisible()
   expect(attempts).toBe(2)
 })
+
+test('wheel and drag scrubbing select only the settled stop without moving the workspace', async ({ page }) => {
+  const revisions = Array.from({ length: 12 }, (_, index) => ({
+    revision: `scrub-${index}`,
+    authoredAt: new Date(Date.UTC(2026, 8, 27, 11 - index, 0)).toISOString(),
+    title: `Scrub moment ${index}`,
+  }))
+  const requests: string[] = []
+  const finishVersionRequests: Array<() => void> = []
+  await page.route('**/api/note/history**', async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/version')) {
+      const revision = url.searchParams.get('revision') || ''
+      requests.push(revision)
+      await new Promise<void>(resolve => finishVersionRequests.push(resolve))
+      await route.fulfill({ json: {
+        revision,
+        note: { title: `Preview ${revision}`, description: '', tags: [], status: 'stable', staleAfter: null, content: `Content ${revision}` },
+        diff: '',
+      } })
+      return
+    }
+    if (url.pathname === '/api/note/history') {
+      await route.fulfill({ json: { entries: revisions, nextCursor: null } })
+      return
+    }
+    await route.continue()
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  await page.getByRole('button', { name: /Open history/ }).click()
+  const timeline = page.getByRole('navigation', { name: 'Note timeline' })
+  await expect(timeline.getByRole('button', { name: /Scrub moment 0/ })).toBeVisible()
+  const workspace = page.locator('#workspace')
+  const initialScroll = await workspace.evaluate(element => element.scrollTop)
+  const box = await timeline.boundingBox()
+  if (!box) throw new Error('Timeline did not have a visible box')
+  await page.mouse.move(box.x + box.width - 12, box.y + box.height * 0.72)
+  await page.mouse.wheel(0, 180)
+  await expect.poll(() => timeline.locator('[aria-current="step"]').getAttribute('data-history-stop')).not.toBe('')
+  await expect.poll(() => requests.length).toBeGreaterThan(0)
+  await expect(page.getByRole('button', { name: 'Restore this version' })).toBeDisabled()
+  finishVersionRequests.shift()?.()
+  await expect(page.getByRole('button', { name: 'Restore this version' })).toBeEnabled()
+  const afterWheel = await timeline.locator('[aria-current="step"]').getAttribute('data-history-stop')
+  expect(afterWheel).toBeTruthy()
+
+  const beforeDragCount = requests.length
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.68)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.4, { steps: 5 })
+  await page.mouse.up()
+  await expect.poll(() => requests.length).toBeGreaterThan(beforeDragCount)
+  await expect.poll(() => timeline.locator('[aria-current="step"]').getAttribute('data-history-stop')).not.toBe(afterWheel)
+  expect(await workspace.evaluate(element => element.scrollTop)).toBe(initialScroll)
+  finishVersionRequests.forEach(finish => finish())
+  const preview = page.getByRole('region', { name: 'History preview' })
+  await expect(preview).toBeVisible()
+  await expect(preview.getByText(/^Content scrub-/)).toBeInViewport()
+  await expect.poll(async () => {
+    const timelineBox = await timeline.boundingBox()
+    const activeBox = await timeline.locator('[aria-current="step"]').boundingBox()
+    if (!timelineBox || !activeBox) return Number.POSITIVE_INFINITY
+    return Math.abs(activeBox.y + activeBox.height / 2 - (timelineBox.y + timelineBox.height / 2))
+  }).toBeLessThan(2)
+  if (process.env.FOLIO_HISTORY_SCREENSHOT) await page.screenshot({ path: process.env.FOLIO_HISTORY_SCREENSHOT, fullPage: false })
+})

@@ -12,7 +12,7 @@ vi.mock("../../src/features/sidebar/WorkspaceSidebar.tsx", () => ({ WorkspaceSid
 vi.mock("../../src/features/workspace/components/WorkspaceSidebarHandle.tsx", () => ({ WorkspaceSidebarHandle: () => null }));
 vi.mock("../../src/features/workspace/components/WorkspaceLeftPaneHeader.tsx", () => ({ WorkspaceLeftPaneHeader: () => null }));
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 const noteId = "/notes/current.md";
 const otherNoteId = "/notes/other.md";
@@ -140,7 +140,7 @@ describe("workspace history mode", () => {
     expect(screen.getByText(/previous present is still in history/)).toBeVisible();
   });
 
-  it("ignores a slow snapshot after the timeline moves to a newer selection", async () => {
+  it("keeps the last successful preview while a rapid selection is pending and ignores stale results", async () => {
     let resolveSlow: ((response: Response) => void) | undefined;
     const slow = new Promise<Response>((resolve) => { resolveSlow = resolve; });
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -153,11 +153,16 @@ describe("workspace history mode", () => {
     }));
     const preview = vi.fn();
     render(<NoteHistoryPanel documentId={noteId} onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onPreview={preview} onExit={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: /Older title/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Another/ }));
+    await waitFor(() => expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ revision: "rev-2" }), false, false));
+    fireEvent.click(screen.getByRole("button", { name: /Older title/ }));
+    expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ revision: "rev-2" }), true, false);
+    expect(screen.getByRole("button", { name: "Restore this version" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /Another/ }));
     await waitFor(() => expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ revision: "rev-2" }), false, false));
     resolveSlow?.(new Response(JSON.stringify({ revision: "rev-1", note: { content: "stale" }, diff: "" }), { status: 200, headers: { "content-type": "application/json" } }));
     await waitFor(() => expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ revision: "rev-2" }), false, false));
+    expect(screen.getByRole("button", { name: "Restore this version" })).toBeEnabled();
   });
 
   it("shows a failed preview and retries when the same tick is selected again", async () => {
@@ -182,15 +187,10 @@ describe("workspace history mode", () => {
     expect(attempts).toBe(2);
   });
 
-  it("coalesces timeline scroll selection into one frame and cancels pending work on exit", async () => {
+  it("settles wheel scrubbing before selecting and supports keyboard navigation", async () => {
     stubHistoryApi();
-    const frames = new Map<number, FrameRequestCallback>();
-    const requestFrame = vi.fn((callback: FrameRequestCallback) => { const id = frames.size + 1; frames.set(id, callback); return id; });
-    const cancelFrame = vi.fn((id: number) => frames.delete(id));
-    vi.stubGlobal("requestAnimationFrame", requestFrame);
-    vi.stubGlobal("cancelAnimationFrame", cancelFrame);
     const preview = vi.fn();
-    const { unmount } = render(<NoteHistoryPanel documentId={noteId} onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onPreview={preview} onExit={vi.fn()} />);
+    render(<NoteHistoryPanel documentId={noteId} onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onPreview={preview} onExit={vi.fn()} />);
     const tick = await screen.findByRole("button", { name: /Older title/ });
     const timeline = screen.getByRole("navigation", { name: "Note timeline" });
     Object.defineProperty(timeline, "clientHeight", { configurable: true, value: 200 });
@@ -200,11 +200,10 @@ describe("workspace history mode", () => {
     fireEvent.scroll(timeline);
     fireEvent.scroll(timeline);
     fireEvent.scroll(timeline);
-    expect(requestFrame).toHaveBeenCalledTimes(1);
-    frames.get(1)?.(0);
+    expect(preview).not.toHaveBeenCalledWith(expect.objectContaining({ revision: "rev-1" }), false, false);
+    await new Promise((resolve) => setTimeout(resolve, 140));
     await waitFor(() => expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ revision: "rev-1" }), false, false));
-    fireEvent.scroll(timeline);
-    unmount();
-    expect(cancelFrame).toHaveBeenCalledWith(2);
+    fireEvent.keyDown(timeline, { key: "Home" });
+    await waitFor(() => expect(preview).toHaveBeenLastCalledWith(null, false, false));
   });
 });
