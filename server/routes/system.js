@@ -4,7 +4,8 @@ export function registerRoutes(app, runtime) {
   const { appVersion, updateRepo, embedModel, fetchLatestRelease, compareVersions, ollamaStatus, hasOllamaModel, refreshMissingEmbeddingsInBackground,
     toggleOllamaService, installConfiguredModels, readRecords, publicRecord, readDrafts, normalizeDraftId, draftFilePath, queueDraftMutation, readDraft,
     writeDraft, resolveBundleMarkdownPath, isMovableConceptId, queueMarkdownMutation, reindexBundle,
-    relationshipIndex, recordIsStale, semanticSuggestionSummaries, removeEmptyBundleDirectories, history } = runtime
+    relationshipIndex, recordIsStale, semanticSuggestionSummaries, removeEmptyBundleDirectories,
+    assertNoBundleSymlinks, history } = runtime
   const ollamaServiceToggles = new Map()
 app.get('/api/version', async (request, response) => {
   const payload = { version: appVersion, repo: updateRepo }
@@ -161,6 +162,7 @@ app.delete('/api/note', async (request, response, next) => {
       if (!current) return null
       const conceptPath = resolveBundleMarkdownPath(current.id)
       if (!conceptPath) throw new Error('Invalid concept path.')
+      await assertNoBundleSymlinks(conceptPath)
       try {
         await fs.unlink(conceptPath)
         await removeEmptyBundleDirectories(path.dirname(conceptPath))

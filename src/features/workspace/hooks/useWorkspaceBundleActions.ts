@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import type {
   BundleFile,
+  BundleDirectory,
   FileMoveResult,
   Note,
   TabGroup,
@@ -24,6 +25,7 @@ type BundleActionSetters = {
   setMessage: Dispatch<SetStateAction<string>>;
   setNotes: Dispatch<SetStateAction<Note[]>>;
   setFiles: Dispatch<SetStateAction<BundleFile[]>>;
+  setDirectories: Dispatch<SetStateAction<BundleDirectory[]>>;
   setDocuments: Dispatch<SetStateAction<Record<string, ViewerDocument>>>;
   setGroups: Dispatch<SetStateAction<TabGroup[]>>;
   setEditingKey: Dispatch<SetStateAction<string | null>>;
@@ -53,6 +55,7 @@ export function useWorkspaceBundleActions(
     setMessage,
     setNotes,
     setFiles,
+    setDirectories,
     setDocuments,
     setGroups,
     setEditingKey,
@@ -73,7 +76,10 @@ export function useWorkspaceBundleActions(
         notes: Note[];
         errors: { id: string; error: string }[];
       }>("/api/reindex", { method: "POST" });
-      const refreshedFiles = await api<BundleFile[]>("/api/files");
+      const [refreshedFiles, refreshedDirectories] = await Promise.all([
+        api<BundleFile[]>("/api/files"),
+        api<BundleDirectory[]>("/api/directories"),
+      ]);
       const openIds = Array.from(
         new Set(groups.flatMap((group) => group.tabs)),
       ).filter((id) => !isUntitledId(id));
@@ -94,6 +100,7 @@ export function useWorkspaceBundleActions(
       );
       setNotes(result.notes);
       setFiles(refreshedFiles);
+      setDirectories(refreshedDirectories);
       setDocuments((current) => {
         const next = { ...current };
         for (const [oldId, document] of refreshedByOldId) {
@@ -163,9 +170,10 @@ export function useWorkspaceBundleActions(
         method: "POST",
         body: JSON.stringify({ id, directory }),
       });
-      const [notesResult, filesResult] = await Promise.allSettled([
+      const [notesResult, filesResult, directoriesResult] = await Promise.allSettled([
         api<Note[]>("/api/notes"),
         api<BundleFile[]>("/api/files"),
+        api<BundleDirectory[]>("/api/directories"),
       ]);
 
       setDocuments((current) => {
@@ -219,6 +227,7 @@ export function useWorkspaceBundleActions(
                   : item,
               ),
       );
+      if (directoriesResult.status === "fulfilled") setDirectories(directoriesResult.value);
       setExpandedDirectories((current) => {
         const next = new Set(current).add("/");
         let path = "";

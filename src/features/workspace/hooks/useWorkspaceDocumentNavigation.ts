@@ -96,7 +96,7 @@ export function useWorkspaceDocumentNavigation({
     }
   }
 
-  async function deleteFiledNote(document: ViewerDocument) {
+  async function deleteFiledNote(document: Pick<ViewerDocument, "id" | "title" | "deletable">) {
     if (
       !document.deletable ||
       isUntitledId(document.id) ||

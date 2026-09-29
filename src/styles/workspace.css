@@ -168,6 +168,87 @@
   box-shadow: inset 2px 0 0 var(--acid);
 }
 
+.tree-branch.drop-target {
+  background: rgba(var(--acid-rgb), 0.1);
+  box-shadow: inset 2px 0 0 var(--acid);
+}
+
+.explorer-context-menu {
+  position: fixed;
+  z-index: 120;
+  width: 236px;
+  max-height: calc(100vh - 8px);
+  overflow: auto;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-raised);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+}
+
+.explorer-context-menu [role="menu"] {
+  display: grid;
+  gap: 2px;
+}
+
+.explorer-context-menu [role="menuitem"],
+.explorer-context-actions button {
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+}
+
+.explorer-context-menu [role="menuitem"]:hover,
+.explorer-context-menu [role="menuitem"]:focus-visible,
+.explorer-context-actions button:hover,
+.explorer-context-actions button:focus-visible {
+  outline: none;
+  background: rgba(var(--highlight-rgb), 0.08);
+}
+
+.explorer-context-menu [role="menuitem"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.explorer-context-menu [role="menuitem"].danger,
+.explorer-context-actions button.danger {
+  color: var(--danger, #e06c75);
+}
+
+.explorer-context-dialog {
+  display: grid;
+  gap: 9px;
+  padding: 7px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.explorer-context-dialog p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.explorer-context-dialog input {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+.explorer-context-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
 .tree-file[draggable='true'] {
   cursor: grab;
 }

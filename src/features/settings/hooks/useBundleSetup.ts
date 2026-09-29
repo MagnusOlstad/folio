@@ -19,8 +19,7 @@ export function useBundleSetup() {
   const activeBundleRef = useRef(activeBundleId);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
-  const refresh = useCallback(async () => {
-    const result = await api<BundleRegistryResponse>("/api/bundles");
+  const applyRegistry = useCallback((result: BundleRegistryResponse) => {
     setBundles(result.bundles);
     setError(result.error || "");
     const storedId = readStorageItem("folio:bundle-active:v1");
@@ -36,11 +35,27 @@ export function useBundleSetup() {
     if (nextId) writeStorageItem("folio:bundle-active:v1", nextId);
   }, []);
 
+  const refresh = useCallback(async () => {
+    applyRegistry(await api<BundleRegistryResponse>("/api/bundles"));
+  }, [applyRegistry]);
+
   useEffect(() => {
-    void refresh()
-      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : "Could not read bundles."))
-      .finally(() => setReady(true));
-  }, [refresh]);
+    let cancelled = false;
+    void api<BundleRegistryResponse>("/api/bundles")
+      .then((result) => {
+        if (!cancelled) applyRegistry(result);
+      })
+      .catch((loadError) => {
+        if (!cancelled)
+          setError(loadError instanceof Error ? loadError.message : "Could not read bundles.");
+      })
+      .finally(() => {
+        if (!cancelled) setReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [applyRegistry]);
 
   const selectBundle = useCallback((id: string) => {
     if (!bundles.some((bundle) => bundle.id === id)) return;

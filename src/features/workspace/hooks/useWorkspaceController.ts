@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { BundleFile, Note, NoteDetail, ViewerDocument } from "../../../domain/types.ts";
+import type { BundleDirectory, BundleFile, Note, NoteDetail, ViewerDocument } from "../../../domain/types.ts";
 import { api, apiForBundle, setActiveBundleId } from "../../../lib/api.ts";
 import type { WorkspaceShellProps } from "../components/WorkspaceShell.tsx";
 import { useWorkspaceBootstrap } from "./useWorkspaceBootstrap.ts";
@@ -61,6 +61,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
     setExpandedDirectories,
     setFiles,
     setNotes,
+    setDirectories,
   } = explorer;
   const refreshAfterObsidianImport = useCallback(async (_job: import("../../settings/model/obsidian-import.ts").ObsidianImportJob, bundleId: string | null) => {
     if (bundleId && bundleId !== bundleSetup.activeBundleId) return;
@@ -68,9 +69,10 @@ export function useWorkspaceController(): WorkspaceShellProps {
     const request = <T,>(url: string) => bundleId
       ? apiForBundle<T>(bundleId, url)
       : api<T>(url);
-    const [filesResult, notesResult] = await Promise.allSettled([
+    const [filesResult, notesResult, directoriesResult] = await Promise.allSettled([
       request<BundleFile[]>("/api/files"),
       request<Note[]>("/api/notes"),
+      request<BundleDirectory[]>("/api/directories"),
     ]);
     if (filesResult.status === "fulfilled") {
       const newFiles = filesResult.value.filter((file) => !previousIds.has(file.id));
@@ -83,10 +85,11 @@ export function useWorkspaceController(): WorkspaceShellProps {
       }
     }
     if (notesResult.status === "fulfilled") setNotes(notesResult.value);
+    if (directoriesResult.status === "fulfilled") setDirectories(directoriesResult.value);
     if (filesResult.status === "rejected" || notesResult.status === "rejected") {
       setMessage("The import finished, but the file explorer could not be fully refreshed.");
     }
-  }, [bundleSetup.activeBundleId, explorerFiles, setExpandedDirectories, setFiles, setNotes]);
+  }, [bundleSetup.activeBundleId, explorerFiles, setDirectories, setExpandedDirectories, setFiles, setNotes]);
   const obsidianImport = useObsidianImport({
     onImportFinishedForBundle: refreshAfterObsidianImport,
   });
@@ -298,15 +301,17 @@ export function useWorkspaceController(): WorkspaceShellProps {
       }));
     }
     try {
-      const [notes, files, drafts, status] = await Promise.all([
+      const [notes, files, directories, drafts, status] = await Promise.all([
         apiForBundle<Note[]>(bundleId, "/api/notes"),
         apiForBundle<BundleFile[]>(bundleId, "/api/files"),
+        apiForBundle<BundleDirectory[]>(bundleId, "/api/directories"),
         apiForBundle<import("../../../domain/types.ts").StoredDraft[]>(bundleId, "/api/drafts"),
         apiForBundle<import("../../../domain/types.ts").ModelStatus>(bundleId, "/api/status"),
       ]);
       if (revision !== bundleSwitchRevisionRef.current) return;
       explorer.setNotes(notes);
       explorer.setFiles(files);
+      explorer.setDirectories(directories);
       models.setStatus(status);
       explorer.setExpandedDirectories(expandedPathsForFiles(files));
       {
@@ -432,6 +437,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
     setMessage,
     setNotes: explorer.setNotes,
     setFiles: explorer.setFiles,
+    setDirectories: explorer.setDirectories,
     setVersionInfo: models.setVersionInfo,
     mergeRemoteDrafts: documents.mergeRemoteDrafts,
     expandedDirectoriesReadyRef: explorer.expandedDirectoriesReadyRef,
@@ -496,6 +502,11 @@ export function useWorkspaceController(): WorkspaceShellProps {
       tabs.openLocalDraft(id);
     },
     deleteLocalDraft: navigation.deleteLocalDraft,
+    deleteFiledNote: navigation.deleteFiledNote,
+    exportFile: async (file, format) => {
+      const document = await api<ViewerDocument>(`/api/file?path=${encodeURIComponent(file.id)}`);
+      await noteExport.exportDocument(document, documents.drafts[file.id], format);
+    },
     openDocument: async (...args) => {
       setEditorFocusRequest(null);
       void finalizeAllFiledDocuments();
