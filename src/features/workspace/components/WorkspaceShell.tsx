@@ -1,9 +1,10 @@
+import { useState } from "react";
 import type { CSSProperties, PointerEvent } from "react";
 import { SettingsDialog } from "../../settings/components/SettingsDialog.tsx";
 import type { SettingsDialogProps } from "../../settings/components/SettingsDialog.tsx";
 import { WorkspaceSidebar } from "../../sidebar/WorkspaceSidebar.tsx";
 import type { WorkspaceSidebarProps } from "../../sidebar/WorkspaceSidebar.tsx";
-import type { VersionInfo } from "../../../domain/types.ts";
+import type { NoteHistorySnapshot, VersionInfo } from "../../../domain/types.ts";
 import type { WorkspaceStatusProps } from "../../status/WorkspaceStatus.tsx";
 import { EditorWorkspace } from "./EditorWorkspace.tsx";
 import type { EditorWorkspaceProps } from "../types.ts";
@@ -53,15 +54,29 @@ export function WorkspaceShell({
   const activeGroup = editor.model.groups.find((group) => group.id === editor.model.activeGroupId);
   const activeDocumentId = activeGroup?.activeId ?? null;
   const activeDocument = activeDocumentId ? editor.model.documents[activeDocumentId] : null;
-  const historyContent = !activeDocumentId ? (
-    <p className="right-pane-placeholder">Open a filed note to see its history.</p>
-  ) : activeDocument && activeDocument.deletable && !isUntitledId(activeDocumentId) ? (
+  const historyAvailable = Boolean(activeDocumentId && activeDocument?.deletable && !isUntitledId(activeDocumentId));
+  const scope = `${activeGroup?.id ?? ""}:\0${activeDocumentId ?? ""}:\0${layout.rightPaneOpen}:\0${historyAvailable}`;
+  const [history, setHistory] = useState<{ scope: string; active: boolean; snapshot: NoteHistorySnapshot | null; loading: boolean; failed: boolean }>(
+    { scope, active: false, snapshot: null, loading: false, failed: false },
+  );
+  if (history.scope !== scope) {
+    setHistory({ scope, active: false, snapshot: null, loading: false, failed: false });
+  }
+  const historyActive = Boolean(history.scope === scope && history.active && layout.rightPaneOpen && historyAvailable);
+  const exitHistory = () => setHistory({ scope, active: false, snapshot: null, loading: false, failed: false });
+  const historyContent = historyActive && activeDocumentId ? (
     <NoteHistoryPanel
-      key={activeDocumentId}
+      key={`${activeGroup?.id}:${activeDocumentId}`}
       documentId={activeDocumentId}
       onBeforeRestore={editor.actions.beforeHistoryRestore}
       onRestored={editor.actions.historyRestored}
+      onPreview={(snapshot, loading, failed) => setHistory((current) => current.scope === scope ? { ...current, snapshot, loading, failed } : current)}
+      onExit={exitHistory}
     />
+  ) : !activeDocumentId ? (
+    <p className="right-pane-placeholder">Open a filed note to see its history.</p>
+  ) : historyAvailable ? (
+    <div className="history-entry"><span className="note-history-eyebrow">NOTE TOOLS</span><h2>History</h2><p>Explore earlier versions of this note in a read only view.</p><button type="button" onClick={() => setHistory({ scope, active: true, snapshot: null, loading: false, failed: false })}>Open history <span aria-hidden="true">↗</span></button></div>
   ) : editor.model.loadingDocuments.has(activeDocumentId) ? (
     <p className="right-pane-placeholder" role="status">Loading note…</p>
   ) : (
@@ -99,6 +114,7 @@ export function WorkspaceShell({
         ) : null}
         <EditorWorkspace
           {...editor}
+          historyPreview={historyActive && activeGroup && activeDocumentId && activeDocument ? { groupId: activeGroup.id, documentId: activeDocumentId, snapshot: history.snapshot, loading: history.loading, failed: history.failed, presentContent: editor.model.drafts[activeDocumentId] ?? activeDocument.content } : undefined}
           paneControls={{
             leftOpen: layout.sidebarOpen,
             rightOpen: layout.rightPaneOpen,

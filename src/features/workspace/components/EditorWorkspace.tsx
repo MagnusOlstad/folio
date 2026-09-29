@@ -6,7 +6,7 @@ import type { EditorWorkspaceProps } from "../types.ts";
 import { WorkspaceSplitHandle } from "./WorkspaceSplitHandle.tsx";
 import { filingOwnerGroupIds } from "../model/filing.ts";
 
-export function EditorWorkspace({ model, actions, paneControls }: EditorWorkspaceProps) {
+export function EditorWorkspace({ model, actions, paneControls, historyPreview }: EditorWorkspaceProps) {
   const ui = useWorkspaceEditorUi();
   const owners = filingOwnerGroupIds(
     model.groups,
@@ -83,6 +83,7 @@ export function EditorWorkspace({ model, actions, paneControls }: EditorWorkspac
             model={groupModel}
             actions={groupActions}
             ui={ui}
+            historyPreview={historyPreview?.groupId === group.id && historyPreview.documentId === group.activeId ? historyPreview : undefined}
             paneControls={paneControls ? {
               ...paneControls,
               leftOpen: groupIndex > 0 || paneControls.leftOpen,
