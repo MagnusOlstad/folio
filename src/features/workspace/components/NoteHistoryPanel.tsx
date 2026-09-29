@@ -10,10 +10,21 @@ type Props = {
   onExit: () => void;
 };
 
+function localDay(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+}
+
 function timestamp(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+function dayLabel(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
 export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPreview, onExit }: Props) {
@@ -227,7 +238,10 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
         <button type="button" disabled={restoring} data-history-stop="" aria-label="Present" aria-current={!revision ? "step" : undefined} className={`note-history-stop is-now${!revision ? " active" : ""}`} onClick={() => { if (dragMoved.current) { dragMoved.current = false; return; } moveTo(null); }}><span className="note-history-tick"/><span className="note-history-stop-copy"><strong>Now</strong><small>Current note</small></span></button>
         {loading && <p className="note-history-state" role="status">Gathering moments…</p>}
         {!loading && entries.length === 0 && <p className="note-history-state">No earlier moments yet.</p>}
-        {entries.map((entry) => <button type="button" disabled={restoring} data-history-stop={entry.revision} aria-label={`${entry.title || "Untitled"}, ${timestamp(entry.authoredAt)}`} aria-current={revision === entry.revision ? "step" : undefined} className={`note-history-stop${revision === entry.revision ? " active" : ""}`} key={entry.revision} onClick={() => { if (dragMoved.current) { dragMoved.current = false; return; } moveTo(entry.revision); }}><span className="note-history-tick"/><span className="note-history-stop-copy"><strong>{entry.title || "Untitled"}</strong><small>{timestamp(entry.authoredAt)}</small></span></button>)}
+        {entries.map((entry, index) => {
+          const dayBoundary = index === 0 || localDay(entry.authoredAt) !== localDay(entries[index - 1].authoredAt);
+          return <button type="button" disabled={restoring} data-history-stop={entry.revision} aria-label={`${entry.title || "Untitled"}, ${dayLabel(entry.authoredAt)}, ${timestamp(entry.authoredAt)}`} aria-current={revision === entry.revision ? "step" : undefined} className={`note-history-stop${dayBoundary ? " is-day-boundary" : ""}${revision === entry.revision ? " active" : ""}`} key={entry.revision} onClick={() => { if (dragMoved.current) { dragMoved.current = false; return; } moveTo(entry.revision); }}><span className="note-history-tick"/><span className="note-history-stop-copy"><strong>{timestamp(entry.authoredAt)}</strong><small>{dayBoundary ? dayLabel(entry.authoredAt) : "\u00a0"}</small></span></button>;
+        })}
         {cursor && <button type="button" className="note-history-more" onClick={() => void loadMore()} disabled={loadingMore || restoring}>{loadingMore ? "Loading…" : "Load earlier"}</button>}
       </nav>
     </div>

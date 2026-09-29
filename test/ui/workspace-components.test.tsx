@@ -144,6 +144,28 @@ describe("workspace editor components", () => {
     vi.unstubAllGlobals();
   });
 
+  it("shows history times and marks local day boundaries without revision titles", async () => {
+    const entries = [
+      { revision: "newest", authoredAt: "2026-09-27T12:00:00.000Z", title: "Newest revision" },
+      { revision: "same-day", authoredAt: "2026-09-27T10:00:00.000Z", title: "Same-day revision" },
+      { revision: "previous-day", authoredAt: "2026-09-26T12:00:00.000Z", title: "Previous-day revision" },
+    ];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ entries, nextCursor: null }), { status: 200 })));
+    render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn()} onRestored={vi.fn()} onPreview={vi.fn()} onExit={vi.fn()} />);
+    const newest = await screen.findByRole("button", { name: /Newest revision/ });
+    const sameDay = screen.getByRole("button", { name: /Same-day revision/ });
+    const previousDay = screen.getByRole("button", { name: /Previous-day revision/ });
+    const dateLabel = (value: string) => new Date(value).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    expect(newest).toHaveClass("is-day-boundary");
+    expect(sameDay).not.toHaveClass("is-day-boundary");
+    expect(previousDay).toHaveClass("is-day-boundary");
+    expect(newest).toHaveTextContent(dateLabel(entries[0].authoredAt));
+    expect(sameDay).not.toHaveTextContent(dateLabel(entries[1].authoredAt));
+    expect(newest).not.toHaveTextContent("Newest revision");
+    expect(screen.getByRole("button", { name: "Present" })).toHaveTextContent("Now");
+    vi.unstubAllGlobals();
+  });
+
   it("previews a selected moment without a diff and restores after confirmation", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [{ revision: "a".repeat(40), authoredAt: "2026-09-27T09:00:00.000Z", title: "First" }], nextCursor: null }), { status: 200 }))
@@ -203,15 +225,17 @@ describe("workspace editor components", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ revision: newerRevision, note: { title: "Newer", description: "", tags: [], status: "stable", staleAfter: null, content: "Newer preview" }, diff: "" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const onPreview = vi.fn();
-    render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onPreview={onPreview} onExit={vi.fn()} />);
+    const { container } = render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onPreview={onPreview} onExit={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: /Older/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Newer/ }));
+    const newerStop = container.querySelector<HTMLButtonElement>(`button[data-history-stop="${newerRevision}"]`);
+    expect(newerStop).not.toBeNull();
+    if (newerStop) fireEvent.click(newerStop);
     await waitFor(() => expect(onPreview).toHaveBeenLastCalledWith(expect.objectContaining({ revision: newerRevision, note: expect.objectContaining({ content: "Newer preview" }) }), false, false));
     await act(async () => {
       finishOlder?.(new Response(JSON.stringify({ revision: olderRevision, note: { title: "Older", description: "", tags: [], status: "stable", staleAfter: null, content: "Stale older preview" }, diff: "" }), { status: 200 }));
     });
     expect(onPreview).toHaveBeenLastCalledWith(expect.objectContaining({ revision: newerRevision }), false, false);
-    expect(screen.getByRole("button", { name: /Newer/ })).toHaveAttribute("aria-current", "step");
+    expect(container.querySelector(`button[data-history-stop="${newerRevision}"]`)).toHaveAttribute("aria-current", "step");
     vi.unstubAllGlobals();
   });
 
