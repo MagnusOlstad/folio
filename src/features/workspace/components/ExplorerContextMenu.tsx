@@ -175,9 +175,7 @@ export function ExplorerContextMenu({
           )}
           {target.kind === "file" ? (
             <button role="menuitem" type="button" disabled={!canRename} onClick={() => openForm("rename")}>Rename file</button>
-          ) : (
-            <button role="menuitem" type="button" disabled title="Folder rename requires safe link and tab reconciliation.">Rename folder</button>
-          )}
+          ) : null}
           <button role="menuitem" type="button" onClick={() => void run(() => actions.copyText(absolutePath))}>Copy absolute path</button>
           <button role="menuitem" type="button" onClick={() => void run(() => actions.copyText(relativePath))}>Copy relative path</button>
           {target.kind === "file" ? (
