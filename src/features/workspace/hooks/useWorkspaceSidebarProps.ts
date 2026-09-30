@@ -24,6 +24,7 @@ type Options = {
   models: ReturnTypeOfWorkspaceModels;
   setMessage: Dispatch<SetStateAction<string>>;
   draftTitle: (content: string) => string;
+  createNewTab: (initialContent?: string) => void;
   openLocalDraft: (id: string) => void;
   deleteLocalDraft: (id: string) => Promise<void>;
   openDocument: WorkspaceSidebarProps["openDocument"];
@@ -41,6 +42,7 @@ export function useWorkspaceSidebarProps({
   models,
   setMessage,
   draftTitle,
+  createNewTab,
   openLocalDraft,
   deleteLocalDraft,
   openDocument,
@@ -107,9 +109,9 @@ export function useWorkspaceSidebarProps({
     setGroups,
     setExpandedDirectories: explorer.setExpandedDirectories,
     setMessage,
-    openDocument,
     deleteFiledNote,
     exportFile,
+    createNewTab,
   });
 
   return {

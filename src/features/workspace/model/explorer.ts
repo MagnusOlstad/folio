@@ -14,7 +14,7 @@ export type ExplorerContextMenuState = {
 
 export type ExplorerFileActions = {
   renameFile: (id: string, name: string) => Promise<void>;
-  createFile: (directory: string, name: string) => Promise<void>;
+  createFile: (directory: string) => Promise<void>;
   createDirectory: (directory: string, name: string) => Promise<void>;
   deleteFile: (file: BundleFile) => Promise<void>;
   exportFile: (file: BundleFile, format: NoteExportFormat) => Promise<void>;

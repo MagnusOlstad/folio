@@ -17,16 +17,16 @@ type ExplorerActionOptions = {
   setGroups: Dispatch<SetStateAction<TabGroup[]>>;
   setExpandedDirectories: Dispatch<SetStateAction<Set<string>>>;
   setMessage: (message: string) => void;
-  openDocument: (id: string, source?: "note" | "file", targetGroupId?: string, disposition?: "preview" | "permanent") => Promise<void>;
   deleteFiledNote: (file: Pick<BundleFile, "id" | "title" | "deletable">) => Promise<void>;
   exportFile: (file: BundleFile, format: NoteExportFormat) => Promise<void>;
+  createNewTab: (initialContent?: string) => void;
 };
 
 export function useWorkspaceExplorerActions(options: ExplorerActionOptions): ExplorerFileActions {
   const {
     files, groups, editingKey, savingDocuments,
     setFiles, setDirectories, setNotes, setDocuments, setDrafts, setGroups,
-    setExpandedDirectories, setMessage, openDocument, deleteFiledNote, exportFile,
+    setExpandedDirectories, setMessage, deleteFiledNote, exportFile, createNewTab,
   } = options;
 
   async function refreshExplorer() {
@@ -96,15 +96,9 @@ export function useWorkspaceExplorerActions(options: ExplorerActionOptions): Exp
       setMessage(result.warning || `Renamed ${file.name} to ${result.newId.split("/").at(-1)}.`);
   }
 
-  async function createFile(directory: string, name: string) {
-    const result = await api<{ id: string; warning: string | null }>("/api/file/create", {
-      method: "POST",
-      body: JSON.stringify({ directory, name }),
-    });
-    const refreshed = await refreshExplorer();
+  async function createFile(directory: string) {
     ensureExpanded(directory);
-    await openDocument(result.id, "file", undefined, "permanent");
-    if (refreshed) setMessage(result.warning || `Created ${result.id.split("/").at(-1)}.`);
+    createNewTab(`path: ${directory}\n`);
   }
 
   async function createDirectory(directory: string, name: string) {

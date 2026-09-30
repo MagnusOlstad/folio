@@ -38,6 +38,9 @@ export function DraftMarkdownEditor({
   const measureRef = useRef<HTMLDivElement>(null);
   const [steeringHeight, setSteeringHeight] = useState(0);
   const firstLine = value.split("\n", 1)[0];
+  const selection = initialSelection ?? (firstLine.startsWith("path: ")
+    ? { from: firstLine.length + 1, to: firstLine.length + 1 }
+    : undefined);
   const measuredFirstLine = firstLine || (!value ? steeringPlaceholder : " ");
 
   useLayoutEffect(() => {
@@ -79,7 +82,7 @@ export function DraftMarkdownEditor({
         onFile={onFile}
         onOpenLink={onOpenLink}
         onToggleTask={onToggleTask}
-        initialSelection={initialSelection}
+        initialSelection={selection}
         onSelectionChange={onSelectionChange}
         focusRequestId={focusRequestId}
         onFocusRequestConsumed={onFocusRequestConsumed}

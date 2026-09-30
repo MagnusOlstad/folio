@@ -80,7 +80,9 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
       }
       const note = body.messages?.at(-1)?.content || ''
       classificationPrompts.push(note)
-      const concept = note.includes('Project Aurora details')
+      const concept = note.includes('Path override todo')
+        ? { kind: 'todo', path: ['wrong'], title: 'Path Override Todo', type: 'Task', description: 'A deliberately misclassified task.', tags: ['task'] }
+        : note.includes('Project Aurora details')
         ? {
             kind: 'note',
             path: ['projects'],
@@ -767,6 +769,72 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal(rootMoved.newId, '/Odd (File).md')
   await fs.access(path.join(dataRoot, 'bundle', 'Odd (File).md'))
 
+  for (const [directory, name] of [['/', 'Research Area'], ['/Research Area', 'Design Notes']]) {
+    const createdFolder = await fetch(`${baseUrl}/api/file/folder`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ directory, name }),
+    })
+    assert.equal(createdFolder.status, 201)
+  }
+  const deepDirectory = '/Research Area/Design Notes/One/Two/Three/Four/Five'
+  let parentDirectory = '/Research Area/Design Notes'
+  for (const name of ['One', 'Two', 'Three', 'Four', 'Five']) {
+    const createdFolder = await fetch(`${baseUrl}/api/file/folder`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ directory: parentDirectory, name }),
+    })
+    assert.equal(createdFolder.status, 201)
+    parentDirectory += `/${name}`
+  }
+
+  const rootPathCapture = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: 'path: /\nRoot path capture details.', timeZone: 'America/New_York',
+  })
+  assert.equal(path.posix.dirname(rootPathCapture.note.id), '/')
+  assert.doesNotMatch(rootPathCapture.note.id, /^\/\//)
+  assert.equal(rootPathCapture.filing.proposal.directory, '/')
+
+  const directedTodo = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: `path: ${deepDirectory}\nPath override todo\nKeep this as an ordinary concept note.`,
+    timeZone: 'America/New_York',
+  })
+  assert.equal(directedTodo.appended, false)
+  assert.equal(path.posix.dirname(directedTodo.note.id), deepDirectory)
+  assert.equal(directedTodo.filing.proposal.directory, deepDirectory)
+  assert.equal(directedTodo.note.title, 'Path Override Todo')
+  const acceptedDirectedTodo = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: directedTodo.filing.id, action: 'accept', fields: directedTodo.filing.proposal }),
+  })
+  const acceptedDirectedBody = await acceptedDirectedTodo.json()
+  assert.equal(acceptedDirectedTodo.status, 200, JSON.stringify(acceptedDirectedBody))
+  assert.equal(acceptedDirectedBody.newId, directedTodo.note.id, 'accepting the unchanged proposal preserves the exact selected folder')
+
+  const preexistingFile = await fetch(`${baseUrl}/api/file/create`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ directory: '/Research Area/Design Notes', name: 'Morning launch meeting' }),
+  })
+  assert.equal(preexistingFile.status, 201)
+  const existingPathCapture = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: 'path: /Research Area/Design Notes\nMorning meeting\nDiscussed the launch plan.',
+    timeZone: 'America/New_York',
+  })
+  assert.equal(existingPathCapture.note.id, '/Research Area/Design Notes/Morning launch meeting.md')
+  assert.equal(existingPathCapture.appended, true)
+  const existingPathDetail = await (await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(existingPathCapture.note.id)}`)).json()
+  assert.match(existingPathDetail.content, /Discussed the launch plan\./)
+  assert.doesNotMatch(existingPathDetail.content, /path: \/Research Area/)
+
+  const rawCaptureCountBeforeInvalidPath = (await fs.readdir(path.join(dataRoot, 'bundle', 'references', 'inbox'))).length
+  for (const invalidPath of ['/../outside', '/daily', '/references/inbox', '/.folio', '/todo-list.md', 'relative/path', '/folder//child']) {
+    const invalidResponse = await fetch(`${baseUrl}/api/notes`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ content: `path: ${invalidPath}\nInvalid guided note`, filedContent: 'Invalid guided note' }),
+    })
+    assert.equal(invalidResponse.status, 400, `path guide ${invalidPath} must be rejected`)
+  }
+  assert.equal((await fs.readdir(path.join(dataRoot, 'bundle', 'references', 'inbox'))).length, rawCaptureCountBeforeInvalidPath)
+
   const soleTodo = await jsonRequest(`${baseUrl}/api/notes`, { content: 'todo: File separately', timeZone: 'America/New_York' })
   assert.equal(soleTodo.appended, false)
   const soleTodoConfirmation = await fetch(`${baseUrl}/api/filing/confirm`, {
@@ -949,7 +1017,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal(standaloneAuroraResponse.status, 200)
   const standaloneAurora = await standaloneAuroraResponse.json()
   assert.equal(standaloneAurora.note.id, `${mergedAurora.filing.standaloneProposal.directory}/${mergedAurora.filing.standaloneProposal.filename}`)
-  assert.equal(standaloneAurora.notes.length, 12)
+  assert.equal(standaloneAurora.notes.length, 15)
   assert.equal(standaloneAurora.note.type, 'Project')
   assert.match(await fs.readFile(path.join(dataRoot, 'bundle', standaloneAurora.note.id.slice(1)), 'utf8'), /filing:\n  by: human:local/)
   assert.match(await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8'), /The launch remains confidential\./)

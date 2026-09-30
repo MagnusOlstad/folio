@@ -16,7 +16,7 @@ type ExplorerContextMenuProps = {
   onError: (message: string) => void;
 };
 
-type FormMode = "rename" | "create-file" | "create-folder" | "delete" | null;
+type FormMode = "rename" | "create-folder" | "delete" | null;
 
 export function ExplorerContextMenu({
   state,
@@ -88,8 +88,6 @@ export function ExplorerContextMenu({
     const nextName = name.trim();
     if (formMode === "rename") {
       if (target.kind === "file") await run(() => actions.renameFile(target.file.id, nextName));
-    } else if (formMode === "create-file") {
-      await run(() => actions.createFile(explorerTargetParent(target), nextName));
     } else if (formMode === "create-folder") {
       await run(() => actions.createDirectory(explorerTargetParent(target), nextName));
     }
@@ -142,7 +140,7 @@ export function ExplorerContextMenu({
           ) : (
             <>
               <label htmlFor="explorer-context-name">
-                {formMode === "rename" ? "Rename" : formMode === "create-file" ? "New note" : "New folder"}
+                {formMode === "rename" ? "Rename" : "New folder"}
               </label>
               <input
                 id="explorer-context-name"
@@ -162,7 +160,7 @@ export function ExplorerContextMenu({
         </form>
       ) : (
         <div role="menu" aria-label={`${explorerTargetName(target)} actions`} onKeyDown={moveMenuFocus}>
-          <button role="menuitem" type="button" onClick={() => openForm("create-file")}>New note</button>
+          <button role="menuitem" type="button" onClick={() => void run(() => actions.createFile(explorerTargetParent(target)))}>New note</button>
           <button role="menuitem" type="button" onClick={() => openForm("create-folder")}>New folder</button>
           {target.kind === "file" ? (
             <button role="menuitem" type="button" disabled={!canRename} onClick={() => openForm("rename")}>Rename file</button>

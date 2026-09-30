@@ -68,7 +68,7 @@ export function useWorkspaceTabs({
     setGroups((current) => pinGroupTab(current, groupId, documentId));
   }
 
-  function createNewTab(targetGroupId = activeGroupId) {
+  function createNewTab(targetGroupId = activeGroupId, initialContent = "") {
     const id = `untitled:${Date.now()}:${++untitledCounter.current}`;
     const createdAt = new Date().toISOString();
     const document: ViewerDocument = {
@@ -78,7 +78,7 @@ export function useWorkspaceTabs({
       description: "",
       tags: [],
       createdAt,
-      content: "",
+      content: initialContent,
       deletable: true,
       movable: false,
       status: "draft",
@@ -92,7 +92,7 @@ export function useWorkspaceTabs({
       updatedAt: createdAt,
     };
     setDocuments((current) => ({ ...current, [id]: document }));
-    setDrafts((current) => ({ ...current, [id]: "" }));
+    setDrafts((current) => ({ ...current, [id]: initialContent }));
     setGroups((current) =>
       current.map((group) =>
         group.id === targetGroupId

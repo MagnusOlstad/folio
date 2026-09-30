@@ -61,6 +61,21 @@ describe("DraftMarkdownEditor", () => {
     expect(document.querySelector(".draft-steering-band")).toBeTruthy();
   });
 
+  it("places a new path-directed draft's caret in the note body", () => {
+    render(
+      <DraftMarkdownEditor
+        value={"path: /Research Area\n"}
+        onChange={vi.fn()}
+        onFile={vi.fn()}
+        ariaLabel="Write a new note"
+      />,
+    );
+
+    const view = EditorView.findFromDOM(screen.getByLabelText("Write a new note"));
+    expect(view.state.doc.toString()).toBe("path: /Research Area\n");
+    expect(view.state.selection.main.from).toBe(view.state.doc.length);
+  });
+
   it("files with Cmd/Ctrl+Enter", () => {
     const onFile = vi.fn();
     render(

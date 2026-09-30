@@ -137,8 +137,9 @@ function confirmationIdFor(rawId) {
 
 function normalizeConfirmationFields(value, fallback, internalFilename = fallback.filename) {
   const requestedDirectory = value?.directory ?? fallback.directory
-  const directory = normalizeMoveDirectory(requestedDirectory)
-    || (requestedDirectory === fallback.directory && requestedDirectory === '/daily' ? '/daily' : null)
+  const directory = requestedDirectory === fallback.directory
+    ? fallback.directory
+    : normalizeMoveDirectory(requestedDirectory)
   const filename = String(internalFilename || '').trim()
   const title = normalizeInlineText(value?.title ?? fallback.title).slice(0, 100)
   const description = normalizeInlineText(value?.description ?? fallback.description).slice(0, 240)
@@ -157,4 +158,3 @@ function destinationFor(id) {
     captureMetadata, restoreCaptureMetadata, filingActor, confirmationIdFor, normalizeConfirmationFields,
     destinationFor }
 }
-
