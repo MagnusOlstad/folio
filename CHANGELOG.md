@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.0](https://github.com/MagnusOlstad/folio/compare/v0.5.0...v0.6.0) (2026-09-30)
+
+
+### Features
+
+* add multiple bundle workspaces ([#67](https://github.com/MagnusOlstad/folio/issues/67)) ([8b403d4](https://github.com/MagnusOlstad/folio/commit/8b403d44e20c0616f4d4663441a8d9caa1efea4a))
+* **explorer:** add context menu and modular tree ([#74](https://github.com/MagnusOlstad/folio/issues/74)) ([f477805](https://github.com/MagnusOlstad/folio/commit/f4778052e91e98009100f04d1870f481e50290cf))
+* **history:** add git-backed note history ([#73](https://github.com/MagnusOlstad/folio/issues/73)) ([e56ca32](https://github.com/MagnusOlstad/folio/commit/e56ca325e3d13d7a5f317e6ade564aab64feb354))
+* **workspace:** add collapsible dual-pane shell ([#72](https://github.com/MagnusOlstad/folio/issues/72)) ([51c2e74](https://github.com/MagnusOlstad/folio/commit/51c2e74bada54c8ed1c63558d68d44f3c51135c7))
+
+
+### Bug Fixes
+
+* **ci:** verify packaged macos app artifacts ([#65](https://github.com/MagnusOlstad/folio/issues/65)) ([ab91ca3](https://github.com/MagnusOlstad/folio/commit/ab91ca3c1236226ba51cf9517b8225ea0188c411))
+* **editor:** preserve task checkbox scroll position ([#68](https://github.com/MagnusOlstad/folio/issues/68)) ([6ff24b6](https://github.com/MagnusOlstad/folio/commit/6ff24b6f0c52ca3873e3ad917954ae1f853cc6d0))
+* **workspace:** create path-directed drafts and unify restore notifications ([#77](https://github.com/MagnusOlstad/folio/issues/77)) ([e0e9bca](https://github.com/MagnusOlstad/folio/commit/e0e9bcaded8179f195669a22ef2d4d9718220a90))
+* **workspace:** improve editor interactions ([#70](https://github.com/MagnusOlstad/folio/issues/70)) ([1a988f8](https://github.com/MagnusOlstad/folio/commit/1a988f85f117a96b382d09c3c5ae9f6fb84128fd))
+
 ## [0.5.0](https://github.com/MagnusOlstad/folio/compare/v0.4.0...v0.5.0) (2026-09-21)
 
 
