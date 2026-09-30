@@ -296,6 +296,46 @@ test('history pagination reaches a note after more than 500 unrelated commits', 
   assert.equal(page.entries[0].title, 'Baseline')
 })
 
+test('history pages stay anchored to their cursor when new checkpoints arrive', async (t) => {
+  const fixture = await setup(t)
+  let note = path.join(fixture.bundleRoot, 'target.md')
+  let noteId = '/target.md'
+  const unrelated = path.join(fixture.bundleRoot, 'other.md')
+  await fsp.writeFile(note, '---\ntitle: Target\n---\n0\n')
+  await fsp.writeFile(unrelated, '---\ntitle: Other\n---\nInitial\n')
+  const revisions = [await fixture.history.reconcile('Checkpoint 0')]
+  for (let index = 1; index <= 34; index += 1) {
+    if (index === 18) {
+      await fsp.mkdir(path.dirname(path.join(fixture.bundleRoot, 'archive', 'target.md')))
+      await fsp.rename(note, path.join(fixture.bundleRoot, 'archive', 'target.md'))
+      note = path.join(fixture.bundleRoot, 'archive', 'target.md')
+      noteId = '/archive/target.md'
+      await fsp.writeFile(note, `---\ntitle: Target\nfiling:\n  previous_paths:\n    - /target.md\n---\nMoved note\n`)
+      revisions.push(await fixture.history.reconcile('Moved target'))
+    }
+    const filing = noteId === '/archive/target.md' ? 'filing:\n  previous_paths:\n    - /target.md\n' : ''
+    await fsp.writeFile(note, `---\ntitle: Target\n${filing}---\n${index}${'x'.repeat(index)}\n`)
+    revisions.push(await fixture.history.reconcile(`Checkpoint ${index}`, [noteId]))
+  }
+
+  const first = await fixture.history.entries(noteId)
+  assert.equal(first.entries.length, 30)
+  assert.ok(first.nextCursor)
+  assert.deepEqual(first.entries.map((entry) => entry.revision), revisions.slice().reverse().slice(0, 30))
+
+  await fsp.writeFile(note, '---\ntitle: Target\nfiling:\n  previous_paths:\n    - /target.md\n---\nnew checkpoint\n')
+  const freshRevision = await fixture.history.reconcile('Checkpoint after first page', [noteId])
+  assert.ok(freshRevision)
+  const second = await fixture.history.entries(noteId, first.nextCursor)
+  assert.deepEqual(second.entries.map((entry) => entry.revision), revisions.slice().reverse().slice(30))
+  assert.ok(!second.entries.some((entry) => entry.revision === freshRevision))
+  assert.equal(second.nextCursor, null)
+  await fsp.writeFile(unrelated, '---\ntitle: Other\n---\nAn unrelated commit after pagination.\n')
+  const unrelatedRevision = await fixture.history.reconcile('Unrelated', ['/other.md'])
+  await assert.rejects(fixture.history.entries(noteId, unrelatedRevision), /Invalid history cursor/)
+  await assert.rejects(fixture.history.version(noteId, unrelatedRevision), /Invalid note version/)
+})
+
 test('history helper keeps the API event loop responsive while it works', async (t) => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'folio-history-helper-'))
   const workerPath = path.join(root, 'slow-worker.js')

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
 type UseNoteHistoryCheckpointOptions = {
-  checkpoint: (documentId: string, scopeId: string) => Promise<void>;
+  checkpoint: (documentId: string, scopeId: string) => Promise<void | boolean>;
+  onCheckpoint?: (documentId: string, scopeId: string) => void;
   onError?: (documentId: string, error: unknown) => void;
   intervalMs?: number;
 };
@@ -11,21 +12,24 @@ type DirtyRevision = { documentId: string; revision: number };
 /** Checkpoints edited filed notes periodically while an editing session remains active. */
 export function useNoteHistoryCheckpoint({
   checkpoint,
+  onCheckpoint,
   onError,
-  intervalMs = 5 * 60 * 1000,
+  intervalMs = 30 * 1000,
 }: UseNoteHistoryCheckpointOptions) {
   const dirtyRevisionsRef = useRef(new Map<string, Map<string, DirtyRevision>>());
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const runningRef = useRef(false);
   const mountedRef = useRef(false);
   const checkpointRef = useRef(checkpoint);
+  const onCheckpointRef = useRef(onCheckpoint);
   const errorRef = useRef(onError);
   const scheduleRef = useRef<() => void>(() => undefined);
 
   useLayoutEffect(() => {
     checkpointRef.current = checkpoint;
+    onCheckpointRef.current = onCheckpoint;
     errorRef.current = onError;
-  }, [checkpoint, onError]);
+  }, [checkpoint, onCheckpoint, onError]);
 
   const schedule = useCallback(() => {
     if (!mountedRef.current || timerRef.current !== undefined || runningRef.current || dirtyRevisionsRef.current.size === 0) return;
@@ -37,7 +41,8 @@ export function useNoteHistoryCheckpoint({
       );
       void Promise.all(snapshot.map(async ({ documentId, revision, scopeId }) => {
         try {
-          await checkpointRef.current(documentId, scopeId);
+          const committed = await checkpointRef.current(documentId, scopeId);
+          if (committed !== false) onCheckpointRef.current?.(documentId, scopeId);
           const scopedDirty = dirtyRevisionsRef.current.get(scopeId);
           if (scopedDirty?.get(documentId)?.revision === revision) {
             scopedDirty.delete(documentId);

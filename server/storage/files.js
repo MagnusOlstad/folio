@@ -73,8 +73,29 @@ async function writeDraft(draft) {
   const filePath = draftFilePath(draft.id)
   if (!filePath) throw new Error('Invalid draft ID.')
   const temporaryPath = `${filePath}.${process.pid}.${crypto.randomBytes(3).toString('hex')}.tmp`
-  await fs.writeFile(temporaryPath, `${JSON.stringify(draft, null, 2)}\n`, { flag: 'wx' })
+  const persistedDraft = Object.fromEntries(Object.entries(draft).filter(([key]) => key !== 'history'))
+  await fs.writeFile(temporaryPath, `${JSON.stringify(persistedDraft, null, 2)}\n`, { flag: 'wx' })
   await fs.rename(temporaryPath, filePath)
+}
+
+async function archiveDraft(id, { content, filedId, filing, appended }) {
+  return queueDraftMutation(async () => {
+    const existing = await readDraft(id)
+    if (!existing) return null
+    const archivedAt = new Date().toISOString()
+    const draftReceipt = Object.fromEntries(Object.entries(existing).filter(([key]) => key !== 'history'))
+    const archived = {
+      ...draftReceipt,
+      ...(typeof content === 'string' ? { content } : {}),
+      filedId,
+      filedAt: archivedAt,
+      appended,
+      filing,
+      updatedAt: archivedAt,
+    }
+    await writeDraft(archived)
+    return archived
+  })
 }
 
 async function readOptionalFile(filePath) {
@@ -195,7 +216,7 @@ async function listBundleMarkdownFiles(directory = bundleRoot) {
 }
 
 
-  return { readRecords, writeRecords, normalizeDraftId, draftFilePath, readDrafts, readDraft, queueDraftMutation, writeDraft,
+  return { readRecords, writeRecords, normalizeDraftId, draftFilePath, readDrafts, archiveDraft, readDraft, queueDraftMutation, writeDraft,
     readOptionalFile, bundleFileId, resolveBundleMarkdownPath, isMovableConceptId, normalizeMoveDirectory,
     normalizeBundlePath, resolveBundlePath, assertNoBundleSymlinks, listBundleDirectories, listBundleMarkdownFiles }
 }

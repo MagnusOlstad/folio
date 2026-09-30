@@ -3,8 +3,8 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 export function registerRoutes(app, runtime) {
-  const { embedModel, getRawRoot, getBundleRoot, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, normalizeDraftId, queueDraftMutation,
-    readDraft, writeDraft, resolveBundleMarkdownPath, readBundleDocuments, bundleFileId, parseMarkdownFile, queueMarkdownMutation, reindexBundle,
+  const { embedModel, getRawRoot, getBundleRoot, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, normalizeDraftId, archiveDraft,
+    readDraft, resolveBundleMarkdownPath, readBundleDocuments, bundleFileId, parseMarkdownFile, queueMarkdownMutation, reindexBundle,
     normalizeInlineText, markdownDocument, embeddingInputHash, persistEmbeddingUpdates, refreshRecordEmbeddings, embedDocument, boundedEmbeddingText,
     embeddingSchemaVersion, classify, openingSpecialKind, rawDocument,
     slugify, confirmationIdFor, destinationFor, availableConceptFilename, findExactConceptFile, appendConceptDocument, appendAggregateDocument, filingActor,
@@ -230,20 +230,7 @@ app.post('/api/notes', async (request, response, next) => {
       await fs.writeFile(targetPath, markdownDocument(parsed.frontmatter, parsed.content))
     })
     if (sourceDraftId) {
-      await queueDraftMutation(async () => {
-        const existingDraft = await readDraft(sourceDraftId)
-        const archivedAt = new Date().toISOString()
-        await writeDraft({
-          id: sourceDraftId,
-          content,
-          createdAt: existingDraft?.createdAt || createdAt,
-          updatedAt: archivedAt,
-          filedId: createdNote.id,
-          filedAt: archivedAt,
-          appended,
-          filing: confirmation,
-        })
-      })
+      await archiveDraft(sourceDraftId, { content, filedId: createdNote.id, appended, filing: confirmation })
     }
     try {
       await history.reconcile(`Created ${createdNote.id}`, [createdNote.id])

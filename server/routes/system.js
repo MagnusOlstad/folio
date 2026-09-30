@@ -105,7 +105,7 @@ app.put('/api/draft', async (request, response, next) => {
         || (Number.isNaN(Date.parse(requestedCreatedAt)) ? now : requestedCreatedAt)
       const updatedAt = Number.isNaN(Date.parse(requestedUpdatedAt)) ? now : requestedUpdatedAt
       if (existing?.updatedAt && existing.updatedAt > updatedAt) return existing
-      const nextDraft = { id, content, createdAt, updatedAt }
+      const nextDraft = { ...existing, id, content, createdAt, updatedAt }
       await writeDraft(nextDraft)
       return nextDraft
     })

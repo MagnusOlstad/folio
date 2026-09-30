@@ -38,6 +38,8 @@ export type LiveMarkdownEditorProps = {
   initialSelection?: { from: number; to: number };
   onSelectionChange?: (from: number, to: number) => void;
   autoFocus?: boolean;
+  readOnly?: boolean;
+  containerClassName?: string;
   focusRequestId?: number;
   onFocusRequestConsumed?: () => void;
   ariaLabel: string;
@@ -111,6 +113,8 @@ export function LiveMarkdownEditor({
   onOpenLink,
   onToggleTask,
   autoFocus = false,
+  readOnly = false,
+  containerClassName,
   focusRequestId,
   onFocusRequestConsumed,
   ariaLabel,
@@ -133,8 +137,8 @@ export function LiveMarkdownEditor({
   const onFocusRequestConsumedRef = useRef(onFocusRequestConsumed);
   const ariaLabelCompartment = useRef(new Compartment());
   const callbacksRef = useRef<LiveMarkdownCallbacks>({
-    onOpenLink,
-    onToggleTask,
+    onOpenLink: readOnly ? undefined : onOpenLink,
+    onToggleTask: readOnly ? undefined : onToggleTask,
   });
 
   useLayoutEffect(() => {
@@ -146,7 +150,10 @@ export function LiveMarkdownEditor({
     onSelectionChangeRef.current = onSelectionChange;
     onFocusRequestConsumedRef.current = onFocusRequestConsumed;
     ariaLabelRef.current = ariaLabel;
-    callbacksRef.current = { onOpenLink, onToggleTask };
+    callbacksRef.current = {
+      onOpenLink: readOnly ? undefined : onOpenLink,
+      onToggleTask: readOnly ? undefined : onToggleTask,
+    };
   }, [
     ariaLabel,
     onBlur,
@@ -157,6 +164,7 @@ export function LiveMarkdownEditor({
     onOpenLink,
     onToggleTask,
     onSelectionChange,
+    readOnly,
   ]);
 
   useLayoutEffect(() => {
@@ -175,6 +183,8 @@ export function LiveMarkdownEditor({
             )
           : undefined,
         extensions: [
+          EditorState.readOnly.of(readOnly),
+          EditorView.editable.of(!readOnly),
           markdown({
             base: markdownLanguage,
             // Keep Markdown commands in the explicit keymap below so Folio's
@@ -192,7 +202,7 @@ export function LiveMarkdownEditor({
           panels(findLayer ? { topContainer: findLayer } : undefined),
           EditorView.scrollMargins.of(() => ({ bottom: 80 })),
           EditorView.lineWrapping,
-          EditorState.transactionFilter.of((transaction) => {
+          ...(!readOnly ? [EditorState.transactionFilter.of((transaction) => {
             if (!transaction.docChanged) return transaction;
             const value = transaction.newDoc.toString();
             const changes = liveMarkdownOrderedListChanges(value);
@@ -204,11 +214,11 @@ export function LiveMarkdownEditor({
                 sequential: true,
               },
             ];
-          }),
+          })] : []),
           ariaLabelCompartment.current.of(
             EditorView.contentAttributes.of({ "aria-label": ariaLabelRef.current }),
           ),
-          keymap.of([
+          keymap.of(readOnly ? [] : [
             { key: "Mod-a", run: selectAll },
             {
               key: "Shift-Space",
@@ -281,8 +291,8 @@ export function LiveMarkdownEditor({
             ...historyKeymap,
             ...searchKeymap,
           ]),
-          liveMarkdownExtensions({ callbacks: callbacksRef }),
-          EditorView.updateListener.of((update) => {
+          liveMarkdownExtensions({ callbacks: callbacksRef, readOnly }),
+          ...(!readOnly ? [EditorView.updateListener.of((update) => {
             if (update.selectionSet)
               onSelectionChangeRef.current?.(
                 update.state.selection.main.from,
@@ -294,23 +304,28 @@ export function LiveMarkdownEditor({
             valueRef.current = nextValue;
             pendingLocalValuesRef.current.push(nextValue);
             onChangeRef.current(nextValue);
-          }),
+          })] : []),
         ],
       }),
       parent: host,
     });
     view.scrollDOM.dataset.liveMarkdownScroll = "";
     const format = (event: Event) => {
+      if (readOnly) return;
       const marker = (event as CustomEvent<FormatMarker>).detail;
       if (marker !== "bold" && marker !== "italic" && marker !== "link") return;
       event.preventDefault();
       applyFormat(view, marker);
     };
-    const blur = () =>
+    const blur = () => {
+      if (readOnly) return;
       onBlurRef.current?.(
         host.closest<HTMLElement>("[data-document-scroll]")?.scrollTop ?? 0,
       );
-    const focus = () => onFocusRef.current?.();
+    };
+    const focus = () => {
+      if (!readOnly) onFocusRef.current?.();
+    };
     const selectListContent = (event: Event) => {
       const contentStart = (event as CustomEvent<number>).detail;
       if (typeof contentStart !== "number") return;
@@ -336,18 +351,18 @@ export function LiveMarkdownEditor({
         window.requestAnimationFrame(restoreDocumentScroll);
       });
     };
-    view.contentDOM.addEventListener("folio-format", format);
+    if (!readOnly) view.contentDOM.addEventListener("folio-format", format);
     view.contentDOM.addEventListener("folio-select-list-content", selectListContent);
     view.contentDOM.addEventListener("blur", blur);
     view.contentDOM.addEventListener("focus", focus);
     host.addEventListener("folio-find", find);
     viewRef.current = view;
-    const focusFrame = autoFocus
+    const focusFrame = autoFocus && !readOnly
       ? window.requestAnimationFrame(() => view.focus())
       : null;
     return () => {
       if (focusFrame !== null) window.cancelAnimationFrame(focusFrame);
-      view.contentDOM.removeEventListener("folio-format", format);
+      if (!readOnly) view.contentDOM.removeEventListener("folio-format", format);
       view.contentDOM.removeEventListener("folio-select-list-content", selectListContent);
       view.contentDOM.removeEventListener("blur", blur);
       view.contentDOM.removeEventListener("focus", focus);
@@ -355,10 +370,10 @@ export function LiveMarkdownEditor({
       view.destroy();
       viewRef.current = null;
     };
-  }, [autoFocus]);
+  }, [autoFocus, readOnly]);
 
   useLayoutEffect(() => {
-    if (focusRequestId === undefined) return;
+    if (readOnly || focusRequestId === undefined) return;
     const frame = window.requestAnimationFrame(() => {
       focusRequestFrameRef.current = null;
       const view = viewRef.current;
@@ -373,7 +388,7 @@ export function LiveMarkdownEditor({
         focusRequestFrameRef.current = null;
       }
     };
-  }, [focusRequestId]);
+  }, [focusRequestId, readOnly]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -414,8 +429,9 @@ export function LiveMarkdownEditor({
 
   return (
     <div
-      className="live-markdown-editor"
+      className={["live-markdown-editor", containerClassName].filter(Boolean).join(" ")}
       data-live-markdown-editor=""
+      data-read-only={readOnly ? "" : undefined}
       ref={hostRef}
     />
   );

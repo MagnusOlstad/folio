@@ -1,5 +1,6 @@
 import type { PointerEvent } from "react";
 import type {
+  NoteHistorySnapshot,
   TabGroup,
   ViewerDocument,
 } from "../../domain/types.ts";
@@ -105,6 +106,14 @@ export type EditorWorkspaceActions = {
 export type EditorWorkspaceProps = {
   model: EditorWorkspaceModel;
   actions: EditorWorkspaceActions;
+  historyPreview?: {
+    groupId: string;
+    documentId: string;
+    snapshot: NoteHistorySnapshot | null;
+    loading: boolean;
+    failed: boolean;
+    presentContent: string;
+  };
   paneControls?: {
     leftOpen: boolean;
     rightOpen: boolean;

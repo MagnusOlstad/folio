@@ -27,7 +27,9 @@ export function registerRoutes(app, runtime) {
 
   app.get('/api/note/history', async (request, response, next) => {
     try {
-      response.json(await runtime.history.entries(noteId(request), request.query.cursor || null, request.query.limit))
+      const id = noteId(request)
+      const page = await runtime.history.entries(id, request.query.cursor || null, request.query.limit)
+      response.json(page)
     } catch (error) {
       if (/Invalid note path|Invalid history cursor/i.test(error.message)) return response.status(400).json({ error: error.message })
       next(error)
@@ -36,8 +38,17 @@ export function registerRoutes(app, runtime) {
 
   const version = async (request, response, next) => {
     try {
-      const result = await runtime.history.version(noteId(request), noteVersion(request))
-      const parsed = runtime.parseMarkdownFile(result.markdown, noteId(request))
+      const id = noteId(request)
+      const revision = noteVersion(request)
+      const result = await runtime.history.version(id, revision)
+      const parsed = runtime.parseMarkdownFile(result.markdown, id)
+      // Note snapshots should use the same generated-section and capture
+      // cleanup as the live indexed note API. Fixed OKF files keep their raw
+      // body, matching /api/file.
+      const indexedRecord = (await runtime.readRecords()).some((record) => record.id === id)
+      const content = indexedRecord
+        ? runtime.indexedConceptContent(parsed.content)
+        : runtime.normalizeMarkdownBreaks(parsed.content)
       response.json({
         revision: result.revision,
         note: {
@@ -46,7 +57,7 @@ export function registerRoutes(app, runtime) {
           tags: parsed.tags,
           status: parsed.status,
           staleAfter: parsed.staleAfter,
-          content: parsed.content,
+          content,
         },
         diff: result.diff,
       })
@@ -65,8 +76,8 @@ export function registerRoutes(app, runtime) {
       const filePath = runtime.resolveBundleMarkdownPath(id)
       if (!filePath) return response.status(400).json({ error: 'Invalid note path.' })
       const historic = await runtime.history.version(id, revision)
-      const historicNote = runtime.parseMarkdownFile(historic.markdown, filePath)
       const currentNote = runtime.parseMarkdownFile(await fs.readFile(filePath, 'utf8'), filePath)
+      const historicNote = runtime.parseMarkdownFile(historic.markdown, filePath)
       try {
         await runtime.history.reconcile(`Before restore ${id}`, [id])
       } catch (error) {
