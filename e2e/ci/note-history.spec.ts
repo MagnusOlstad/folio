@@ -260,6 +260,48 @@ test('Older from Now refreshes snapshots created while the note stayed open', as
   expect(historyReads).toBe(2)
 })
 
+test('a successful live checkpoint appears without moving the timeline away from Now', async ({ page }) => {
+  await page.clock.install()
+  const oldEntries = Array.from({ length: 8 }, (_, index) => ({
+    revision: `live-old-${index}`,
+    authoredAt: new Date(Date.UTC(2026, 8, 27, 10, 0 - index)).toISOString(),
+    title: `Existing moment ${index}`,
+  }))
+  const newEntry = { revision: 'live-new', authoredAt: '2026-09-27T11:00:00.000Z', title: 'New checkpoint' }
+  let checkpointed = false
+  let checkpointRequests = 0
+  await page.route('**/api/note/history**', async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/checkpoint') && route.request().method() === 'POST') {
+      checkpointed = true
+      checkpointRequests += 1
+      await route.fulfill({ json: {} })
+      return
+    }
+    if (url.pathname === '/api/note/history' && route.request().method() === 'GET') {
+      await route.fulfill({ json: { entries: checkpointed ? [newEntry, ...oldEntries] : oldEntries, nextCursor: null } })
+      return
+    }
+    await route.continue()
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  const editor = page.getByRole('textbox', { name: 'Edit Start Here' })
+  await expect(editor).toBeVisible()
+  const timeline = page.getByRole('navigation', { name: 'Note timeline' })
+  await expect(timeline.getByRole('button', { name: /Existing moment 0/ })).toBeVisible()
+  await editor.fill('# Start Here\n\nA live checkpoint update')
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible()
+  await timeline.evaluate(node => { node.scrollTop = 24 })
+  await page.clock.fastForward(10_000)
+  await expect.poll(() => checkpointRequests).toBe(1)
+  await expect(timeline.getByRole('button', { name: /New checkpoint/ })).toBeVisible()
+  await expect(timeline.getByRole('button', { name: 'Present' })).toHaveAttribute('aria-current', 'step')
+  await expect(editor).toBeVisible()
+  await expect.poll(() => timeline.evaluate(node => node.scrollTop)).toBe(24)
+})
+
 test('the sticky timeline date follows the day at the top while scrolling', async ({ page }) => {
   const revisions = Array.from({ length: 24 }, (_, index) => ({
     revision: `sticky-${index}`,

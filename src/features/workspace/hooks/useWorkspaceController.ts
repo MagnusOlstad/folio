@@ -37,6 +37,11 @@ function draftTitle(content: string) {
 
 export function useWorkspaceController(): WorkspaceShellProps {
   const [message, setMessage] = useState("");
+  const [historyCheckpoint, setHistoryCheckpoint] = useState<{
+    documentId: string;
+    scopeId: string;
+    revision: number;
+  } | null>(null);
   const noteExport = useNoteExport({ setMessage });
   const themeSettings = useThemeSettings();
   const bundleSetup = useBundleSetup();
@@ -152,19 +157,29 @@ export function useWorkspaceController(): WorkspaceShellProps {
   }, [documents.deletingNoteId, explorer.movingFileId, persistenceBundleId]);
   const checkpointEditedNote = useNoteHistoryCheckpoint({
     checkpoint: async (documentId, scopeId) => {
-      if (checkpointContextRef.current.bundleId !== scopeId) return;
+      if (checkpointContextRef.current.bundleId !== scopeId) return false;
       const bundleId = scopeId;
       const document = documents.documentsRef.current[documentId];
-      if (!document) return;
-      if (isUntitledId(documentId)) return;
+      if (!document) return false;
+      if (isUntitledId(documentId)) return false;
       await autosave.flushSave(documentId);
       if (autosave.isDirty(documentId)) throw new Error("Could not save the note before its history checkpoint.");
       const context = checkpointContextRef.current;
-      if (!document || isUntitledId(documentId) || !document.deletable || context.bundleId !== bundleId || context.movingFileId === documentId || context.deletingNoteId === documentId) return;
+      if (!document || isUntitledId(documentId) || !document.deletable || context.bundleId !== bundleId || context.movingFileId === documentId || context.deletingNoteId === documentId) return false;
       await apiForBundle(bundleId, "/api/note/history/checkpoint", {
         method: "POST",
         body: JSON.stringify({ id: documentId }),
       });
+      return true;
+    },
+    onCheckpoint: (documentId, scopeId) => {
+      const activeGroup = tabs.groups.find((group) => group.id === tabs.activeGroupId);
+      if (!layout.rightPaneOpen || activeGroup?.activeId !== documentId || persistenceBundleId !== scopeId) return;
+      setHistoryCheckpoint((current) => ({
+        documentId,
+        scopeId,
+        revision: (current?.documentId === documentId && current.scopeId === scopeId ? current.revision : 0) + 1,
+      }));
     },
     onError: (_documentId, error) => {
       setMessage(error instanceof Error ? error.message : "Could not save a note history checkpoint.");
@@ -293,6 +308,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
   const previousBundleIdRef = useRef<string | null>(null);
   const switchBundle = useCallback(async (bundleId: string, previousBundleId: string | null) => {
     const revision = ++bundleSwitchRevisionRef.current;
+    setHistoryCheckpoint(null);
     explorer.setFilesLoading(true);
     explorer.discovery.clearDiscovery();
     if (previousBundleId) {
@@ -520,6 +536,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
 
   return {
     exportPreview: noteExport.preview,
+    historyCheckpoint,
+    historyScopeId: persistenceBundleId,
     app: {
       versionInfo: models.versionInfo,
       status: models.status,

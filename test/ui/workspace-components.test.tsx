@@ -166,6 +166,63 @@ describe("workspace editor components", () => {
     vi.unstubAllGlobals();
   });
 
+  it("shows one timestamp legend for consecutive snapshots in the same local minute", async () => {
+    const sameMinute = [
+      { revision: "minute-newer", authoredAt: "2026-09-27T10:05:50.000Z", title: "Newer in minute" },
+      { revision: "minute-older", authoredAt: "2026-09-27T10:05:03.000Z", title: "Older in minute" },
+    ];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ entries: sameMinute, nextCursor: null }), { status: 200 })));
+    render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn()} onRestored={vi.fn()} onPreview={vi.fn()} />);
+    const newer = await screen.findByRole("button", { name: /Newer in minute/ });
+    const older = screen.getByRole("button", { name: /Older in minute/ });
+    const minute = new Date(sameMinute[0].authoredAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    expect(newer).toHaveTextContent(minute);
+    expect(older).not.toHaveTextContent(minute);
+    const accessibleStamp = new Date(sameMinute[1].authoredAt).toLocaleString(undefined, { dateStyle: "full", timeStyle: "medium" });
+    expect(older).toHaveAttribute("aria-label", expect.stringContaining(accessibleStamp));
+    expect(newer).toHaveClass("is-day-boundary");
+    expect(older).not.toHaveClass("is-day-boundary");
+    vi.unstubAllGlobals();
+  });
+
+  it("refreshes after a checkpoint while keeping Now selected and the older cursor", async () => {
+    const oldEntry = { revision: "old", authoredAt: "2026-09-27T10:00:00.000Z", title: "Old moment" };
+    const newEntry = { revision: "new", authoredAt: "2026-09-27T11:00:00.000Z", title: "New moment" };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.searchParams.has("cursor")) {
+        return new Response(JSON.stringify({ entries: [], nextCursor: null }), { status: 200 });
+      }
+      const checkpointRead = fetchMock.mock.calls.length > 1;
+      return new Response(JSON.stringify({ entries: checkpointRead ? [newEntry, oldEntry] : [oldEntry], nextCursor: checkpointRead ? "new-older-cursor" : "older-cursor" }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onBeforeRestore = vi.fn().mockResolvedValue(undefined);
+    const onRestored = vi.fn().mockResolvedValue(undefined);
+    const onPreview = vi.fn();
+    const { rerender } = render(<NoteHistoryPanel documentId="/notes/current.md" checkpointRevision={0} onBeforeRestore={onBeforeRestore} onRestored={onRestored} onPreview={onPreview} />);
+    const timeline = screen.getByRole("navigation", { name: "Note timeline" });
+    await screen.findByRole("button", { name: /Old moment/ });
+    timeline.scrollTop = 37;
+    rerender(<NoteHistoryPanel documentId="/notes/current.md" checkpointRevision={1} onBeforeRestore={onBeforeRestore} onRestored={onRestored} onPreview={onPreview} />);
+    const present = screen.getByRole("button", { name: "Present" });
+    await screen.findByRole("button", { name: /New moment/ });
+    expect(present).toHaveAttribute("aria-current", "step");
+    expect(timeline.scrollTop).toBe(37);
+    fireEvent.click(screen.getByRole("button", { name: "Load earlier" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("cursor=older-cursor"), expect.any(Object)));
+    vi.unstubAllGlobals();
+  });
+
+  it("uses the initial history request instead of replaying an old checkpoint signal on mount", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ entries: [], nextCursor: null }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<NoteHistoryPanel documentId="/notes/current.md" checkpointRevision={7} onBeforeRestore={vi.fn()} onRestored={vi.fn()} onPreview={vi.fn()} />);
+    await screen.findByText("No earlier moments yet.");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
   it("automatically appends and deduplicates the next history page near the timeline edge", async () => {
     const newest = { revision: "newest", authoredAt: "2026-09-27T12:00:00.000Z", title: "Newest" };
     const older = { revision: "older", authoredAt: "2026-09-26T12:00:00.000Z", title: "Older" };

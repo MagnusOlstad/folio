@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { NoteHistoryEntry, NoteHistoryPage, NoteHistorySnapshot } from "../../../domain/types.ts";
 import { api } from "../../../lib/api.ts";
 
 type Props = {
   documentId: string;
+  checkpointRevision?: number;
   onBeforeRestore: (id: string) => Promise<void>;
   onRestored: (id: string) => Promise<void>;
   onPreview: (snapshot: NoteHistorySnapshot | null, loading: boolean, failed: boolean) => void;
@@ -23,13 +24,19 @@ function timestamp(value: string) {
   return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
+function accessibleTimestamp(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, { dateStyle: "full", timeStyle: "medium" });
+}
+
 function dayLabel(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
-export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPreview }: Props) {
+export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeRestore, onRestored, onPreview }: Props) {
   const [entries, setEntries] = useState<NoteHistoryEntry[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [revision, setRevision] = useState<string | null>(null);
@@ -65,6 +72,10 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
   const historyReady = useRef(false);
   const refreshedFromNow = useRef(false);
   const refreshingTimeline = useRef(false);
+  const checkpointRefreshInFlight = useRef(false);
+  const desiredCheckpointRevision = useRef(checkpointRevision);
+  const completedCheckpointRevision = useRef(checkpointRevision);
+  const requestScrubSelectionRef = useRef<() => void>(() => undefined);
 
   function updateStickyDay() {
     const node = timeline.current;
@@ -242,7 +253,7 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
   }
 
   async function refreshTimelineFromNow(): Promise<NoteHistoryPage | null> {
-    if (!historyReady.current || refreshedFromNow.current || refreshingTimeline.current || loadingPage.current) return null;
+    if (!historyReady.current || refreshedFromNow.current || refreshingTimeline.current || loadingPage.current || checkpointRefreshInFlight.current) return null;
     refreshedFromNow.current = true;
     refreshingTimeline.current = true;
     try {
@@ -272,9 +283,55 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
       return null;
     } finally {
       refreshingTimeline.current = false;
-      if (scrubIntent.current) requestScrubSelection();
+      if (desiredCheckpointRevision.current > completedCheckpointRevision.current) void refreshTimelineAfterCheckpoint();
+      if (scrubIntent.current) requestScrubSelectionRef.current();
     }
   }
+
+  const refreshTimelineAfterCheckpoint = useCallback(async () => {
+    if (checkpointRefreshInFlight.current || !historyReady.current || loadingPage.current || refreshingTimeline.current) return;
+    checkpointRefreshInFlight.current = true;
+    const generation = historyPageGeneration.current;
+    const targetRevision = desiredCheckpointRevision.current;
+    try {
+      const page = await api<NoteHistoryPage>(`/api/note/history?id=${encodeURIComponent(documentId)}&limit=${HISTORY_PAGE_SIZE}`);
+      if (generation !== historyPageGeneration.current) return;
+      const node = timeline.current;
+      const center = node ? node.getBoundingClientRect().top + node.clientHeight / 2 : 0;
+      const stops = node ? [...node.querySelectorAll<HTMLButtonElement>("[data-history-stop]")] : [];
+      const anchor = stops.reduce<HTMLButtonElement | null>((best, stop) =>
+        !best || Math.abs(stop.getBoundingClientRect().top + stop.offsetHeight / 2 - center) < Math.abs(best.getBoundingClientRect().top + best.offsetHeight / 2 - center) ? stop : best, null);
+      const anchorRevision = anchor?.dataset.historyStop || "";
+      const anchorTop = anchor?.getBoundingClientRect().top ?? 0;
+      setEntries((current) => {
+        const seen = new Set(current.map((entry) => entry.revision));
+        return [...page.entries, ...current.filter((entry) => !seen.has(entry.revision))];
+      });
+      if (entries.length === 0) setCursor(page.nextCursor);
+      completedCheckpointRevision.current = targetRevision;
+      requestAnimationFrame(() => {
+        if (!node || !anchor || generation !== historyPageGeneration.current) return;
+        const refreshedAnchor = [...node.querySelectorAll<HTMLButtonElement>("[data-history-stop]")]
+          .find((stop) => (stop.dataset.historyStop || "") === anchorRevision);
+        if (refreshedAnchor) node.scrollTop += refreshedAnchor.getBoundingClientRect().top - anchorTop;
+      });
+    } catch (cause) {
+      if (generation === historyPageGeneration.current) setError(cause instanceof Error ? cause.message : "Could not refresh note history.");
+    } finally {
+      checkpointRefreshInFlight.current = false;
+      if (generation === historyPageGeneration.current && desiredCheckpointRevision.current > targetRevision) {
+        void refreshTimelineAfterCheckpoint();
+      }
+      if (scrubIntent.current) requestScrubSelectionRef.current();
+    }
+  }, [documentId, entries]);
+
+  useEffect(() => {
+    desiredCheckpointRevision.current = Math.max(desiredCheckpointRevision.current, checkpointRevision);
+    if (loading || !historyReady.current || loadingPage.current || refreshingTimeline.current || checkpointRefreshInFlight.current
+      || desiredCheckpointRevision.current <= completedCheckpointRevision.current) return;
+    void refreshTimelineAfterCheckpoint();
+  }, [checkpointRevision, loading, loadingMore, refreshTimelineAfterCheckpoint]);
 
   function beginScrub() {
     scrubIntent.current = true;
@@ -307,6 +364,8 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
       void select(next, false, true);
     });
   }
+
+  requestScrubSelectionRef.current = requestScrubSelection;
 
   function onScroll() {
     const node = timeline.current;
@@ -421,7 +480,8 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
         {!loading && entries.length === 0 && <p className="note-history-state">No earlier moments yet.</p>}
         {entries.map((entry, index) => {
           const dayBoundary = index === 0 || localDay(entry.authoredAt) !== localDay(entries[index - 1].authoredAt);
-          return <button type="button" disabled={restoring} data-history-stop={entry.revision} data-history-day={dayLabel(entry.authoredAt)} aria-label={`${entry.title || "Untitled"}, ${dayLabel(entry.authoredAt)}, ${timestamp(entry.authoredAt)}`} aria-current={revision === entry.revision ? "step" : undefined} className={`note-history-stop${dayBoundary ? " is-day-boundary" : ""}${revision === entry.revision ? " active" : ""}`} key={entry.revision} onClick={() => { if (dragMoved.current) { dragMoved.current = false; return; } moveTo(entry.revision); }}><span className="note-history-tick"/><span className="note-history-stop-copy"><strong>{timestamp(entry.authoredAt)}</strong><small>{dayBoundary ? dayLabel(entry.authoredAt) : "\u00a0"}</small></span></button>;
+          const sameMinuteAsPrevious = !dayBoundary && index > 0 && timestamp(entry.authoredAt) === timestamp(entries[index - 1].authoredAt);
+          return <button type="button" disabled={restoring} data-history-stop={entry.revision} data-history-day={dayLabel(entry.authoredAt)} aria-label={`${entry.title || "Untitled"}, ${accessibleTimestamp(entry.authoredAt)}`} aria-current={revision === entry.revision ? "step" : undefined} className={`note-history-stop${dayBoundary ? " is-day-boundary" : ""}${revision === entry.revision ? " active" : ""}`} key={entry.revision} onClick={() => { if (dragMoved.current) { dragMoved.current = false; return; } moveTo(entry.revision); }}><span className="note-history-tick"/><span className="note-history-stop-copy"><strong>{sameMinuteAsPrevious ? "\u00a0" : timestamp(entry.authoredAt)}</strong><small>{dayBoundary ? dayLabel(entry.authoredAt) : "\u00a0"}</small></span></button>;
         })}
         {cursor && <button type="button" className="note-history-more" onClick={() => void loadMore()} disabled={loadingMore || restoring}>{loadingMore ? "Loading…" : "Load earlier"}</button>}
       </nav>

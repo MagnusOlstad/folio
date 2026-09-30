@@ -41,6 +41,8 @@ export type WorkspaceShellProps = {
     resetSidebar: () => void;
     resetRightPane: () => void;
   };
+  historyCheckpoint?: { documentId: string; scopeId: string; revision: number } | null;
+  historyScopeId?: string;
 };
 
 export function WorkspaceShell({
@@ -50,13 +52,15 @@ export function WorkspaceShell({
   editor,
   exportPreview,
   layout,
+  historyCheckpoint,
+  historyScopeId,
 }: WorkspaceShellProps) {
   const activeGroup = editor.model.groups.find((group) => group.id === editor.model.activeGroupId);
   const activeDocumentId = activeGroup?.activeId ?? null;
   const activeDocument = activeDocumentId ? editor.model.documents[activeDocumentId] : null;
   const historyAvailable = Boolean(activeDocumentId && activeDocument && !editor.model.loadingDocuments.has(activeDocumentId)
     && activeDocument.deletable && !isUntitledId(activeDocumentId));
-  const scope = `${activeGroup?.id ?? ""}:\0${activeDocumentId ?? ""}:\0${layout.rightPaneOpen}:\0${historyAvailable}`;
+  const scope = `${historyScopeId ?? ""}:\0${activeGroup?.id ?? ""}:\0${activeDocumentId ?? ""}:\0${layout.rightPaneOpen}:\0${historyAvailable}`;
   const [history, setHistory] = useState<{ scope: string; snapshot: NoteHistorySnapshot | null; loading: boolean; failed: boolean }>(
     { scope, snapshot: null, loading: false, failed: false },
   );
@@ -65,8 +69,9 @@ export function WorkspaceShell({
   }
   const historyContent = historyAvailable && activeDocumentId ? (
     <NoteHistoryPanel
-      key={`${activeGroup?.id}:${activeDocumentId}`}
+      key={`${historyScopeId ?? ""}:${activeGroup?.id}:${activeDocumentId}`}
       documentId={activeDocumentId}
+      checkpointRevision={historyCheckpoint?.documentId === activeDocumentId && historyCheckpoint.scopeId === historyScopeId ? historyCheckpoint.revision : 0}
       onBeforeRestore={editor.actions.beforeHistoryRestore}
       onRestored={editor.actions.historyRestored}
       onPreview={(snapshot, loading, failed) => setHistory((current) => current.scope === scope ? { ...current, snapshot, loading, failed } : current)}

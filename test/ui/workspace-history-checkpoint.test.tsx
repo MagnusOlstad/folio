@@ -22,6 +22,24 @@ describe("useNoteHistoryCheckpoint", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("notifies the mounted history only after a checkpoint commits", async () => {
+    vi.useFakeTimers();
+    let resolveCheckpoint: ((committed: boolean) => void) | undefined;
+    const checkpoint = vi.fn(() => new Promise<boolean>((resolve) => { resolveCheckpoint = resolve; }));
+    const onCheckpoint = vi.fn();
+    const { result } = renderHook(() => useNoteHistoryCheckpoint({ checkpoint, onCheckpoint }));
+    act(() => result.current("/notes/long-session.md", "bundle-one"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(10 * 1000); });
+    expect(onCheckpoint).not.toHaveBeenCalled();
+    await act(async () => { resolveCheckpoint?.(true); await Promise.resolve(); });
+    expect(onCheckpoint).toHaveBeenCalledWith("/notes/long-session.md", "bundle-one");
+
+    act(() => result.current("/notes/long-session.md", "bundle-one"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(10 * 1000); });
+    await act(async () => { resolveCheckpoint?.(false); await Promise.resolve(); });
+    expect(onCheckpoint).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps edits made during a checkpoint dirty for the next interval", async () => {
     vi.useFakeTimers();
     let resolveCheckpoint: (() => void) | undefined;
