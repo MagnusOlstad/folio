@@ -302,6 +302,17 @@ export function useWorkspaceController(): WorkspaceShellProps {
     },
     enabled: persistenceEnabled,
   });
+  const flushSession = session.flush;
+  const { flushAllSaves, hasDirtySaves } = autosave;
+  const flushUpdateRestartState = useCallback(async () => {
+    await flushAllSaves();
+    flushSession();
+    return !hasDirtySaves();
+  }, [flushAllSaves, flushSession, hasDirtySaves]);
+  useEffect(
+    () => window.folio?.onPrepareUpdateRestart?.(flushUpdateRestartState),
+    [flushUpdateRestartState],
+  );
 
   const bundleSwitchRevisionRef = useRef(0);
   const initialBundleIdRef = useRef<string | null | undefined>(undefined);

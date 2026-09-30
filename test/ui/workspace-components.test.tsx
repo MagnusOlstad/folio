@@ -1,5 +1,5 @@
-import { createEvent, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
-import { act, useState } from "react";
+import { act, createEvent, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ViewerDocument } from "../../src/domain/types.ts";
 import { DocumentFooter } from "../../src/features/workspace/components/DocumentFooter.tsx";
@@ -64,6 +64,187 @@ describe("workspace editor components", () => {
     expect(header).toContainElement(screen.getByRole("button", { name: "Settings" }));
     expect(header).toContainElement(toggle);
     expect(toggle.parentElement).toBe(header);
+  });
+
+  it("starts desktop updates from the badge and shows download progress", async () => {
+    const previousFolio = window.folio;
+    let updateListener: ((state: { status: "downloading"; version: string; percent: number; error: null }) => void) | undefined;
+    const startUpdate = vi.fn().mockResolvedValue(null);
+    window.folio = {
+      getUpdateState: vi.fn().mockResolvedValue({ status: "available", version: "1.2.3", percent: null, error: null }),
+      startUpdate,
+      onUpdateState: (handler) => {
+        updateListener = handler;
+        return vi.fn();
+      },
+    };
+    try {
+      const { container } = render(
+        <WorkspaceLeftPaneHeader
+          versionInfo={{ version: "1.0.0", repo: "owner/repo", latest: "1.2.3", latestUrl: "https://example.test/release", updateAvailable: true }}
+          onOpenSettings={vi.fn()}
+          sidebarOpen
+          onToggleSidebar={vi.fn()}
+        />,
+      );
+      const badge = await screen.findByRole("button", { name: "Download update: version 1.2.3" });
+      fireEvent.click(badge);
+      expect(startUpdate).toHaveBeenCalledOnce();
+      await waitFor(() => expect(updateListener).toBeDefined());
+      await act(async () => updateListener?.({ status: "downloading", version: "1.2.3", percent: 42, error: null }));
+      expect(screen.getByRole("button", { name: "Downloading 42%: version 1.2.3" })).toBeDisabled();
+      expect(container.querySelector(".update-spinner")).toBeInTheDocument();
+    } finally {
+      window.folio = previousFolio;
+    }
+  });
+
+  it("shows the native update when the release API has no update information", async () => {
+    const previousFolio = window.folio;
+    window.folio = {
+      getUpdateState: vi.fn().mockResolvedValue({ status: "available", version: "1.2.3", percent: null, error: null }),
+      startUpdate: vi.fn().mockResolvedValue(null),
+    };
+    try {
+      render(
+        <WorkspaceLeftPaneHeader
+          versionInfo={{ version: "1.0.0", repo: "owner/repo", latest: null, updateAvailable: false }}
+          onOpenSettings={vi.fn()}
+          sidebarOpen
+          onToggleSidebar={vi.fn()}
+        />,
+      );
+      expect(await screen.findByRole("button", { name: "Download update: version 1.2.3" })).toBeVisible();
+    } finally {
+      window.folio = previousFolio;
+    }
+  });
+
+  it("keeps newer update events over stale state reads and handles failed reads", async () => {
+    const previousFolio = window.folio;
+    let resolveInitial: ((state: { status: "available"; version: string; percent: null; error: null }) => void) | undefined;
+    let updateListener: ((state: { status: "available"; version: string; percent: null; error: null }) => void) | undefined;
+    const unsubscribe = vi.fn();
+    window.folio = {
+      getUpdateState: () => new Promise((resolve) => { resolveInitial = resolve; }),
+      startUpdate: vi.fn().mockResolvedValue(null),
+      onUpdateState: (handler) => {
+        updateListener = handler;
+        return unsubscribe;
+      },
+    };
+    try {
+      const { unmount } = render(
+        <WorkspaceLeftPaneHeader
+          versionInfo={{ version: "1.0.0", repo: "owner/repo", latest: null, updateAvailable: false }}
+          onOpenSettings={vi.fn()}
+          sidebarOpen
+          onToggleSidebar={vi.fn()}
+        />,
+      );
+      await waitFor(() => expect(updateListener).toBeDefined());
+      act(() => updateListener?.({ status: "available", version: "1.3.0", percent: null, error: null }));
+      await act(async () => resolveInitial?.({ status: "available", version: "1.2.0", percent: null, error: null }));
+      expect(screen.getByRole("button", { name: "Download update: version 1.3.0" })).toBeVisible();
+      unmount();
+      expect(unsubscribe).toHaveBeenCalledOnce();
+
+      window.folio.getUpdateState = vi.fn().mockRejectedValue(new Error("updater unavailable"));
+      const { container } = render(
+        <WorkspaceLeftPaneHeader
+          versionInfo={{ version: "1.0.0", repo: "owner/repo", latest: "1.4.0", latestUrl: "https://example.test/release", updateAvailable: true }}
+          onOpenSettings={vi.fn()}
+          sidebarOpen
+          onToggleSidebar={vi.fn()}
+        />,
+      );
+      await waitFor(() => expect(container.querySelector(".update-badge")).toHaveAttribute("href", "https://example.test/release"));
+    } finally {
+      window.folio = previousFolio;
+    }
+  });
+
+  it("uses the native updater version when the release API reports no update", async () => {
+    const previousFolio = window.folio;
+    window.folio = {
+      getUpdateState: vi.fn().mockResolvedValue({ status: "available", version: "1.2.3", percent: null, error: null }),
+      startUpdate: vi.fn().mockResolvedValue(null),
+    };
+    try {
+      render(
+        <WorkspaceLeftPaneHeader
+          versionInfo={{ version: "1.0.0", repo: "owner/repo", latest: null, updateAvailable: false }}
+          onOpenSettings={vi.fn()}
+          sidebarOpen
+          onToggleSidebar={vi.fn()}
+        />,
+      );
+      expect(await screen.findByRole("button", { name: "Download update: version 1.2.3" })).toBeVisible();
+    } finally {
+      window.folio = previousFolio;
+    }
+  });
+
+  it("keeps an updater event newer than a delayed initial state and ignores rejected state reads", async () => {
+    const previousFolio = window.folio;
+    let resolveInitial: ((state: { status: "available"; version: string; percent: null; error: null }) => void) | undefined;
+    let updateListener: ((state: { status: "available"; version: string; percent: null; error: null }) => void) | undefined;
+    const unsubscribe = vi.fn();
+    window.folio = {
+      getUpdateState: () => new Promise((resolve) => { resolveInitial = resolve; }),
+      startUpdate: vi.fn().mockResolvedValue(null),
+      onUpdateState: (handler) => {
+        updateListener = handler;
+        return unsubscribe;
+      },
+    };
+    try {
+      const { unmount } = render(
+        <WorkspaceLeftPaneHeader
+          versionInfo={{ version: "1.0.0", repo: "owner/repo", latest: null, updateAvailable: false }}
+          onOpenSettings={vi.fn()}
+          sidebarOpen
+          onToggleSidebar={vi.fn()}
+        />,
+      );
+      await waitFor(() => expect(updateListener).toBeDefined());
+      act(() => updateListener?.({ status: "available", version: "1.3.0", percent: null, error: null }));
+      await act(async () => resolveInitial?.({ status: "available", version: "1.2.0", percent: null, error: null }));
+      expect(screen.getByRole("button", { name: "Download update: version 1.3.0" })).toBeVisible();
+      unmount();
+      expect(unsubscribe).toHaveBeenCalledOnce();
+
+      window.folio.getUpdateState = vi.fn().mockRejectedValue(new Error("updater unavailable"));
+      const { container } = render(
+        <WorkspaceLeftPaneHeader
+          versionInfo={{ version: "1.0.0", repo: "owner/repo", latest: "1.4.0", latestUrl: "https://example.test/release", updateAvailable: true }}
+          onOpenSettings={vi.fn()}
+          sidebarOpen
+          onToggleSidebar={vi.fn()}
+        />,
+      );
+      await waitFor(() => expect(container.querySelector(".update-badge")).toHaveAttribute("href", "https://example.test/release"));
+    } finally {
+      window.folio = previousFolio;
+    }
+  });
+
+  it("keeps the release page link when the desktop updater is unavailable", () => {
+    const previousFolio = window.folio;
+    window.folio = undefined;
+    try {
+      render(
+        <WorkspaceLeftPaneHeader
+          versionInfo={{ version: "1.0.0", repo: "owner/repo", latest: "1.2.3", latestUrl: "https://example.test/release", updateAvailable: true }}
+          onOpenSettings={vi.fn()}
+          sidebarOpen
+          onToggleSidebar={vi.fn()}
+        />,
+      );
+      expect(screen.getByRole("link", { name: "Update to version 1.2.3" })).toHaveAttribute("href", "https://example.test/release");
+    } finally {
+      window.folio = previousFolio;
+    }
   });
 
   it("puts the right-pane hide control in its top header", () => {

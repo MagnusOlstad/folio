@@ -119,6 +119,21 @@ describe("workspace session persistence", () => {
     expect(JSON.parse(storageWrite.mock.calls[0][1]).groups[0].activeId).toBe("/two.md");
   });
 
+  it("flushes a pending workspace session immediately", () => {
+    const storageWrite = vi.mocked(window.folio!.setStorage!);
+    const { result } = renderHook(() => useTestSession(null, vi.fn().mockResolvedValue(undefined)));
+    act(() => {
+      result.current.setGroups([group("primary", ["/one.md"], "/one.md")]);
+    });
+
+    expect(storageWrite).not.toHaveBeenCalled();
+    act(() => result.current.flush());
+    expect(storageWrite).toHaveBeenCalledOnce();
+    expect(JSON.parse(storageWrite.mock.calls[0][1]).groups[0].activeId).toBe("/one.md");
+    act(() => vi.advanceTimersByTime(400));
+    expect(storageWrite).toHaveBeenCalledOnce();
+  });
+
   it("persists and restores a selection for each document", () => {
     const { result, rerender } = renderHook(() => useTestSession(null, vi.fn().mockResolvedValue(undefined)));
     act(() => {

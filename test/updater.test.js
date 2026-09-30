@@ -5,24 +5,23 @@ import { createUpdaterCoordinator } from '../electron/updater.js'
 
 function createUpdater() {
   const updater = new EventEmitter()
-  updater.checkForUpdates = async () => {}
+  const nativeUpdater = new EventEmitter()
+  updater.checkForUpdates = async () => ({ isUpdateAvailable: false, updateInfo: { version: '1.0.0' } })
+  updater.downloadUpdate = async () => []
   updater.quitAndInstall = () => {}
-  return updater
+  nativeUpdater.checkForUpdates = () => {}
+  return { updater, nativeUpdater }
 }
 
-function createLogger() {
-  const errors = []
-  const warnings = []
+function coordinatorOptions({ updater, nativeUpdater, ...options }) {
   return {
-    errors,
-    warnings,
-    error: (...args) => errors.push(args),
-    warn: (...args) => warnings.push(args),
+    updater,
+    nativeUpdater,
+    getWindow: () => ({ webContents: { send() {} } }),
+    isPackaged: true,
+    platform: 'darwin',
+    ...options,
   }
-}
-
-function nextTurn() {
-  return new Promise((resolve) => setImmediate(resolve))
 }
 
 test('updater skips unpackaged and non-macOS runs', async () => {
@@ -30,103 +29,229 @@ test('updater skips unpackaged and non-macOS runs', async () => {
     { isPackaged: false, platform: 'darwin' },
     { isPackaged: true, platform: 'linux' },
   ]) {
-    const updater = createUpdater()
+    const { updater, nativeUpdater } = createUpdater()
     let checks = 0
     updater.checkForUpdates = async () => { checks += 1 }
-    const coordinator = createUpdaterCoordinator({
-      updater,
-      dialog: { showMessageBox: async () => ({ response: 1 }) },
-      getWindow: () => ({}),
-      ...options,
-    })
-
+    const coordinator = createUpdaterCoordinator(coordinatorOptions({ updater, nativeUpdater, ...options }))
     assert.equal(await coordinator.start(), false)
     assert.equal(checks, 0)
   }
 })
 
-test('packaged macOS updater checks once and configures automatic install behavior', async () => {
-  const updater = createUpdater()
+test('checks without downloading until requested, then stages and restarts after save flush', async () => {
+  const { updater, nativeUpdater } = createUpdater()
   let checks = 0
-  updater.checkForUpdates = async () => { checks += 1 }
-  const coordinator = createUpdaterCoordinator({
+  let downloads = 0
+  let nativeChecks = 0
+  let flushes = 0
+  let quits = 0
+  updater.checkForUpdates = async () => {
+    checks += 1
+    return { isUpdateAvailable: true, updateInfo: { version: '1.2.3' } }
+  }
+  updater.downloadUpdate = async () => { downloads += 1; return [] }
+  updater.quitAndInstall = () => { quits += 1 }
+  nativeUpdater.checkForUpdates = () => { nativeChecks += 1 }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
     updater,
-    dialog: { showMessageBox: async () => ({ response: 1 }) },
-    getWindow: () => ({}),
-    isPackaged: true,
-    platform: 'darwin',
-  })
-
-  assert.equal(await coordinator.start(), true)
-  assert.equal(await coordinator.start(), true)
-  assert.equal(checks, 1)
-  assert.equal(updater.autoDownload, true)
-  assert.equal(updater.autoInstallOnAppQuit, true)
-})
-
-test('downloaded update prompts for restart and invokes quitAndInstall', async () => {
-  const updater = createUpdater()
-  let quitAndInstallCalls = 0
-  updater.quitAndInstall = () => { quitAndInstallCalls += 1 }
-  const window = { id: 'main' }
-  const dialogs = []
-  const coordinator = createUpdaterCoordinator({
-    updater,
-    dialog: {
-      showMessageBox: async (...args) => {
-        dialogs.push(args)
-        return { response: 0 }
-      },
-    },
-    getWindow: () => window,
-    isPackaged: true,
-    platform: 'darwin',
-  })
+    nativeUpdater,
+    prepareForRestart: async () => { flushes += 1; return true },
+  }))
 
   await coordinator.start()
-  updater.emit('update-downloaded')
-  updater.emit('update-downloaded')
-  await nextTurn()
+  assert.equal(updater.autoDownload, false)
+  assert.equal(updater.autoInstallOnAppQuit, false)
+  assert.equal(downloads, 0)
+  assert.equal(coordinator.getState().status, 'available')
+  await coordinator.startDownload()
+  assert.equal(downloads, 1)
+  assert.equal(nativeChecks, 1)
+  assert.equal(coordinator.getState().status, 'staging')
+  assert.equal(quits, 0)
 
-  assert.equal(dialogs.length, 1)
-  assert.equal(dialogs[0][0], window)
-  assert.deepEqual(dialogs[0][1].buttons, ['Restart Now', 'Later'])
-  assert.equal(quitAndInstallCalls, 1)
+  nativeUpdater.emit('update-downloaded')
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(flushes, 1)
+  assert.equal(quits, 1)
+  assert.equal(coordinator.getState().status, 'installing')
 })
 
-test('Later leaves the downloaded update staged', async () => {
-  const updater = createUpdater()
-  let quitAndInstallCalls = 0
-  updater.quitAndInstall = () => { quitAndInstallCalls += 1 }
-  const coordinator = createUpdaterCoordinator({
+test('a failed renderer save prevents the restart', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let quits = 0
+  updater.checkForUpdates = async () => ({ isUpdateAvailable: true, updateInfo: { version: '1.2.3' } })
+  updater.quitAndInstall = () => { quits += 1 }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
     updater,
-    dialog: { showMessageBox: async () => ({ response: 1 }) },
-    getWindow: () => ({}),
-    isPackaged: true,
-    platform: 'darwin',
-  })
+    nativeUpdater,
+    prepareForRestart: async () => false,
+  }))
 
   await coordinator.start()
-  updater.emit('update-downloaded')
-  await nextTurn()
-
-  assert.equal(quitAndInstallCalls, 0)
+  await coordinator.startDownload()
+  nativeUpdater.emit('update-downloaded')
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(quits, 0)
+  assert.equal(coordinator.getState().status, 'error')
+  assert.match(coordinator.getState().error, /Save your changes/)
 })
 
-test('updater check rejections and errors are logged without throwing', async () => {
-  const updater = createUpdater()
-  const logger = createLogger()
+test('a stale release check does not start a download', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let downloads = 0
+  updater.checkForUpdates = async () => ({ isUpdateAvailable: false, updateInfo: { version: '1.0.0' } })
+  updater.downloadUpdate = async () => { downloads += 1 }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({ updater, nativeUpdater }))
+
+  await coordinator.start()
+  await coordinator.startDownload()
+  assert.equal(downloads, 0)
+  assert.equal(coordinator.getState().status, 'idle')
+})
+
+test('updater errors are logged and surfaced for retry', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  const errors = []
+  const logger = { error: (...args) => errors.push(args), warn() {} }
   updater.checkForUpdates = async () => { throw new Error('network unavailable') }
-  const coordinator = createUpdaterCoordinator({
-    updater,
-    dialog: { showMessageBox: async () => ({ response: 1 }) },
-    getWindow: () => ({}),
-    isPackaged: true,
-    platform: 'darwin',
-    logger,
-  })
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({ updater, nativeUpdater, logger }))
 
-  await assert.doesNotReject(() => coordinator.start())
-  assert.doesNotThrow(() => updater.emit('error', new Error('update failed')))
-  assert.equal(logger.errors.length, 2)
+  await coordinator.start()
+  assert.equal(coordinator.getState().status, 'error')
+  updater.emit('error', new Error('update failed'))
+  assert.equal(errors.length, 2)
+  assert.equal(coordinator.getState().status, 'error')
+})
+
+test('concurrent update clicks share the check, download, and native stage', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let checks = 0
+  let downloads = 0
+  let nativeChecks = 0
+  let finishCheck
+  updater.checkForUpdates = async () => {
+    checks += 1
+    if (checks === 1) return { isUpdateAvailable: true, updateInfo: { version: '1.2.3' } }
+    return new Promise((resolve) => { finishCheck = resolve })
+  }
+  updater.downloadUpdate = async () => { downloads += 1; return [] }
+  nativeUpdater.checkForUpdates = () => { nativeChecks += 1 }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({ updater, nativeUpdater }))
+
+  await coordinator.start()
+  const first = coordinator.startDownload()
+  const second = coordinator.startDownload()
+  finishCheck?.({ isUpdateAvailable: true, updateInfo: { version: '1.2.3' } })
+  await Promise.all([first, second])
+
+  assert.equal(checks, 2)
+  assert.equal(downloads, 1)
+  assert.equal(nativeChecks, 1)
+})
+
+test('check and download failures can be retried', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let checks = 0
+  let downloads = 0
+  let nativeChecks = 0
+  updater.checkForUpdates = async () => {
+    checks += 1
+    if (checks === 1) throw new Error('check unavailable')
+    return { isUpdateAvailable: true, updateInfo: { version: '1.2.3' } }
+  }
+  updater.downloadUpdate = async () => {
+    downloads += 1
+    if (downloads === 1) throw new Error('download unavailable')
+    return []
+  }
+  nativeUpdater.checkForUpdates = () => { nativeChecks += 1 }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({ updater, nativeUpdater }))
+
+  await coordinator.start()
+  await coordinator.startDownload()
+  assert.equal(coordinator.getState().status, 'error')
+  await coordinator.startDownload()
+
+  assert.equal(checks, 3)
+  assert.equal(downloads, 2)
+  assert.equal(nativeChecks, 1)
+  assert.equal(coordinator.getState().status, 'staging')
+})
+
+test('retrying after a save failure reuses the staged update', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let canSave = false
+  let downloads = 0
+  let nativeChecks = 0
+  let quits = 0
+  updater.checkForUpdates = async () => ({ isUpdateAvailable: true, updateInfo: { version: '1.2.3' } })
+  updater.downloadUpdate = async () => { downloads += 1; return [] }
+  updater.quitAndInstall = () => { quits += 1 }
+  nativeUpdater.checkForUpdates = () => { nativeChecks += 1 }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    prepareForRestart: async () => canSave,
+  }))
+
+  await coordinator.start()
+  await coordinator.startDownload()
+  nativeUpdater.emit('update-downloaded')
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(coordinator.getState().status, 'error')
+
+  canSave = true
+  await coordinator.startDownload()
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(downloads, 1)
+  assert.equal(nativeChecks, 1)
+  assert.equal(quits, 1)
+})
+
+test('native update-not-available makes staging retryable', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let nativeChecks = 0
+  let quits = 0
+  updater.checkForUpdates = async () => ({ isUpdateAvailable: true, updateInfo: { version: '1.2.3' } })
+  updater.quitAndInstall = () => { quits += 1 }
+  nativeUpdater.checkForUpdates = () => { nativeChecks += 1 }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({ updater, nativeUpdater }))
+
+  await coordinator.start()
+  await coordinator.startDownload()
+  nativeUpdater.emit('update-not-available')
+  assert.equal(coordinator.getState().status, 'error')
+  await coordinator.startDownload()
+  assert.equal(nativeChecks, 2)
+  nativeUpdater.emit('update-downloaded')
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(quits, 1)
+})
+
+test('timed-out native staging ignores late readiness until the user retries', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let nativeChecks = 0
+  let quits = 0
+  updater.checkForUpdates = async () => ({ isUpdateAvailable: true, updateInfo: { version: '1.2.3' } })
+  updater.quitAndInstall = () => { quits += 1 }
+  nativeUpdater.checkForUpdates = () => { nativeChecks += 1 }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    stagingTimeoutMs: 5,
+  }))
+
+  await coordinator.start()
+  await coordinator.startDownload()
+  await new Promise((resolve) => setTimeout(resolve, 15))
+  assert.equal(coordinator.getState().status, 'error')
+  nativeUpdater.emit('update-downloaded')
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(quits, 0)
+
+  await coordinator.startDownload()
+  assert.equal(nativeChecks, 1)
+  nativeUpdater.emit('update-downloaded')
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(quits, 1)
 })

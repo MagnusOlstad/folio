@@ -118,6 +118,10 @@ export function useWorkspaceSessionPersistence({
   }, []);
 
   const flush = useCallback(() => {
+    if (persistTimerRef.current !== null) {
+      window.clearTimeout(persistTimerRef.current);
+      persistTimerRef.current = null;
+    }
     const current = snapshot();
     save();
     return current;

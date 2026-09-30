@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import fsSync from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, BrowserWindow, Menu, dialog, ipcMain, screen, shell } from 'electron'
+import { app, autoUpdater, BrowserWindow, Menu, dialog, ipcMain, screen, shell } from 'electron'
 import { createUpdaterCoordinator } from './updater.js'
 
 const isMac = process.platform === 'darwin'
@@ -19,6 +19,9 @@ let rendererStorageWriteTimer = null
 let rendererStorageWritePromise = Promise.resolve()
 let rendererStorageSyncFlushRevision = -1
 let updaterCoordinator = null
+let updateFlushRequestId = 0
+let updateFlushTimer = null
+let resolveUpdateFlush = null
 
 function validStorageKey(key) {
   return typeof key === 'string' && key.startsWith('folio:') && key.length <= 200
@@ -304,18 +307,35 @@ async function initializeUpdater() {
     // it from this ESM entrypoint. Dynamic import keeps the development/test
     // path dependency-free.
     const { default: electronUpdater } = await import('electron-updater')
-    const { autoUpdater } = electronUpdater
+    const { autoUpdater: electronAutoUpdater } = electronUpdater
     updaterCoordinator = createUpdaterCoordinator({
-      updater: autoUpdater,
-      dialog,
+      updater: electronAutoUpdater,
+      nativeUpdater: autoUpdater,
       getWindow: () => mainWindow,
       isPackaged: app.isPackaged,
       platform: process.platform,
+      prepareForRestart: prepareRendererForUpdateRestart,
     })
     await updaterCoordinator.start()
   } catch (error) {
     console.error('Failed to initialize Folio updater:', error)
   }
+}
+
+function prepareRendererForUpdateRestart() {
+  if (!mainWindow || mainWindow.isDestroyed()) return Promise.resolve(false)
+  if (resolveUpdateFlush) return Promise.resolve(false)
+  updateFlushRequestId += 1
+  const requestId = updateFlushRequestId
+  return new Promise((resolve) => {
+    resolveUpdateFlush = resolve
+    updateFlushTimer = setTimeout(() => {
+      updateFlushTimer = null
+      resolveUpdateFlush = null
+      resolve(false)
+    }, 10_000)
+    mainWindow.webContents.send('folio:prepare-update-restart', requestId)
+  })
 }
 
 app.whenReady().then(async () => {
@@ -333,6 +353,16 @@ app.whenReady().then(async () => {
   localUrl = `http://127.0.0.1:${address.port}`
 
   setApplicationMenu()
+  ipcMain.handle('folio:get-update-state', () => updaterCoordinator?.getState() ?? null)
+  ipcMain.handle('folio:start-update', () => updaterCoordinator?.startDownload() ?? null)
+  ipcMain.on('folio:update-save-result', (_event, requestId, saved) => {
+    if (requestId !== updateFlushRequestId || !resolveUpdateFlush) return
+    if (updateFlushTimer !== null) clearTimeout(updateFlushTimer)
+    updateFlushTimer = null
+    const resolve = resolveUpdateFlush
+    resolveUpdateFlush = null
+    resolve(saved === true)
+  })
   ipcMain.on('folio:close-window', () => {
     mainWindow?.close()
   })
@@ -397,6 +427,16 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   flushRendererStorageSync()
+  if (updateFlushTimer !== null) clearTimeout(updateFlushTimer)
+  updateFlushTimer = null
+  if (resolveUpdateFlush) {
+    const resolve = resolveUpdateFlush
+    resolveUpdateFlush = null
+    resolve(false)
+  }
+  ipcMain.removeHandler('folio:get-update-state')
+  ipcMain.removeHandler('folio:start-update')
+  ipcMain.removeAllListeners('folio:update-save-result')
   ipcMain.removeHandler('folio:save-markdown-export')
   ipcMain.removeHandler('folio:save-pdf-export')
   ipcMain.removeHandler('folio:select-obsidian-vault')

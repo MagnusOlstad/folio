@@ -159,11 +159,11 @@ the artifacts attached and the notes read right before going live.
 
 ### In-app updates
 
-On a signed, packaged macOS launch, Folio checks the configured public GitHub Release once,
-downloads a newer arm64 update automatically, and then shows a native `Restart Now` /
-`Later` prompt. `Restart Now` installs the staged update immediately; `Later` leaves it staged
-for the next quit or relaunch. Updater errors are logged and do not prevent Folio from
-starting.
+On a signed, packaged macOS launch, Folio checks the configured public GitHub Release once.
+When a newer arm64 release is available, click the version badge to download it in the
+background. The badge shows download progress and Folio restarts into the new version when
+macOS finishes staging it. Before restarting, Folio flushes pending note saves and pauses the
+restart if any save fails. Updater errors appear on the badge, where you can retry.
 
 The browser and development builds retain the existing fallback: on launch the app asks the
 GitHub releases API for the latest tag and, when it is newer than the running version, shows

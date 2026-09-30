@@ -142,6 +142,12 @@ export type VersionInfo = {
   latestUrl?: string;
   updateAvailable: boolean;
 };
+export type DesktopUpdateState = {
+  status: "checking" | "idle" | "available" | "downloading" | "downloaded" | "staging" | "installing" | "error";
+  version: string | null;
+  percent: number | null;
+  error: string | null;
+};
 export type ModelStatus = {
   online: boolean;
   canLaunch: boolean;

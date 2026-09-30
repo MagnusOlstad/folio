@@ -1,4 +1,5 @@
-import type { ModelStatus, VersionInfo } from "../../domain/types.ts";
+import { useEffect, useState } from "react";
+import type { DesktopUpdateState, ModelStatus, VersionInfo } from "../../domain/types.ts";
 
 export type Endpoint = {
   id: string;
@@ -18,6 +19,44 @@ export type WorkspaceStatusProps = {
 };
 
 export function FolioBrand({ versionInfo }: { versionInfo: VersionInfo | null }) {
+  const [updateState, setUpdateState] = useState<DesktopUpdateState | null>(null);
+  useEffect(() => {
+    let receivedEvent = false;
+    let mounted = true;
+    const unsubscribe = window.folio?.onUpdateState?.((state) => {
+      receivedEvent = true;
+      setUpdateState(state);
+    });
+    const getUpdateState = window.folio?.getUpdateState;
+    if (getUpdateState) {
+      void Promise.resolve().then(getUpdateState).then((state) => {
+        if (mounted && !receivedEvent && state) setUpdateState(state);
+      }).catch(() => {});
+    }
+    return () => {
+      mounted = false;
+      unsubscribe?.();
+    };
+  }, []);
+
+  const startDesktopUpdate = updateState ? window.folio?.startUpdate : undefined;
+  const updateVersion = updateState?.version ?? (versionInfo?.updateAvailable ? versionInfo.latest : null);
+  const nativeUpdateAvailable = Boolean(
+    updateState && updateVersion && updateState.status !== "idle",
+  );
+  const busy = updateState?.status === "checking" || updateState?.status === "downloading" || updateState?.status === "downloaded" || updateState?.status === "staging" || updateState?.status === "installing";
+  const updateLabel = updateState?.status === "error"
+    ? "Retry update"
+    : updateState?.status === "checking"
+      ? "Checking…"
+    : updateState?.status === "installing" || updateState?.status === "downloaded"
+      ? "Restarting…"
+      : updateState?.status === "staging"
+        ? "Preparing install…"
+      : updateState?.status === "downloading"
+        ? `Downloading ${updateState.percent ?? 0}%`
+        : "Download update";
+
   return (
     <div className="brand-group">
       <a className="brand" href="#workspace" aria-label="Folio home">
@@ -25,18 +64,30 @@ export function FolioBrand({ versionInfo }: { versionInfo: VersionInfo | null })
         <span>Folio</span>
       </a>
       {versionInfo && <span className="app-version">v{versionInfo.version}</span>}
-      {versionInfo?.updateAvailable && (
-        <a
-          className="update-badge"
-          href={versionInfo.latestUrl}
-          target="_blank"
-          rel="noreferrer"
-          aria-label={`Update to version ${versionInfo.latest}`}
-          title={`Update to v${versionInfo.latest}`}
-        >
-          Update to v{versionInfo.latest}
-        </a>
-      )}
+      {nativeUpdateAvailable && startDesktopUpdate ? (
+          <button
+            className={`update-badge${busy ? " is-busy" : ""}`}
+            type="button"
+            onClick={() => { void startDesktopUpdate(); }}
+            disabled={busy}
+            aria-label={`${updateLabel}: version ${updateVersion}`}
+            title={updateState?.error ?? `Download and install v${updateVersion}`}
+          >
+            {busy && <span className="update-spinner" aria-hidden="true" />}
+            {updateState?.status === "error" || busy ? updateLabel : `Update to v${updateVersion}`}
+          </button>
+      ) : versionInfo?.updateAvailable ? (
+          <a
+            className="update-badge"
+            href={versionInfo.latestUrl}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Update to version ${versionInfo.latest}`}
+            title={`Update to v${versionInfo.latest}`}
+          >
+            Update to v{versionInfo.latest}
+          </a>
+      ) : null}
     </div>
   );
 }
