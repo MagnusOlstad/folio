@@ -67,12 +67,14 @@ describe("useFiledDocumentAutosave", () => {
       result.current.scheduleSave("one", "a");
       result.current.scheduleSave("two", "b");
     });
+    expect(result.current.hasDirtySaves()).toBe(true);
     await act(async () => result.current.flushSave("one"));
     expect(save).toHaveBeenCalledWith("one", "a");
     expect(save).not.toHaveBeenCalledWith("two", "b");
 
     await act(async () => result.current.flushAllSaves());
     expect(save).toHaveBeenCalledWith("two", "b");
+    expect(result.current.hasDirtySaves()).toBe(false);
   });
 
   it("retains a failed save as dirty and retries it on an explicit flush", async () => {

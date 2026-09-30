@@ -9,6 +9,26 @@ contextBridge.exposeInMainWorld('folio', {
     ipcRenderer.on('folio:menu-action', listener)
     return () => ipcRenderer.removeListener('folio:menu-action', listener)
   },
+  getUpdateState: () => ipcRenderer.invoke('folio:get-update-state'),
+  startUpdate: () => ipcRenderer.invoke('folio:start-update'),
+  onUpdateState: (handler) => {
+    const listener = (_event, state) => handler(state)
+    ipcRenderer.on('folio:update-state', listener)
+    return () => ipcRenderer.removeListener('folio:update-state', listener)
+  },
+  onPrepareUpdateRestart: (handler) => {
+    const listener = async (_event, requestId) => {
+      let saved = false
+      try {
+        saved = await handler()
+      } catch {
+        saved = false
+      }
+      ipcRenderer.send('folio:update-save-result', requestId, saved)
+    }
+    ipcRenderer.on('folio:prepare-update-restart', listener)
+    return () => ipcRenderer.removeListener('folio:prepare-update-restart', listener)
+  },
   closeWindow: () => ipcRenderer.send('folio:close-window'),
   saveMarkdownExport: (filename, content) => ipcRenderer.invoke('folio:save-markdown-export', filename, content),
   savePdfExport: (filename) => ipcRenderer.invoke('folio:save-pdf-export', filename),

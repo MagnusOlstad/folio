@@ -1,77 +1,192 @@
-const RESTART_NOW = 0
-
 function report(logger, method, ...args) {
   const target = logger && typeof logger[method] === 'function' ? logger : console
   target[method](...args)
 }
 
-/**
- * Coordinate the production updater without importing Electron. The injected
- * updater and dialog make this module safe to exercise with Node's test runner.
- */
+function initialState() {
+  return { status: 'checking', version: null, percent: null, error: null }
+}
+
+/** Coordinate the packaged macOS updater without importing Electron. */
 export function createUpdaterCoordinator({
   updater,
-  dialog,
   getWindow,
+  nativeUpdater,
   isPackaged,
   platform,
+  prepareForRestart = async () => true,
+  stagingTimeoutMs = 120_000,
   logger = console,
 }) {
   let started = false
-  let promptShown = false
+  let checkPromise = null
+  let downloadPromise = null
+  let installStarted = false
+  let hasDownloadedUpdate = false
+  let nativeUpdateReady = false
+  let nativeStageActive = false
+  let stagingTimeout = null
+  let state = initialState()
 
-  async function showDownloadedUpdate() {
-    if (promptShown) return
-    promptShown = true
-
+  function publish(next) {
+    state = { ...state, ...next }
     const window = getWindow()
-    if (!window) {
-      report(logger, 'warn', 'Folio update is ready, but no application window is available.')
-      return
-    }
+    if (window && !window.isDestroyed?.()) window.webContents.send('folio:update-state', state)
+    return state
+  }
 
-    try {
-      const result = await dialog.showMessageBox(window, {
-        type: 'info',
-        title: 'Folio update ready',
-        message: 'A new Folio version is ready to install.',
-        detail: 'Restart Folio now to apply the update, or choose Later to install it the next time Folio quits.',
-        buttons: ['Restart Now', 'Later'],
-        defaultId: RESTART_NOW,
-        cancelId: 1,
-        noLink: true,
-      })
-
-      if (result.response === RESTART_NOW) {
-        await updater.quitAndInstall()
+  async function check() {
+    if (checkPromise) return checkPromise
+    checkPromise = (async () => {
+      publish({ status: 'checking', error: null })
+      try {
+        const result = await updater.checkForUpdates()
+        const version = result?.updateInfo?.version ?? state.version
+        if (state.status === 'checking') publish({ status: result?.isUpdateAvailable ? 'available' : 'idle', version: result?.isUpdateAvailable ? version : null })
+        return result
+      } catch (error) {
+        report(logger, 'error', 'Folio updater check failed:', error)
+        publish({ status: 'error', error: 'Could not check for updates. Try again.' })
+        return null
+      } finally {
+        checkPromise = null
       }
+    })()
+    return checkPromise
+  }
+
+  async function requestInstall() {
+    if (installStarted) return
+    installStarted = true
+    try {
+      // Ask the renderer to flush immediately before the native updater quits.
+      // MacUpdater's own native listener marks the update staged before this one
+      // runs, so quitAndInstall takes its ready-to-install path without adding a
+      // second native listener.
+      const saved = await prepareForRestart()
+      if (!saved) {
+        installStarted = false
+        publish({ status: 'error', error: 'Save your changes before installing the update. Click to retry.' })
+        return
+      }
+      publish({ status: 'installing', percent: 100, error: null })
+      updater.quitAndInstall()
     } catch (error) {
-      report(logger, 'error', 'Folio updater could not present or install the downloaded update:', error)
+      installStarted = false
+      report(logger, 'error', 'Folio updater could not stage the update:', error)
+      publish({ status: 'error', error: 'Could not install the update. Try again.' })
     }
+  }
+
+  function finishNativeStageWithError(message) {
+    if (!nativeStageActive) return
+    nativeStageActive = false
+    if (stagingTimeout !== null) clearTimeout(stagingTimeout)
+    stagingTimeout = null
+    nativeUpdateReady = false
+    installStarted = false
+    publish({ status: 'error', percent: null, error: message })
+  }
+
+  function beginNativeStage() {
+    nativeStageActive = true
+    nativeUpdateReady = false
+    publish({ status: 'staging', percent: 100, error: null })
+    stagingTimeout = setTimeout(() => {
+      stagingTimeout = null
+      finishNativeStageWithError('The update is taking too long to stage. Click to retry.')
+    }, stagingTimeoutMs)
+    stagingTimeout.unref?.()
+    try {
+      nativeUpdater.checkForUpdates()
+    } catch (error) {
+      report(logger, 'error', 'Folio native updater retry failed:', error)
+      finishNativeStageWithError('The update could not be staged. Click to retry.')
+    }
+  }
+
+  async function startDownload() {
+    if (!isPackaged || platform !== 'darwin') return getState()
+    if (downloadPromise || state.status === 'downloading' || state.status === 'staging' || state.status === 'installing') return getState()
+    if (nativeUpdateReady) {
+      void requestInstall()
+      return getState()
+    }
+    if (hasDownloadedUpdate) {
+      beginNativeStage()
+      return getState()
+    }
+    downloadPromise = (async () => {
+      try {
+        const result = await check()
+        if (!result) return getState()
+        if (result.isUpdateAvailable === false) {
+          publish({ status: 'idle', error: null })
+          return getState()
+        }
+        if (result.isUpdateAvailable !== true) {
+          publish({ status: 'error', error: 'Could not confirm an update is available. Click to retry.' })
+          return getState()
+        }
+        const version = result?.updateInfo?.version ?? state.version
+        publish({ status: 'downloading', version, percent: 0, error: null })
+        await updater.downloadUpdate()
+        // MacUpdater has configured its native feed by the time downloadUpdate
+        // resolves. With autoInstallOnAppQuit=false it leaves the app running;
+        // explicitly stage now and wait for the native ready event below.
+        beginNativeStage()
+        return getState()
+      } catch (error) {
+        report(logger, 'error', 'Folio updater download failed:', error)
+        publish({ status: 'error', error: 'Could not download the update. Click to retry.' })
+        return getState()
+      } finally {
+        downloadPromise = null
+      }
+    })()
+    return downloadPromise
+  }
+
+  function getState() {
+    return { ...state }
   }
 
   async function start() {
     if (!isPackaged || platform !== 'darwin') return false
     if (started) return true
     started = true
-
-    updater.autoDownload = true
-    updater.autoInstallOnAppQuit = true
-    updater.on('update-downloaded', () => {
-      void showDownloadedUpdate()
+    updater.autoDownload = false
+    updater.autoInstallOnAppQuit = false
+    updater.on('update-available', (info) => publish({ status: 'available', version: info?.version ?? null, error: null }))
+    updater.on('update-not-available', () => publish({ status: 'idle', version: null, error: null }))
+    updater.on('download-progress', (progress) => publish({ status: 'downloading', percent: Math.round(progress?.percent ?? 0) }))
+    updater.on('update-downloaded', (info) => {
+      hasDownloadedUpdate = true
+      publish({ status: 'downloaded', version: info?.version ?? state.version, percent: 100 })
+    })
+    nativeUpdater.on('update-downloaded', () => {
+      nativeUpdateReady = true
+      if (!nativeStageActive) return
+      nativeStageActive = false
+      if (stagingTimeout !== null) clearTimeout(stagingTimeout)
+      stagingTimeout = null
+      void requestInstall()
+    })
+    nativeUpdater.on('update-not-available', () => {
+      finishNativeStageWithError('The update could not be staged. Click to retry.')
     })
     updater.on('error', (error) => {
       report(logger, 'error', 'Folio updater error:', error)
+      if (nativeStageActive) {
+        finishNativeStageWithError('The update could not be staged. Click to retry.')
+        return
+      }
+      installStarted = false
+      publish({ status: 'error', error: hasDownloadedUpdate ? 'The update could not be staged. Click to retry.' : 'The update failed. Click to retry.' })
     })
-
-    try {
-      await updater.checkForUpdates()
-    } catch (error) {
-      report(logger, 'error', 'Folio updater check failed:', error)
-    }
-
+    await check()
     return true
   }
 
-  return { start }
+  return { start, startDownload, getState }
 }

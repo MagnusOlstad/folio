@@ -20,6 +20,7 @@ export type FiledDocumentAutosave = {
   flushSave: (documentId: string) => Promise<void>;
   flushAllSaves: () => Promise<void>;
   isDirty: (documentId: string) => boolean;
+  hasDirtySaves: () => boolean;
 };
 
 type PendingSave = {
@@ -184,6 +185,11 @@ export function useFiledDocumentAutosave({
     [getRecord],
   );
 
+  const hasDirtySaves = useCallback(
+    () => Array.from(recordsRef.current.values()).some((record) => record.dirty),
+    [],
+  );
+
   useEffect(
     () => () => {
       // React cleanup cannot await. Starting the flush here gives navigation and
@@ -193,5 +199,5 @@ export function useFiledDocumentAutosave({
     [flushAllSaves],
   );
 
-  return { scheduleSave, flushSave, flushAllSaves, isDirty };
+  return { scheduleSave, flushSave, flushAllSaves, isDirty, hasDirtySaves };
 }

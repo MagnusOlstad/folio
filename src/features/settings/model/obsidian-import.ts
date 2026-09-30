@@ -1,3 +1,5 @@
+import type { DesktopUpdateState } from "../../../domain/types.ts";
+
 export type ObsidianImportCounts = {
   new: number;
   imported: number;
@@ -75,6 +77,10 @@ declare global {
       getObsidianImportJob?: (jobId: string) => Promise<ObsidianImportJob>;
       cancelObsidianImport?: (jobId: string) => Promise<ObsidianImportJob>;
       selectFolder?: () => Promise<string | null>;
+      getUpdateState?: () => Promise<DesktopUpdateState | null>;
+      startUpdate?: () => Promise<DesktopUpdateState | null>;
+      onUpdateState?: (handler: (state: DesktopUpdateState) => void) => () => void;
+      onPrepareUpdateRestart?: (handler: () => Promise<boolean>) => () => void;
     };
   }
 }
