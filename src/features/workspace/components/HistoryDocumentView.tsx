@@ -12,13 +12,17 @@ type Props = {
   presentContent: string;
 };
 
+function historyPreviewContent(content: string) {
+  return content.replace(/^# Captured note[ \t]*\r?\n(?:[ \t]*\r?\n)*(?=<!-- folio:capture:[^:\r\n]+:start -->)/, "");
+}
+
 export function HistoryDocumentView({ document, snapshot, loading, failed, presentContent }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const alignedScroll = useRef(false);
   const preview: ViewerDocument = {
     ...document,
-    content: presentContent,
     ...(snapshot?.note ?? {}),
+    content: historyPreviewContent(snapshot?.note.content ?? presentContent),
     deletable: document.deletable,
     movable: document.movable,
   };

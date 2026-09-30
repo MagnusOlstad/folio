@@ -96,6 +96,42 @@ test('a matching history snapshot keeps the live document header and body start 
   expect(Math.abs(after[1].y - before[1].y)).toBeLessThan(2)
 })
 
+test('hides the generated capture heading in history while preserving user headings', async ({ page }) => {
+  await page.route('**/api/note/history**', async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/version')) {
+      const userHeading = url.searchParams.get('revision') === 'user-heading-revision'
+      await route.fulfill({ json: {
+        revision: userHeading ? 'user-heading-revision' : 'captured-revision',
+        note: userHeading
+          ? { title: 'Meeting notes', description: '', tags: [], status: 'stable', staleAfter: null, content: '# Captured note\n\nThis heading was written by the user.' }
+          : { title: 'Captured meeting', description: '', tags: [], status: 'stable', staleAfter: null, content: '# Captured note\n\n<!-- folio:capture:abcd1234:start -->\nMeeting notes from the capture.\n<!-- folio:capture:abcd1234:end -->' },
+        diff: '',
+      } })
+      return
+    }
+    if (url.pathname === '/api/note/history') {
+      await route.fulfill({ json: { entries: [
+        { revision: 'captured-revision', authoredAt: '2026-09-27T10:00:00.000Z', title: 'Captured meeting' },
+        { revision: 'user-heading-revision', authoredAt: '2026-09-27T09:00:00.000Z', title: 'User heading' },
+      ], nextCursor: null } })
+      return
+    }
+    await route.continue()
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  const preview = page.getByRole('region', { name: 'History preview' })
+  await page.getByRole('navigation', { name: 'Note timeline' }).getByRole('button', { name: /Captured meeting/ }).click()
+  await expect(preview.getByRole('heading', { name: 'Captured meeting' })).toBeVisible()
+  await expect(preview.getByRole('heading', { name: 'Captured note' })).toHaveCount(0)
+  await expect(preview.getByText('Meeting notes from the capture.')).toBeVisible()
+  await page.getByRole('navigation', { name: 'Note timeline' }).getByRole('button', { name: /User heading/ }).click()
+  await expect(preview.getByRole('heading', { name: 'Captured note' })).toBeVisible()
+  await expect(preview.getByText('This heading was written by the user.')).toBeVisible()
+})
+
 test('a failed moment shows a retry state in the main note window', async ({ page }) => {
   let attempts = 0
   await page.route('**/api/note/history**', async route => {
