@@ -182,13 +182,78 @@ dropped some note content and did not return strict JSON. This is not a
 production model decision; its small fixture set does not establish reliable
 quality.
 
-The initial Gemma 4 candidate, `mlx-community/gemma-4-e4b-it-4bit`, downloaded
-but failed to load with pinned `mlx-swift-lm` 3.31.3. Its safetensors have
-key/value projection weights only through text layer 23, while the implementation
-still constructs projections for layer 24. In this config, layers 24 onward
-share key/value states from earlier layers. No architecture workaround was
-made; `mlx-community/gemma-3-text-4b-it-4bit` was used as the Gemma-family
-fallback.
+The original comparison's Gemma 4 candidate,
+`mlx-community/gemma-4-e4b-it-4bit`, failed to load with pinned
+`mlx-swift-lm` 3.31.3. Its safetensors have key/value projection weights only
+through text layer 23, while the implementation also constructs projections
+for layer 24. In this config, layers 24 onward share key/value states from
+earlier layers. No workaround was used for that original comparison;
+`mlx-community/gemma-3-text-4b-it-4bit` was its Gemma-family fallback.
+
+### Bounded E4B compatibility trial
+
+A separate experiment backported only two upstream Gemma4 changes into the
+ignored pinned `mlx-swift-lm` 3.31.3 source copy. The shared-KV change gates
+K/V projections and K normalization off in shared-tail layers, then sanitizes
+redundant K/V keys from older checkpoints. The quantization change replaces
+the custom `ScaledLinear` with quantizable `Linear` and keeps the same
+`hidden_size^-0.5` multiplier after projection. This model declares
+`attention_k_eq_v: false`, so no K-equals-V adjustment was needed. Provenance:
+[upstream PR #342](https://github.com/ml-explore/mlx-swift-lm/pull/342), merged
+commit `4bba1a8`, and the upstream quantizable PLE projection change
+[PR #320](https://github.com/ml-explore/mlx-swift-lm/pull/320) / PR #309.
+
+The combined patch is
+[`Patches/gemma4-text-pinned-3.31.3.patch`](Patches/gemma4-text-pinned-3.31.3.patch)
+(SHA-256 `4b61fb6e78a6e4a73971fa47d0824f52c7b9a19ef8be5bcae2c08827c58a2a74`),
+created against the pristine `Gemma4Text.swift` from the pinned package source
+(SHA-256 `d045292c6131d3bcf14f7e9034daea8ef4cdc5875f46d8b064f63835804f28af`).
+To reproduce it after preparing the pinned ignored source tree:
+
+```sh
+patch -p1 -d .cache/local-packages/mlx-swift-lm \
+  < Patches/gemma4-text-pinned-3.31.3.patch
+swift build --package-path .cache/prebuilt-build --configuration release --arch arm64
+PRODUCTS_DIR="$(swift build --package-path .cache/prebuilt-build --configuration release --arch arm64 --show-bin-path)"
+OUTPUT_DIR="$(mktemp -d /private/tmp/folio-mlx-gemma4.XXXXXX)"
+bash Scripts/build-native.sh --stage-only \
+  "$PRODUCTS_DIR" \
+  --output "$OUTPUT_DIR/Folio.app"
+```
+
+The existing SwiftPM graph was rebuilt incrementally without changing package
+pins, resolving packages, or clearing caches. A relocated helper then loaded
+the cached snapshot and generated with the patched text model. The trial was a
+single warm-up plus one pass over the same six filing fixtures and one Ask
+fixture, with the per-request session/allocator cleanup policy described above.
+Its results are separate from the four-model baseline and record `runtimePatch`
+and `runtimePatchSHA256` metadata in
+`Results/gemma4-e4b-clear-cache-benchmark.jsonl`.
+
+| Strict JSON / schema | Kind / path | Median generation / end-to-end | Median TTFT | Idle active | Max request peak active | Max generation active + cache | Peak RSS |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0/6 · 6/6 | 5/6 · 6/6 | 6.36s / 6.38s | 2.10s | 3.91 GiB | 4.45 GiB | 4.52 GiB | 2.66 GiB |
+
+All six filing replies were schema-valid JSON inside Markdown fences, so a
+separate Gemma4-only run appended the same one-sentence JSON instruction used
+in the Gemma3 test. It returned strict JSON in all six cases, with schema6/6,
+kind5/6, and path5/6. The daily note's path dropped from `[personal,daily]` to
+`[personal]`; its summary still mentioned a possible December Bergen visit,
+while its title called a dentist phone call an “appointment.” The variant's
+exact suffix and outputs are in
+`Results/gemma4-e4b-json-instruction-variant.jsonl`.
+
+The baseline output preserved the Norwegian note in Norwegian, routed all six
+filings to their expected paths, and kept key dates and the explicit no-task
+instruction. It still classified the daily entry as `note`, used `type: note`
+for the todo, and added “appointment” to the daily title. Its Ask response
+included inline source links and stated the launch delay as October14 and
+Ingrid's deadline as October2, consistent with the source text. The Gemma4
+snapshot has a larger measured idle active allocation (3.91 GiB); this is a
+quality/memory tradeoff to consider, not evidence of a new winner. These are
+single-pass synthetic checks, not a broad quality evaluation. The helper still
+accepts unconstrained output; strict JSON here required the extra prompt
+instruction.
 
 ## Per-note allocator cleanup rerun
 

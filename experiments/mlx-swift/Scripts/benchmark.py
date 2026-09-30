@@ -139,6 +139,8 @@ def main() -> int:
     parser.add_argument("--repeats", type=int, default=1, help="number of measured passes after the warm-up")
     parser.add_argument("--system-suffix", default="", help="append one controlled instruction to the existing system prompt")
     parser.add_argument("--classification-only", action="store_true", help="run only classification fixtures (useful for controlled filing prompt variants)")
+    parser.add_argument("--runtime-patch", default="", help="provenance label for a locally patched model runtime")
+    parser.add_argument("--runtime-patch-sha256", default="", help="SHA-256 of the tracked runtime patch file")
     args = parser.parse_args()
 
     if args.repeats < 1:
@@ -240,6 +242,8 @@ def main() -> int:
                     "cachePolicy": "clear-after-every-request",
                     "promptVariant": "system-suffix" if args.system_suffix else "baseline",
                     "systemSuffix": args.system_suffix,
+                    **({"runtimePatch": args.runtime_patch} if args.runtime_patch else {}),
+                    **({"runtimePatchSHA256": args.runtime_patch_sha256} if args.runtime_patch_sha256 else {}),
                     "elapsedWallSeconds": time.monotonic() - sent_at,
                     "metrics": response.get("metrics", {}),
                     "smokeChecks": quality_smoke(fixture, response),
