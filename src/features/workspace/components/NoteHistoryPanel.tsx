@@ -140,6 +140,7 @@ export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeR
       setPendingRevision(next);
       onPreview(selectedRef.current, true, false);
       if (next === null) {
+        request.current += 1;
         versionController.current?.abort();
         versionController.current = null;
         scrubFetchInFlight.current = false;
@@ -304,7 +305,7 @@ export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeR
       const anchorRevision = anchor?.dataset.historyStop || "";
       const anchorTop = anchor?.getBoundingClientRect().top ?? 0;
       setEntries((current) => {
-        const seen = new Set(current.map((entry) => entry.revision));
+        const seen = new Set(page.entries.map((entry) => entry.revision));
         return [...page.entries, ...current.filter((entry) => !seen.has(entry.revision))];
       });
       if (entries.length === 0) setCursor(page.nextCursor);

@@ -185,16 +185,24 @@ describe("workspace editor components", () => {
     vi.unstubAllGlobals();
   });
 
-  it("refreshes after a checkpoint while keeping Now selected and the older cursor", async () => {
-    const oldEntry = { revision: "old", authoredAt: "2026-09-27T10:00:00.000Z", title: "Old moment" };
+  it("refreshes after a checkpoint while keeping loaded history and its pagination cursor", async () => {
+    const loadedEntry = { revision: "loaded", authoredAt: "2026-09-26T10:00:00.000Z", title: "Loaded older moment" };
+    const initialEntry = { revision: "initial", authoredAt: "2026-09-27T10:00:00.000Z", title: "Initial moment" };
     const newEntry = { revision: "new", authoredAt: "2026-09-27T11:00:00.000Z", title: "New moment" };
+    let initialReads = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input), "http://localhost");
       if (url.searchParams.has("cursor")) {
+        if (url.searchParams.get("cursor") === "first-page") {
+          return new Response(JSON.stringify({ entries: [loadedEntry, initialEntry], nextCursor: "after-loaded-page" }), { status: 200 });
+        }
         return new Response(JSON.stringify({ entries: [], nextCursor: null }), { status: 200 });
       }
-      const checkpointRead = fetchMock.mock.calls.length > 1;
-      return new Response(JSON.stringify({ entries: checkpointRead ? [newEntry, oldEntry] : [oldEntry], nextCursor: checkpointRead ? "new-older-cursor" : "older-cursor" }), { status: 200 });
+      initialReads += 1;
+      return new Response(JSON.stringify({
+        entries: initialReads > 1 ? [newEntry, initialEntry] : [initialEntry],
+        nextCursor: initialReads > 1 ? "checkpoint-page" : "first-page",
+      }), { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
     const onBeforeRestore = vi.fn().mockResolvedValue(undefined);
@@ -202,15 +210,21 @@ describe("workspace editor components", () => {
     const onPreview = vi.fn();
     const { rerender } = render(<NoteHistoryPanel documentId="/notes/current.md" checkpointRevision={0} onBeforeRestore={onBeforeRestore} onRestored={onRestored} onPreview={onPreview} />);
     const timeline = screen.getByRole("navigation", { name: "Note timeline" });
-    await screen.findByRole("button", { name: /Old moment/ });
+    await screen.findByRole("button", { name: /Initial moment/ });
+    fireEvent.click(screen.getByRole("button", { name: "Load earlier" }));
+    await screen.findByRole("button", { name: /Loaded older moment/ });
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("cursor=first-page"), expect.any(Object));
     timeline.scrollTop = 37;
     rerender(<NoteHistoryPanel documentId="/notes/current.md" checkpointRevision={1} onBeforeRestore={onBeforeRestore} onRestored={onRestored} onPreview={onPreview} />);
     const present = screen.getByRole("button", { name: "Present" });
     await screen.findByRole("button", { name: /New moment/ });
+    expect(screen.getAllByRole("button", { name: /Initial moment/ })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: /Loaded older moment/ })).toBeInTheDocument();
     expect(present).toHaveAttribute("aria-current", "step");
     expect(timeline.scrollTop).toBe(37);
     fireEvent.click(screen.getByRole("button", { name: "Load earlier" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("cursor=older-cursor"), expect.any(Object)));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("cursor=after-loaded-page"), expect.any(Object)));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Load earlier" })).not.toBeInTheDocument());
     vi.unstubAllGlobals();
   });
 
@@ -324,6 +338,53 @@ describe("workspace editor components", () => {
     });
     expect(onPreview).toHaveBeenLastCalledWith(expect.objectContaining({ revision: newerRevision }), false, false);
     expect(container.querySelector(`button[data-history-stop="${newerRevision}"]`)).toHaveAttribute("aria-current", "step");
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps Now selected when a pending scrub preview is aborted", async () => {
+    const firstRevision = "first";
+    const pendingRevision = "pending";
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/version?") && url.includes(pendingRevision)) {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+      }
+      if (url.includes("/version?")) {
+        return Promise.resolve(new Response(JSON.stringify({ revision: firstRevision, note: { title: "First", description: "", tags: [], status: "stable", staleAfter: null, content: "First preview" }, diff: "" }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ entries: [
+        { revision: firstRevision, authoredAt: "2026-09-27T10:00:00.000Z", title: "First" },
+        { revision: pendingRevision, authoredAt: "2026-09-27T09:00:00.000Z", title: "Pending" },
+      ], nextCursor: null }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const preview = vi.fn();
+    const { container } = render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onPreview={preview} />);
+    fireEvent.click(await screen.findByRole("button", { name: /First/ }));
+    await waitFor(() => expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ revision: firstRevision }), false, false));
+
+    const timeline = screen.getByRole("navigation", { name: "Note timeline" });
+    const now = screen.getByRole("button", { name: "Present" });
+    const pending = container.querySelector<HTMLButtonElement>(`button[data-history-stop="${pendingRevision}"]`);
+    expect(pending).not.toBeNull();
+    Object.defineProperty(timeline, "clientHeight", { configurable: true, value: 200 });
+    vi.spyOn(timeline, "getBoundingClientRect").mockReturnValue(DOMRect.fromRect({ y: 0 }));
+    vi.spyOn(now, "getBoundingClientRect").mockReturnValue(DOMRect.fromRect({ y: 500 }));
+    if (pending) vi.spyOn(pending, "getBoundingClientRect").mockReturnValue(DOMRect.fromRect({ y: 100 }));
+    fireEvent.wheel(timeline);
+    fireEvent.scroll(timeline);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining(`revision=${pendingRevision}`), expect.any(Object)));
+
+    vi.spyOn(now, "getBoundingClientRect").mockReturnValue(DOMRect.fromRect({ y: 100 }));
+    if (pending) vi.spyOn(pending, "getBoundingClientRect").mockReturnValue(DOMRect.fromRect({ y: 500 }));
+    fireEvent.wheel(timeline);
+    fireEvent.scroll(timeline);
+    await waitFor(() => expect(preview).toHaveBeenLastCalledWith(null, false, false));
+    expect(now).toHaveAttribute("aria-current", "step");
+    expect(screen.getByText("Viewing the present")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     vi.unstubAllGlobals();
   });
 
