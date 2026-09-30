@@ -166,6 +166,33 @@ describe("workspace editor components", () => {
     vi.unstubAllGlobals();
   });
 
+  it("automatically appends and deduplicates the next history page near the timeline edge", async () => {
+    const newest = { revision: "newest", authoredAt: "2026-09-27T12:00:00.000Z", title: "Newest" };
+    const older = { revision: "older", authoredAt: "2026-09-26T12:00:00.000Z", title: "Older" };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const page = url.includes("cursor=next-page")
+        ? { entries: [newest, older], nextCursor: "last-page" }
+        : { entries: [newest], nextCursor: "next-page" };
+      return new Response(JSON.stringify(page), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn()} onRestored={vi.fn()} onPreview={vi.fn()} onExit={vi.fn()} />);
+    await screen.findByRole("button", { name: /Newest/ });
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("limit=15"), expect.any(Object));
+    const timeline = screen.getByRole("navigation", { name: "Note timeline" });
+    Object.defineProperty(timeline, "scrollHeight", { configurable: true, value: 1000 });
+    Object.defineProperty(timeline, "clientHeight", { configurable: true, value: 400 });
+    timeline.scrollTop = 450;
+    fireEvent.scroll(timeline);
+
+    expect(await screen.findByRole("button", { name: /Older/ })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("cursor=next-page"), expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("cursor=next-page&limit=15"), expect.any(Object));
+    expect(container.querySelectorAll('button[data-history-stop="newest"]')).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+
   it("previews a selected moment without a diff and restores after confirmation", async () => {
     let historyReads = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

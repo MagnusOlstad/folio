@@ -10,6 +10,8 @@ type Props = {
   onExit?: () => void;
 };
 
+const HISTORY_PAGE_SIZE = 15;
+
 function localDay(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
@@ -59,6 +61,7 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
   const selectedRef = useRef<NoteHistorySnapshot | null>(null);
   const timeline = useRef<HTMLElement>(null);
   const loadingPage = useRef(false);
+  const historyPageGeneration = useRef(0);
   const historyReady = useRef(false);
   const refreshedFromNow = useRef(false);
   const refreshingTimeline = useRef(false);
@@ -82,19 +85,30 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
   }, [entries]);
 
   useEffect(() => {
+    historyPageGeneration.current += 1;
+    loadingPage.current = false;
+    historyReady.current = false;
+    refreshedFromNow.current = false;
     let cancelled = false;
     async function load() {
       try {
         await onBeforeRestore(documentId);
-        const page = await api<NoteHistoryPage>(`/api/note/history?id=${encodeURIComponent(documentId)}`);
+        const page = await api<NoteHistoryPage>(`/api/note/history?id=${encodeURIComponent(documentId)}&limit=${HISTORY_PAGE_SIZE}`);
         if (!cancelled) { setEntries(page.entries); setCursor(page.nextCursor); historyReady.current = true; }
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "Could not load note history.");
-      } finally { if (!cancelled) setLoading(false); }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      }
     }
     void load();
     return () => {
       cancelled = true;
+      historyPageGeneration.current += 1;
+      loadingPage.current = false;
       request.current += 1;
       versionController.current?.abort();
       if (scrubFrame.current !== null) cancelAnimationFrame(scrubFrame.current);
@@ -205,14 +219,26 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
 
   async function loadMore() {
     if (!cursor || loadingPage.current) return;
+    const generation = historyPageGeneration.current;
     loadingPage.current = true;
     setLoadingMore(true);
     try {
-      const page = await api<NoteHistoryPage>(`/api/note/history?id=${encodeURIComponent(documentId)}&cursor=${encodeURIComponent(cursor)}`);
-      setEntries((current) => [...current, ...page.entries.filter((entry) => !current.some((existing) => existing.revision === entry.revision))]);
+      const page = await api<NoteHistoryPage>(`/api/note/history?id=${encodeURIComponent(documentId)}&cursor=${encodeURIComponent(cursor)}&limit=${HISTORY_PAGE_SIZE}`);
+      if (generation !== historyPageGeneration.current) return;
+      setEntries((current) => {
+        const seen = new Set(current.map((entry) => entry.revision));
+        return [...current, ...page.entries.filter((entry) => !seen.has(entry.revision))];
+      });
       setCursor(page.nextCursor);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not load more history."); }
-    finally { loadingPage.current = false; setLoadingMore(false); }
+    } catch (cause) {
+      if (generation === historyPageGeneration.current) setError(cause instanceof Error ? cause.message : "Could not load more history.");
+    }
+    finally {
+      if (generation === historyPageGeneration.current) {
+        loadingPage.current = false;
+        setLoadingMore(false);
+      }
+    }
   }
 
   async function refreshTimelineFromNow(): Promise<NoteHistoryPage | null> {
@@ -220,7 +246,7 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
     refreshedFromNow.current = true;
     refreshingTimeline.current = true;
     try {
-      const page = await api<NoteHistoryPage>(`/api/note/history?id=${encodeURIComponent(documentId)}`);
+      const page = await api<NoteHistoryPage>(`/api/note/history?id=${encodeURIComponent(documentId)}&limit=${HISTORY_PAGE_SIZE}`);
       const node = timeline.current;
       const center = node ? node.getBoundingClientRect().top + node.clientHeight / 2 : 0;
       const stops = node ? [...node.querySelectorAll<HTMLButtonElement>("[data-history-stop]")] : [];
@@ -232,7 +258,7 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
         const seen = new Set(page.entries.map((entry) => entry.revision));
         return [...page.entries, ...current.filter((entry) => !seen.has(entry.revision))];
       });
-      setCursor(page.nextCursor);
+      if (entries.length === 0) setCursor(page.nextCursor);
       requestAnimationFrame(() => {
         if (!node || !anchor) return;
         const refreshedAnchor = [...node.querySelectorAll<HTMLButtonElement>("[data-history-stop]")]
@@ -344,7 +370,7 @@ export function NoteHistoryPanel({ documentId, onBeforeRestore, onRestored, onPr
         method: "POST", body: JSON.stringify({ id: documentId, revision: selected.revision }),
       });
       await onRestored(documentId);
-      const page = await api<NoteHistoryPage>(`/api/note/history?id=${encodeURIComponent(documentId)}`);
+      const page = await api<NoteHistoryPage>(`/api/note/history?id=${encodeURIComponent(documentId)}&limit=${HISTORY_PAGE_SIZE}`);
       cache.current.clear();
       setEntries(page.entries);
       setCursor(page.nextCursor);
