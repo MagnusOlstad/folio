@@ -15,7 +15,7 @@
 
 ## Agent Use
 
-- Codex agents only: prefer GPT-5.6 Sol for scoping, orchestration, review, and final validation; GPT-6 Luna with high reasoning effort is the required implementation sub-agent. Other agents should ignore this model-selection guidance.
+- Codex agents only: prefer GPT-6.1 Sol High for scoping, orchestration, review, and final validation; GPT-6 Luna with high reasoning effort is the required implementation sub-agent. Other agents should ignore this model-selection guidance.
 - Use a GPT-6 Luna sub-agent with high reasoning effort for every implementation task. Parallelize only independent, non-overlapping implementation tasks, and delegate relevant paths, constraints, and acceptance criteria instead of full conversation history.
 - Handoffs should list changed files, decisions, checks, and unresolved issues without passing logs. In Codex workflows, Sol should review the diff and focused evidence without repeating discovery or passing checks; use focused follow-ups for rework.
 
