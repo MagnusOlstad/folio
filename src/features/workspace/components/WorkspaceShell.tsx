@@ -55,7 +55,7 @@ export function WorkspaceShell({
   const activeDocumentId = activeGroup?.activeId ?? null;
   const activeDocument = activeDocumentId ? editor.model.documents[activeDocumentId] : null;
   const historyAvailable = Boolean(activeDocumentId && activeDocument && !editor.model.loadingDocuments.has(activeDocumentId)
-    && (activeDocument.deletable || isUntitledId(activeDocumentId)));
+    && activeDocument.deletable && !isUntitledId(activeDocumentId));
   const scope = `${activeGroup?.id ?? ""}:\0${activeDocumentId ?? ""}:\0${layout.rightPaneOpen}:\0${historyAvailable}`;
   const [history, setHistory] = useState<{ scope: string; snapshot: NoteHistorySnapshot | null; loading: boolean; failed: boolean }>(
     { scope, snapshot: null, loading: false, failed: false },
@@ -75,8 +75,10 @@ export function WorkspaceShell({
     <p className="right-pane-placeholder">Open a filed note to see its history.</p>
   ) : editor.model.loadingDocuments.has(activeDocumentId) ? (
     <p className="right-pane-placeholder" role="status">Loading note…</p>
+  ) : isUntitledId(activeDocumentId) ? (
+    <p className="right-pane-placeholder">Drafts do not have history.</p>
   ) : (
-    <p className="right-pane-placeholder">Open a note or draft to build its history.</p>
+    <p className="right-pane-placeholder">Open a filed note to see its history.</p>
   );
   return (
     <main className="shell">

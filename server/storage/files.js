@@ -4,9 +4,6 @@ import path from 'node:path'
 
 import { createSerialQueue } from '../core/queue.js'
 
-const MAX_DRAFT_HISTORY_SNAPSHOTS = 10
-const MAX_DRAFT_HISTORY_BYTES = 256 * 1024
-
 export function createFileStorage(runtime) {
   const { indexPath, draftsRoot, bundleRoot, slugify } = runtime
   const queueDraftMutation = createSerialQueue()
@@ -61,35 +58,6 @@ async function readDrafts() {
   return drafts.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
 }
 
-async function readDraftHistoryForDraft(id) {
-  const draft = await readDraft(id)
-  return Array.isArray(draft?.history) ? draft.history.filter((snapshot) =>
-    typeof snapshot?.revision === 'string' && typeof snapshot?.authoredAt === 'string'
-      && typeof snapshot?.title === 'string' && typeof snapshot?.content === 'string') : []
-}
-
-async function readDraftHistoryForFile(fileId) {
-  const fileIds = new Set(Array.isArray(fileId) ? fileId : [fileId])
-  const entries = await fs.readdir(draftsRoot, { withFileTypes: true })
-  const snapshots = []
-  for (const entry of entries) {
-    if (!entry.isFile() || path.extname(entry.name) !== '.json') continue
-    try {
-      const draft = JSON.parse(await fs.readFile(path.join(draftsRoot, entry.name), 'utf8'))
-      if (!fileIds.has(draft?.filedId) || draft.appended || !Array.isArray(draft.history)) continue
-      for (const snapshot of draft.history) {
-        if (typeof snapshot?.revision === 'string' && typeof snapshot?.authoredAt === 'string'
-          && typeof snapshot?.title === 'string' && typeof snapshot?.content === 'string') {
-          snapshots.push({ ...snapshot, draftId: normalizeDraftId(draft.id) })
-        }
-      }
-    } catch {
-      // Keep corrupt draft archives untouched for recovery.
-    }
-  }
-  return snapshots.sort((left, right) => right.authoredAt.localeCompare(left.authoredAt))
-}
-
 async function readDraft(id) {
   const filePath = draftFilePath(id)
   if (!filePath) return null
@@ -105,82 +73,19 @@ async function writeDraft(draft) {
   const filePath = draftFilePath(draft.id)
   if (!filePath) throw new Error('Invalid draft ID.')
   const temporaryPath = `${filePath}.${process.pid}.${crypto.randomBytes(3).toString('hex')}.tmp`
-  await fs.writeFile(temporaryPath, `${JSON.stringify(draft, null, 2)}\n`, { flag: 'wx' })
+  const persistedDraft = Object.fromEntries(Object.entries(draft).filter(([key]) => key !== 'history'))
+  await fs.writeFile(temporaryPath, `${JSON.stringify(persistedDraft, null, 2)}\n`, { flag: 'wx' })
   await fs.rename(temporaryPath, filePath)
 }
 
-function retainDraftHistory(history) {
-  const retained = history.filter((snapshot) => Buffer.byteLength(JSON.stringify(snapshot), 'utf8') <= MAX_DRAFT_HISTORY_BYTES)
-  while (retained.length > MAX_DRAFT_HISTORY_SNAPSHOTS) retained.splice(1, 1)
-  while (retained.length > 1 && Buffer.byteLength(JSON.stringify(retained), 'utf8') > MAX_DRAFT_HISTORY_BYTES) {
-    retained.splice(retained.length > 2 ? 1 : 0, 1)
-  }
-  return retained
-}
-
-async function checkpointDraftHistoryNow(id, contentOverride) {
-  const draft = await readDraft(id)
-  if (!draft || draft.filedId || typeof draft.content !== 'string' || !draft.content.trim()) return { draft: null, snapshot: null }
-  const content = typeof contentOverride === 'string' ? contentOverride : draft.content
-  const history = retainDraftHistory(await readDraftHistoryForDraft(id))
-  if (Buffer.byteLength(content, 'utf8') > MAX_DRAFT_HISTORY_BYTES) {
-    const boundedDraft = { ...draft, ...(content === draft.content ? {} : { content }), history }
-    if (JSON.stringify(history) !== JSON.stringify(draft.history || [])) await writeDraft(boundedDraft)
-    return { draft: boundedDraft, snapshot: null, skippedReason: 'too-large' }
-  }
-  if (history.at(-1)?.content === content) {
-    const unchanged = content === draft.content && JSON.stringify(history) === JSON.stringify(draft.history || [])
-    const nextDraft = unchanged ? draft : { ...draft, content, history }
-    if (!unchanged) await writeDraft(nextDraft)
-    return { draft: nextDraft, snapshot: history.at(-1) || null }
-  }
-  const authoredAt = new Date().toISOString()
-  const title = content.split('\n').map((line) => line.replace(/^\s*#+\s*/, '').trim()).find(Boolean)?.slice(0, 48) || 'Untitled'
-  const revision = `draft-${crypto.createHash('sha256').update(`${id}\0${authoredAt}\0${content}`).digest('hex').slice(0, 40)}`
-  const snapshot = { revision, authoredAt, title, content }
-  const retainedHistory = retainDraftHistory([...history, snapshot])
-  const nextDraft = { ...draft, history: retainedHistory }
-  await writeDraft(nextDraft)
-  return { draft: nextDraft, snapshot }
-}
-
-async function checkpointDraftHistory(id) {
-  return queueDraftMutation(async () => checkpointDraftHistoryNow(id))
-}
-
-async function restoreDraftHistory(id, revision) {
-  return queueDraftMutation(async () => {
-    const existing = await readDraft(id)
-    const snapshot = (await readDraftHistoryForDraft(id)).find((item) => item.revision === revision)
-    if (!snapshot) return null
-    const { draft: checkpointed } = await checkpointDraftHistoryNow(id)
-    if (!checkpointed || !existing) return null
-    let draft = checkpointed
-    if (!(draft.history || []).some((item) => item.revision === revision)) {
-      const retainedHistory = retainDraftHistory([snapshot, ...(draft.history || []).filter((item) => item.revision !== revision)])
-      draft = { ...draft, history: retainedHistory }
-      await writeDraft(draft)
-    }
-    const restored = { ...draft, content: snapshot.content, updatedAt: new Date().toISOString() }
-    await writeDraft(restored)
-    return restored
-  })
-}
-
-async function archiveDraftWithHistory(id, { content, filedId, filing, appended }) {
+async function archiveDraft(id, { content, filedId, filing, appended }) {
   return queueDraftMutation(async () => {
     const existing = await readDraft(id)
     if (!existing) return null
     const archivedAt = new Date().toISOString()
-    let draft = existing
-    if (!existing.filedId) {
-      const checkpoint = await checkpointDraftHistoryNow(id, typeof content === 'string' ? content : existing.content)
-      draft = checkpoint.draft || existing
-    }
-    const { history, ...draftReceipt } = draft
+    const draftReceipt = Object.fromEntries(Object.entries(existing).filter(([key]) => key !== 'history'))
     const archived = {
       ...draftReceipt,
-      ...(!appended && history?.length ? { history } : {}),
       ...(typeof content === 'string' ? { content } : {}),
       filedId,
       filedAt: archivedAt,
@@ -311,7 +216,7 @@ async function listBundleMarkdownFiles(directory = bundleRoot) {
 }
 
 
-  return { readRecords, writeRecords, normalizeDraftId, draftFilePath, readDrafts, readDraftHistoryForDraft, readDraftHistoryForFile, checkpointDraftHistory, restoreDraftHistory, archiveDraftWithHistory, readDraft, queueDraftMutation, writeDraft,
+  return { readRecords, writeRecords, normalizeDraftId, draftFilePath, readDrafts, archiveDraft, readDraft, queueDraftMutation, writeDraft,
     readOptionalFile, bundleFileId, resolveBundleMarkdownPath, isMovableConceptId, normalizeMoveDirectory,
     normalizeBundlePath, resolveBundlePath, assertNoBundleSymlinks, listBundleDirectories, listBundleMarkdownFiles }
 }

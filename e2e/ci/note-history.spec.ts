@@ -35,9 +35,11 @@ test('keeps the timeline visible and returns to the live editor at Now', async (
 
   await history.getByRole('button', { name: /Earlier version/ }).click()
   await expect(page.getByRole('region', { name: 'History preview' }).getByText('This text only exists in history.')).toBeVisible()
-  await expect(page.getByRole('region', { name: 'History preview' }).getByRole('button', { name: 'Earlier Start Here' })).toBeVisible()
+  const preview = page.getByRole('region', { name: 'History preview' })
+  await expect(preview.getByRole('heading', { name: 'Earlier Start Here' })).toBeVisible()
+  await expect(preview.getByText('Add description')).toHaveCount(0)
   await expect(editor).toBeHidden()
-  await expect(page.getByRole('region', { name: 'History preview' }).locator('.history-preview-banner')).toHaveCount(0)
+  await expect(preview.locator('.history-preview-banner')).toHaveCount(0)
   await expect(page.getByText('do not render this diff')).toHaveCount(0)
   await expect(history.getByRole('button', { name: 'Restore this version' })).toBeEnabled()
 
@@ -47,25 +49,12 @@ test('keeps the timeline visible and returns to the live editor at Now', async (
   await expect(editor).toContainText('Live note content')
 })
 
-test('drafts keep bounded history and a restore returns to the present', async ({ page }) => {
+test('untitled drafts stay editable without history controls', async ({ page }) => {
   await page.goto('/')
   await page.getByTitle('New note (Cmd+T)').click()
-  const draftHistory = page.getByRole('region', { name: 'Note history' })
-  await expect(draftHistory).toBeVisible()
-  await expect(draftHistory.getByRole('button', { name: 'Present' })).toHaveAttribute('aria-current', 'step')
-  await expect(draftHistory.getByText('No earlier moments yet.')).toBeVisible()
-
-  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
-  const history = page.getByRole('region', { name: 'Note history' })
-  const version = history.locator('.note-history-stop').filter({ hasNotText: 'Now' }).first()
-  await expect(version).toBeVisible()
-  await version.click()
-  await expect(history.getByRole('button', { name: 'Restore this version' })).toBeEnabled()
-
-  page.once('dialog', dialog => dialog.accept())
-  await history.getByRole('button', { name: 'Restore this version' }).click()
-  await expect(history.getByRole('button', { name: 'Present' })).toHaveAttribute('aria-current', 'step')
-  await expect(history.getByRole('button', { name: 'Restore this version' })).toBeDisabled()
+  await expect(page.getByText('Drafts do not have history.')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Note history' })).toHaveCount(0)
+  await expect(page.locator('.cm-content')).toBeEditable()
 })
 
 test('a matching history snapshot keeps the live document header and body start aligned', async ({ page }) => {

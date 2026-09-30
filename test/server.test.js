@@ -264,53 +264,20 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal(savedDraft.content, 'A durable unfinished thought.')
   const historyDraftId = 'untitled:history-persistence-test'
   const historyDraftUrl = `${baseUrl}/api/draft?id=${encodeURIComponent(historyDraftId)}`
-  await fetch(historyDraftUrl, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'First draft body', createdAt: draftCreatedAt, updatedAt: draftUpdatedAt }) })
-  const checkpointDraft = () => fetch(`${baseUrl}/api/draft/history/checkpoint?id=${encodeURIComponent(historyDraftId)}`, { method: 'POST' })
-  assert.equal((await checkpointDraft()).status, 200)
-  assert.equal((await checkpointDraft()).status, 200)
-  let draftHistory = await (await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(historyDraftId)}`)).json()
-  assert.equal(draftHistory.entries.length, 1, 'unchanged drafts do not add history entries')
-  const firstDraftRevision = draftHistory.entries[0].revision
-  await fetch(historyDraftUrl, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Second draft body', createdAt: draftCreatedAt, updatedAt: '2026-09-03T06:02:00.000Z' }) })
-  await checkpointDraft()
-  draftHistory = await (await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(historyDraftId)}`)).json()
-  assert.equal(draftHistory.entries.length, 2)
-  const draftVersion = await (await fetch(`${baseUrl}/api/note/history/version?id=${encodeURIComponent(historyDraftId)}&revision=${encodeURIComponent(firstDraftRevision)}`)).json()
-  assert.equal(draftVersion.note.content, 'First draft body')
-  assert.equal(Object.hasOwn((await (await fetch(`${baseUrl}/api/drafts`)).json()).find((draft) => draft.id === historyDraftId), 'history'), false, 'draft history stays private from the workspace bootstrap payload')
-  await fetch(historyDraftUrl, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Unsnapshotted current body', createdAt: draftCreatedAt, updatedAt: '2026-09-03T06:04:00.000Z' }) })
-  const draftRestore = await fetch(`${baseUrl}/api/note/history/restore`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: historyDraftId, revision: firstDraftRevision }) })
-  assert.equal(draftRestore.status, 200)
-  const restoredDraft = (await (await fetch(`${baseUrl}/api/drafts`)).json()).find((draft) => draft.id === historyDraftId)
-  assert.equal(restoredDraft.content, 'First draft body')
-  draftHistory = await (await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(historyDraftId)}`)).json()
-  assert.ok(draftHistory.entries.length >= 3, 'restoring preserves the replaced current draft as a new snapshot')
-  assert.ok(draftHistory.entries.some((entry) => entry.title.includes('Unsnapshotted current body')))
-  for (let index = 0; index < 12; index += 1) {
-    await fetch(historyDraftUrl, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: `Rolling draft body ${index}`, createdAt: draftCreatedAt, updatedAt: new Date(Date.now() + (index + 1) * 1000).toISOString() }) })
-    await checkpointDraft()
-  }
+  await fetch(historyDraftUrl, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'A recoverable unfinished thought.', createdAt: draftCreatedAt, updatedAt: draftUpdatedAt }) })
   const historyDraftPath = path.join(dataRoot, 'drafts', `${crypto.createHash('sha256').update(historyDraftId).digest('hex')}.json`)
-  const persistedDraftHistory = JSON.parse(await fs.readFile(historyDraftPath, 'utf8')).history
-  assert.equal(persistedDraftHistory.length, 10, 'draft history keeps only a small rolling window')
-  assert.equal(persistedDraftHistory[0].content, 'First draft body', 'the first draft moment remains available')
-  assert.equal(persistedDraftHistory.at(-1).content, 'Rolling draft body 11')
-  const agedDraftRevision = persistedDraftHistory[1].revision
-  await fetch(historyDraftUrl, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Uncheckpointed body at capacity', createdAt: draftCreatedAt, updatedAt: new Date(Date.now() + 20_000).toISOString() }) })
-  const agedDraftRestore = await fetch(`${baseUrl}/api/note/history/restore`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: historyDraftId, revision: agedDraftRevision }) })
-  assert.equal(agedDraftRestore.status, 200, 'restoring an older moment succeeds even when checkpointing current content reaches the retention limit')
-  const restoredAgedDraft = (await (await fetch(`${baseUrl}/api/drafts`)).json()).find((draft) => draft.id === historyDraftId)
-  assert.equal(restoredAgedDraft.content, 'Rolling draft body 3')
+  await fs.writeFile(historyDraftPath, JSON.stringify({ id: historyDraftId, content: 'A recoverable unfinished thought.', createdAt: draftCreatedAt, updatedAt: draftUpdatedAt, history: [{ revision: 'legacy-draft-snapshot', authoredAt: draftUpdatedAt, title: 'Legacy', content: 'Old snapshot' }] }))
+  const draftCheckpoint = await fetch(`${baseUrl}/api/draft/history/checkpoint?id=${encodeURIComponent(historyDraftId)}`, { method: 'POST' })
+  assert.equal(draftCheckpoint.status, 404, 'draft checkpoint route is removed')
+  const draftHistory = await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(historyDraftId)}`)
+  assert.equal(draftHistory.status, 400, 'draft IDs are not accepted by filed-note history')
+  const draftRestore = await fetch(`${baseUrl}/api/note/history/restore`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: historyDraftId, revision: 'legacy-draft-snapshot' }) })
+  assert.equal(draftRestore.status, 400, 'draft snapshots cannot be restored')
+  const recoveredDraft = (await (await fetch(`${baseUrl}/api/drafts`)).json()).find((draft) => draft.id === historyDraftId)
+  assert.equal(recoveredDraft.content, 'A recoverable unfinished thought.', 'draft content remains available for recovery')
+  await fetch(historyDraftUrl, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Updated recoverable thought.', createdAt: draftCreatedAt, updatedAt: '2026-09-03T06:02:00.000Z' }) })
+  assert.equal(Object.hasOwn(JSON.parse(await fs.readFile(historyDraftPath, 'utf8')), 'history'), false, 'saving a legacy draft removes stored snapshots')
   await fetch(historyDraftUrl, { method: 'DELETE' })
-  const largeHistoryDraftId = 'untitled:large-history-budget-test'
-  const largeHistoryDraftUrl = `${baseUrl}/api/draft?id=${encodeURIComponent(largeHistoryDraftId)}`
-  await fetch(largeHistoryDraftUrl, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'x'.repeat(256 * 1024 + 1), createdAt: draftCreatedAt, updatedAt: new Date().toISOString() }) })
-  const skippedLargeCheckpoint = await fetch(`${baseUrl}/api/draft/history/checkpoint?id=${encodeURIComponent(largeHistoryDraftId)}`, { method: 'POST' })
-  assert.equal(skippedLargeCheckpoint.status, 200, 'oversized draft history is a nonfatal checkpoint result')
-  assert.deepEqual(await skippedLargeCheckpoint.json(), { checkpointed: false, reason: 'too-large' })
-  const largeDraftTimeline = await (await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(largeHistoryDraftId)}`)).json()
-  assert.deepEqual(largeDraftTimeline.entries, [])
-  await fetch(largeHistoryDraftUrl, { method: 'DELETE' })
   const draftsResponse = await fetch(`${baseUrl}/api/drafts`)
   const drafts = await draftsResponse.json()
   assert.deepEqual(drafts, [{
@@ -360,12 +327,10 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     method: 'PUT', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ content: `${meetingCapture}\nEarlier draft-only line.`, createdAt: draftCreatedAt, updatedAt: '2026-09-03T06:02:00.000Z' }),
   })
-  await fetch(`${baseUrl}/api/draft/history/checkpoint?id=${encodeURIComponent(meetingDraftId)}`, { method: 'POST' })
   await fetch(`${baseUrl}/api/draft?id=${encodeURIComponent(meetingDraftId)}`, {
     method: 'PUT', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ content: meetingCapture, createdAt: draftCreatedAt, updatedAt: '2026-09-03T06:03:00.000Z' }),
   })
-  await fetch(`${baseUrl}/api/draft/history/checkpoint?id=${encodeURIComponent(meetingDraftId)}`, { method: 'POST' })
   const meetingResult = await jsonRequest(`${baseUrl}/api/notes`, {
     content: meetingCapture,
     filedContent: meeting,
@@ -393,14 +358,9 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const archivedMeetingDraft = archivedDrafts.find((draft) => draft.id === meetingDraftId)
   assert.equal(archivedMeetingDraft.content, meetingCapture)
   assert.equal(archivedMeetingDraft.filedId, meetingResult.note.id)
-  assert.equal(archivedMeetingDraft.history.length, 2, 'draft history transfers with its archived filing receipt')
-  assert.equal(archivedMeetingDraft.history.at(-1).content, meetingCapture, 'filing checkpoints the submitted final draft body')
-  assert.ok(archivedMeetingDraft.history.length <= 10)
-  assert.ok(Buffer.byteLength(JSON.stringify(archivedMeetingDraft.history), 'utf8') <= 256 * 1024, 'filed draft lineage stays within the history budget')
+  assert.equal(Object.hasOwn(archivedMeetingDraft, 'history'), false, 'filing archives draft content without snapshot lineage')
   const filedTimeline = await (await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(meetingResult.note.id)}`)).json()
-  assert.ok(filedTimeline.entries.some((entry) => entry.revision.startsWith('draft-')), 'filed note history includes its draft lineage')
-  const draftLineageVersion = await (await fetch(`${baseUrl}/api/note/history/version?id=${encodeURIComponent(meetingResult.note.id)}&revision=${encodeURIComponent(archivedMeetingDraft.history[0].revision)}`)).json()
-  assert.match(draftLineageVersion.note.content, /Earlier draft-only line\./)
+  assert.ok(filedTimeline.entries.every((entry) => !entry.revision.startsWith('draft-')), 'filed history contains Git checkpoints only')
   assert.equal(meetingResult.filing.draftId, meetingDraftId)
   assert.equal(meetingResult.filing.mode, 'new')
   assert.equal(meetingResult.filing.actor, 'okf-notetaker/llama3.2:3b')
@@ -690,10 +650,9 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     history: [{ revision: 'draft-appended-content', authoredAt: '2026-09-02T13:00:00.000Z', title: 'Appended capture', content: 'Only the appended capture body' }],
   }))
   const renamedTimeline = await (await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(movedId)}`)).json()
-  assert.ok(renamedTimeline.entries.some((entry) => entry.revision === 'draft-renamed-lineage'), 'draft snapshots follow a filed note after rename')
-  assert.ok(!renamedTimeline.entries.some((entry) => entry.revision === 'draft-appended-content'), 'appended draft-only text cannot replace the complete filed note')
-  const renamedVersion = await (await fetch(`${baseUrl}/api/note/history/version?id=${encodeURIComponent(movedId)}&revision=draft-renamed-lineage`)).json()
-  assert.equal(renamedVersion.note.content, 'Archived draft body')
+  assert.ok(!renamedTimeline.entries.some((entry) => entry.revision.startsWith('draft-')), 'legacy draft snapshots do not enter filed-note history')
+  const renamedVersionResponse = await fetch(`${baseUrl}/api/note/history/version?id=${encodeURIComponent(movedId)}&revision=draft-renamed-lineage`)
+  assert.notEqual(renamedVersionResponse.status, 200, 'legacy draft snapshots cannot be opened as note versions')
   const oldPathResponse = await fetch(`${baseUrl}/api/file?path=${encodeURIComponent(spacedId)}`)
   const oldPathDocument = await oldPathResponse.json()
   assert.equal(oldPathResponse.status, 200, JSON.stringify(oldPathDocument))

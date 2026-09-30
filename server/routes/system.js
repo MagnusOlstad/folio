@@ -5,7 +5,7 @@ export function registerRoutes(app, runtime) {
     toggleOllamaService, installConfiguredModels, readRecords, publicRecord, readDrafts, normalizeDraftId, draftFilePath, queueDraftMutation, readDraft,
     writeDraft, resolveBundleMarkdownPath, isMovableConceptId, queueMarkdownMutation, reindexBundle,
     relationshipIndex, recordIsStale, semanticSuggestionSummaries, removeEmptyBundleDirectories,
-    assertNoBundleSymlinks, history, checkpointDraftHistory } = runtime
+    assertNoBundleSymlinks, history } = runtime
   const ollamaServiceToggles = new Map()
 app.get('/api/version', async (request, response) => {
   const payload = { version: appVersion, repo: updateRepo }
@@ -110,20 +110,6 @@ app.put('/api/draft', async (request, response, next) => {
       return nextDraft
     })
     response.json(draft)
-  } catch (error) {
-    next(error)
-  }
-})
-
-app.post('/api/draft/history/checkpoint', async (request, response, next) => {
-  try {
-    const id = normalizeDraftId(request.query.id || request.body?.id)
-    if (!id) return response.status(400).json({ error: 'Invalid draft ID.' })
-    const checkpoint = await checkpointDraftHistory(id)
-    if (!checkpoint?.draft) return response.status(404).json({ error: 'Draft not found.' })
-    response.json(checkpoint.snapshot
-      ? { checkpointed: true, revision: checkpoint.snapshot.revision }
-      : { checkpointed: false, reason: checkpoint.skippedReason || 'unchanged' })
   } catch (error) {
     next(error)
   }

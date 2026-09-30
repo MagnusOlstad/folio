@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 export function registerRoutes(app, runtime) {
-  const { embedModel, getRawRoot, getBundleRoot, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, normalizeDraftId, archiveDraftWithHistory,
+  const { embedModel, getRawRoot, getBundleRoot, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, normalizeDraftId, archiveDraft,
     readDraft, resolveBundleMarkdownPath, readBundleDocuments, bundleFileId, parseMarkdownFile, queueMarkdownMutation, reindexBundle,
     normalizeInlineText, markdownDocument, embeddingInputHash, persistEmbeddingUpdates, refreshRecordEmbeddings, embedDocument, boundedEmbeddingText,
     embeddingSchemaVersion, classify, openingSpecialKind, rawDocument,
@@ -230,7 +230,7 @@ app.post('/api/notes', async (request, response, next) => {
       await fs.writeFile(targetPath, markdownDocument(parsed.frontmatter, parsed.content))
     })
     if (sourceDraftId) {
-      await archiveDraftWithHistory(sourceDraftId, { content, filedId: createdNote.id, appended, filing: confirmation })
+      await archiveDraft(sourceDraftId, { content, filedId: createdNote.id, appended, filing: confirmation })
     }
     try {
       await history.reconcile(`Created ${createdNote.id}`, [createdNote.id])

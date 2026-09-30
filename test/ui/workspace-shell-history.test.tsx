@@ -99,7 +99,7 @@ describe("workspace history mode", () => {
     expect(screen.getByRole("region", { name: "Note history" })).toBeVisible();
   });
 
-  it("exits on group change and keeps drafts and unloaded notes neutral", async () => {
+  it("keeps drafts live without history controls and leaves unloaded notes neutral", async () => {
     const fetchMock = stubHistoryApi();
     const { rerender } = render(<WorkspaceShell {...shellProps()} />);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -109,7 +109,9 @@ describe("workspace history mode", () => {
     rerender(<WorkspaceShell {...shellProps()} />);
     expect(screen.getByRole("region", { name: "Note history" })).toBeInTheDocument();
     rerender(<WorkspaceShell {...shellProps({ primaryId: "untitled:draft", documents: {} })} />);
-    expect(screen.getByText("Open a note or draft to build its history.")).toBeVisible();
+    expect(screen.getByText("Drafts do not have history.")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Note history" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("main-note")).toHaveTextContent("Live editor");
     rerender(<WorkspaceShell {...shellProps({ documents: {}, loadingDocuments: new Set([noteId]) })} />);
     expect(screen.getByRole("status")).toHaveTextContent("Loading note");
     expect(fetchMock).toHaveBeenCalledTimes(1);
