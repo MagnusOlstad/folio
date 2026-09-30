@@ -1504,6 +1504,11 @@
   vertical-align: -1px;
 }
 
+.live-markdown-editor[data-read-only] .cm-live-markdown-task:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
 .live-markdown-editor .cm-live-markdown-task-complete {
   text-decoration: line-through;
 }

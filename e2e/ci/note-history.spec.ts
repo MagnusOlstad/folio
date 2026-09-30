@@ -80,13 +80,13 @@ test('a matching history snapshot keeps the live document header and body start 
   await editor.fill('# Start Here\n\nLive note content')
   await expect(page.getByText('Saved', { exact: true })).toBeVisible()
   const liveHeader = page.locator('.document-heading')
-  const liveBody = page.locator('.live-markdown-editor .cm-content')
+  const liveBody = page.locator('.live-markdown-editor .cm-content').first()
   const before = await Promise.all([liveHeader.boundingBox(), liveBody.boundingBox()])
   if (!before[0] || !before[1]) throw new Error('Live note layout was not visible')
   await page.getByRole('navigation', { name: 'Note timeline' }).getByRole('button', { name: /Matching moment/ }).click()
   const history = page.getByRole('region', { name: 'History preview' })
   const historicalHeader = history.locator('.document-heading')
-  const historicalBody = history.locator('.history-document-content')
+  const historicalBody = history.locator('.history-document-content .cm-content')
   await expect(history.getByText('Live note content')).toBeVisible()
   await expect(history.getByText('Add description')).toHaveCount(0)
   const after = await Promise.all([historicalHeader.boundingBox(), historicalBody.boundingBox()])
@@ -96,7 +96,7 @@ test('a matching history snapshot keeps the live document header and body start 
   expect(Math.abs(after[1].y - before[1].y)).toBeLessThan(2)
 })
 
-test('hides the generated capture heading in history while preserving user headings', async ({ page }) => {
+test('uses the live indexed body for generated captures and authored wrapper headings', async ({ page }) => {
   await page.route('**/api/note/history**', async route => {
     const url = new URL(route.request().url())
     if (url.pathname.endsWith('/version')) {
@@ -104,8 +104,8 @@ test('hides the generated capture heading in history while preserving user headi
       await route.fulfill({ json: {
         revision: userHeading ? 'user-heading-revision' : 'captured-revision',
         note: userHeading
-          ? { title: 'Meeting notes', description: '', tags: [], status: 'stable', staleAfter: null, content: '# Captured note\n\nThis heading was written by the user.' }
-          : { title: 'Captured meeting', description: '', tags: [], status: 'stable', staleAfter: null, content: '# Captured note\n\n<!-- folio:capture:abcd1234:start -->\nMeeting notes from the capture.\n<!-- folio:capture:abcd1234:end -->' },
+          ? { title: 'Meeting notes', description: '', tags: [], status: 'stable', staleAfter: null, content: 'This heading was written by the user.' }
+          : { title: 'Captured meeting', description: '', tags: [], status: 'stable', staleAfter: null, content: 'Meeting notes from the capture.' },
         diff: '',
       } })
       return
@@ -128,8 +128,87 @@ test('hides the generated capture heading in history while preserving user headi
   await expect(preview.getByRole('heading', { name: 'Captured note' })).toHaveCount(0)
   await expect(preview.getByText('Meeting notes from the capture.')).toBeVisible()
   await page.getByRole('navigation', { name: 'Note timeline' }).getByRole('button', { name: /User heading/ }).click()
-  await expect(preview.getByRole('heading', { name: 'Captured note' })).toBeVisible()
+  await expect(preview.getByRole('heading', { name: 'Captured note' })).toHaveCount(0)
   await expect(preview.getByText('This heading was written by the user.')).toBeVisible()
+})
+
+test('history snapshots keep live Markdown layout and reject editing and task toggles', async ({ page }) => {
+  const markdown = [
+    '## Earlier section',
+    '',
+    '- First item',
+    '  - Nested item',
+    '- [ ] Open task',
+    '',
+    '> A quoted line',
+    '',
+    '```ts',
+    'const count = 2',
+    '```',
+    '',
+    ...Array.from({ length: 35 }, (_, index) => `Paragraph ${index + 1} keeps the note long enough to scroll.`),
+  ].join('\n')
+  await page.route('**/api/note/history**', async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/version')) {
+      await route.fulfill({ json: {
+        revision: 'formatted-revision',
+        note: { title: 'Start Here', description: '', tags: [], status: 'stable', staleAfter: null, content: markdown },
+        diff: '',
+      } })
+      return
+    }
+    if (url.pathname === '/api/note/history') {
+      await route.fulfill({ json: { entries: [{ revision: 'formatted-revision', authoredAt: '2026-09-27T10:00:00.000Z', title: 'Formatted moment' }], nextCursor: null } })
+      return
+    }
+    await route.continue()
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  const live = page.locator('.history-editor-underlay .cm-content')
+  await live.fill(markdown)
+  const liveScroll = page.locator('.history-editor-underlay [data-document-scroll]')
+  await liveScroll.evaluate(element => { element.scrollTop = 150 })
+  await page.getByRole('navigation', { name: 'Note timeline' }).getByRole('button', { name: /Formatted moment/ }).click()
+  const preview = page.getByRole('region', { name: 'History preview' })
+  const historical = preview.locator('.history-document-content .cm-content')
+  await expect(historical).toHaveAttribute('contenteditable', 'false')
+  await expect(preview.getByRole('heading', { name: 'Earlier section', level: 2 })).toBeVisible()
+  await expect(preview.locator('.cm-live-markdown-list')).toHaveCount(3)
+  await expect(preview.locator('.cm-live-markdown-quote')).toBeVisible()
+  await expect(preview.locator('.cm-live-markdown-code-block')).toHaveCount(3)
+  const liveLines = await page.locator('.history-editor-underlay .cm-line').evaluateAll(lines =>
+    lines.map(line => ({ top: line.getBoundingClientRect().top, height: line.getBoundingClientRect().height })),
+  )
+  const historyLines = await historical.locator('.cm-line').evaluateAll(lines =>
+    lines.map(line => ({ top: line.getBoundingClientRect().top, height: line.getBoundingClientRect().height })),
+  )
+  for (const index of [0, 2, 3, 4, 6, 8, 9, 10]) {
+    expect(Math.abs(historyLines[index].top - liveLines[index].top)).toBeLessThan(1)
+    expect(Math.abs(historyLines[index].height - liveLines[index].height)).toBeLessThan(1)
+  }
+  const historyScroll = preview.locator('[data-document-scroll]')
+  await expect.poll(() => historyScroll.evaluate(element => element.scrollTop)).toBe(150)
+  const task = preview.getByRole('checkbox', { name: 'Toggle task on line 5' })
+  await expect(task).toBeDisabled()
+  await historical.dispatchEvent('focus')
+  await historical.dispatchEvent('folio-format', { detail: 'bold', bubbles: true })
+  await task.click({ force: true })
+  await expect(historical).toContainText('Open task')
+  await expect(historical).not.toContainText('# Earlier section')
+  await historyScroll.evaluate(element => { element.scrollTop = element.scrollHeight })
+  const liveBottom = await liveScroll.evaluate(element => element.scrollHeight - element.clientHeight)
+  await expect.poll(() => historyScroll.evaluate(element => element.scrollHeight - element.clientHeight)).toBe(liveBottom)
+  const historyBottom = await historyScroll.evaluate(element => element.scrollHeight - element.clientHeight)
+  await expect.poll(() => historyScroll.evaluate(element => element.scrollTop)).toBe(historyBottom)
+  await expect.poll(() => liveScroll.evaluate(element => element.scrollTop)).toBe(historyBottom)
+
+  await page.getByRole('navigation', { name: 'Note timeline' }).getByRole('button', { name: 'Present' }).click()
+  await expect(live).toContainText('Open task')
+  await expect(live).toContainText('const count = 2')
+  await expect.poll(() => liveScroll.evaluate(element => element.scrollTop)).toBe(historyBottom)
 })
 
 test('a failed moment shows a retry state in the main note window', async ({ page }) => {

@@ -105,6 +105,43 @@ describe("LiveMarkdownEditor", () => {
     expect(editor).not.toHaveTextContent("# Heading");
   });
 
+  it("keeps read-only snapshots formatted and blocks editing and task changes", () => {
+    const onChange = vi.fn();
+    const onToggleTask = vi.fn();
+    render(
+      <LiveMarkdownEditor
+        value={"# Heading\n\n- Bullet\n- [ ] Task\n\n> quote\n\n```ts\nconst x = 1\n```"}
+        onChange={onChange}
+        onToggleTask={onToggleTask}
+        readOnly
+        ariaLabel="History of note"
+      />,
+    );
+
+    const editor = screen.getByLabelText("History of note");
+    const view = EditorView.findFromDOM(editor);
+    expect(editor).toHaveAttribute("contenteditable", "false");
+    expect(document.querySelector(".cm-live-markdown-heading-1")).toBeTruthy();
+    expect(document.querySelector(".cm-live-markdown-list-marker")).toBeTruthy();
+    expect(document.querySelector(".cm-live-markdown-quote")).toBeTruthy();
+    expect(document.querySelector(".cm-live-markdown-code-block")).toBeTruthy();
+
+    fireEvent.focus(editor);
+    expect(editor).not.toHaveTextContent("# Heading");
+    fireEvent.keyDown(editor, { key: "b", ctrlKey: true });
+    fireEvent.input(editor, { inputType: "insertText", data: "changed" });
+    editor.dispatchEvent(
+      new CustomEvent("folio-format", { detail: "bold", cancelable: true }),
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "Toggle task on line 4" }));
+
+    expect(view.state.doc.toString()).toContain("# Heading");
+    expect(view.state.doc.toString()).toContain("- [ ] Task");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onToggleTask).not.toHaveBeenCalled();
+    expect(screen.getByRole("checkbox", { name: "Toggle task on line 4" })).toBeDisabled();
+  });
+
   it("uses the CodeMirror GFM syntax tree for nested strikethrough", () => {
     render(
       <LiveMarkdownEditor

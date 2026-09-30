@@ -1076,6 +1076,9 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const offlineHistory = await (await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(offline.note.id)}`)).json()
   const offlineSnapshot = await (await fetch(`${baseUrl}/api/note/history/version?id=${encodeURIComponent(offline.note.id)}&revision=${encodeURIComponent(offlineHistory.entries[0].revision)}`)).json()
   assert.match(offlineSnapshot.note.content, /Offline capture/)
+  const offlineLiveNote = await (await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(offline.note.id)}`)).json()
+  assert.equal(offlineSnapshot.note.content, offlineLiveNote.content, 'history and the live note expose the same indexed Markdown body')
+  assert.doesNotMatch(offlineSnapshot.note.content, /folio:capture:|^# Captured note/m, 'generated capture wrappers are hidden in history presentation')
   assert.doesNotMatch(offlineSnapshot.note.content, /^(?:---|title:|type:|generated:|filing:)/m, 'worker snapshots expose parsed note body rather than OKF frontmatter')
   const unfiledHistoryResponse = await fetch(`${baseUrl}/api/note/history/checkpoint`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'untitled:note' }),

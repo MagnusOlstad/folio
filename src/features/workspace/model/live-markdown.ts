@@ -29,6 +29,7 @@ export type LiveMarkdownListIndentChange = {
 
 type LiveMarkdownConfiguration = {
   callbacks: MutableRefObject<LiveMarkdownCallbacks>;
+  readOnly?: boolean;
 };
 
 type SourceLink = { from: number; to: number; href: string };
@@ -73,16 +74,19 @@ class TaskCheckboxWidget extends WidgetType {
   private readonly checked: boolean;
   private readonly lineNumber: number;
   private readonly callbacks: MutableRefObject<LiveMarkdownCallbacks>;
+  private readonly readOnly: boolean;
 
   constructor(
     checked: boolean,
     lineNumber: number,
     callbacks: MutableRefObject<LiveMarkdownCallbacks>,
+    readOnly: boolean,
   ) {
     super();
     this.checked = checked;
     this.lineNumber = lineNumber;
     this.callbacks = callbacks;
+    this.readOnly = readOnly;
   }
 
   eq(other: TaskCheckboxWidget) {
@@ -95,6 +99,7 @@ class TaskCheckboxWidget extends WidgetType {
     input.checked = this.checked;
     input.className = "cm-live-markdown-task";
     input.setAttribute("aria-label", `Toggle task on line ${this.lineNumber}`);
+    input.disabled = this.readOnly;
     input.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -214,6 +219,7 @@ function buildDecorations(
   focused: boolean,
 ): DecorationSet {
   const reveal = (from: number, to: number) => {
+    if (configuration.readOnly) return false;
     if (!focused) return false;
     return state.selection.ranges.some((range) => {
       if (range.empty) return range.from >= from && range.from <= to;
@@ -345,6 +351,7 @@ function buildDecorations(
                 task[1].toLowerCase() === "x",
                 lineNumber,
                 configuration.callbacks,
+                Boolean(configuration.readOnly),
               ),
               side: 1,
             }).range(markerStart, line.from + task[0].length),
@@ -420,7 +427,7 @@ export function liveMarkdownExtensions(configuration: LiveMarkdownConfiguration)
     update(value, transaction) {
       let focused = value.focused;
       for (const effect of transaction.effects) {
-        if (effect.is(setLiveMarkdownFocus)) focused = effect.value;
+        if (effect.is(setLiveMarkdownFocus)) focused = configuration.readOnly ? false : effect.value;
       }
       if (focused === value.focused && !transaction.docChanged && !transaction.selection)
         return value;
@@ -436,11 +443,11 @@ export function liveMarkdownExtensions(configuration: LiveMarkdownConfiguration)
     decorations,
     EditorView.domEventHandlers({
       focus: (_event, view) => {
-        view.dispatch({ effects: setLiveMarkdownFocus.of(true) });
+        if (!configuration.readOnly) view.dispatch({ effects: setLiveMarkdownFocus.of(true) });
         return false;
       },
       blur: (_event, view) => {
-        view.dispatch({ effects: setLiveMarkdownFocus.of(false) });
+        if (!configuration.readOnly) view.dispatch({ effects: setLiveMarkdownFocus.of(false) });
         return false;
       },
       mousedown: (event, view) => {

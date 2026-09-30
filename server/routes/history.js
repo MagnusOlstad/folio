@@ -42,6 +42,13 @@ export function registerRoutes(app, runtime) {
       const revision = noteVersion(request)
       const result = await runtime.history.version(id, revision)
       const parsed = runtime.parseMarkdownFile(result.markdown, id)
+      // Note snapshots should use the same generated-section and capture
+      // cleanup as the live indexed note API. Fixed OKF files keep their raw
+      // body, matching /api/file.
+      const indexedRecord = (await runtime.readRecords()).some((record) => record.id === id)
+      const content = indexedRecord
+        ? runtime.indexedConceptContent(parsed.content)
+        : runtime.normalizeMarkdownBreaks(parsed.content)
       response.json({
         revision: result.revision,
         note: {
@@ -50,7 +57,7 @@ export function registerRoutes(app, runtime) {
           tags: parsed.tags,
           status: parsed.status,
           staleAfter: parsed.staleAfter,
-          content: parsed.content,
+          content,
         },
         diff: result.diff,
       })

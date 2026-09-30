@@ -21,6 +21,7 @@ type DocumentFooterProps = {
   deleteInProgress: boolean;
   moving: boolean;
   exporting: boolean;
+  readOnly?: boolean;
   onBeginPathEditing: (document: ViewerDocument) => void;
   onChangePath: (documentId: string, value: string) => void;
   onFinishPathEditing: (document: ViewerDocument, value: string) => void;
@@ -49,6 +50,7 @@ export function DocumentFooter({
   deleteInProgress,
   moving,
   exporting,
+  readOnly = false,
   onBeginPathEditing,
   onChangePath,
   onFinishPathEditing,
@@ -88,6 +90,7 @@ export function DocumentFooter({
             <input
               value={pathDraft ?? directoryForId(document.id)}
               disabled={moving || deleting}
+              readOnly={readOnly}
               onFocus={() => onBeginPathEditing(document)}
               onChange={(event) =>
                 onChangePath(document.id, event.target.value)
@@ -119,6 +122,7 @@ export function DocumentFooter({
           ) : document.deletable ? (
             <input
               value={tagDraft ?? document.tags.join(", ")}
+              readOnly={readOnly}
               onFocus={() => onBeginTagEditing(document)}
               onChange={(event) =>
                 onChangeTag(document.id, event.target.value)
@@ -183,7 +187,7 @@ export function DocumentFooter({
                   type="button"
                   className="document-delete"
                   onClick={() => setDeleteConfirmationId(document.id)}
-                  disabled={deleteInProgress}
+                  disabled={readOnly || deleteInProgress}
                   title={`Delete ${document.title}`}
                 >
                   Delete
@@ -194,6 +198,7 @@ export function DocumentFooter({
           <NoteExportMenu
             title={document.title}
             exporting={exporting}
+            disabled={readOnly}
             onExport={(format) => onExport(document, format)}
           />
         </div>

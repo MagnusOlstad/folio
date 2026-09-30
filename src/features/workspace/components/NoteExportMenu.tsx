@@ -5,12 +5,14 @@ import type { NoteExportFormat } from "../model/note-export.ts";
 type NoteExportMenuProps = {
   title: string;
   exporting: boolean;
+  disabled?: boolean;
   onExport: (format: NoteExportFormat) => void;
 };
 
 export function NoteExportMenu({
   title,
   exporting,
+  disabled = false,
   onExport,
 }: NoteExportMenuProps) {
   const [open, setOpen] = useState(false);
@@ -66,7 +68,7 @@ export function NoteExportMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        disabled={exporting}
+        disabled={exporting || disabled}
         onClick={() => setOpen((current) => !current)}
         onKeyDown={(event) => {
           if (event.key !== "ArrowDown") return;
