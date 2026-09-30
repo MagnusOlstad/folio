@@ -18,6 +18,7 @@ type DocumentHeaderProps = {
     field: MetadataField,
     value: string,
   ) => void;
+  readOnly?: boolean;
 };
 
 export function DocumentHeader({
@@ -28,6 +29,7 @@ export function DocumentHeader({
   onBeginEditing,
   onChangeDraft,
   onFinishEditing,
+  readOnly = false,
 }: DocumentHeaderProps) {
   const titleKey = `${groupId}:${document.id}:title`;
   const descriptionKey = `${groupId}:${document.id}:description`;
@@ -38,7 +40,9 @@ export function DocumentHeader({
         {document.type}
         {document.stale ? " / stale" : ""}
       </p>
-      {editingKey === titleKey ? (
+      {readOnly ? (
+        <h1>{document.title}</h1>
+      ) : editingKey === titleKey ? (
         <input
           className="document-title-editor"
           value={drafts[titleKey] ?? document.title}
@@ -76,7 +80,14 @@ export function DocumentHeader({
       ) : (
         <h1>{document.title}</h1>
       )}
-      {editingKey === descriptionKey ? (
+      {readOnly ? (
+        <span
+          className={`document-description${document.description ? "" : " empty"}`}
+          aria-hidden={document.description ? undefined : true}
+        >
+          {document.description || "\u00a0"}
+        </span>
+      ) : editingKey === descriptionKey ? (
         <input
           className="document-description-editor"
           value={drafts[descriptionKey] ?? document.description}

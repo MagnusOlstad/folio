@@ -5,17 +5,17 @@ import { useNoteHistoryCheckpoint } from "../../src/features/workspace/hooks/use
 describe("useNoteHistoryCheckpoint", () => {
   afterEach(() => vi.useRealTimers());
 
-  it("checkpoints edited notes every five minutes and stops after a clean checkpoint", async () => {
+  it("checkpoints edited notes every ten seconds and stops after a clean checkpoint", async () => {
     vi.useFakeTimers();
     const checkpoint = vi.fn().mockResolvedValue(undefined);
     const { result, unmount } = renderHook(() => useNoteHistoryCheckpoint({ checkpoint }));
 
     act(() => result.current("/notes/long-session.md", "bundle-one"));
-    await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60 * 1000 - 1); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10 * 1000 - 1); });
     expect(checkpoint).not.toHaveBeenCalled();
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(checkpoint).toHaveBeenCalledTimes(1);
-    await act(async () => { await vi.advanceTimersByTimeAsync(10 * 60 * 1000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30 * 1000); });
     expect(checkpoint).toHaveBeenCalledTimes(1);
 
     unmount();
@@ -28,11 +28,11 @@ describe("useNoteHistoryCheckpoint", () => {
     const checkpoint = vi.fn(() => new Promise<void>((resolve) => { resolveCheckpoint = resolve; }));
     const { result } = renderHook(() => useNoteHistoryCheckpoint({ checkpoint }));
     act(() => result.current("/notes/long-session.md", "bundle-one"));
-    await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60 * 1000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10 * 1000); });
     expect(checkpoint).toHaveBeenCalledTimes(1);
     act(() => result.current("/notes/long-session.md", "bundle-one"));
     await act(async () => { resolveCheckpoint?.(); await Promise.resolve(); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60 * 1000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10 * 1000); });
     expect(checkpoint).toHaveBeenCalledTimes(2);
   });
 

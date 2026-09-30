@@ -167,11 +167,14 @@ describe("workspace editor components", () => {
   });
 
   it("previews a selected moment without a diff and restores after confirmation", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [{ revision: "a".repeat(40), authoredAt: "2026-09-27T09:00:00.000Z", title: "First" }], nextCursor: null }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ revision: "a".repeat(40), note: { title: "First", description: "", tags: ["one"], status: "stable", staleAfter: null, content: "# Earlier" }, diff: "-# Earlier\n+# Current" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ note: document, warning: "Embedding refresh is pending." }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [], nextCursor: null }), { status: 200 }));
+    let historyReads = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/restore")) return new Response(JSON.stringify({ note: document, warning: "Embedding refresh is pending." }), { status: 200 });
+      if (url.includes("/version?")) return new Response(JSON.stringify({ revision: "a".repeat(40), note: { title: "First", description: "", tags: ["one"], status: "stable", staleAfter: null, content: "# Earlier" }, diff: "-# Earlier\n+# Current" }), { status: 200 });
+      historyReads += 1;
+      return new Response(JSON.stringify({ entries: historyReads > 2 ? [] : [{ revision: "a".repeat(40), authoredAt: "2026-09-27T09:00:00.000Z", title: "First" }], nextCursor: null }), { status: 200 });
+    });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
     const restored = vi.fn().mockResolvedValue(undefined);
@@ -194,9 +197,9 @@ describe("workspace editor components", () => {
   });
 
   it("does not issue a restore request when flushing the current note fails", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [{ revision: "b".repeat(40), authoredAt: "2026-09-27T09:00:00.000Z", title: "Earlier" }], nextCursor: null }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ revision: "b".repeat(40), note: { title: "Earlier", description: "", tags: [], status: "stable", staleAfter: null, content: "Before edit" }, diff: "-Before edit\n+Unsaved edit" }), { status: 200 }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).includes("/version?")
+      ? new Response(JSON.stringify({ revision: "b".repeat(40), note: { title: "Earlier", description: "", tags: [], status: "stable", staleAfter: null, content: "Before edit" }, diff: "-Before edit\n+Unsaved edit" }), { status: 200 })
+      : new Response(JSON.stringify({ entries: [{ revision: "b".repeat(40), authoredAt: "2026-09-27T09:00:00.000Z", title: "Earlier" }], nextCursor: null }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
     const beforeRestore = vi.fn()
@@ -207,7 +210,6 @@ describe("workspace editor components", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Restore this version" })).toBeEnabled());
     fireEvent.click(await screen.findByRole("button", { name: "Restore this version" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not save the note");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/restore"))).toBe(false);
     vi.unstubAllGlobals();
   });
@@ -216,13 +218,15 @@ describe("workspace editor components", () => {
     const olderRevision = "a".repeat(40);
     const newerRevision = "b".repeat(40);
     let finishOlder: ((response: Response) => void) | undefined;
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/version?") && url.includes(olderRevision)) return new Promise<Response>((resolve) => { finishOlder = resolve; });
+      if (url.includes("/version?")) return Promise.resolve(new Response(JSON.stringify({ revision: newerRevision, note: { title: "Newer", description: "", tags: [], status: "stable", staleAfter: null, content: "Newer preview" }, diff: "" }), { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify({ entries: [
         { revision: olderRevision, authoredAt: "2026-09-27T09:00:00.000Z", title: "Older" },
         { revision: newerRevision, authoredAt: "2026-09-27T10:00:00.000Z", title: "Newer" },
-      ], nextCursor: null }), { status: 200 }))
-      .mockImplementationOnce(() => new Promise<Response>((resolve) => { finishOlder = resolve; }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ revision: newerRevision, note: { title: "Newer", description: "", tags: [], status: "stable", staleAfter: null, content: "Newer preview" }, diff: "" }), { status: 200 }));
+      ], nextCursor: null }), { status: 200 }));
+    });
     vi.stubGlobal("fetch", fetchMock);
     const onPreview = vi.fn();
     const { container } = render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onPreview={onPreview} onExit={vi.fn()} />);

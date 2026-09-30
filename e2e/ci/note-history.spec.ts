@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-test('opens an opt-in timeline and previews a snapshot without editing the live note', async ({ page }) => {
+test('keeps the timeline visible and returns to the live editor at Now', async ({ page }) => {
   const historyRequests: string[] = []
   await page.route('**/api/note/history**', async route => {
     const url = new URL(route.request().url())
@@ -24,41 +24,38 @@ test('opens an opt-in timeline and previews a snapshot without editing the live 
   await page.getByRole('button', { name: 'Start Here', exact: true }).click()
   const editor = page.getByRole('textbox', { name: 'Edit Start Here' })
   await expect(editor).toBeVisible()
-  await expect(page.getByRole('button', { name: /Open history/ })).toBeVisible()
-  expect(historyRequests).toHaveLength(0)
+  const history = page.getByRole('region', { name: 'Note history' })
+  await expect(history).toBeVisible()
+  await expect.poll(() => historyRequests.length).toBe(1)
 
   await editor.fill('# Start Here\n\nLive note content')
   await expect(page.getByText('Saved', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: /Open history/ }).click()
-  const history = page.getByRole('region', { name: 'Note history' })
-  await expect(history).toBeVisible()
-  await expect(page.getByRole('region', { name: 'History preview' })).toBeVisible()
-  await expect(editor).toBeHidden()
-  await expect.poll(() => historyRequests.length).toBe(1)
+  await expect(editor).toBeVisible()
   await expect(page.getByRole('button', { name: 'Present' })).toHaveAttribute('aria-current', 'step')
 
   await history.getByRole('button', { name: /Earlier version/ }).click()
   await expect(page.getByRole('region', { name: 'History preview' }).getByText('This text only exists in history.')).toBeVisible()
-  await expect(page.getByRole('region', { name: 'History preview' }).getByRole('heading', { name: 'Earlier Start Here' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'History preview' }).getByRole('button', { name: 'Earlier Start Here' })).toBeVisible()
+  await expect(editor).toBeHidden()
+  await expect(page.getByRole('region', { name: 'History preview' }).locator('.history-preview-banner')).toHaveCount(0)
   await expect(page.getByText('do not render this diff')).toHaveCount(0)
   await expect(history.getByRole('button', { name: 'Restore this version' })).toBeEnabled()
 
   await history.getByRole('button', { name: 'Present' }).click()
-  await expect(page.getByRole('region', { name: 'History preview' }).getByText('Live note content')).toBeVisible()
-  await history.getByRole('button', { name: 'Done' }).click()
-  await expect(page.getByRole('region', { name: 'History preview' })).toHaveCount(0)
   await expect(editor).toBeVisible()
+  await expect(page.getByRole('region', { name: 'History preview' })).toHaveCount(0)
   await expect(editor).toContainText('Live note content')
 })
 
-test('drafts keep history unavailable and a restore returns to the present', async ({ page }) => {
+test('drafts keep bounded history and a restore returns to the present', async ({ page }) => {
   await page.goto('/')
   await page.getByTitle('New note (Cmd+T)').click()
-  await expect(page.getByText('History is available for filed notes.')).toBeVisible()
-  await expect(page.getByRole('button', { name: /Open history/ })).toHaveCount(0)
+  const draftHistory = page.getByRole('region', { name: 'Note history' })
+  await expect(draftHistory).toBeVisible()
+  await expect(draftHistory.getByRole('button', { name: 'Present' })).toHaveAttribute('aria-current', 'step')
+  await expect(draftHistory.getByText('No earlier moments yet.')).toBeVisible()
 
   await page.getByRole('button', { name: 'Start Here', exact: true }).click()
-  await page.getByRole('button', { name: /Open history/ }).click()
   const history = page.getByRole('region', { name: 'Note history' })
   const version = history.locator('.note-history-stop').filter({ hasNotText: 'Now' }).first()
   await expect(version).toBeVisible()
@@ -69,6 +66,45 @@ test('drafts keep history unavailable and a restore returns to the present', asy
   await history.getByRole('button', { name: 'Restore this version' }).click()
   await expect(history.getByRole('button', { name: 'Present' })).toHaveAttribute('aria-current', 'step')
   await expect(history.getByRole('button', { name: 'Restore this version' })).toBeDisabled()
+})
+
+test('a matching history snapshot keeps the live document header and body start aligned', async ({ page }) => {
+  await page.route('**/api/note/history**', async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/version')) {
+      await route.fulfill({ json: {
+        revision: 'matching-revision',
+        note: { title: 'Start Here', description: '', tags: [], status: 'stable', staleAfter: null, content: '# Start Here\n\nLive note content' },
+        diff: '',
+      } })
+      return
+    }
+    if (url.pathname === '/api/note/history') {
+      await route.fulfill({ json: { entries: [{ revision: 'matching-revision', authoredAt: '2026-09-27T10:00:00.000Z', title: 'Matching moment' }], nextCursor: null } })
+      return
+    }
+    await route.continue()
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  const editor = page.getByRole('textbox', { name: 'Edit Start Here' })
+  await editor.fill('# Start Here\n\nLive note content')
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible()
+  const liveHeader = page.locator('.document-heading')
+  const liveBody = page.locator('.live-markdown-editor .cm-content')
+  const before = await Promise.all([liveHeader.boundingBox(), liveBody.boundingBox()])
+  if (!before[0] || !before[1]) throw new Error('Live note layout was not visible')
+  await page.getByRole('navigation', { name: 'Note timeline' }).getByRole('button', { name: /Matching moment/ }).click()
+  const history = page.getByRole('region', { name: 'History preview' })
+  const historicalHeader = history.locator('.document-heading')
+  const historicalBody = history.locator('.history-document-content')
+  await expect(history.getByText('Live note content')).toBeVisible()
+  await expect(history.getByText('Add description')).toHaveCount(0)
+  const after = await Promise.all([historicalHeader.boundingBox(), historicalBody.boundingBox()])
+  if (!after[0] || !after[1]) throw new Error('Historical note layout was not visible')
+  expect(Math.abs(after[0].y - before[0].y)).toBeLessThan(2)
+  expect(Math.abs(after[0].height - before[0].height)).toBeLessThan(2)
+  expect(Math.abs(after[1].y - before[1].y)).toBeLessThan(2)
 })
 
 test('a failed moment shows a retry state in the main note window', async ({ page }) => {
@@ -97,7 +133,6 @@ test('a failed moment shows a retry state in the main note window', async ({ pag
 
   await page.goto('/')
   await page.getByRole('button', { name: 'Start Here', exact: true }).click()
-  await page.getByRole('button', { name: /Open history/ }).click()
   const tick = page.getByRole('navigation', { name: 'Note timeline' }).getByRole('button', { name: /Retry moment/ })
   await tick.click()
   const preview = page.getByRole('region', { name: 'History preview' })
@@ -107,7 +142,7 @@ test('a failed moment shows a retry state in the main note window', async ({ pag
   expect(attempts).toBe(2)
 })
 
-test('wheel and drag scrubbing select only the settled stop without moving the workspace', async ({ page }) => {
+test('wheel and drag scrubbing preview while moving without shifting the workspace', async ({ page }) => {
   const revisions = Array.from({ length: 12 }, (_, index) => ({
     revision: `scrub-${index}`,
     authoredAt: new Date(Date.UTC(2026, 8, 27, 11 - index, 0)).toISOString(),
@@ -137,7 +172,6 @@ test('wheel and drag scrubbing select only the settled stop without moving the w
 
   await page.goto('/')
   await page.getByRole('button', { name: 'Start Here', exact: true }).click()
-  await page.getByRole('button', { name: /Open history/ }).click()
   const timeline = page.getByRole('navigation', { name: 'Note timeline' })
   await expect(timeline.getByRole('button', { name: /Scrub moment 0/ })).toBeVisible()
   const workspace = page.locator('#workspace')
@@ -149,30 +183,56 @@ test('wheel and drag scrubbing select only the settled stop without moving the w
   await expect.poll(() => timeline.locator('[aria-current="step"]').getAttribute('data-history-stop')).not.toBe('')
   await expect.poll(() => requests.length).toBeGreaterThan(0)
   await expect(page.getByRole('button', { name: 'Restore this version' })).toBeDisabled()
-  finishVersionRequests.shift()?.()
-  await expect(page.getByRole('button', { name: 'Restore this version' })).toBeEnabled()
   const afterWheel = await timeline.locator('[aria-current="step"]').getAttribute('data-history-stop')
   expect(afterWheel).toBeTruthy()
 
-  const beforeDragCount = requests.length
   await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.68)
   await page.mouse.down()
   await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.4, { steps: 5 })
   await page.mouse.up()
-  await expect.poll(() => requests.length).toBeGreaterThan(beforeDragCount)
+  await expect.poll(() => timeline.locator('[aria-current="step"]').getAttribute('data-history-stop')).not.toBe(afterWheel)
+  finishVersionRequests.shift()?.()
+  const preview = page.getByRole('region', { name: 'History preview' })
+  await expect(preview.getByText(/^Content scrub-/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Restore this version' })).toBeDisabled()
+  await expect.poll(() => requests.length).toBeGreaterThan(1)
+  const restore = page.getByRole('button', { name: 'Restore this version' })
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    if (await restore.isEnabled()) break
+    await expect.poll(() => finishVersionRequests.length > 0 || restore.isEnabled()).toBe(true)
+    if (await restore.isEnabled()) break
+    finishVersionRequests.shift()?.()
+  }
+  await expect(restore).toBeEnabled()
   await expect.poll(() => timeline.locator('[aria-current="step"]').getAttribute('data-history-stop')).not.toBe(afterWheel)
   expect(await workspace.evaluate(element => element.scrollTop)).toBe(initialScroll)
   finishVersionRequests.forEach(finish => finish())
-  const preview = page.getByRole('region', { name: 'History preview' })
   await expect(preview).toBeVisible()
   await expect(preview.getByText(/^Content scrub-/)).toBeInViewport()
-  await expect.poll(async () => {
-    const timelineBox = await timeline.boundingBox()
-    const activeBox = await timeline.locator('[aria-current="step"]').boundingBox()
-    if (!timelineBox || !activeBox) return Number.POSITIVE_INFINITY
-    return Math.abs(activeBox.y + activeBox.height / 2 - (timelineBox.y + timelineBox.height / 2))
-  }).toBeLessThan(2)
   if (process.env.FOLIO_HISTORY_SCREENSHOT) await page.screenshot({ path: process.env.FOLIO_HISTORY_SCREENSHOT, fullPage: false })
+})
+
+test('Older from Now refreshes snapshots created while the note stayed open', async ({ page }) => {
+  const oldEntry = { revision: 'old-moment', authoredAt: '2026-09-27T10:00:00.000Z', title: 'Old moment' }
+  const newEntry = { revision: 'new-moment', authoredAt: '2026-09-27T11:00:00.000Z', title: 'New moment' }
+  let historyReads = 0
+  await page.route('**/api/note/history**', async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname === '/api/note/history') {
+      historyReads += 1
+      await route.fulfill({ json: { entries: historyReads === 1 ? [oldEntry] : [newEntry, oldEntry], nextCursor: null } })
+      return
+    }
+    await route.continue()
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  const timeline = page.getByRole('navigation', { name: 'Note timeline' })
+  await expect(timeline.getByRole('button', { name: /Old moment/ })).toBeVisible()
+  await page.getByRole('button', { name: 'Older moment' }).click()
+  await expect(timeline.getByRole('button', { name: /New moment/ })).toBeVisible()
+  expect(historyReads).toBe(2)
 })
 
 test('the sticky timeline date follows the day at the top while scrolling', async ({ page }) => {
@@ -192,7 +252,6 @@ test('the sticky timeline date follows the day at the top while scrolling', asyn
 
   await page.goto('/')
   await page.getByRole('button', { name: 'Start Here', exact: true }).click()
-  await page.getByRole('button', { name: /Open history/ }).click()
   const timeline = page.getByRole('navigation', { name: 'Note timeline' })
   const stickyDay = page.locator('.note-history-sticky-day')
   await expect(stickyDay).toBeHidden()

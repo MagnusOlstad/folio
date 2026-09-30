@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { BundleDirectory, BundleFile, Note, NoteDetail, ViewerDocument } from "../../../domain/types.ts";
+import type { BundleDirectory, BundleFile, Note, NoteDetail, StoredDraft, ViewerDocument } from "../../../domain/types.ts";
 import { api, apiForBundle, setActiveBundleId } from "../../../lib/api.ts";
 import type { WorkspaceShellProps } from "../components/WorkspaceShell.tsx";
 import { useWorkspaceBootstrap } from "./useWorkspaceBootstrap.ts";
@@ -150,13 +150,30 @@ export function useWorkspaceController(): WorkspaceShellProps {
       deletingNoteId: documents.deletingNoteId,
     };
   }, [documents.deletingNoteId, explorer.movingFileId, persistenceBundleId]);
+  async function saveDraftHistorySnapshot(documentId: string, bundleId: string) {
+    const document = documents.documentsRef.current[documentId];
+    const context = checkpointContextRef.current;
+    if (!document || context.bundleId !== bundleId || context.movingFileId === documentId || context.deletingNoteId === documentId) return;
+    const content = documents.drafts[documentId] ?? document.content;
+    if (!content.trim()) return;
+    await apiForBundle(bundleId, `/api/draft?id=${encodeURIComponent(documentId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ content, createdAt: document.createdAt, updatedAt: document.updatedAt || document.createdAt }),
+    });
+    await apiForBundle(bundleId, `/api/draft/history/checkpoint?id=${encodeURIComponent(documentId)}`, { method: "POST" });
+  }
   const checkpointEditedNote = useNoteHistoryCheckpoint({
     checkpoint: async (documentId, scopeId) => {
       if (checkpointContextRef.current.bundleId !== scopeId) return;
       const bundleId = scopeId;
+      const document = documents.documentsRef.current[documentId];
+      if (!document) return;
+      if (isUntitledId(documentId)) {
+        await saveDraftHistorySnapshot(documentId, bundleId);
+        return;
+      }
       await autosave.flushSave(documentId);
       if (autosave.isDirty(documentId)) throw new Error("Could not save the note before its history checkpoint.");
-      const document = documents.documentsRef.current[documentId];
       const context = checkpointContextRef.current;
       if (!document || isUntitledId(documentId) || !document.deletable || context.bundleId !== bundleId || context.movingFileId === documentId || context.deletingNoteId === documentId) return;
       await apiForBundle(bundleId, "/api/note/history/checkpoint", {
@@ -206,6 +223,10 @@ export function useWorkspaceController(): WorkspaceShellProps {
   }
 
   async function prepareHistoryDocument(documentId: string) {
+    if (isUntitledId(documentId)) {
+      await saveDraftHistorySnapshot(documentId, persistenceBundleId);
+      return;
+    }
     await prepareFiledDocumentHistory(
       documentId,
       autosave.flushSave,
@@ -214,12 +235,29 @@ export function useWorkspaceController(): WorkspaceShellProps {
     );
   }
 
+  async function fileDraftWithHistory(document: ViewerDocument) {
+    try {
+      await saveDraftHistorySnapshot(document.id, persistenceBundleId);
+      mutations.fileDraft(document);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save this draft's history before filing.");
+    }
+  }
+
   function finalizeAllFiledDocuments() {
     return Promise.all(
       Array.from(embeddingRevisionsRef.current.keys(), finalizeFiledDocument),
     );
   }
   const refreshAfterHistoryRestore = useCallback(async (documentId: string) => {
+    if (isUntitledId(documentId)) {
+      const drafts = await api<StoredDraft[]>("/api/drafts");
+      const draft = drafts.find((candidate) => candidate.id === documentId);
+      if (!draft) throw new Error("The restored draft could not be reloaded.");
+      documents.setDocuments((current) => ({ ...current, [documentId]: { ...current[documentId], content: draft.content, updatedAt: draft.updatedAt } }));
+      documents.setDrafts((current) => ({ ...current, [documentId]: draft.content }));
+      return;
+    }
     const [detail, notes, files] = await Promise.all([
       api<NoteDetail>(`/api/note?id=${encodeURIComponent(documentId)}`),
       api<Note[]>("/api/notes"),
@@ -620,13 +658,13 @@ export function useWorkspaceController(): WorkspaceShellProps {
         closeTab: closeDocumentTab,
         changeDraftContent: (document, content) => {
           documents.changeDraftContent(document, content);
+          checkpointEditedNote(document.id, persistenceBundleId);
           if (!isUntitledId(document.id)) {
             markEmbeddingDirty(document.id);
-            if (document.deletable) checkpointEditedNote(document.id, persistenceBundleId);
             autosave.scheduleSave(document.id, content);
           }
         },
-        fileDraft: mutations.fileDraft,
+        fileDraft: fileDraftWithHistory,
         changeFilingFields: mutations.changeFilingFields,
         revealStandaloneFiling: mutations.revealStandaloneFiling,
         confirmFiling: mutations.confirmFiling,
@@ -645,13 +683,25 @@ export function useWorkspaceController(): WorkspaceShellProps {
           void finalizeAllFiledDocuments();
           return navigation.openDocument(...args);
         },
-        toggleTaskCheckbox: mutations.toggleTaskCheckbox,
+        toggleTaskCheckbox: (document, lineNumber, checked) => {
+          const updated = mutations.toggleTaskCheckbox(document, lineNumber, checked);
+          checkpointEditedNote(document.id, persistenceBundleId);
+          return updated;
+        },
         deleteFiledNote: async (document) => {
           await autosave.flushSave(document.id);
           return navigation.deleteFiledNote(document);
         },
-        persistDocument: mutations.persistDocument,
-        persistMetadata: mutations.persistMetadata,
+        persistDocument: (...args) => {
+          const updated = mutations.persistDocument(...args);
+          checkpointEditedNote(args[0].id, persistenceBundleId);
+          return updated;
+        },
+        persistMetadata: (...args) => {
+          const updated = mutations.persistMetadata(...args);
+          checkpointEditedNote(args[0].id, persistenceBundleId);
+          return updated;
+        },
         moveBundleFile: async (id, directory) => {
           await finalizeFiledDocument(id);
           return moveBundleFile(id, directory);

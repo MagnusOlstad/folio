@@ -617,19 +617,23 @@
 .history-entry button, .note-history-exit, .note-history-restore { border: 1px solid var(--line); background: var(--paper); color: var(--ink); padding: 8px 10px; font: inherit; cursor: pointer; }
 .history-entry button { width: 100%; display: flex; justify-content: space-between; margin-top: 20px; }
 .history-entry button:hover, .note-history-exit:hover, .note-history-restore:not(:disabled):hover { border-color: var(--acid); }
-.note-history-panel { display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; color: var(--muted); font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--paper); }
+.note-history-panel { position: relative; display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; color: var(--muted); font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--paper); }
 .note-history-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 21px 20px 18px; }
 .note-history-head h2 { margin: 0; color: var(--ink); font-size: 22px; font-weight: 600; letter-spacing: -.035em; }
 .note-history-eyebrow { color: var(--acid); font-size: 9px; font-weight: 700; letter-spacing: .16em; }
 .note-history-exit { padding: 5px 11px; border-radius: 7px; background: var(--paper-raised); color: var(--muted); font-size: 12px; }
 .note-history-exit:hover { border-color: color-mix(in srgb, var(--muted) 55%, var(--line)); color: var(--ink); }
-.note-history-error, .note-history-warning { margin: 0; padding: 8px 16px; color: var(--orange); }
+.note-history-error, .note-history-warning { position: absolute; z-index: 4; top: 54px; left: 10px; right: 10px; margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--orange); background: var(--paper-raised); box-shadow: 0 4px 18px #0002; }
 .note-history-error button { border: 0; border-bottom: 1px solid currentColor; padding: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .note-history-track-wrap { position: relative; flex: 1 1 auto; min-height: 0; container-type: size; border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent); }
 .note-history-focus { position: absolute; z-index: 0; top: 50%; left: 10px; right: 10px; height: 52px; transform: translateY(-50%); border: 1px solid color-mix(in srgb, var(--line) 75%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--paper-raised) 76%, transparent); pointer-events: none; }
 .note-history-sticky-day { position: absolute; z-index: 2; top: 0; left: 0; right: 0; height: 38px; box-sizing: border-box; display: flex; align-items: center; gap: 14px; overflow: hidden; padding: 0 12px 0 21px; border-bottom: 1px solid var(--line); background: var(--paper); color: var(--muted); font-size: 11px; font-weight: 600; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
 .note-history-tick.is-sticky-day-tick { width: 20px; height: 2px; flex-basis: 20px; background: var(--muted); }
-.note-history-timeline { position: relative; z-index: 1; height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line) transparent; padding-block: max(20px, calc(50cqh - 26px)); box-sizing: border-box; touch-action: pan-y; cursor: grab; user-select: none; }
+.note-history-timeline { position: relative; z-index: 1; height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; scrollbar-color: var(--line) transparent; padding-block: max(20px, calc(50cqh - 26px)); box-sizing: border-box; touch-action: pan-y; cursor: grab; user-select: none; }
+.note-history-timeline:not(.is-explored) { -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 52%, transparent 94%); mask-image: linear-gradient(to bottom, #000 0%, #000 52%, transparent 94%); }
+.note-history-timeline:hover, .note-history-timeline:focus-visible { scrollbar-width: thin; }
+.note-history-timeline::-webkit-scrollbar { width: 0; }
+.note-history-timeline:hover::-webkit-scrollbar, .note-history-timeline:focus-visible::-webkit-scrollbar { width: 6px; }
 .note-history-timeline:active { cursor: grabbing; }
 .note-history-timeline:focus-visible { outline: 2px solid color-mix(in srgb, var(--acid) 60%, transparent); outline-offset: -2px; }
 .note-history-stop { position: relative; display: flex; align-items: center; gap: 14px; width: 100%; height: 52px; min-height: 52px; padding: 0 12px 0 21px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); text-align: left; font: inherit; cursor: pointer; transition: background-color .16s ease, color .16s ease; }
@@ -658,13 +662,9 @@
 .history-editor-underlay:not(.is-present) { visibility: hidden; pointer-events: none; }
 .editor-surface:has(.history-document-view) { position: relative; }
 .document-view.history-document-view { position: absolute; inset: 0; z-index: 2; }
-.history-preview-banner { display: flex; justify-content: space-between; padding: 15px 30px; border-bottom: 1px solid var(--line); color: var(--acid); font-size: 10px; font-weight: 700; letter-spacing: .11em; }
-.history-preview-banner span:last-child { color: var(--dim); font-weight: 400; letter-spacing: 0; }
 .history-preview-loading { padding: 50px 30px; color: var(--dim); }
-.history-preview-pending { position: absolute; z-index: 3; top: 12px; right: 18px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 20px; background: var(--paper); color: var(--muted); font-size: 10px; box-shadow: 0 4px 18px #0002; }
+.history-preview-pending { position: absolute; z-index: 3; top: 12px; right: 18px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 20px; background: var(--paper); color: var(--muted); font-size: 10px; box-shadow: 0 4px 18px #0002; pointer-events: none; }
 .history-preview-pending.is-error { border-color: color-mix(in srgb, var(--orange) 50%, var(--line)); color: var(--orange); }
-.history-preview-description { color: var(--muted); }
-.history-preview-footer { padding: 10px 30px; border-top: 1px solid var(--line); color: var(--dim); font-size: 10px; }
 
 .editor-group {
   container-type: inline-size;

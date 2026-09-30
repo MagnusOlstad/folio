@@ -80,44 +80,36 @@ function stubHistoryApi() {
 }
 
 describe("workspace history mode", () => {
-  it("only loads on activation and previews in the main note without opening the editor", async () => {
+  it("keeps history visible and exposes the live editor at Now", async () => {
     const fetchMock = stubHistoryApi();
     const props = shellProps();
     const { rerender } = render(<WorkspaceShell {...props} />);
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(screen.getByTestId("main-note")).toHaveTextContent("Live editor");
-
-    fireEvent.click(screen.getByRole("button", { name: /Open history/ }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("main-note")).toHaveTextContent("Live editor");
     expect(screen.getByRole("region", { name: "Note history" })).toBeVisible();
-    expect(screen.getByTestId("main-note")).toHaveTextContent("Read only present");
     fireEvent.click(await screen.findByRole("button", { name: /Older title/ }));
     await waitFor(() => expect(screen.getByTestId("main-note")).toHaveTextContent("old content"));
     expect(screen.queryByText(/ignored diff/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Present" }));
-    expect(screen.getByTestId("main-note")).toHaveTextContent("Read only present");
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(screen.getByTestId("main-note")).toHaveTextContent("Live editor");
 
     rerender(<WorkspaceShell {...shellProps({ activeGroupId: "secondary" })} />);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole("button", { name: /Open history/ })).toBeVisible();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole("region", { name: "Note history" })).toBeVisible();
   });
 
   it("exits on group change and keeps drafts and unloaded notes neutral", async () => {
     const fetchMock = stubHistoryApi();
     const { rerender } = render(<WorkspaceShell {...shellProps()} />);
-    fireEvent.click(screen.getByRole("button", { name: /Open history/ }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     rerender(<WorkspaceShell {...shellProps({ activeGroupId: "secondary" })} />);
-    expect(screen.queryByRole("region", { name: "Note history" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Note history" })).toBeInTheDocument();
     expect(screen.getByTestId("main-note")).toHaveTextContent("Live editor");
     rerender(<WorkspaceShell {...shellProps()} />);
-    expect(screen.queryByRole("region", { name: "Note history" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Open history/ })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Note history" })).toBeInTheDocument();
     rerender(<WorkspaceShell {...shellProps({ primaryId: "untitled:draft", documents: {} })} />);
-    expect(screen.getByText("History is available for filed notes.")).toBeVisible();
+    expect(screen.getByText("Open a note or draft to build its history.")).toBeVisible();
     rerender(<WorkspaceShell {...shellProps({ documents: {}, loadingDocuments: new Set([noteId]) })} />);
     expect(screen.getByRole("status")).toHaveTextContent("Loading note");
     expect(fetchMock).toHaveBeenCalledTimes(1);

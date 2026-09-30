@@ -1,4 +1,7 @@
 import type { NoteHistorySnapshot, ViewerDocument } from "../../../domain/types.ts";
+import { useLayoutEffect, useRef } from "react";
+import { isUntitledId } from "../../../lib/workspace.ts";
+import { DocumentHeader } from "./DocumentHeader.tsx";
 import { RenderedMarkdown } from "./RenderedMarkdown.tsx";
 
 type Props = {
@@ -10,26 +13,42 @@ type Props = {
 };
 
 export function HistoryDocumentView({ document, snapshot, loading, failed, presentContent }: Props) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const alignedScroll = useRef(false);
   const preview: ViewerDocument = {
     ...document,
     content: presentContent,
     ...(snapshot?.note ?? {}),
-    deletable: false,
-    movable: false,
+    deletable: document.deletable,
+    movable: document.movable,
   };
+  useLayoutEffect(() => {
+    if (alignedScroll.current) return;
+    const previewScroll = scrollRef.current;
+    const liveScroll = previewScroll?.closest(".editor-surface")?.querySelector<HTMLElement>(".history-editor-underlay [data-document-scroll]");
+    if (previewScroll && liveScroll) previewScroll.scrollTop = liveScroll.scrollTop;
+    alignedScroll.current = true;
+  }, []);
   return <article className="document-view history-document-view" role="region" aria-label="History preview">
-    <div className="document-scroll">
-      <div className="history-preview-banner"><span>HISTORY PREVIEW</span><span>Read only</span></div>
-      {loading && <div className="history-preview-pending" role="status">Opening selected moment…</div>}
+    <div ref={scrollRef} className="document-scroll" data-document-scroll="">
+      {loading && <div className="history-preview-pending" role="status">Loading moment…</div>}
       {failed && !snapshot && <div className="history-preview-loading" role="alert">Could not open this moment. Select its tick to try again.</div>}
       {failed && snapshot && <div className="history-preview-pending is-error" role="alert">Could not open selected moment · showing previous preview</div>}
-      {!failed || snapshot ? <>
-        <header className="document-heading"><p>{preview.type} / {snapshot ? "earlier moment" : "current note"}</p><h1>{preview.title}</h1>{preview.description && <span className="history-preview-description">{preview.description}</span>}</header>
-        <div className="document-content read-only">
-          <RenderedMarkdown document={preview} groupId="" saving={false} onOpenDocument={async () => {}} onToggleTask={async () => {}} />
-        </div>
-      </> : null}
+      {!isUntitledId(document.id) &&
+        <DocumentHeader
+          groupId="history"
+          document={preview}
+          editingKey={null}
+          drafts={{}}
+          onBeginEditing={() => {}}
+          onChangeDraft={() => {}}
+          onFinishEditing={() => {}}
+          readOnly
+        />
+      }
+      {!failed || snapshot ? <div className="document-content read-only history-document-content">
+        <RenderedMarkdown document={preview} groupId="" saving={false} onOpenDocument={async () => {}} onToggleTask={async () => {}} />
+      </div> : null}
     </div>
-    <div className="history-preview-footer">Previewing history · use Done to return to your note</div>
   </article>;
 }

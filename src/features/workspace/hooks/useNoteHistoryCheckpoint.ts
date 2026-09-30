@@ -12,7 +12,7 @@ type DirtyRevision = { documentId: string; revision: number };
 export function useNoteHistoryCheckpoint({
   checkpoint,
   onError,
-  intervalMs = 5 * 60 * 1000,
+  intervalMs = 10 * 1000,
 }: UseNoteHistoryCheckpointOptions) {
   const dirtyRevisionsRef = useRef(new Map<string, Map<string, DirtyRevision>>());
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
