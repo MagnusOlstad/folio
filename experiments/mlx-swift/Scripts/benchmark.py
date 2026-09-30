@@ -137,11 +137,17 @@ def main() -> int:
     parser.add_argument("--max-tokens", type=int, default=512)
     parser.add_argument("--temperature", type=float, default=0)
     parser.add_argument("--repeats", type=int, default=1, help="number of measured passes after the warm-up")
+    parser.add_argument("--system-suffix", default="", help="append one controlled instruction to the existing system prompt")
+    parser.add_argument("--classification-only", action="store_true", help="run only classification fixtures (useful for controlled filing prompt variants)")
     args = parser.parse_args()
 
     if args.repeats < 1:
         parser.error("--repeats must be positive")
     fixtures = read_jsonl(args.fixtures)
+    if args.classification_only:
+        fixtures = [row for row in fixtures if row.get("validation", {}).get("kind") == "classification"]
+        if not fixtures:
+            parser.error("--classification-only selected no fixtures")
     if not args.helper.is_file() or not args.model_directory.is_dir():
         parser.error("helper and local model directory must already exist")
     args.helper = args.helper.resolve()
@@ -197,7 +203,10 @@ def main() -> int:
     try:
         assert process.stdin is not None and process.stdout is not None
         # One untimed warm-up exercises generation before the recorded fixture set.
-        first = fixtures[0]
+        first = dict(fixtures[0])
+        if args.system_suffix:
+            first["messages"] = [dict(message) for message in first["messages"]]
+            first["messages"][0]["content"] += "\n" + args.system_suffix
         process.stdin.write(json.dumps(first, ensure_ascii=False) + "\n")
         process.stdin.flush()
         warmup = next_stdout_line("warm-up")
@@ -208,6 +217,9 @@ def main() -> int:
         for repeat in range(1, args.repeats + 1):
             for fixture in fixtures:
                 request = dict(fixture)
+                if args.system_suffix:
+                    request["messages"] = [dict(message) for message in fixture["messages"]]
+                    request["messages"][0]["content"] += "\n" + args.system_suffix
                 request["maxTokens"] = args.max_tokens
                 request["temperature"] = args.temperature
                 request["noThinking"] = True
@@ -225,6 +237,9 @@ def main() -> int:
                     "repeat": repeat,
                     "model": args.model,
                     "modelSnapshotRevision": args.model_directory.name,
+                    "cachePolicy": "clear-after-every-request",
+                    "promptVariant": "system-suffix" if args.system_suffix else "baseline",
+                    "systemSuffix": args.system_suffix,
                     "elapsedWallSeconds": time.monotonic() - sent_at,
                     "metrics": response.get("metrics", {}),
                     "smokeChecks": quality_smoke(fixture, response),

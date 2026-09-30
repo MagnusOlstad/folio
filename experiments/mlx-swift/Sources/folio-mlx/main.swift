@@ -30,6 +30,9 @@ private struct Response: Encodable {
 private struct Metrics: Encodable {
     let coldLoadSeconds: Double
     let totalRequestSeconds: Double
+    let sessionReleaseSeconds: Double
+    let cleanupSeconds: Double
+    let endToEndFilingSeconds: Double
     let ttftSeconds: Double?
     let promptTokens: Int?
     let generatedTokens: Int?
@@ -37,14 +40,47 @@ private struct Metrics: Encodable {
     let generationSeconds: Double?
     let tokensPerSecond: Double?
     let peakResidentBytes: UInt64?
-    let mlxActiveBytes: Int
-    let mlxCacheBytes: Int
-    let mlxPeakBytes: Int
+    let mlxGenerationActiveBytes: Int
+    let mlxGenerationCacheBytes: Int
+    let mlxBeforeAllocatorClearActiveBytes: Int
+    let mlxBeforeAllocatorClearCacheBytes: Int
+    let mlxRequestPeakActiveBytes: Int
+    let mlxAfterCleanupActiveBytes: Int
+    let mlxAfterCleanupCacheBytes: Int
+    let mlxModelIdleActiveBytes: Int
+    let mlxModelIdleCacheBytes: Int
+    let mlxProcessPeakActiveBytes: Int
 }
 
 private struct ErrorResponse: Encodable {
     let id: String?
     let error: String
+    let metrics: CleanupMetrics
+}
+
+private struct CleanupMetrics: Encodable {
+    let cleanupSeconds: Double
+    let mlxBeforeAllocatorClearActiveBytes: Int
+    let mlxBeforeAllocatorClearCacheBytes: Int
+    let mlxAfterCleanupActiveBytes: Int
+    let mlxAfterCleanupCacheBytes: Int
+    let mlxModelIdleActiveBytes: Int
+    let mlxModelIdleCacheBytes: Int
+}
+
+private struct GenerationOutput {
+    let text: String
+    let elapsedSeconds: Double
+    let sessionReleaseSeconds: Double
+    let ttftSeconds: Double?
+    let promptTokens: Int?
+    let generatedTokens: Int?
+    let promptSeconds: Double?
+    let generationSeconds: Double?
+    let tokensPerSecond: Double?
+    let inFlightActiveBytes: Int
+    let inFlightCacheBytes: Int
+    let requestPeakActiveBytes: Int
 }
 
 private func log(_ message: String) {
@@ -129,11 +165,19 @@ private struct FolioMLX {
         }
         let coldLoadSeconds = seconds(from: processStarted, to: processClock.now)
         let memoryAfterLoad = Memory.snapshot()
+        var processPeakActiveBytes = memoryAfterLoad.peakMemory
+        synchronizeDefaultStream()
+        Memory.clearCache()
+        synchronizeDefaultStream()
+        let modelIdleMemory = Memory.snapshot()
         log("Model ready. Reading JSONL requests from stdin.")
 
         while let line = readLine() {
             guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            let requestStarted = processClock.now
             var requestID: String?
+            var requestError: String?
+            var generation: GenerationOutput?
             do {
                 let request = try JSONDecoder().decode(Request.self, from: Data(line.utf8))
                 requestID = request.id
@@ -142,56 +186,145 @@ private struct FolioMLX {
                 let requestTemperature = request.temperature ?? temperature
                 guard requestTokens > 0 else { throw NSError(domain: "FolioMLX", code: 8, userInfo: [NSLocalizedDescriptionKey: "maxTokens must be positive"]) }
                 guard requestTemperature.isFinite, requestTemperature >= 0 else { throw NSError(domain: "FolioMLX", code: 9, userInfo: [NSLocalizedDescriptionKey: "temperature must be finite and non-negative"]) }
-                let parameters = GenerateParameters(
-                    maxTokens: requestTokens,
-                    temperature: requestTemperature
+                Memory.peakMemory = 0
+                generation = try await generate(
+                    model: model,
+                    system: system,
+                    prompt: prompt,
+                    parameters: GenerateParameters(maxTokens: requestTokens, temperature: requestTemperature),
+                    noThinking: request.noThinking != false,
+                    clock: processClock
                 )
-                let session = ChatSession(
-                    model,
-                    instructions: system,
-                    generateParameters: parameters,
-                    additionalContext: request.noThinking == false ? nil : ["enable_thinking": false]
-                )
-                let started = processClock.now
-                var firstChunkAt: Double?
-                var output = ""
-                var info: GenerateCompletionInfo?
-                for try await event in session.streamDetails(to: prompt, role: .user, images: [], videos: []) {
-                    switch event {
-                    case .chunk(let chunk):
-                        if firstChunkAt == nil { firstChunkAt = seconds(from: started, to: processClock.now) }
-                        output += chunk
-                    case .info(let completion): info = completion
-                    case .toolCall: break
-                    }
-                }
-                let elapsed = seconds(from: started, to: processClock.now)
-                let memoryAfterRequest = Memory.snapshot()
-                let generatedTokens = info?.generationTokenCount
-                let generationSeconds = info?.generateTime
+            } catch {
+                requestError = error.localizedDescription
+            }
+
+            // generate() has returned (or thrown), so its ChatSession, stream, and
+            // generated MLX arrays are out of scope before allocator cleanup.
+            synchronizeDefaultStream()
+            let beforeCleanup = Memory.snapshot()
+            let requestPeak = generation?.requestPeakActiveBytes ?? beforeCleanup.peakMemory
+            processPeakActiveBytes = max(processPeakActiveBytes, requestPeak)
+            let cleanupStarted = processClock.now
+            Memory.clearCache()
+            synchronizeDefaultStream()
+            let afterCleanup = Memory.snapshot()
+            let cleanupElapsed = seconds(from: cleanupStarted, to: processClock.now)
+
+            if let generation {
+                let endToEndElapsed = seconds(from: requestStarted, to: processClock.now)
                 let metrics = Metrics(
                     coldLoadSeconds: coldLoadSeconds,
-                    totalRequestSeconds: elapsed,
-                    ttftSeconds: firstChunkAt,
-                    promptTokens: info?.promptTokenCount,
-                    generatedTokens: generatedTokens,
-                    promptSeconds: info?.promptTime,
-                    generationSeconds: generationSeconds,
-                    tokensPerSecond: generatedTokens.flatMap { tokens in
-                        let seconds = generationSeconds ?? elapsed
-                        return seconds > 0 ? Double(tokens) / seconds : nil
-                    },
+                    totalRequestSeconds: generation.elapsedSeconds,
+                    sessionReleaseSeconds: generation.sessionReleaseSeconds,
+                    cleanupSeconds: cleanupElapsed,
+                    endToEndFilingSeconds: endToEndElapsed,
+                    ttftSeconds: generation.ttftSeconds,
+                    promptTokens: generation.promptTokens,
+                    generatedTokens: generation.generatedTokens,
+                    promptSeconds: generation.promptSeconds,
+                    generationSeconds: generation.generationSeconds,
+                    tokensPerSecond: generation.tokensPerSecond,
                     peakResidentBytes: peakResidentBytes(),
-                    mlxActiveBytes: memoryAfterRequest.activeMemory,
-                    mlxCacheBytes: memoryAfterRequest.cacheMemory,
-                    mlxPeakBytes: max(memoryAfterLoad.peakMemory, memoryAfterRequest.peakMemory)
+                    mlxGenerationActiveBytes: generation.inFlightActiveBytes,
+                    mlxGenerationCacheBytes: generation.inFlightCacheBytes,
+                    mlxBeforeAllocatorClearActiveBytes: beforeCleanup.activeMemory,
+                    mlxBeforeAllocatorClearCacheBytes: beforeCleanup.cacheMemory,
+                    mlxRequestPeakActiveBytes: generation.requestPeakActiveBytes,
+                    mlxAfterCleanupActiveBytes: afterCleanup.activeMemory,
+                    mlxAfterCleanupCacheBytes: afterCleanup.cacheMemory,
+                    mlxModelIdleActiveBytes: modelIdleMemory.activeMemory,
+                    mlxModelIdleCacheBytes: modelIdleMemory.cacheMemory,
+                    mlxProcessPeakActiveBytes: processPeakActiveBytes
                 )
-                writeProtocolLine(encodeLine(Response(id: requestID, model: modelID, text: output, metrics: metrics)))
-            } catch {
-                writeProtocolLine(encodeLine(ErrorResponse(id: requestID, error: error.localizedDescription)))
+                writeProtocolLine(encodeLine(Response(id: requestID, model: modelID, text: generation.text, metrics: metrics)))
+            } else {
+                let cleanupMetrics = CleanupMetrics(
+                    cleanupSeconds: cleanupElapsed,
+                    mlxBeforeAllocatorClearActiveBytes: beforeCleanup.activeMemory,
+                    mlxBeforeAllocatorClearCacheBytes: beforeCleanup.cacheMemory,
+                    mlxAfterCleanupActiveBytes: afterCleanup.activeMemory,
+                    mlxAfterCleanupCacheBytes: afterCleanup.cacheMemory,
+                    mlxModelIdleActiveBytes: modelIdleMemory.activeMemory,
+                    mlxModelIdleCacheBytes: modelIdleMemory.cacheMemory
+                )
+                writeProtocolLine(encodeLine(ErrorResponse(
+                    id: requestID,
+                    error: requestError ?? "request failed",
+                    metrics: cleanupMetrics
+                )))
             }
         }
     }
+}
+
+private func generate(
+    model: ModelContainer,
+    system: String,
+    prompt: String,
+    parameters: GenerateParameters,
+    noThinking: Bool,
+    clock: ContinuousClock
+) async throws -> GenerationOutput {
+    let session = ChatSession(
+        model,
+        instructions: system,
+        generateParameters: parameters,
+        additionalContext: noThinking ? ["enable_thinking": false] : nil
+    )
+    let started = clock.now
+    var firstChunkAt: Double?
+    var output = ""
+    var info: GenerateCompletionInfo?
+    do {
+        for try await event in session.streamDetails(to: prompt, role: .user, images: [], videos: []) {
+            switch event {
+            case .chunk(let chunk):
+                if firstChunkAt == nil { firstChunkAt = seconds(from: started, to: clock.now) }
+                output += chunk
+            case .info(let completion): info = completion
+            case .toolCall: break
+            }
+        }
+    } catch {
+        await session.synchronize()
+        await session.clear()
+        await session.synchronize()
+        throw error
+    }
+    let elapsed = seconds(from: started, to: clock.now)
+    await session.synchronize()
+    synchronizeDefaultStream()
+    let inFlight = Memory.snapshot()
+    let requestPeakActiveBytes = Memory.peakMemory
+    let sessionReleaseStarted = clock.now
+    await session.clear()
+    await session.synchronize()
+    synchronizeDefaultStream()
+    let sessionReleaseElapsed = seconds(from: sessionReleaseStarted, to: clock.now)
+    let generatedTokens = info?.generationTokenCount
+    let generationSeconds = info?.generateTime
+    return GenerationOutput(
+        text: output,
+        elapsedSeconds: elapsed,
+        sessionReleaseSeconds: sessionReleaseElapsed,
+        ttftSeconds: firstChunkAt,
+        promptTokens: info?.promptTokenCount,
+        generatedTokens: generatedTokens,
+        promptSeconds: info?.promptTime,
+        generationSeconds: generationSeconds,
+        tokensPerSecond: generatedTokens.flatMap { tokens in
+            let duration = generationSeconds ?? elapsed
+            return duration > 0 ? Double(tokens) / duration : nil
+        },
+        inFlightActiveBytes: inFlight.activeMemory,
+        inFlightCacheBytes: inFlight.cacheMemory,
+        requestPeakActiveBytes: requestPeakActiveBytes
+    )
+}
+
+private func synchronizeDefaultStream() {
+    Stream.defaultStream(Device.defaultDevice()).synchronize()
 }
 
 private func seconds(from start: ContinuousClock.Instant, to end: ContinuousClock.Instant) -> Double {

@@ -112,14 +112,17 @@ generation, including a subset of JSON Schema. This experiment did not benchmark
 it. [llama.cpp](https://github.com/ggml-org/llama.cpp) ·
 [grammar and JSON Schema support](https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md).
 
-## Light model comparison
+## Light model comparison: retained-cache baseline
 
 The user prioritized filing quality and precision first, memory second, then
-speed. This is one pass over six synthetic filing notes and one grounded-answer
-case using the same general prompt, schema, temperature 0, 512-token limit, and
-no-thinking request for every model. Each helper process handled one discarded
-warm-up and all seven measured requests. Model data was already cached locally;
-cold-load figures below are local-directory model loads and exclude downloads.
+speed. This is the original one pass over six synthetic filing notes and one
+grounded-answer case using the same general prompt, schema, temperature 0,
+512-token limit, and no-thinking request for every model. Each helper process
+handled one discarded warm-up and all seven measured requests. This run retained
+MLX allocator buffers between requests, so its growing cache values do not
+describe the idle footprint before filing the next note. Its raw output is
+preserved for comparison with the clear-between-requests rerun below. Model
+data was already cached locally; cold-load figures below exclude downloads.
 
 | Model | Strict JSON | JSON body schema | Kind / path | Median filing time | Median tok/s | Median TTFT | Cached load | Max active + cache sample | Peak active | Peak RSS |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -186,6 +189,88 @@ still constructs projections for layer 24. In this config, layers 24 onward
 share key/value states from earlier layers. No architecture workaround was
 made; `mlx-community/gemma-3-text-4b-it-4bit` was used as the Gemma-family
 fallback.
+
+## Per-note allocator cleanup rerun
+
+The helper now keeps the model loaded while creating a fresh `ChatSession` for
+each request. When generation ends, it synchronizes and clears that session's KV
+cache before returning from the scoped generation function. It records the
+generation-live active/cache snapshot and per-request peak active allocation,
+then synchronizes and calls `Memory.clearCache()` before it sends the JSONL
+response or reads the next request. Model-load allocator buffers are cleared
+once before the first request as well. Every success and error response reports
+allocator cache after cleanup; all benchmark records report zero bytes. Model
+weights remain active at the idle baseline.
+
+The original retained-cache results above are left intact. These new values are
+from one warm-up plus one pass over the same six filing fixtures and one Ask
+fixture, using local snapshots, temperature 0, a 512-token limit, and the same
+general prompt. “End-to-end” starts when the request line is read and ends after
+session release and allocator cleanup. “Generation active + cache” is sampled
+after the stream finishes while the session/KV cache still exists. Request peak
+active is the allocator's reset per-request peak counter. The “pre-clear cache”
+column is cached allocation remaining after session/KV release and just before
+`Memory.clearCache()`. Idle active is the model-loaded baseline sampled after
+startup cleanup; post-cleanup cache was zero for every measured request.
+
+| Model | Strict JSON / schema | Kind / path | Median generation | Median end-to-end | Median TTFT | Idle active | Max request peak active | Max generation active + cache | Max pre-clear cache | Peak process RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Qwen3.5-4B | 6/6 · 6/6 | 5/6 · 4/6 | 5.69s | 5.70s | 1.97s | 2.20 GiB | 2.94 GiB | 2.97 GiB | 0.74 GiB | 2.46 GiB |
+| Gemma 3 text 4B | 0/6 · 6/6 | 6/6 · 6/6 | 6.09s | 6.10s | 2.84s | 2.38 GiB | 2.86 GiB | 2.96 GiB | 0.58 GiB | 2.74 GiB |
+| Llama 3.2 3B | 0/6 · 6/6 | 4/6 · 5/6 | 4.56s | 4.57s | 0.84s | 1.68 GiB | 2.21 GiB | 2.32 GiB | 0.64 GiB | 1.86 GiB |
+| Ministral 3 3B | 0/6 · 5/6 | 5/6 · 3/6 | 4.84s | 4.85s | 1.53s | 1.80 GiB | 2.30 GiB | 2.33 GiB | 0.53 GiB | 2.01 GiB |
+
+These readings are independent. Active plus cache is MLX allocator memory,
+while RSS is process resident memory; do not add them or interpret any sampled
+sum as peak unified/system memory. Cache is zero between requests, but live
+generation still peaks between 2.21 and 2.94 GiB active; the largest sampled
+generation-time active-plus-cache sum ranges from 2.32 to 2.97 GiB. A single
+pass is not a statistical speed comparison. The raw records include
+`cachePolicy: clear-after-every-request` and are saved in
+`Results/qwen-clear-cache-benchmark.jsonl`,
+`Results/gemma3-text-clear-cache-benchmark.jsonl`,
+`Results/llama32-clear-cache-benchmark.jsonl`, and
+`Results/ministral3-clear-cache-benchmark.jsonl`.
+
+The clear-cache rerun's qualitative observations remain mixed. Qwen returned
+strict JSON for all six filing notes and retained most source facts, but
+translated the Norwegian note, assigned `note` to the daily fixture, and missed
+two expected existing paths. Gemma matched kind and path on all six and
+preserved the Norwegian description, but its daily summary omitted the
+tentative Bergen trip and its titles were generic or English. Llama falsely
+claimed the Atlas deck had been sent, mislabeled the daily entry, and omitted
+Ingrid's explicit obligation in Ask. Ministral repeated the injected filing
+instruction as note content, contradicted the Oslo launch date, and invented
+the Aurora follow-up meeting. The raw files above should be used for detailed
+review; these smoke checks are not a semantic score.
+
+One additional Gemma-only run appended exactly one system instruction to each
+of the six filing fixtures:
+
+> Your entire reply must be a single JSON object, starting with { and ending with }. Do not use Markdown, code fences, or explanatory text.
+
+It still returned Markdown fences in all six responses (strict JSON 0/6), with
+schema, kind, and path checks unchanged at 6/6. This controlled tweak did not
+fix semantic omissions: the daily item still dropped the uncertain Bergen trip
+and the todo still used generic `type: note`. Its raw outputs, exact suffix,
+and `promptVariant: system-suffix` metadata are in
+`Results/gemma3-text-json-instruction-variant.jsonl`. The harness reproduces it
+with `--classification-only --system-suffix '...'`; this variant is not the
+baseline.
+
+To repeat error recovery and idle-cache checks on a downloaded snapshot, send
+one invalid request followed by two independent filings through one process:
+
+```sh
+python3 Scripts/cache-policy-smoke.py \
+  --helper "$PWD/.cache/staged/Folio.app/Contents/MacOS/folio-mlx" \
+  --model mlx-community/Qwen3.5-4B-MLX-4bit \
+  --model-directory /path/to/hf/snapshots/<revision> \
+  --cache "$PWD/.cache/hf-cache"
+```
+
+The script checks error recovery, successful response IDs, and zero cached
+allocator bytes before the helper accepts its next request.
 
 ## What this does not establish
 
