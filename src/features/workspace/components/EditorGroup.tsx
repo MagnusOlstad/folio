@@ -27,6 +27,7 @@ type EditorGroupProps = {
     | "dismissMessage"
     | "beforeHistoryRestore"
     | "historyRestored"
+    | "notifyMessage"
   >;
   ui: WorkspaceEditorUi;
   historyPreview?: EditorWorkspaceProps["historyPreview"];

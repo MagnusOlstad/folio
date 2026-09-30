@@ -96,6 +96,7 @@ export type EditorWorkspaceActions = {
   ) => void;
   beforeHistoryRestore: (documentId: string) => Promise<void>;
   historyRestored: (documentId: string) => Promise<void>;
+  notifyMessage: (message: string) => void;
   dismissMessage: () => void;
   getDocumentScrollTop: (documentId: string) => number;
   rememberDocumentScrollTop: (documentId: string, scrollTop: number) => void;

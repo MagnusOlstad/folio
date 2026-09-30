@@ -705,6 +705,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
           ),
         beforeHistoryRestore,
         historyRestored,
+        notifyMessage: setMessage,
         dismissMessage: () => setMessage(""),
       },
     },

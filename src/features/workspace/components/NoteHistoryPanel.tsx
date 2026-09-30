@@ -7,6 +7,7 @@ type Props = {
   checkpointRevision?: number;
   onBeforeRestore: (id: string) => Promise<void>;
   onRestored: (id: string) => Promise<void>;
+  onRestoreFeedback: (message: string) => void;
   onPreview: (snapshot: NoteHistorySnapshot | null, loading: boolean, failed: boolean) => void;
   onExit?: () => void;
 };
@@ -36,7 +37,7 @@ function dayLabel(value: string) {
   return date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
-export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeRestore, onRestored, onPreview }: Props) {
+export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeRestore, onRestored, onRestoreFeedback, onPreview }: Props) {
   const [entries, setEntries] = useState<NoteHistoryEntry[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [revision, setRevision] = useState<string | null>(null);
@@ -49,7 +50,6 @@ export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeR
   const [restoring, setRestoring] = useState(false);
   const [stickyDay, setStickyDay] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [warning, setWarning] = useState("");
   const [timelineExplored, setTimelineExplored] = useState(false);
   const request = useRef(0);
   const activeRevision = useRef<string | null>(null);
@@ -506,9 +506,9 @@ export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeR
       cursorRef.current = page.nextCursor;
       setCursor(page.nextCursor);
       failedPageCursor.current = null;
-      setWarning(result.warning || "Restored. The previous present is still in history.");
+      onRestoreFeedback(result.warning || "Restored. The previous present is still in history.");
       moveTo(null, true);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not restore that version."); }
+    } catch (cause) { onRestoreFeedback(cause instanceof Error ? cause.message : "Could not restore that version."); }
     finally { setRestoring(false); }
   }
 
@@ -517,7 +517,6 @@ export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeR
   return <section className="note-history-panel" aria-label="Note history">
     <div className="note-history-head"><h2>History</h2></div>
     {error && <p className="note-history-error" role="alert">{error} {failed && <button type="button" onClick={() => void select(revision, true)}>Retry</button>}</p>}
-    {warning && <p className="note-history-warning" role="status">{warning}</p>}
     <div className="note-history-track-wrap"><div className="note-history-focus" aria-hidden="true" />
       {stickyDay && <div className="note-history-sticky-day" aria-hidden="true"><span className="note-history-tick is-sticky-day-tick"/><span>{stickyDay}</span></div>}
       <nav ref={timeline} tabIndex={0} className={`note-history-timeline${timelineExplored ? " is-explored" : ""}`} aria-label="Note timeline" onScroll={onScroll}
