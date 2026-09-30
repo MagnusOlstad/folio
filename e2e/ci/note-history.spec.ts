@@ -49,6 +49,71 @@ test('keeps the timeline visible and returns to the live editor at Now', async (
   await expect(editor).toContainText('Live note content')
 })
 
+test('loads older history pages before the focus reaches the edge and keeps the focused stop anchored', async ({ page }) => {
+  const pageResolvers = new Map<string, () => void>()
+  const pageEntries = (start: number, count: number) => Array.from({ length: count }, (_, offset) => ({
+    revision: `paged-${start + offset}`,
+    authoredAt: new Date(Date.UTC(2026, 8, 27, 12, 0 - start - offset)).toISOString(),
+    title: `Paged moment ${start + offset}`,
+  }))
+  const firstPage = pageEntries(0, 15)
+  const responses = new Map([
+    ['cursor-1', { entries: pageEntries(15, 15), nextCursor: 'cursor-2' }],
+    ['cursor-2', { entries: pageEntries(30, 4), nextCursor: null }],
+  ])
+  await page.route('**/api/note/history**', async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/version')) {
+      await route.fulfill({ json: { revision: url.searchParams.get('revision'), note: { title: 'Paged history', description: '', tags: [], status: 'stable', staleAfter: null, content: 'Paged history preview' }, diff: '' } })
+      return
+    }
+    if (url.pathname === '/api/note/history') {
+      const cursor = url.searchParams.get('cursor')
+      if (!cursor) {
+        await route.fulfill({ json: { entries: firstPage, nextCursor: 'cursor-1' } })
+        return
+      }
+      const response = responses.get(cursor)
+      if (!response) throw new Error(`Unexpected history cursor ${cursor}`)
+      await new Promise<void>(resolve => { pageResolvers.set(cursor, resolve) })
+      await route.fulfill({ json: response })
+      return
+    }
+    await route.continue()
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  const timeline = page.getByRole('navigation', { name: 'Note timeline' })
+  await timeline.getByRole('button', { name: /Paged moment 10/ }).click()
+  const selectedRevision = 'paged-10'
+  await expect(timeline.locator('[aria-current="step"]')).toHaveAttribute('data-history-stop', selectedRevision)
+
+  const loadAndRelease = async (cursor: string) => {
+    await expect(page.locator('.note-history-page-status').getByRole('status', { name: 'Loading earlier moments' })).toBeVisible()
+    await timeline.evaluate(node => { node.scrollTop = Math.max(0, node.scrollHeight - node.clientHeight - 80) })
+    const focused = await timeline.evaluate(node => {
+      const center = node.getBoundingClientRect().top + node.clientHeight / 2
+      const stops = [...node.querySelectorAll('[data-history-stop]:not([data-history-stop=""])')]
+      const nearest = stops.reduce((best, stop) =>
+        !best || Math.abs(stop.getBoundingClientRect().top + stop.offsetHeight / 2 - center) < Math.abs(best.getBoundingClientRect().top + best.offsetHeight / 2 - center) ? stop : best, null)
+      return { revision: nearest?.getAttribute('data-history-stop'), top: nearest?.getBoundingClientRect().top }
+    })
+    await expect.poll(() => pageResolvers.has(cursor)).toBe(true)
+    pageResolvers.get(cursor)?.()
+    pageResolvers.delete(cursor)
+    await expect(timeline.getByRole('button', { name: new RegExp(`Paged moment ${cursor === 'cursor-1' ? 15 : 30}`) })).toBeVisible()
+    await expect.poll(async () => timeline.locator(`[data-history-stop="${focused.revision}"]`).evaluate(stop => stop.getBoundingClientRect().top)).toBeCloseTo(focused.top ?? 0, 0)
+    await expect(timeline.locator('[aria-current="step"]')).toHaveAttribute('data-history-stop', selectedRevision)
+  }
+
+  await loadAndRelease('cursor-1')
+  await timeline.evaluate(node => { node.scrollTop = node.scrollHeight })
+  await loadAndRelease('cursor-2')
+  await expect(timeline.getByRole('button', { name: 'Load earlier' })).toHaveCount(0)
+  await expect(page.locator('.note-history-page-status').getByRole('status')).toHaveCount(0)
+})
+
 test('untitled drafts stay editable without history controls', async ({ page }) => {
   await page.goto('/')
   await page.getByTitle('New note (Cmd+T)').click()
@@ -373,7 +438,7 @@ test('a successful live checkpoint appears without moving the timeline away from
   await editor.fill('# Start Here\n\nA live checkpoint update')
   await expect(page.getByText('Saved', { exact: true })).toBeVisible()
   await timeline.evaluate(node => { node.scrollTop = 24 })
-  await page.clock.fastForward(10_000)
+  await page.clock.fastForward(30_000)
   await expect.poll(() => checkpointRequests).toBe(1)
   await expect(timeline.getByRole('button', { name: /New checkpoint/ })).toBeVisible()
   await expect(timeline.getByRole('button', { name: 'Present' })).toHaveAttribute('aria-current', 'step')

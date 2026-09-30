@@ -14,7 +14,7 @@ export function useNoteHistoryCheckpoint({
   checkpoint,
   onCheckpoint,
   onError,
-  intervalMs = 10 * 1000,
+  intervalMs = 30 * 1000,
 }: UseNoteHistoryCheckpointOptions) {
   const dirtyRevisionsRef = useRef(new Map<string, Map<string, DirtyRevision>>());
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);

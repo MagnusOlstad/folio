@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { NoteHistoryEntry, NoteHistoryPage, NoteHistorySnapshot } from "../../../domain/types.ts";
 import { api } from "../../../lib/api.ts";
 
@@ -45,6 +45,7 @@ export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeR
   const [previewFailed, setPreviewFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [pageError, setPageError] = useState("");
   const [restoring, setRestoring] = useState(false);
   const [stickyDay, setStickyDay] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -69,6 +70,11 @@ export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeR
   const timeline = useRef<HTMLElement>(null);
   const loadingPage = useRef(false);
   const historyPageGeneration = useRef(0);
+  const activePageRequest = useRef(0);
+  const cursorRef = useRef<string | null>(null);
+  const failedPageCursor = useRef<string | null>(null);
+  const pageAnchor = useRef<{ node: HTMLElement; revision: string; top: number } | null>(null);
+  const programmaticScrollTop = useRef<number | null>(null);
   const historyReady = useRef(false);
   const refreshedFromNow = useRef(false);
   const refreshingTimeline = useRef(false);
@@ -97,15 +103,20 @@ export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeR
 
   useEffect(() => {
     historyPageGeneration.current += 1;
+    activePageRequest.current += 1;
     loadingPage.current = false;
     historyReady.current = false;
     refreshedFromNow.current = false;
+    cursorRef.current = null;
+    failedPageCursor.current = null;
+    pageAnchor.current = null;
+    programmaticScrollTop.current = null;
     let cancelled = false;
     async function load() {
       try {
         await onBeforeRestore(documentId);
         const page = await api<NoteHistoryPage>(`/api/note/history?id=${encodeURIComponent(documentId)}&limit=${HISTORY_PAGE_SIZE}`);
-        if (!cancelled) { setEntries(page.entries); setCursor(page.nextCursor); historyReady.current = true; }
+        if (!cancelled) { setEntries(page.entries); cursorRef.current = page.nextCursor; setCursor(page.nextCursor); historyReady.current = true; }
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "Could not load note history.");
       } finally {
@@ -119,6 +130,7 @@ export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeR
     return () => {
       cancelled = true;
       historyPageGeneration.current += 1;
+      activePageRequest.current += 1;
       loadingPage.current = false;
       request.current += 1;
       versionController.current?.abort();
@@ -127,6 +139,23 @@ export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeR
       if (scrubSettleTimer.current !== null) clearTimeout(scrubSettleTimer.current);
     };
   }, [documentId, onBeforeRestore]);
+
+  useLayoutEffect(() => {
+    const pendingAnchor = pageAnchor.current;
+    if (!pendingAnchor) return;
+    pageAnchor.current = null;
+    if (timeline.current !== pendingAnchor.node) return;
+    const refreshedAnchor = [...pendingAnchor.node.querySelectorAll<HTMLButtonElement>("[data-history-stop]")]
+      .find((stop) => stop.dataset.historyStop === pendingAnchor.revision);
+    if (!refreshedAnchor) return;
+    const delta = refreshedAnchor.getBoundingClientRect().top - pendingAnchor.top;
+    if (Math.abs(delta) < 1) return;
+    pendingAnchor.node.scrollTop += delta;
+    programmaticScrollTop.current = pendingAnchor.node.scrollTop;
+    requestAnimationFrame(() => {
+      if (programmaticScrollTop.current === pendingAnchor.node.scrollTop) programmaticScrollTop.current = null;
+    });
+  }, [entries]);
 
   async function select(next: string | null, retry = false, fromScrub = false, force = false) {
     if (!force && next === activeRevision.current && (!retry || failedRevision.current !== next)
@@ -229,24 +258,46 @@ export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeR
     }
   }
 
-  async function loadMore() {
-    if (!cursor || loadingPage.current) return;
+  async function loadMore(retry = false) {
+    const requestedCursor = cursorRef.current;
+    if (!requestedCursor || loadingPage.current || (!retry && failedPageCursor.current === requestedCursor)) return;
     const generation = historyPageGeneration.current;
+    const requestId = ++activePageRequest.current;
     loadingPage.current = true;
     setLoadingMore(true);
+    setPageError("");
     try {
-      const page = await api<NoteHistoryPage>(`/api/note/history?id=${encodeURIComponent(documentId)}&cursor=${encodeURIComponent(cursor)}&limit=${HISTORY_PAGE_SIZE}`);
-      if (generation !== historyPageGeneration.current) return;
+      const page = await api<NoteHistoryPage>(`/api/note/history?id=${encodeURIComponent(documentId)}&cursor=${encodeURIComponent(requestedCursor)}&limit=${HISTORY_PAGE_SIZE}`);
+      if (generation !== historyPageGeneration.current || requestId !== activePageRequest.current || cursorRef.current !== requestedCursor) return;
+      const node = timeline.current;
+      const center = node ? node.getBoundingClientRect().top + node.clientHeight / 2 : 0;
+      const stops = node ? [...node.querySelectorAll<HTMLButtonElement>("[data-history-stop]")] : [];
+      const anchor = stops.reduce<HTMLButtonElement | null>((best, stop) =>
+        !best || Math.abs(stop.getBoundingClientRect().top + stop.offsetHeight / 2 - center) < Math.abs(best.getBoundingClientRect().top + best.offsetHeight / 2 - center) ? stop : best, null);
+      const anchorRevision = anchor?.dataset.historyStop;
+      const anchorTop = anchor?.getBoundingClientRect().top ?? 0;
       setEntries((current) => {
         const seen = new Set(current.map((entry) => entry.revision));
         return [...current, ...page.entries.filter((entry) => !seen.has(entry.revision))];
       });
+      if (node && anchorRevision !== undefined) pageAnchor.current = { node, revision: anchorRevision, top: anchorTop };
+      cursorRef.current = page.nextCursor;
       setCursor(page.nextCursor);
+      if (page.nextCursor === requestedCursor) {
+        failedPageCursor.current = requestedCursor;
+        setPageError("History did not advance. Try loading earlier moments again.");
+      } else {
+        failedPageCursor.current = null;
+        setPageError("");
+      }
     } catch (cause) {
-      if (generation === historyPageGeneration.current) setError(cause instanceof Error ? cause.message : "Could not load more history.");
+      if (generation === historyPageGeneration.current && requestId === activePageRequest.current && cursorRef.current === requestedCursor) {
+        failedPageCursor.current = requestedCursor;
+        setPageError(cause instanceof Error ? cause.message : "Could not load more history.");
+      }
     }
     finally {
-      if (generation === historyPageGeneration.current) {
+      if (generation === historyPageGeneration.current && requestId === activePageRequest.current) {
         loadingPage.current = false;
         setLoadingMore(false);
       }
@@ -270,7 +321,7 @@ export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeR
         const seen = new Set(page.entries.map((entry) => entry.revision));
         return [...page.entries, ...current.filter((entry) => !seen.has(entry.revision))];
       });
-      if (entries.length === 0) setCursor(page.nextCursor);
+      if (entries.length === 0) { cursorRef.current = page.nextCursor; setCursor(page.nextCursor); }
       requestAnimationFrame(() => {
         if (!node || !anchor) return;
         const refreshedAnchor = [...node.querySelectorAll<HTMLButtonElement>("[data-history-stop]")]
@@ -308,7 +359,7 @@ export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeR
         const seen = new Set(page.entries.map((entry) => entry.revision));
         return [...page.entries, ...current.filter((entry) => !seen.has(entry.revision))];
       });
-      if (entries.length === 0) setCursor(page.nextCursor);
+      if (entries.length === 0) { cursorRef.current = page.nextCursor; setCursor(page.nextCursor); }
       completedCheckpointRevision.current = targetRevision;
       requestAnimationFrame(() => {
         if (!node || !anchor || generation !== historyPageGeneration.current) return;
@@ -372,7 +423,21 @@ export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeR
     const node = timeline.current;
     if (!node || restoring) return;
     updateStickyDay();
-    if (cursor && node.scrollHeight - node.scrollTop - node.clientHeight < 160) void loadMore();
+    if (programmaticScrollTop.current !== null) {
+      if (Math.abs(node.scrollTop - programmaticScrollTop.current) < 1) {
+        programmaticScrollTop.current = null;
+        return;
+      }
+      programmaticScrollTop.current = null;
+    }
+    const stops = [...node.querySelectorAll<HTMLButtonElement>('[data-history-stop]:not([data-history-stop=""])')];
+    const oldest = stops.at(-1);
+    if (cursorRef.current && oldest) {
+      const focus = node.getBoundingClientRect().top + node.clientHeight / 2;
+      const oldestCenter = oldest.getBoundingClientRect().top + oldest.offsetHeight / 2;
+      const prefetchDistance = Math.max(160, Math.min(520, node.clientHeight * 0.9));
+      if (oldestCenter - focus <= prefetchDistance) void loadMore();
+    }
     if (scrubIntent.current) {
       requestScrubSelection();
       if (scrubSettleTimer.current !== null) clearTimeout(scrubSettleTimer.current);
@@ -422,6 +487,11 @@ export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeR
   async function restore() {
     if (!selected || selected.revision !== revision || pendingRevision || restoring || !window.confirm("Restore this version? Your current note will remain in history.")) return;
     scrubIntent.current = false;
+    historyPageGeneration.current += 1;
+    activePageRequest.current += 1;
+    loadingPage.current = false;
+    setLoadingMore(false);
+    setPageError("");
     setRestoring(true);
     setError("");
     try {
@@ -433,7 +503,9 @@ export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeR
       const page = await api<NoteHistoryPage>(`/api/note/history?id=${encodeURIComponent(documentId)}&limit=${HISTORY_PAGE_SIZE}`);
       cache.current.clear();
       setEntries(page.entries);
+      cursorRef.current = page.nextCursor;
       setCursor(page.nextCursor);
+      failedPageCursor.current = null;
       setWarning(result.warning || "Restored. The previous present is still in history.");
       moveTo(null, true);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not restore that version."); }
@@ -484,8 +556,11 @@ export function NoteHistoryPanel({ documentId, checkpointRevision = 0, onBeforeR
           const sameMinuteAsPrevious = !dayBoundary && index > 0 && timestamp(entry.authoredAt) === timestamp(entries[index - 1].authoredAt);
           return <button type="button" disabled={restoring} data-history-stop={entry.revision} data-history-day={dayLabel(entry.authoredAt)} aria-label={`${entry.title || "Untitled"}, ${accessibleTimestamp(entry.authoredAt)}`} aria-current={revision === entry.revision ? "step" : undefined} className={`note-history-stop${dayBoundary ? " is-day-boundary" : ""}${revision === entry.revision ? " active" : ""}`} key={entry.revision} onClick={() => { if (dragMoved.current) { dragMoved.current = false; return; } moveTo(entry.revision); }}><span className="note-history-tick"/><span className="note-history-stop-copy"><strong>{sameMinuteAsPrevious ? "\u00a0" : timestamp(entry.authoredAt)}</strong><small>{dayBoundary ? dayLabel(entry.authoredAt) : "\u00a0"}</small></span></button>;
         })}
-        {cursor && <button type="button" className="note-history-more" onClick={() => void loadMore()} disabled={loadingMore || restoring}>{loadingMore ? "Loading…" : "Load earlier"}</button>}
+        {cursor && <button type="button" className="note-history-more" onClick={() => void loadMore(true)} disabled={loadingMore || restoring}>{loadingMore ? "Loading…" : "Load earlier"}</button>}
       </nav>
+    </div>
+    <div className="note-history-page-status" aria-live="polite">
+      {loadingMore ? <span role="status" aria-label="Loading earlier moments">Loading earlier moments…</span> : pageError ? <span role="alert">{pageError} <button type="button" onClick={() => void loadMore(true)} disabled={restoring}>Retry</button></span> : null}
     </div>
     <div className="note-history-actions"><span aria-live="polite">{pending ? "Opening selected moment…" : failed ? "Could not open moment" : revision ? "Viewing an earlier moment" : "Viewing the present"}</span><div className="note-history-nav"><button type="button" onClick={() => moveBy(-1)} disabled={!revision || restoring} aria-label="Newer moment">↑ Newer</button><button type="button" onClick={() => moveBy(1)} disabled={!entries.length || restoring} aria-label="Older moment">Older ↓</button></div><button type="button" className="note-history-restore" onClick={() => void restore()} disabled={!selected || selected.revision !== revision || pending || restoring}>{restoring ? "Restoring…" : "Restore this version"}</button></div>
   </section>;

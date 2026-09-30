@@ -5,13 +5,13 @@ import { useNoteHistoryCheckpoint } from "../../src/features/workspace/hooks/use
 describe("useNoteHistoryCheckpoint", () => {
   afterEach(() => vi.useRealTimers());
 
-  it("checkpoints edited notes every ten seconds and stops after a clean checkpoint", async () => {
+  it("checkpoints edited notes every thirty seconds and stops after a clean checkpoint", async () => {
     vi.useFakeTimers();
     const checkpoint = vi.fn().mockResolvedValue(undefined);
     const { result, unmount } = renderHook(() => useNoteHistoryCheckpoint({ checkpoint }));
 
     act(() => result.current("/notes/long-session.md", "bundle-one"));
-    await act(async () => { await vi.advanceTimersByTimeAsync(10 * 1000 - 1); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30 * 1000 - 1); });
     expect(checkpoint).not.toHaveBeenCalled();
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(checkpoint).toHaveBeenCalledTimes(1);
@@ -29,13 +29,13 @@ describe("useNoteHistoryCheckpoint", () => {
     const onCheckpoint = vi.fn();
     const { result } = renderHook(() => useNoteHistoryCheckpoint({ checkpoint, onCheckpoint }));
     act(() => result.current("/notes/long-session.md", "bundle-one"));
-    await act(async () => { await vi.advanceTimersByTimeAsync(10 * 1000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30 * 1000); });
     expect(onCheckpoint).not.toHaveBeenCalled();
     await act(async () => { resolveCheckpoint?.(true); await Promise.resolve(); });
     expect(onCheckpoint).toHaveBeenCalledWith("/notes/long-session.md", "bundle-one");
 
     act(() => result.current("/notes/long-session.md", "bundle-one"));
-    await act(async () => { await vi.advanceTimersByTimeAsync(10 * 1000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30 * 1000); });
     await act(async () => { resolveCheckpoint?.(false); await Promise.resolve(); });
     expect(onCheckpoint).toHaveBeenCalledTimes(1);
   });
@@ -46,11 +46,11 @@ describe("useNoteHistoryCheckpoint", () => {
     const checkpoint = vi.fn(() => new Promise<void>((resolve) => { resolveCheckpoint = resolve; }));
     const { result } = renderHook(() => useNoteHistoryCheckpoint({ checkpoint }));
     act(() => result.current("/notes/long-session.md", "bundle-one"));
-    await act(async () => { await vi.advanceTimersByTimeAsync(10 * 1000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30 * 1000); });
     expect(checkpoint).toHaveBeenCalledTimes(1);
     act(() => result.current("/notes/long-session.md", "bundle-one"));
     await act(async () => { resolveCheckpoint?.(); await Promise.resolve(); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(10 * 1000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30 * 1000); });
     expect(checkpoint).toHaveBeenCalledTimes(2);
   });
 

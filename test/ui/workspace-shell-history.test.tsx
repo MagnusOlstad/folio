@@ -181,6 +181,71 @@ describe("workspace history mode", () => {
     expect(attempts).toBe(2);
   });
 
+  it("keeps older-page loading visible and retries a failed page without an automatic loop", async () => {
+    let olderAttempts = 0;
+    let finishOlder: ((response: Response) => void) | undefined;
+    const delayedOlder = new Promise<Response>((resolve) => { finishOlder = resolve; });
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("cursor=older")) {
+        olderAttempts += 1;
+        return olderAttempts === 1 ? Promise.resolve(new Response(JSON.stringify({ error: "temporary error" }), { status: 503, headers: { "content-type": "application/json" } })) : delayedOlder;
+      }
+      return Promise.resolve(new Response(JSON.stringify({ entries, nextCursor: "older" }), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<NoteHistoryPanel documentId={noteId} onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onPreview={vi.fn()} />);
+    await screen.findByRole("button", { name: /Older title/ });
+    fireEvent.click(screen.getByRole("button", { name: "Load earlier" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("temporary error");
+    expect(olderAttempts).toBe(1);
+    const timeline = screen.getByRole("navigation", { name: "Note timeline" });
+    fireEvent.scroll(timeline);
+    fireEvent.scroll(timeline);
+    expect(olderAttempts).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    const loadingStatus = await screen.findByRole("status", { name: "Loading earlier moments" });
+    expect(screen.getByRole("region", { name: "Note history" })).toContainElement(loadingStatus);
+    expect(timeline).not.toContainElement(loadingStatus);
+    fireEvent.scroll(timeline);
+    fireEvent.scroll(timeline);
+    expect(olderAttempts).toBe(2);
+
+    finishOlder?.(new Response(JSON.stringify({ entries: [{ revision: "rev-older", authoredAt: "2026-09-25T12:00:00.000Z", title: "Older page" }], nextCursor: null }), { status: 200, headers: { "content-type": "application/json" } }));
+    await screen.findByRole("button", { name: /Older page/ });
+    expect(screen.queryByRole("button", { name: "Load earlier" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading earlier moments…")).not.toBeInTheDocument();
+  });
+
+  it("ignores an older page response after switching documents", async () => {
+    let finishOlder: ((response: Response) => void) | undefined;
+    const delayedOlder = new Promise<Response>((resolve) => { finishOlder = resolve; });
+    const beforeRestore = vi.fn().mockResolvedValue(undefined);
+    const restored = vi.fn();
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("id=%2Fnotes%2Fcurrent.md") && url.includes("cursor=older")) return delayedOlder;
+      const nextEntry = url.includes("other.md")
+        ? { revision: "other-revision", authoredAt: "2026-09-26T12:00:00.000Z", title: "Other document" }
+        : entries[0];
+      const nextCursor = url.includes("other.md") ? null : "older";
+      return Promise.resolve(new Response(JSON.stringify({ entries: [nextEntry], nextCursor }), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const props = { onBeforeRestore: beforeRestore, onRestored: restored, onPreview: vi.fn() };
+    const { rerender } = render(<NoteHistoryPanel documentId={noteId} {...props} />);
+    await screen.findByRole("button", { name: /Older title/ });
+    fireEvent.click(screen.getByRole("button", { name: "Load earlier" }));
+    await screen.findByRole("status", { name: "Loading earlier moments" });
+    rerender(<NoteHistoryPanel documentId={otherNoteId} {...props} />);
+    await screen.findByRole("button", { name: /Other document/ });
+
+    finishOlder?.(new Response(JSON.stringify({ entries: [{ revision: "stale-page", authoredAt: "2026-09-25T12:00:00.000Z", title: "Stale page" }], nextCursor: null }), { status: 200, headers: { "content-type": "application/json" } }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Stale page/ })).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /Other document/ })).toBeInTheDocument();
+  });
+
   it("settles wheel scrubbing before selecting and supports keyboard navigation", async () => {
     stubHistoryApi();
     const preview = vi.fn();
