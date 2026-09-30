@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/MagnusOlstad/folio/compare/v0.6.0...v0.6.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **desktop:** download and install updates from the version badge ([#78](https://github.com/MagnusOlstad/folio/issues/78)) ([1c9ba5b](https://github.com/MagnusOlstad/folio/commit/1c9ba5b855685776f66ed899a3ea20c49a298b1c))
+
 ## [0.6.0](https://github.com/MagnusOlstad/folio/compare/v0.5.0...v0.6.0) (2026-09-30)
 
 
