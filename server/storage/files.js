@@ -73,8 +73,29 @@ async function writeDraft(draft) {
   const filePath = draftFilePath(draft.id)
   if (!filePath) throw new Error('Invalid draft ID.')
   const temporaryPath = `${filePath}.${process.pid}.${crypto.randomBytes(3).toString('hex')}.tmp`
-  await fs.writeFile(temporaryPath, `${JSON.stringify(draft, null, 2)}\n`, { flag: 'wx' })
+  const persistedDraft = Object.fromEntries(Object.entries(draft).filter(([key]) => key !== 'history'))
+  await fs.writeFile(temporaryPath, `${JSON.stringify(persistedDraft, null, 2)}\n`, { flag: 'wx' })
   await fs.rename(temporaryPath, filePath)
+}
+
+async function archiveDraft(id, { content, filedId, filing, appended }) {
+  return queueDraftMutation(async () => {
+    const existing = await readDraft(id)
+    if (!existing) return null
+    const archivedAt = new Date().toISOString()
+    const draftReceipt = Object.fromEntries(Object.entries(existing).filter(([key]) => key !== 'history'))
+    const archived = {
+      ...draftReceipt,
+      ...(typeof content === 'string' ? { content } : {}),
+      filedId,
+      filedAt: archivedAt,
+      appended,
+      filing,
+      updatedAt: archivedAt,
+    }
+    await writeDraft(archived)
+    return archived
+  })
 }
 
 async function readOptionalFile(filePath) {
@@ -144,7 +165,10 @@ async function listBundleDirectories(directory = bundleRoot, prefix = '') {
 }
 
 function resolveBundleMarkdownPath(fileId) {
-  const filePath = path.resolve(bundleRoot, String(fileId).replace(/^[/\\]+/, ''))
+  const relativePath = String(fileId).replaceAll('\\', '/').replace(/^[/\\]+/, '')
+  const parts = relativePath.split('/')
+  if (parts.some((part) => part === '.' || part === '..' || part === '.git') || parts[0] === '.folio') return null
+  const filePath = path.resolve(bundleRoot, relativePath)
   const isInsideBundle = filePath.startsWith(`${bundleRoot}${path.sep}`)
   return isInsideBundle && path.extname(filePath) === '.md' ? filePath : null
 }
@@ -181,6 +205,7 @@ async function listBundleMarkdownFiles(directory = bundleRoot) {
   for (const entry of entries) {
     const entryPath = path.join(directory, entry.name)
     if (entry.isDirectory()) {
+      if (entry.name === '.git' || path.resolve(entryPath) === path.resolve(bundleRoot, '.folio')) continue
       files.push(...await listBundleMarkdownFiles(entryPath))
     } else if (entry.isFile() && path.extname(entry.name) === '.md') {
       files.push(entryPath)
@@ -191,7 +216,7 @@ async function listBundleMarkdownFiles(directory = bundleRoot) {
 }
 
 
-  return { readRecords, writeRecords, normalizeDraftId, draftFilePath, readDrafts, readDraft, queueDraftMutation, writeDraft,
+  return { readRecords, writeRecords, normalizeDraftId, draftFilePath, readDrafts, archiveDraft, readDraft, queueDraftMutation, writeDraft,
     readOptionalFile, bundleFileId, resolveBundleMarkdownPath, isMovableConceptId, normalizeMoveDirectory,
     normalizeBundlePath, resolveBundlePath, assertNoBundleSymlinks, listBundleDirectories, listBundleMarkdownFiles }
 }

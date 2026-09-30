@@ -6,7 +6,7 @@ import type { EditorWorkspaceProps } from "../types.ts";
 import { WorkspaceSplitHandle } from "./WorkspaceSplitHandle.tsx";
 import { filingOwnerGroupIds } from "../model/filing.ts";
 
-export function EditorWorkspace({ model, actions, paneControls }: EditorWorkspaceProps) {
+export function EditorWorkspace({ model, actions, paneControls, historyPreview }: EditorWorkspaceProps) {
   const ui = useWorkspaceEditorUi();
   const owners = filingOwnerGroupIds(
     model.groups,
@@ -61,15 +61,12 @@ export function EditorWorkspace({ model, actions, paneControls }: EditorWorkspac
   };
 
   return (
-    <section
-      className={`editor-workspace ${model.groups.length === 2 ? "is-split" : ""}`}
-      style={
-        {
-          "--split-position": `${model.splitPosition}%`,
-        } as CSSProperties
-      }
-    >
-      {model.groups.map((group, groupIndex) => (
+    <section className="editor-workspace">
+      <div
+        className={`editor-groups ${model.groups.length === 2 ? "is-split" : ""}`}
+        style={{ "--split-position": `${model.splitPosition}%` } as CSSProperties}
+      >
+        {model.groups.map((group, groupIndex) => (
         <Fragment key={group.id}>
           {groupIndex === 1 && (
             <WorkspaceSplitHandle
@@ -86,6 +83,7 @@ export function EditorWorkspace({ model, actions, paneControls }: EditorWorkspac
             model={groupModel}
             actions={groupActions}
             ui={ui}
+            historyPreview={historyPreview?.groupId === group.id && historyPreview.documentId === group.activeId ? historyPreview : undefined}
             paneControls={paneControls ? {
               ...paneControls,
               leftOpen: groupIndex > 0 || paneControls.leftOpen,
@@ -93,7 +91,8 @@ export function EditorWorkspace({ model, actions, paneControls }: EditorWorkspac
             } : undefined}
           />
         </Fragment>
-      ))}
+        ))}
+      </div>
       {model.message && (
         <button
           type="button"

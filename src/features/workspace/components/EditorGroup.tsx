@@ -5,9 +5,11 @@ import { isUntitledId } from "../../../lib/workspace.ts";
 import { EditorTabs } from "../../tabs/EditorTabs.tsx";
 import { DocumentPane } from "./DocumentPane.tsx";
 import { DocumentView } from "./DocumentView.tsx";
+import { HistoryDocumentView } from "./HistoryDocumentView.tsx";
 import type {
   EditorWorkspaceActions,
   EditorWorkspaceModel,
+  EditorWorkspaceProps,
 } from "../types.ts";
 
 type EditorGroupProps = {
@@ -23,8 +25,11 @@ type EditorGroupProps = {
     | "finishHorizontalResize"
     | "resetSplit"
     | "dismissMessage"
+    | "beforeHistoryRestore"
+    | "historyRestored"
   >;
   ui: WorkspaceEditorUi;
+  historyPreview?: EditorWorkspaceProps["historyPreview"];
   paneControls?: {
     leftOpen: boolean;
     rightOpen: boolean;
@@ -39,6 +44,7 @@ export function EditorGroup({
   model,
   actions,
   ui,
+  historyPreview,
   paneControls,
 }: EditorGroupProps) {
   const document = group.activeId ? model.documents[group.activeId] : null;
@@ -187,7 +193,8 @@ export function EditorGroup({
         loading={loading}
         onCreateNewTab={actions.createNewTab}
       >
-        {document && (
+        {document && <>
+          <div className={historyPreview ? "history-editor-underlay" : "history-editor-underlay is-present"} aria-hidden={historyPreview ? true : undefined} inert={historyPreview ? true : undefined}>
           <DocumentView
             groupId={group.id}
             document={document}
@@ -259,7 +266,9 @@ export function EditorGroup({
             onConfirmFiling={actions.confirmFiling}
             onDismissFiling={actions.dismissFiling}
           />
-        )}
+          </div>
+          {historyPreview && <HistoryDocumentView document={document} snapshot={historyPreview.snapshot} loading={historyPreview.loading} failed={historyPreview.failed} presentContent={historyPreview.presentContent} />}
+        </>}
       </DocumentPane>
     </section>
   );

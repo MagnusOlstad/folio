@@ -62,6 +62,9 @@ test('explorer folders persist and file operations validate, index, and rename p
   const createdFile = await createdFileResponse.json()
   assert.equal(createdFileResponse.status, 201, JSON.stringify(createdFile))
   assert.equal(createdFile.id, '/archive/new folder/Meeting notes.md')
+  assert.equal(createdFile.warning, null)
+  const createdHistory = await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(createdFile.id)}`, { headers }).then((response) => response.json())
+  assert.equal(createdHistory.entries.length, 1)
   const createdDocument = await fetch(`${baseUrl}/api/file?path=${encodeURIComponent(createdFile.id)}`, { headers }).then((response) => response.json())
   assert.equal(createdDocument.title, 'Meeting notes')
   assert.match(createdDocument.content, /# Meeting notes/)
@@ -81,9 +84,34 @@ test('explorer folders persist and file operations validate, index, and rename p
   assert.equal(renameResponse.status, 200, JSON.stringify(renamed))
   assert.equal(renamed.oldId, createdFile.id)
   assert.equal(renamed.newId, '/archive/new folder/Meeting plan.md')
+  assert.match(renamed.warning, /semantic index still needs refreshing/)
+  const renamedHistory = await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(renamed.newId)}`, { headers }).then((response) => response.json())
+  assert.equal(renamedHistory.entries.length, 2)
+  assert.equal(renamedHistory.entries[0].title, `Renamed ${createdFile.id} to ${renamed.newId}`)
   const previousPathResponse = await fetch(`${baseUrl}/api/file?path=${encodeURIComponent(createdFile.id)}`, { headers })
   assert.equal(previousPathResponse.status, 200)
   assert.equal((await previousPathResponse.json()).id, renamed.newId)
+
+  const reconcile = bundleRuntime.history.reconcile
+  bundleRuntime.history.reconcile = async () => { throw new Error('history unavailable') }
+  try {
+    const uncheckpointedCreateResponse = await fetch(`${baseUrl}/api/file/create`, {
+      method: 'POST', headers, body: JSON.stringify({ directory: '/', name: 'Checkpoint warning' }),
+    })
+    const uncheckpointedCreate = await uncheckpointedCreateResponse.json()
+    assert.equal(uncheckpointedCreateResponse.status, 201)
+    assert.equal(uncheckpointedCreate.warning, 'The note was created, but its history checkpoint could not be saved.')
+
+    const uncheckpointedRenameResponse = await fetch(`${baseUrl}/api/file/rename`, {
+      method: 'POST', headers, body: JSON.stringify({ id: uncheckpointedCreate.id, name: 'Checkpoint warning renamed' }),
+    })
+    const uncheckpointedRename = await uncheckpointedRenameResponse.json()
+    assert.equal(uncheckpointedRenameResponse.status, 200, JSON.stringify(uncheckpointedRename))
+    assert.match(uncheckpointedRename.warning, /The note was renamed, but its history checkpoint could not be saved\./)
+  } finally {
+    bundleRuntime.history.reconcile = reconcile
+  }
+
   const fixedRenameResponse = await fetch(`${baseUrl}/api/file/rename`, {
     method: 'POST', headers, body: JSON.stringify({ id: '/index.md', name: 'index-renamed.md' }),
   })

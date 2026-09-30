@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { BundleDirectory, BundleFile, Note, ViewerDocument } from "../../../domain/types.ts";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { BundleDirectory, BundleFile, Note, NoteDetail, ViewerDocument } from "../../../domain/types.ts";
 import { api, apiForBundle, setActiveBundleId } from "../../../lib/api.ts";
 import type { WorkspaceShellProps } from "../components/WorkspaceShell.tsx";
 import { useWorkspaceBootstrap } from "./useWorkspaceBootstrap.ts";
@@ -13,6 +13,8 @@ import { useWorkspaceExplorerState } from "./useWorkspaceExplorerState.ts";
 import { useWorkspaceSidebarProps } from "./useWorkspaceSidebarProps.ts";
 import { useWorkspaceShortcutActions } from "./useWorkspaceShortcutActions.ts";
 import { useFiledDocumentAutosave } from "./useFiledDocumentAutosave.ts";
+import { useNoteHistoryCheckpoint } from "./useNoteHistoryCheckpoint.ts";
+import { prepareFiledDocumentHistory } from "../model/history-actions.ts";
 import { expandedPathsForFiles, isUntitledId } from "../../../lib/workspace.ts";
 import { bundleDirectories } from "../model/directory-suggestions.ts";
 import { useNoteExport } from "./useNoteExport.ts";
@@ -35,6 +37,11 @@ function draftTitle(content: string) {
 
 export function useWorkspaceController(): WorkspaceShellProps {
   const [message, setMessage] = useState("");
+  const [historyCheckpoint, setHistoryCheckpoint] = useState<{
+    documentId: string;
+    scopeId: string;
+    revision: number;
+  } | null>(null);
   const noteExport = useNoteExport({ setMessage });
   const themeSettings = useThemeSettings();
   const bundleSetup = useBundleSetup();
@@ -136,6 +143,48 @@ export function useWorkspaceController(): WorkspaceShellProps {
       );
     },
   });
+  const checkpointContextRef = useRef({
+    bundleId: persistenceBundleId,
+    movingFileId: explorer.movingFileId,
+    deletingNoteId: documents.deletingNoteId,
+  });
+  useLayoutEffect(() => {
+    checkpointContextRef.current = {
+      bundleId: persistenceBundleId,
+      movingFileId: explorer.movingFileId,
+      deletingNoteId: documents.deletingNoteId,
+    };
+  }, [documents.deletingNoteId, explorer.movingFileId, persistenceBundleId]);
+  const checkpointEditedNote = useNoteHistoryCheckpoint({
+    checkpoint: async (documentId, scopeId) => {
+      if (checkpointContextRef.current.bundleId !== scopeId) return false;
+      const bundleId = scopeId;
+      const document = documents.documentsRef.current[documentId];
+      if (!document) return false;
+      if (isUntitledId(documentId)) return false;
+      await autosave.flushSave(documentId);
+      if (autosave.isDirty(documentId)) throw new Error("Could not save the note before its history checkpoint.");
+      const context = checkpointContextRef.current;
+      if (!document || isUntitledId(documentId) || !document.deletable || context.bundleId !== bundleId || context.movingFileId === documentId || context.deletingNoteId === documentId) return false;
+      await apiForBundle(bundleId, "/api/note/history/checkpoint", {
+        method: "POST",
+        body: JSON.stringify({ id: documentId }),
+      });
+      return true;
+    },
+    onCheckpoint: (documentId, scopeId) => {
+      const activeGroup = tabs.groups.find((group) => group.id === tabs.activeGroupId);
+      if (!layout.rightPaneOpen || activeGroup?.activeId !== documentId || persistenceBundleId !== scopeId) return;
+      setHistoryCheckpoint((current) => ({
+        documentId,
+        scopeId,
+        revision: (current?.documentId === documentId && current.scopeId === scopeId ? current.revision : 0) + 1,
+      }));
+    },
+    onError: (_documentId, error) => {
+      setMessage(error instanceof Error ? error.message : "Could not save a note history checkpoint.");
+    },
+  });
 
   function markEmbeddingDirty(documentId: string) {
     embeddingRevisionsRef.current.set(
@@ -173,11 +222,54 @@ export function useWorkspaceController(): WorkspaceShellProps {
     return finalization;
   }
 
+  async function prepareHistoryDocument(documentId: string) {
+    await prepareFiledDocumentHistory(
+      documentId,
+      autosave.flushSave,
+      finalizeFiledDocument,
+      autosave.isDirty,
+    );
+  }
+
   function finalizeAllFiledDocuments() {
     return Promise.all(
       Array.from(embeddingRevisionsRef.current.keys(), finalizeFiledDocument),
     );
   }
+  const refreshAfterHistoryRestore = useCallback(async (documentId: string) => {
+    const [detail, notes, files] = await Promise.all([
+      api<NoteDetail>(`/api/note?id=${encodeURIComponent(documentId)}`),
+      api<Note[]>("/api/notes"),
+      api<BundleFile[]>("/api/files"),
+    ]);
+    documents.setDocuments((current) => ({
+      ...current,
+      [documentId]: { ...detail, deletable: true } as ViewerDocument,
+    }));
+    documents.setDrafts((current) => {
+      const next = { ...current };
+      delete next[documentId];
+      return next;
+    });
+    setNotes(notes);
+    setFiles(files);
+  }, [documents, setFiles, setNotes]);
+  const historyRestoreActionsRef = useRef<{
+    before: (documentId: string) => Promise<void>;
+    after: (documentId: string) => Promise<void>;
+  }>({ before: async () => {}, after: async () => {} });
+  historyRestoreActionsRef.current = {
+    before: prepareHistoryDocument,
+    after: refreshAfterHistoryRestore,
+  };
+  const beforeHistoryRestore = useCallback(
+    (documentId: string) => historyRestoreActionsRef.current.before(documentId),
+    [],
+  );
+  const historyRestored = useCallback(
+    (documentId: string) => historyRestoreActionsRef.current.after(documentId),
+    [],
+  );
   const navigation = useWorkspaceDocumentNavigation({
     documents,
     groups: tabs.groups,
@@ -216,6 +308,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
   const previousBundleIdRef = useRef<string | null>(null);
   const switchBundle = useCallback(async (bundleId: string, previousBundleId: string | null) => {
     const revision = ++bundleSwitchRevisionRef.current;
+    setHistoryCheckpoint(null);
     explorer.setFilesLoading(true);
     explorer.discovery.clearDiscovery();
     if (previousBundleId) {
@@ -443,6 +536,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
 
   return {
     exportPreview: noteExport.preview,
+    historyCheckpoint,
+    historyScopeId: persistenceBundleId,
     app: {
       versionInfo: models.versionInfo,
       status: models.status,
@@ -546,6 +641,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
         changeDraftContent: (document, content) => {
           documents.changeDraftContent(document, content);
           if (!isUntitledId(document.id)) {
+            checkpointEditedNote(document.id, persistenceBundleId);
             markEmbeddingDirty(document.id);
             autosave.scheduleSave(document.id, content);
           }
@@ -569,13 +665,25 @@ export function useWorkspaceController(): WorkspaceShellProps {
           void finalizeAllFiledDocuments();
           return navigation.openDocument(...args);
         },
-        toggleTaskCheckbox: mutations.toggleTaskCheckbox,
+        toggleTaskCheckbox: (document, lineNumber, checked) => {
+          const updated = mutations.toggleTaskCheckbox(document, lineNumber, checked);
+          if (!isUntitledId(document.id)) checkpointEditedNote(document.id, persistenceBundleId);
+          return updated;
+        },
         deleteFiledNote: async (document) => {
           await autosave.flushSave(document.id);
           return navigation.deleteFiledNote(document);
         },
-        persistDocument: mutations.persistDocument,
-        persistMetadata: mutations.persistMetadata,
+        persistDocument: (...args) => {
+          const updated = mutations.persistDocument(...args);
+          if (!isUntitledId(args[0].id)) checkpointEditedNote(args[0].id, persistenceBundleId);
+          return updated;
+        },
+        persistMetadata: (...args) => {
+          const updated = mutations.persistMetadata(...args);
+          if (!isUntitledId(args[0].id)) checkpointEditedNote(args[0].id, persistenceBundleId);
+          return updated;
+        },
         moveBundleFile: async (id, directory) => {
           await finalizeFiledDocument(id);
           return moveBundleFile(id, directory);
@@ -591,6 +699,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
             documents.drafts[document.id],
             format,
           ),
+        beforeHistoryRestore,
+        historyRestored,
         dismissMessage: () => setMessage(""),
       },
     },

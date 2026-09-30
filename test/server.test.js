@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import http from 'node:http'
 import os from 'node:os'
@@ -31,6 +32,11 @@ async function jsonRequest(url, body) {
 function markdownFrontmatter(markdown) {
   const end = markdown.indexOf('\n---\n', 4)
   return YAML.parse(markdown.slice(4, end))
+}
+
+function markdownManagedMetadata(markdown) {
+  const frontmatter = markdownFrontmatter(markdown)
+  return { generated: frontmatter.generated, filing: frontmatter.filing }
 }
 
 test('files whole notes hierarchically and appends todo and daily captures', async (context) => {
@@ -227,6 +233,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const baseUrl = `http://127.0.0.1:${apiPort}`
   context.after(async () => {
     await close(api)
+    await api.waitForBackground?.()
     await close(ollama)
     await fs.rm(dataRoot, { recursive: true, force: true })
   })
@@ -255,6 +262,22 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal(savedDraftResponse.status, 200)
   const savedDraft = await savedDraftResponse.json()
   assert.equal(savedDraft.content, 'A durable unfinished thought.')
+  const historyDraftId = 'untitled:history-persistence-test'
+  const historyDraftUrl = `${baseUrl}/api/draft?id=${encodeURIComponent(historyDraftId)}`
+  await fetch(historyDraftUrl, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'A recoverable unfinished thought.', createdAt: draftCreatedAt, updatedAt: draftUpdatedAt }) })
+  const historyDraftPath = path.join(dataRoot, 'drafts', `${crypto.createHash('sha256').update(historyDraftId).digest('hex')}.json`)
+  await fs.writeFile(historyDraftPath, JSON.stringify({ id: historyDraftId, content: 'A recoverable unfinished thought.', createdAt: draftCreatedAt, updatedAt: draftUpdatedAt, history: [{ revision: 'legacy-draft-snapshot', authoredAt: draftUpdatedAt, title: 'Legacy', content: 'Old snapshot' }] }))
+  const draftCheckpoint = await fetch(`${baseUrl}/api/draft/history/checkpoint?id=${encodeURIComponent(historyDraftId)}`, { method: 'POST' })
+  assert.equal(draftCheckpoint.status, 404, 'draft checkpoint route is removed')
+  const draftHistory = await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(historyDraftId)}`)
+  assert.equal(draftHistory.status, 400, 'draft IDs are not accepted by filed-note history')
+  const draftRestore = await fetch(`${baseUrl}/api/note/history/restore`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: historyDraftId, revision: 'legacy-draft-snapshot' }) })
+  assert.equal(draftRestore.status, 400, 'draft snapshots cannot be restored')
+  const recoveredDraft = (await (await fetch(`${baseUrl}/api/drafts`)).json()).find((draft) => draft.id === historyDraftId)
+  assert.equal(recoveredDraft.content, 'A recoverable unfinished thought.', 'draft content remains available for recovery')
+  await fetch(historyDraftUrl, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Updated recoverable thought.', createdAt: draftCreatedAt, updatedAt: '2026-09-03T06:02:00.000Z' }) })
+  assert.equal(Object.hasOwn(JSON.parse(await fs.readFile(historyDraftPath, 'utf8')), 'history'), false, 'saving a legacy draft removes stored snapshots')
+  await fetch(historyDraftUrl, { method: 'DELETE' })
   const draftsResponse = await fetch(`${baseUrl}/api/drafts`)
   const drafts = await draftsResponse.json()
   assert.deepEqual(drafts, [{
@@ -300,6 +323,14 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ content: meetingCapture, createdAt: draftCreatedAt, updatedAt: draftUpdatedAt }),
   })
+  await fetch(`${baseUrl}/api/draft?id=${encodeURIComponent(meetingDraftId)}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: `${meetingCapture}\nEarlier draft-only line.`, createdAt: draftCreatedAt, updatedAt: '2026-09-03T06:02:00.000Z' }),
+  })
+  await fetch(`${baseUrl}/api/draft?id=${encodeURIComponent(meetingDraftId)}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: meetingCapture, createdAt: draftCreatedAt, updatedAt: '2026-09-03T06:03:00.000Z' }),
+  })
   const meetingResult = await jsonRequest(`${baseUrl}/api/notes`, {
     content: meetingCapture,
     filedContent: meeting,
@@ -327,6 +358,9 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const archivedMeetingDraft = archivedDrafts.find((draft) => draft.id === meetingDraftId)
   assert.equal(archivedMeetingDraft.content, meetingCapture)
   assert.equal(archivedMeetingDraft.filedId, meetingResult.note.id)
+  assert.equal(Object.hasOwn(archivedMeetingDraft, 'history'), false, 'filing archives draft content without snapshot lineage')
+  const filedTimeline = await (await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(meetingResult.note.id)}`)).json()
+  assert.ok(filedTimeline.entries.every((entry) => !entry.revision.startsWith('draft-')), 'filed history contains Git checkpoints only')
   assert.equal(meetingResult.filing.draftId, meetingDraftId)
   assert.equal(meetingResult.filing.mode, 'new')
   assert.equal(meetingResult.filing.actor, 'okf-notetaker/llama3.2:3b')
@@ -598,6 +632,27 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.ok(movedFile.includes(`[semantic]: ${semantic.note.id}`))
   assert.ok(movedFile.includes(`[example](${semanticRelativeLink})`))
   assert.equal(await fs.readFile(rawSemanticPath, 'utf8'), rawSemanticWithLink)
+  const renamedDraftId = 'untitled:renamed-history-lineage'
+  const renamedDraftPath = path.join(dataRoot, 'drafts', `${crypto.createHash('sha256').update(renamedDraftId).digest('hex')}.json`)
+  await fs.writeFile(renamedDraftPath, JSON.stringify({
+    id: renamedDraftId,
+    content: 'Archived draft body',
+    filedId: spacedId,
+    history: [{ revision: 'draft-renamed-lineage', authoredAt: '2026-09-02T12:00:00.000Z', title: 'Archived moment', content: 'Archived draft body' }],
+  }))
+  const appendedDraftId = 'untitled:appended-history-not-whole-note'
+  const appendedDraftPath = path.join(dataRoot, 'drafts', `${crypto.createHash('sha256').update(appendedDraftId).digest('hex')}.json`)
+  await fs.writeFile(appendedDraftPath, JSON.stringify({
+    id: appendedDraftId,
+    content: 'Only the appended capture body',
+    filedId: spacedId,
+    appended: true,
+    history: [{ revision: 'draft-appended-content', authoredAt: '2026-09-02T13:00:00.000Z', title: 'Appended capture', content: 'Only the appended capture body' }],
+  }))
+  const renamedTimeline = await (await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(movedId)}`)).json()
+  assert.ok(!renamedTimeline.entries.some((entry) => entry.revision.startsWith('draft-')), 'legacy draft snapshots do not enter filed-note history')
+  const renamedVersionResponse = await fetch(`${baseUrl}/api/note/history/version?id=${encodeURIComponent(movedId)}&revision=draft-renamed-lineage`)
+  assert.notEqual(renamedVersionResponse.status, 200, 'legacy draft snapshots cannot be opened as note versions')
   const oldPathResponse = await fetch(`${baseUrl}/api/file?path=${encodeURIComponent(spacedId)}`)
   const oldPathDocument = await oldPathResponse.json()
   assert.equal(oldPathResponse.status, 200, JSON.stringify(oldPathDocument))
@@ -785,8 +840,8 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     .map((filename) => fs.readFile(path.join(dataRoot, 'bundle', 'references', 'inbox', filename), 'utf8')))
   assert.ok(dailyRawCaptures.some((rawCapture) => /release route only/.test(rawCapture)))
 
-  const todoMetadataBeforeAccept = (await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g)
-  const dailyMetadataBeforeAccept = (await fs.readFile(path.join(dataRoot, 'bundle', firstDaily.note.id.slice(1)), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g)
+  const todoMetadataBeforeAccept = markdownManagedMetadata(await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8'))
+  const dailyMetadataBeforeAccept = markdownManagedMetadata(await fs.readFile(path.join(dataRoot, 'bundle', firstDaily.note.id.slice(1)), 'utf8'))
   for (const filing of [secondTodo.filing, secondDaily.filing]) {
     const accepted = await fetch(`${baseUrl}/api/filing/confirm`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -797,15 +852,15 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     assert.equal(acceptedBody.newId, filing.destinationId)
     assert.ok(acceptedBody.notes.length >= 8)
   }
-  assert.deepEqual((await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g), todoMetadataBeforeAccept)
-  assert.deepEqual((await fs.readFile(path.join(dataRoot, 'bundle', firstDaily.note.id.slice(1)), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g), dailyMetadataBeforeAccept)
+  assert.deepEqual(markdownManagedMetadata(await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')), todoMetadataBeforeAccept)
+  assert.deepEqual(markdownManagedMetadata(await fs.readFile(path.join(dataRoot, 'bundle', firstDaily.note.id.slice(1)), 'utf8')), dailyMetadataBeforeAccept)
 
   const existingAppend = await jsonRequest(`${baseUrl}/api/notes`, {
     content: 'Project Aurora details\nA third capture that must stay appended.',
     timeZone: 'America/New_York',
   })
   assert.equal(existingAppend.appended, true)
-  const existingMetadataBeforeAccept = (await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g)
+  const existingMetadataBeforeAccept = markdownManagedMetadata(await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8'))
   const acceptedExisting = await fetch(`${baseUrl}/api/filing/confirm`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ filingId: existingAppend.filing.id, action: 'accept', fields: existingAppend.filing.proposal }),
@@ -813,7 +868,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const acceptedExistingBody = await acceptedExisting.json()
   assert.equal(acceptedExisting.status, 200, JSON.stringify(acceptedExistingBody))
   assert.equal(acceptedExistingBody.newId, auroraId)
-  assert.deepEqual((await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8')).match(/(?:generated|filing):\n(?:  .*\n){1,4}/g), existingMetadataBeforeAccept)
+  assert.deepEqual(markdownManagedMetadata(await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8')), existingMetadataBeforeAccept)
 
   await fs.writeFile(path.join(dataRoot, 'bundle', 'linked.md'), `---\ntitle: Linked\ntype: Note\n---\n\n[Semantic](${semantic.note.id})\n`)
   await fetch(`${baseUrl}/api/reindex`, { method: 'POST' })
@@ -1013,6 +1068,22 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const offline = await jsonRequest(`${baseUrl}/api/notes`, { content: 'Offline capture', timeZone: 'America/New_York' })
   assert.equal(offline.filing.actor, 'process:folio-fallback')
   assert.match(await fs.readFile(path.join(dataRoot, 'bundle', offline.note.id.slice(1)), 'utf8'), /filing:\n  by: process:folio-fallback/)
+  const historyCheckpointResponse = await fetch(`${baseUrl}/api/note/history/checkpoint`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: offline.note.id }),
+  })
+  assert.equal(historyCheckpointResponse.status, 200)
+  assert.deepEqual(await historyCheckpointResponse.json(), { checkpointed: true })
+  const offlineHistory = await (await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(offline.note.id)}`)).json()
+  const offlineSnapshot = await (await fetch(`${baseUrl}/api/note/history/version?id=${encodeURIComponent(offline.note.id)}&revision=${encodeURIComponent(offlineHistory.entries[0].revision)}`)).json()
+  assert.match(offlineSnapshot.note.content, /Offline capture/)
+  const offlineLiveNote = await (await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(offline.note.id)}`)).json()
+  assert.equal(offlineSnapshot.note.content, offlineLiveNote.content, 'history and the live note expose the same indexed Markdown body')
+  assert.doesNotMatch(offlineSnapshot.note.content, /folio:capture:|^# Captured note/m, 'generated capture wrappers are hidden in history presentation')
+  assert.doesNotMatch(offlineSnapshot.note.content, /^(?:---|title:|type:|generated:|filing:)/m, 'worker snapshots expose parsed note body rather than OKF frontmatter')
+  const unfiledHistoryResponse = await fetch(`${baseUrl}/api/note/history/checkpoint`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'untitled:note' }),
+  })
+  assert.equal(unfiledHistoryResponse.status, 400)
 
   const nestedDeleteDirectory = path.join(dataRoot, 'bundle', 'temporary', 'sole', 'deep')
   const nestedDeleteId = '/temporary/sole/deep/only-note.md'

@@ -14,6 +14,7 @@ export function createConfig(env = process.env) {
   const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const dataRoot = env.FOLIO_DATA_ROOT || path.join(projectRoot, 'data')
   const bundleRoot = env.FOLIO_BUNDLE_ROOT || path.join(dataRoot, 'bundle')
+  const historyBundleId = env.FOLIO_HISTORY_BUNDLE_ID || 'legacy-bundle'
   const ollamaUrl = env.OLLAMA_URL || 'http://127.0.0.1:11434'
   const classifierModel = env.OLLAMA_CLASSIFIER_MODEL || 'llama3.2:3b'
   const answerModel = env.OLLAMA_ANSWER_MODEL || 'llama3.2:3b'
@@ -29,6 +30,9 @@ export function createConfig(env = process.env) {
     projectRoot,
     dataRoot,
     bundleRoot,
+    historyBundleId,
+    historyGitDir: path.join(bundleRoot, '.folio', 'history.git'),
+    legacyHistoryGitDir: env.FOLIO_LEGACY_HISTORY_GIT_DIR || env.FOLIO_HISTORY_GIT_DIR || path.join(dataRoot, 'state', 'bundles', historyBundleId, 'history.git'),
     rawRoot: env.FOLIO_RAW_ROOT || path.join(bundleRoot, 'references', 'inbox'),
     draftsRoot: env.FOLIO_DRAFTS_ROOT || path.join(dataRoot, 'drafts'),
     importsRoot: env.FOLIO_IMPORTS_ROOT || path.join(dataRoot, 'imports'),

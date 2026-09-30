@@ -1,9 +1,10 @@
+import { useState } from "react";
 import type { CSSProperties, PointerEvent } from "react";
 import { SettingsDialog } from "../../settings/components/SettingsDialog.tsx";
 import type { SettingsDialogProps } from "../../settings/components/SettingsDialog.tsx";
 import { WorkspaceSidebar } from "../../sidebar/WorkspaceSidebar.tsx";
 import type { WorkspaceSidebarProps } from "../../sidebar/WorkspaceSidebar.tsx";
-import type { VersionInfo } from "../../../domain/types.ts";
+import type { NoteHistorySnapshot, VersionInfo } from "../../../domain/types.ts";
 import type { WorkspaceStatusProps } from "../../status/WorkspaceStatus.tsx";
 import { EditorWorkspace } from "./EditorWorkspace.tsx";
 import type { EditorWorkspaceProps } from "../types.ts";
@@ -12,6 +13,8 @@ import { NoteExportPreview } from "./NoteExportPreview.tsx";
 import { WorkspaceRightPane } from "./WorkspaceRightPane.tsx";
 import { WorkspaceLeftPaneHeader } from "./WorkspaceLeftPaneHeader.tsx";
 import type { NoteExportSnapshot } from "../model/note-export.ts";
+import { NoteHistoryPanel } from "./NoteHistoryPanel.tsx";
+import { isUntitledId } from "../../../lib/workspace.ts";
 
 type WorkspaceAppProps = WorkspaceStatusProps & {
   versionInfo: VersionInfo | null;
@@ -38,6 +41,8 @@ export type WorkspaceShellProps = {
     resetSidebar: () => void;
     resetRightPane: () => void;
   };
+  historyCheckpoint?: { documentId: string; scopeId: string; revision: number } | null;
+  historyScopeId?: string;
 };
 
 export function WorkspaceShell({
@@ -47,7 +52,39 @@ export function WorkspaceShell({
   editor,
   exportPreview,
   layout,
+  historyCheckpoint,
+  historyScopeId,
 }: WorkspaceShellProps) {
+  const activeGroup = editor.model.groups.find((group) => group.id === editor.model.activeGroupId);
+  const activeDocumentId = activeGroup?.activeId ?? null;
+  const activeDocument = activeDocumentId ? editor.model.documents[activeDocumentId] : null;
+  const historyAvailable = Boolean(activeDocumentId && activeDocument && !editor.model.loadingDocuments.has(activeDocumentId)
+    && activeDocument.deletable && !isUntitledId(activeDocumentId));
+  const scope = `${historyScopeId ?? ""}:\0${activeGroup?.id ?? ""}:\0${activeDocumentId ?? ""}:\0${layout.rightPaneOpen}:\0${historyAvailable}`;
+  const [history, setHistory] = useState<{ scope: string; snapshot: NoteHistorySnapshot | null; loading: boolean; failed: boolean }>(
+    { scope, snapshot: null, loading: false, failed: false },
+  );
+  if (history.scope !== scope) {
+    setHistory({ scope, snapshot: null, loading: false, failed: false });
+  }
+  const historyContent = historyAvailable && activeDocumentId ? (
+    <NoteHistoryPanel
+      key={`${historyScopeId ?? ""}:${activeGroup?.id}:${activeDocumentId}`}
+      documentId={activeDocumentId}
+      checkpointRevision={historyCheckpoint?.documentId === activeDocumentId && historyCheckpoint.scopeId === historyScopeId ? historyCheckpoint.revision : 0}
+      onBeforeRestore={editor.actions.beforeHistoryRestore}
+      onRestored={editor.actions.historyRestored}
+      onPreview={(snapshot, loading, failed) => setHistory((current) => current.scope === scope ? { ...current, snapshot, loading, failed } : current)}
+    />
+  ) : !activeDocumentId ? (
+    <p className="right-pane-placeholder">Open a filed note to see its history.</p>
+  ) : editor.model.loadingDocuments.has(activeDocumentId) ? (
+    <p className="right-pane-placeholder" role="status">Loading note…</p>
+  ) : isUntitledId(activeDocumentId) ? (
+    <p className="right-pane-placeholder">Drafts do not have history.</p>
+  ) : (
+    <p className="right-pane-placeholder">Open a filed note to see its history.</p>
+  );
   return (
     <main className="shell">
       <section
@@ -80,6 +117,7 @@ export function WorkspaceShell({
         ) : null}
         <EditorWorkspace
           {...editor}
+          historyPreview={history.scope === scope && (history.snapshot !== null || history.loading || history.failed) && activeGroup && activeDocumentId && activeDocument ? { groupId: activeGroup.id, documentId: activeDocumentId, snapshot: history.snapshot, loading: history.loading, failed: history.failed, presentContent: editor.model.drafts[activeDocumentId] ?? activeDocument.content } : undefined}
           paneControls={{
             leftOpen: layout.sidebarOpen,
             rightOpen: layout.rightPaneOpen,
@@ -98,7 +136,11 @@ export function WorkspaceShell({
           />
         ) : null}
         {layout.rightPaneOpen ? (
-          <WorkspaceRightPane {...app} onHide={() => layout.setRightPaneOpen(false)} />
+          <WorkspaceRightPane
+            {...app}
+            onHide={() => layout.setRightPaneOpen(false)}
+            historyContent={historyContent}
+          />
         ) : null}
       </section>
       {exportPreview ? <NoteExportPreview snapshot={exportPreview} /> : null}

@@ -7,7 +7,7 @@ export function registerRoutes(app, runtime) {
     rankedRecords, normalizeInlineText, normalizeTag, normalizeMarkdownBreaks, markdownDocument, updatedGenerated,
     replaceIndexedConceptContent, embeddingInputHash, refreshRecordEmbeddings, queueIndexOperation,
     performReindexBundle, persistEmbeddingUpdatesNow, relationshipIndex, recordIsStale,
-    semanticSuggestionSummaries } = runtime
+    semanticSuggestionSummaries, history } = runtime
 app.get('/api/search', async (request, response, next) => {
   try {
     const query = String(request.query.q || '').trim()
@@ -113,12 +113,19 @@ app.post('/api/file/move', async (request, response, next) => {
 
     const records = await readRecords()
     const current = records.find((record) => record.id === moveResult.newId) || moveResult.record
+    let historyWarning = null
+    try {
+      await history.reconcile(`Moved ${moveResult.oldId}`)
+    } catch (error) {
+      console.error(`The note moved, but its history checkpoint failed: ${error.message}`)
+      historyWarning = 'The note moved, but its history checkpoint could not be saved.'
+    }
     const graph = await relationshipIndex()
     if (moveResult.warning) void refreshMissingEmbeddingsInBackground()
     response.json({
       oldId: moveResult.oldId,
       newId: moveResult.newId,
-      warning: moveResult.warning,
+      warning: moveResult.warning || historyWarning,
       note: {
         ...publicRecord(current),
         content: current.content,
@@ -196,7 +203,14 @@ app.get('/api/concepts', async (request, response, next) => {
 app.post('/api/reindex', async (_request, response, next) => {
   try {
     const result = await reindexBundle({ refreshEmbeddings: true })
-    response.json({ notes: result.records.map(publicRecord), errors: result.errors })
+    let historyWarning = null
+    try {
+      await history.reconcile('Reindexed notes')
+    } catch (error) {
+      console.error(`The bundle reindexed, but its history checkpoint failed: ${error.message}`)
+      historyWarning = 'The bundle reindexed, but its history checkpoint could not be saved.'
+    }
+    response.json({ notes: result.records.map(publicRecord), errors: result.errors, warning: historyWarning })
   } catch (error) {
     next(error)
   }
@@ -221,6 +235,11 @@ app.patch('/api/note', async (request, response, next) => {
     const status = request.body?.status
     const staleAfter = request.body?.staleAfter
     const confirmRelatedId = String(request.body?.confirmRelatedId || '')
+    const hasMarkdownChanges = hasContent || hasTags || hasTitle || hasDescription
+      || confirmRelatedId || status !== undefined || staleAfter !== undefined
+    const contentAutosaveOnly = refreshEmbeddings === false && hasContent
+      && !hasTags && !hasTitle && !hasDescription && !confirmRelatedId
+      && status === undefined && staleAfter === undefined
     if (hasContent && !content) {
       return response.status(400).json({ error: 'A note cannot be empty.' })
     }
@@ -245,8 +264,6 @@ app.patch('/api/note', async (request, response, next) => {
           if (confirmRelatedId === id || !targetExists) return { status: 400, error: 'Invalid related concept.' }
         }
 
-        const hasMarkdownChanges = hasContent || hasTags || hasTitle || hasDescription
-          || confirmRelatedId || status !== undefined || staleAfter !== undefined
         if (!hasMarkdownChanges) return null
 
         const updatedAt = new Date().toISOString()
@@ -299,6 +316,15 @@ app.patch('/api/note', async (request, response, next) => {
 
     const { newId, updated, currentRecords, warning } = updateResult
     if (warning) void refreshMissingEmbeddingsInBackground()
+    let historyWarning = null
+    if (refreshEmbeddings === true || (hasMarkdownChanges && !contentAutosaveOnly)) {
+      try {
+        await history.reconcile(`Updated ${newId}`, [newId])
+      } catch (error) {
+        console.error(`The note updated, but its history checkpoint failed: ${error.message}`)
+        historyWarning = 'The note was updated, but its history checkpoint could not be saved.'
+      }
+    }
 
     const graph = await relationshipIndex()
     const publicUpdated = publicRecord(updated)
@@ -312,7 +338,7 @@ app.patch('/api/note', async (request, response, next) => {
       links: graph.outgoing.get(newId) || [],
       backlinks: graph.incoming.get(newId) || [],
       suggestions: semanticSuggestionSummaries(updated, currentRecords),
-      warning,
+      warning: warning || historyWarning,
     })
   } catch (error) {
     if (error.code === 'ENOENT') return response.status(404).json({ error: 'Note not found.' })

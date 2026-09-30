@@ -38,6 +38,20 @@ export type NoteUpdateResult = NoteDetail & {
   newId: string;
   warning: string | null;
 };
+export type NoteHistoryEntry = {
+  revision: string;
+  authoredAt: string;
+  title: string;
+};
+export type NoteHistoryPage = {
+  entries: NoteHistoryEntry[];
+  nextCursor: string | null;
+};
+export type NoteHistorySnapshot = {
+  revision: string;
+  note: Pick<NoteDetail, "title" | "description" | "tags" | "status" | "staleAfter" | "content">;
+  diff: string;
+};
 export type FilingMode = "new" | "existing" | "todo" | "daily";
 export type FilingProposal = {
   directory: string;

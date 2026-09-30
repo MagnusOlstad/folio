@@ -201,6 +201,7 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
   const registry = createBundleRegistry(config)
   const runtimes = new Map()
   const preparations = new Map()
+  const background = new Set()
   const contexts = new AsyncLocalStorage()
   const pendingContext = Symbol('pending-bundle')
   const pendingRoot = path.join(config.dataRoot, 'state', 'pending-import')
@@ -224,6 +225,11 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
         draftsRoot: path.join(config.dataRoot, 'state', 'bundles', entry.id, 'drafts'),
         importsRoot: path.join(config.dataRoot, 'state', 'bundles', entry.id, 'imports'),
         indexPath: path.join(config.dataRoot, 'state', 'bundles', entry.id, 'search-index.json'),
+        historyBundleId: entry.id,
+        historyGitDir: path.join(entry.markdownPath, '.folio', 'history.git'),
+        legacyHistoryGitDir: entry.id === config.historyBundleId
+          ? config.legacyHistoryGitDir
+          : path.join(config.dataRoot, 'state', 'bundles', entry.id, 'history.git'),
       }
       const runtime = (entry.id === 'legacy-bundle' && entry.markdownPath === config.bundleRoot)
         ? defaultRuntime
@@ -235,6 +241,19 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
 
   function activeRuntime() {
     return contexts.getStore() === pendingContext ? pendingRuntime : runtimeFor(contexts.getStore())
+  }
+
+  function trackBackground(task, message = 'Background bundle task failed.') {
+    const tracked = Promise.resolve(task).catch((error) => {
+      console.error(`${message} ${error.message}`)
+    })
+    background.add(tracked)
+    void tracked.finally(() => background.delete(tracked))
+    return tracked
+  }
+
+  async function waitForBackground() {
+    while (background.size) await Promise.all([...background])
   }
 
   function prepare(entry) {
@@ -249,7 +268,14 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
         fs.mkdir(runtime.importsRoot, { recursive: true }),
       ]).then(async () => {
         await runtime.reindexBundle()
-        void runtime.refreshMissingEmbeddingsInBackground()
+        if (runtime.history) trackBackground(
+          runtime.history.reconcile('Baseline'),
+          'Could not initialize note history.',
+        )
+        trackBackground(
+          runtime.refreshMissingEmbeddingsInBackground(),
+          'Could not refresh the semantic index.',
+        )
         return runtime
       }))
     }
@@ -266,11 +292,17 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
     return preparations.get('pending-import')
   }
 
+  async function close() {
+    const allRuntimes = new Set([defaultRuntime, pendingRuntime, ...runtimes.values()])
+    await Promise.allSettled(Array.from(allRuntimes, (runtime) => runtime.history?.close?.()))
+  }
+
   function proxyRuntime() {
     return new Proxy(defaultRuntime, {
       get(_target, property) {
         if (property === 'getBundleRoot') return () => activeRuntime().bundleRoot
         if (property === 'getRawRoot') return () => activeRuntime().rawRoot
+        if (property === 'history') return activeRuntime().history
         const propertyName = String(property)
         const defaultValue = Reflect.get(defaultRuntime, property, defaultRuntime)
         if (typeof defaultValue !== 'function') return defaultValue
@@ -316,6 +348,9 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
     run: (entry, operation) => contexts.run(entry, operation),
     runPending: (operation) => contexts.run(pendingContext, operation),
     context: contexts,
+    trackBackground,
+    waitForBackground,
+    close,
   }
 }
 

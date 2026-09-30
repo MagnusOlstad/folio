@@ -97,14 +97,14 @@ export function useWorkspaceExplorerActions(options: ExplorerActionOptions): Exp
   }
 
   async function createFile(directory: string, name: string) {
-    const result = await api<{ id: string }>("/api/file/create", {
+    const result = await api<{ id: string; warning: string | null }>("/api/file/create", {
       method: "POST",
       body: JSON.stringify({ directory, name }),
     });
     const refreshed = await refreshExplorer();
     ensureExpanded(directory);
     await openDocument(result.id, "file", undefined, "permanent");
-    if (refreshed) setMessage(`Created ${result.id.split("/").at(-1)}.`);
+    if (refreshed) setMessage(result.warning || `Created ${result.id.split("/").at(-1)}.`);
   }
 
   async function createDirectory(directory: string, name: string) {

@@ -118,7 +118,14 @@ export function registerRoutes(app, runtime) {
         }
         return id
       }))
-      response.status(201).json({ id: createdId })
+      let warning = null
+      try {
+        await runtime.history.reconcile(`Created ${createdId}`, [createdId])
+      } catch (error) {
+        console.error(`The note was created, but its history checkpoint failed: ${error.message}`)
+        warning = 'The note was created, but its history checkpoint could not be saved.'
+      }
+      response.status(201).json({ id: createdId, warning })
     } catch (error) {
       if (error.status) return response.status(error.status).json({ error: error.message })
       next(error)
@@ -170,6 +177,13 @@ export function registerRoutes(app, runtime) {
           throw error
         }
       }))
+      let historyWarning = null
+      try {
+        await runtime.history.reconcile(`Renamed ${moveResult.oldId} to ${moveResult.newId}`, [moveResult.oldId, moveResult.newId])
+      } catch (error) {
+        console.error(`The note was renamed, but its history checkpoint failed: ${error.message}`)
+        historyWarning = 'The note was renamed, but its history checkpoint could not be saved.'
+      }
       const records = await readRecords()
       const current = records.find((record) => record.id === moveResult.newId) || moveResult.record
       const graph = await relationshipIndex()
@@ -177,7 +191,7 @@ export function registerRoutes(app, runtime) {
       response.json({
         oldId: moveResult.oldId,
         newId: moveResult.newId,
-        warning: moveResult.warning,
+        warning: [moveResult.warning, historyWarning].filter(Boolean).join(' ') || null,
         note: {
           ...publicRecord(current),
           content: current.content,

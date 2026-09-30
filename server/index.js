@@ -19,6 +19,8 @@ export function startServer(requestedPort, injectedRuntime = null) {
         console.log(`OKF Notetaker API listening on http://127.0.0.1:${listeningPort}`)
         resolve(server)
       })
+      server.waitForBackground = () => app.bundleManager.waitForBackground()
+      server.once('close', () => { void app.bundleManager.close() })
       server.once('error', reject)
     })
   })

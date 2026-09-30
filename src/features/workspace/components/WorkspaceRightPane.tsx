@@ -1,12 +1,14 @@
+import type { ReactNode } from "react";
 import { OllamaStatus } from "../../status/WorkspaceStatus.tsx";
 import type { WorkspaceStatusProps } from "../../status/WorkspaceStatus.tsx";
 
 type WorkspaceRightPaneProps = WorkspaceStatusProps & {
   onHide: () => void;
+  historyContent?: ReactNode;
 };
 
 /** A deliberately empty extension surface for future workspace tools. */
-export function WorkspaceRightPane({ onHide, ...props }: WorkspaceRightPaneProps) {
+export function WorkspaceRightPane({ onHide, historyContent, ...props }: WorkspaceRightPaneProps) {
   return (
     <aside className="workspace-right-pane" aria-label="Workspace tools">
       <header className="right-pane-header">
@@ -23,7 +25,7 @@ export function WorkspaceRightPane({ onHide, ...props }: WorkspaceRightPaneProps
           </svg>
         </button>
       </header>
-      <div className="right-pane-content" />
+      <div className="right-pane-content">{historyContent}</div>
       <footer className="right-pane-status"><OllamaStatus {...props} /></footer>
     </aside>
   );

@@ -34,11 +34,14 @@ test('downloads all attached bundle trees as a ZIP archive', async (context) => 
   const secondRoot = path.join(dataRoot, 'second')
   const detachedRoot = path.join(dataRoot, 'detached')
   await fs.mkdir(path.join(firstRoot, 'nested'), { recursive: true })
+  await fs.mkdir(path.join(firstRoot, '.folio', 'history.git', 'objects'), { recursive: true })
   await fs.mkdir(path.join(secondRoot, 'attachments'), { recursive: true })
   await fs.mkdir(detachedRoot, { recursive: true })
   await fs.mkdir(path.join(dataRoot, 'drafts'), { recursive: true })
   await fs.mkdir(path.join(dataRoot, 'state', 'bundles', 'private', 'drafts'), { recursive: true })
   await fs.writeFile(path.join(firstRoot, 'nested', 'note.md'), '# First\n')
+  await fs.writeFile(path.join(firstRoot, '.folio', 'history.git', 'HEAD'), 'ref: refs/heads/main\n')
+  await fs.writeFile(path.join(firstRoot, '.folio', 'history.git', 'objects', 'snapshot'), 'snapshot bytes')
   await fs.writeFile(path.join(secondRoot, 'attachments', 'paper.pdf'), 'second attachment')
   await fs.writeFile(path.join(detachedRoot, 'detached.md'), '# Detached\n')
   await fs.writeFile(path.join(dataRoot, 'drafts', 'private.md'), '# Not backed up\n')
@@ -70,6 +73,8 @@ test('downloads all attached bundle trees as a ZIP archive', async (context) => 
   assert.deepEqual(archive.subarray(0, 2), Buffer.from('PK'))
   assert.deepEqual(await archiveEntries(archive), {
     'bundles/Research-Notes/nested/note.md': '# First\n',
+    'bundles/Research-Notes/.folio/history.git/HEAD': 'ref: refs/heads/main\n',
+    'bundles/Research-Notes/.folio/history.git/objects/snapshot': 'snapshot bytes',
     'bundles/Research-Notes-2/attachments/paper.pdf': 'second attachment',
   })
 })

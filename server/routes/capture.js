@@ -3,13 +3,13 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 export function registerRoutes(app, runtime) {
-  const { embedModel, getRawRoot, getBundleRoot, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, normalizeDraftId, queueDraftMutation,
-    readDraft, writeDraft, resolveBundleMarkdownPath, readBundleDocuments, bundleFileId, parseMarkdownFile, queueMarkdownMutation, reindexBundle,
+  const { embedModel, getRawRoot, getBundleRoot, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, normalizeDraftId, archiveDraft,
+    readDraft, resolveBundleMarkdownPath, readBundleDocuments, bundleFileId, parseMarkdownFile, queueMarkdownMutation, reindexBundle,
     normalizeInlineText, markdownDocument, embeddingInputHash, persistEmbeddingUpdates, refreshRecordEmbeddings, embedDocument, boundedEmbeddingText,
     embeddingSchemaVersion, classify, openingSpecialKind, rawDocument,
     slugify, confirmationIdFor, destinationFor, availableConceptFilename, findExactConceptFile, appendConceptDocument, appendAggregateDocument, filingActor,
     conceptDocument, validTimeZone, dateKeyInTimeZone, normalizeClassification, embeddingDimension,
-    normalizeMarkdownBreaks, creationRelationships } = runtime
+    normalizeMarkdownBreaks, creationRelationships, history } = runtime
   const rawRootForRequest = typeof getRawRoot === 'function' ? getRawRoot : () => runtime.rawRoot
   const bundleRootForRequest = typeof getBundleRoot === 'function' ? getBundleRoot : () => runtime.bundleRoot
 app.post('/api/notes', async (request, response, next) => {
@@ -230,20 +230,13 @@ app.post('/api/notes', async (request, response, next) => {
       await fs.writeFile(targetPath, markdownDocument(parsed.frontmatter, parsed.content))
     })
     if (sourceDraftId) {
-      await queueDraftMutation(async () => {
-        const existingDraft = await readDraft(sourceDraftId)
-        const archivedAt = new Date().toISOString()
-        await writeDraft({
-          id: sourceDraftId,
-          content,
-          createdAt: existingDraft?.createdAt || createdAt,
-          updatedAt: archivedAt,
-          filedId: createdNote.id,
-          filedAt: archivedAt,
-          appended,
-          filing: confirmation,
-        })
-      })
+      await archiveDraft(sourceDraftId, { content, filedId: createdNote.id, appended, filing: confirmation })
+    }
+    try {
+      await history.reconcile(`Created ${createdNote.id}`, [createdNote.id])
+    } catch (error) {
+      console.error(`The note was created, but its history checkpoint failed: ${error.message}`)
+      warning ||= 'The note was created, but its history checkpoint could not be saved.'
     }
     response.status(201).json({ note: createdNote, notes: [createdNote], warning, appended, filing: confirmation })
   } catch (error) {
