@@ -151,7 +151,7 @@ describe("workspace editor components", () => {
       { revision: "previous-day", authoredAt: "2026-09-26T12:00:00.000Z", title: "Previous-day revision" },
     ];
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ entries, nextCursor: null }), { status: 200 })));
-    render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn()} onRestored={vi.fn()} onPreview={vi.fn()} onExit={vi.fn()} />);
+    render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn()} onRestored={vi.fn()} onRestoreFeedback={vi.fn()} onPreview={vi.fn()} onExit={vi.fn()} />);
     const newest = await screen.findByRole("button", { name: /Newest revision/ });
     const sameDay = screen.getByRole("button", { name: /Same-day revision/ });
     const previousDay = screen.getByRole("button", { name: /Previous-day revision/ });
@@ -172,7 +172,7 @@ describe("workspace editor components", () => {
       { revision: "minute-older", authoredAt: "2026-09-27T10:05:03.000Z", title: "Older in minute" },
     ];
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ entries: sameMinute, nextCursor: null }), { status: 200 })));
-    render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn()} onRestored={vi.fn()} onPreview={vi.fn()} />);
+    render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn()} onRestored={vi.fn()} onRestoreFeedback={vi.fn()} onPreview={vi.fn()} />);
     const newer = await screen.findByRole("button", { name: /Newer in minute/ });
     const older = screen.getByRole("button", { name: /Older in minute/ });
     const minute = new Date(sameMinute[0].authoredAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -208,14 +208,14 @@ describe("workspace editor components", () => {
     const onBeforeRestore = vi.fn().mockResolvedValue(undefined);
     const onRestored = vi.fn().mockResolvedValue(undefined);
     const onPreview = vi.fn();
-    const { rerender } = render(<NoteHistoryPanel documentId="/notes/current.md" checkpointRevision={0} onBeforeRestore={onBeforeRestore} onRestored={onRestored} onPreview={onPreview} />);
+    const { rerender } = render(<NoteHistoryPanel documentId="/notes/current.md" checkpointRevision={0} onBeforeRestore={onBeforeRestore} onRestored={onRestored} onRestoreFeedback={vi.fn()} onPreview={onPreview} />);
     const timeline = screen.getByRole("navigation", { name: "Note timeline" });
     await screen.findByRole("button", { name: /Initial moment/ });
     fireEvent.click(screen.getByRole("button", { name: "Load earlier" }));
     await screen.findByRole("button", { name: /Loaded older moment/ });
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("cursor=first-page"), expect.any(Object));
     timeline.scrollTop = 37;
-    rerender(<NoteHistoryPanel documentId="/notes/current.md" checkpointRevision={1} onBeforeRestore={onBeforeRestore} onRestored={onRestored} onPreview={onPreview} />);
+    rerender(<NoteHistoryPanel documentId="/notes/current.md" checkpointRevision={1} onBeforeRestore={onBeforeRestore} onRestored={onRestored} onRestoreFeedback={vi.fn()} onPreview={onPreview} />);
     const present = screen.getByRole("button", { name: "Present" });
     await screen.findByRole("button", { name: /New moment/ });
     expect(screen.getAllByRole("button", { name: /Initial moment/ })).toHaveLength(1);
@@ -231,7 +231,7 @@ describe("workspace editor components", () => {
   it("uses the initial history request instead of replaying an old checkpoint signal on mount", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ entries: [], nextCursor: null }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    render(<NoteHistoryPanel documentId="/notes/current.md" checkpointRevision={7} onBeforeRestore={vi.fn()} onRestored={vi.fn()} onPreview={vi.fn()} />);
+    render(<NoteHistoryPanel documentId="/notes/current.md" checkpointRevision={7} onBeforeRestore={vi.fn()} onRestored={vi.fn()} onRestoreFeedback={vi.fn()} onPreview={vi.fn()} />);
     await screen.findByText("No earlier moments yet.");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
@@ -248,7 +248,7 @@ describe("workspace editor components", () => {
       return new Response(JSON.stringify(page), { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    const { container } = render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn()} onRestored={vi.fn()} onPreview={vi.fn()} onExit={vi.fn()} />);
+    const { container } = render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn()} onRestored={vi.fn()} onRestoreFeedback={vi.fn()} onPreview={vi.fn()} onExit={vi.fn()} />);
     await screen.findByRole("button", { name: /Newest/ });
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("limit=15"), expect.any(Object));
     const timeline = screen.getByRole("navigation", { name: "Note timeline" });
@@ -278,7 +278,8 @@ describe("workspace editor components", () => {
     const restored = vi.fn().mockResolvedValue(undefined);
     const beforeRestore = vi.fn().mockResolvedValue(undefined);
     const onPreview = vi.fn();
-    render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={beforeRestore} onRestored={restored} onPreview={onPreview} onExit={vi.fn()} />);
+    const onRestoreFeedback = vi.fn();
+    render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={beforeRestore} onRestored={restored} onRestoreFeedback={onRestoreFeedback} onPreview={onPreview} onExit={vi.fn()} />);
     await screen.findByRole("button", { name: /First/ });
     fireEvent.click(screen.getByRole("button", { name: /First/ }));
     await waitFor(() => expect(onPreview).toHaveBeenCalledWith(expect.objectContaining({ note: expect.objectContaining({ content: "# Earlier" }) }), false, false));
@@ -287,7 +288,8 @@ describe("workspace editor components", () => {
     fireEvent.click(screen.getByRole("button", { name: "Restore this version" }));
     await waitFor(() => expect(beforeRestore).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(restored).toHaveBeenCalledWith("/notes/current.md"));
-    expect(screen.getByText("Embedding refresh is pending.")).toBeInTheDocument();
+    expect(onRestoreFeedback).toHaveBeenCalledWith("Embedding refresh is pending.");
+    expect(screen.queryByText("Embedding refresh is pending.")).not.toBeInTheDocument();
     expect(onPreview).toHaveBeenLastCalledWith(null, false, false);
     expect(screen.getByRole("button", { name: "Present" })).toHaveAttribute("aria-current", "step");
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/note/history/version"), expect.any(Object));
@@ -303,11 +305,13 @@ describe("workspace editor components", () => {
     const beforeRestore = vi.fn()
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("Could not save the note before continuing with history."));
-    render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={beforeRestore} onRestored={vi.fn()} onPreview={vi.fn()} onExit={vi.fn()} />);
+    const onRestoreFeedback = vi.fn();
+    render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={beforeRestore} onRestored={vi.fn()} onRestoreFeedback={onRestoreFeedback} onPreview={vi.fn()} onExit={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: /Earlier/ }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Restore this version" })).toBeEnabled());
     fireEvent.click(await screen.findByRole("button", { name: "Restore this version" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not save the note");
+    await waitFor(() => expect(onRestoreFeedback).toHaveBeenCalledWith("Could not save the note before continuing with history."));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/restore"))).toBe(false);
     vi.unstubAllGlobals();
   });
@@ -327,7 +331,7 @@ describe("workspace editor components", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const onPreview = vi.fn();
-    const { container } = render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onPreview={onPreview} onExit={vi.fn()} />);
+    const { container } = render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onRestoreFeedback={vi.fn()} onPreview={onPreview} onExit={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: /Older/ }));
     const newerStop = container.querySelector<HTMLButtonElement>(`button[data-history-stop="${newerRevision}"]`);
     expect(newerStop).not.toBeNull();
@@ -361,7 +365,7 @@ describe("workspace editor components", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const preview = vi.fn();
-    const { container } = render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onPreview={preview} />);
+    const { container } = render(<NoteHistoryPanel documentId="/notes/current.md" onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onRestoreFeedback={vi.fn()} onPreview={preview} />);
     fireEvent.click(await screen.findByRole("button", { name: /First/ }));
     await waitFor(() => expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ revision: firstRevision }), false, false));
 

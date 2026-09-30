@@ -74,6 +74,7 @@ export function WorkspaceShell({
       checkpointRevision={historyCheckpoint?.documentId === activeDocumentId && historyCheckpoint.scopeId === historyScopeId ? historyCheckpoint.revision : 0}
       onBeforeRestore={editor.actions.beforeHistoryRestore}
       onRestored={editor.actions.historyRestored}
+      onRestoreFeedback={editor.actions.notifyMessage}
       onPreview={(snapshot, loading, failed) => setHistory((current) => current.scope === scope ? { ...current, snapshot, loading, failed } : current)}
     />
   ) : !activeDocumentId ? (

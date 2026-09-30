@@ -6,7 +6,7 @@ export function registerRoutes(app, runtime) {
   const { embedModel, getRawRoot, getBundleRoot, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, normalizeDraftId, archiveDraft,
     readDraft, resolveBundleMarkdownPath, readBundleDocuments, bundleFileId, parseMarkdownFile, queueMarkdownMutation, reindexBundle,
     normalizeInlineText, markdownDocument, embeddingInputHash, persistEmbeddingUpdates, refreshRecordEmbeddings, embedDocument, boundedEmbeddingText,
-    embeddingSchemaVersion, classify, openingSpecialKind, rawDocument,
+    embeddingSchemaVersion, classify, openingSpecialKind, rawDocument, normalizeBundlePath, resolveBundlePath, assertNoBundleSymlinks,
     slugify, confirmationIdFor, destinationFor, availableConceptFilename, findExactConceptFile, appendConceptDocument, appendAggregateDocument, filingActor,
     conceptDocument, validTimeZone, dateKeyInTimeZone, normalizeClassification, embeddingDimension,
     normalizeMarkdownBreaks, creationRelationships, history } = runtime
@@ -33,17 +33,41 @@ app.post('/api/notes', async (request, response, next) => {
         }
       }
     }
+    const openingLine = content.split('\n').find((line) => line.trim())?.trim() || ''
+    const pathGuide = openingLine.match(/^path\s*:\s*(.*)$/i)
     const filedContent = request.body?.filedContent === undefined
-      ? content
+      ? pathGuide ? content.slice(content.indexOf(openingLine) + openingLine.length).trim() : content
       : String(request.body.filedContent).trim()
     if (!filedContent) return response.status(400).json({ error: 'Write note content below the steering line before saving.' })
     const conceptContent = normalizeMarkdownBreaks(filedContent)
+
+    let guidedPath = null
+    if (pathGuide) {
+      const requestedPath = pathGuide[1].trim()
+      const normalizedPath = normalizeBundlePath(requestedPath, { allowRoot: true })
+      const segments = normalizedPath === '/' ? [] : normalizedPath?.slice(1).split('/') || []
+      const reserved = segments[0] === 'daily' || segments[0] === 'references'
+        || (segments.length === 1 && ['index.md', 'log.md', 'todo-list.md'].includes(segments[0]))
+      if (!normalizedPath || reserved)
+        return response.status(400).json({ error: 'Choose a valid bundle folder for the path guide.' })
+      const resolvedPath = resolveBundlePath(normalizedPath, { allowRoot: true })
+      if (!resolvedPath) return response.status(400).json({ error: 'Choose a valid bundle folder for the path guide.' })
+      try {
+        await assertNoBundleSymlinks(resolvedPath.path, { allowMissing: true })
+        const stat = await fs.stat(resolvedPath.path)
+        if (!stat.isDirectory()) return response.status(400).json({ error: 'The path guide must name a folder.' })
+      } catch (error) {
+        if (error.code !== 'ENOENT') return response.status(400).json({ error: 'Choose a valid bundle folder for the path guide.' })
+      }
+      guidedPath = normalizedPath
+    }
 
     const createdAt = new Date().toISOString()
     const timeZone = validTimeZone(String(request.body?.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone))
     const stamp = createdAt.replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
     const suffix = crypto.randomBytes(2).toString('hex')
-    const rawTitle = normalizeInlineText(content.split('\n').find((line) => line.trim())?.replace(/^#+\s*/, '') || 'Untitled note').slice(0, 100)
+    const rawTitleContent = guidedPath !== null ? filedContent : content
+    const rawTitle = normalizeInlineText(rawTitleContent.split('\n').find((line) => line.trim())?.replace(/^#+\s*/, '') || 'Untitled note').slice(0, 100)
     const rawFile = `${stamp}-${slugify(rawTitle)}-${suffix}.md`
     const rawId = `/references/inbox/${rawFile}`
     const confirmationId = confirmationIdFor(rawId)
@@ -62,6 +86,8 @@ app.post('/api/notes', async (request, response, next) => {
       classifiedByModel = false
       warning = guidedKind
         ? `The raw note was saved and the opening ${guidedKind} guide was used, but Ollama was unavailable for classification.`
+        : guidedPath !== null
+          ? 'The raw note was saved and the opening path guide was used, but Ollama was unavailable for classification.'
         : 'The raw note was saved, but Ollama was unavailable. It was filed as Unsorted Note.'
       result = {
         concept: {
@@ -76,6 +102,10 @@ app.post('/api/notes', async (request, response, next) => {
     }
 
     const classification = normalizeClassification(result, content, records)
+    if (guidedPath !== null) {
+      classification.kind = 'note'
+      classification.path = guidedPath === '/' ? [] : guidedPath.slice(1).split('/')
+    }
     const captureActor = filingActor(classifiedByModel)
     let noteEmbedding = null
     if (classification.kind === 'note') {
@@ -114,6 +144,7 @@ app.post('/api/notes', async (request, response, next) => {
       const relatedConcepts = new Map(records.map((record) => [record.id, record]))
       const targetFolder = path.join(bundleRootForRequest(), folder)
       await queueMarkdownMutation(async () => {
+        if (guidedPath !== null) await assertNoBundleSymlinks(targetFolder, { allowMissing: true })
         await fs.mkdir(targetFolder, { recursive: true })
         const existingFile = await findExactConceptFile(targetFolder, classification.title)
         if (existingFile) {
@@ -131,7 +162,7 @@ app.post('/api/notes', async (request, response, next) => {
           return
         }
         const filename = await availableConceptFilename(targetFolder, classification.title, createdAt.slice(0, 10))
-        classification.id = `/${folder}/${filename}`
+        classification.id = folder ? `/${folder}/${filename}` : `/${filename}`
         await fs.writeFile(
           path.join(targetFolder, filename),
           conceptDocument(classification, rawId, createdAt, relatedConcepts, conceptContent, classifiedByModel, confirmationId),

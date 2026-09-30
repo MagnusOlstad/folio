@@ -26,6 +26,7 @@ function shellProps(options: {
   loadingDocuments?: Set<string>;
   beforeHistoryRestore?: (id: string) => Promise<void>;
   historyRestored?: (id: string) => Promise<void>;
+  notifyMessage?: (message: string) => void;
 } = {}): WorkspaceShellProps {
   const primaryId = options.primaryId ?? noteId;
   return {
@@ -53,6 +54,7 @@ function shellProps(options: {
       actions: {
         beforeHistoryRestore: options.beforeHistoryRestore ?? vi.fn().mockResolvedValue(undefined),
         historyRestored: options.historyRestored ?? vi.fn().mockResolvedValue(undefined),
+        notifyMessage: options.notifyMessage ?? vi.fn(),
       },
     } as unknown as WorkspaceShellProps["editor"],
     exportPreview: null,
@@ -121,9 +123,10 @@ describe("workspace history mode", () => {
     const fetchMock = stubHistoryApi();
     const before = vi.fn().mockResolvedValue(undefined);
     const restored = vi.fn().mockResolvedValue(undefined);
+    const restoreFeedback = vi.fn();
     vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
     const preview = vi.fn();
-    render(<NoteHistoryPanel documentId={noteId} onBeforeRestore={before} onRestored={restored} onPreview={preview} onExit={vi.fn()} />);
+    render(<NoteHistoryPanel documentId={noteId} onBeforeRestore={before} onRestored={restored} onRestoreFeedback={restoreFeedback} onPreview={preview} onExit={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: /Older title/ }));
     await waitFor(() => expect(preview).toHaveBeenCalledWith(expect.objectContaining({ revision: "rev-1" }), false, false));
     fireEvent.click(screen.getByRole("button", { name: "Restore this version" }));
@@ -131,7 +134,36 @@ describe("workspace history mode", () => {
     expect(before).toHaveBeenCalledWith(noteId);
     expect(fetchMock.mock.calls.some(([input, init]) => String(input).endsWith("/api/note/history/restore") && init?.method === "POST")).toBe(true);
     await waitFor(() => expect(preview).toHaveBeenLastCalledWith(null, false, false));
-    expect(screen.getByText(/previous present is still in history/)).toBeVisible();
+    expect(restoreFeedback).toHaveBeenCalledWith("Restored. The previous present is still in history.");
+    expect(screen.queryByText(/previous present is still in history/)).not.toBeInTheDocument();
+  });
+
+  it("routes restore failures through workspace feedback", async () => {
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/version?")) return new Response(JSON.stringify({ revision: "rev-1", note: { title: "Older title", content: "old" }, diff: "" }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.endsWith("/api/note/history/restore")) return new Response(JSON.stringify({ error: "Restore service unavailable" }), { status: 503, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ entries, nextCursor: null }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const restoreFeedback = vi.fn();
+    render(<NoteHistoryPanel documentId={noteId} onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onRestoreFeedback={restoreFeedback} onPreview={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Older title/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Restore this version" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Restore this version" }));
+    await waitFor(() => expect(restoreFeedback).toHaveBeenCalledWith("Restore service unavailable"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("wires restore feedback to the workspace notification action", async () => {
+    stubHistoryApi();
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+    const notifyMessage = vi.fn();
+    render(<WorkspaceShell {...shellProps({ notifyMessage })} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Older title/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Restore this version" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Restore this version" }));
+    await waitFor(() => expect(notifyMessage).toHaveBeenCalledWith("Restored. The previous present is still in history."));
   });
 
   it("keeps the last successful preview while a rapid selection is pending and ignores stale results", async () => {
@@ -146,7 +178,7 @@ describe("workspace history mode", () => {
       return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
     }));
     const preview = vi.fn();
-    render(<NoteHistoryPanel documentId={noteId} onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onPreview={preview} onExit={vi.fn()} />);
+    render(<NoteHistoryPanel documentId={noteId} onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onRestoreFeedback={vi.fn()} onPreview={preview} onExit={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: /Another/ }));
     await waitFor(() => expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ revision: "rev-2" }), false, false));
     fireEvent.click(screen.getByRole("button", { name: /Older title/ }));
@@ -170,7 +202,7 @@ describe("workspace history mode", () => {
       return new Response(JSON.stringify({ entries, nextCursor: null }), { status: 200, headers: { "content-type": "application/json" } });
     }));
     const preview = vi.fn();
-    render(<NoteHistoryPanel documentId={noteId} onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onPreview={preview} onExit={vi.fn()} />);
+    render(<NoteHistoryPanel documentId={noteId} onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onRestoreFeedback={vi.fn()} onPreview={preview} onExit={vi.fn()} />);
     const tick = await screen.findByRole("button", { name: /Older title/ });
     fireEvent.click(tick);
     await waitFor(() => expect(preview).toHaveBeenLastCalledWith(null, false, true));
@@ -194,7 +226,7 @@ describe("workspace history mode", () => {
       return Promise.resolve(new Response(JSON.stringify({ entries, nextCursor: "older" }), { status: 200, headers: { "content-type": "application/json" } }));
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<NoteHistoryPanel documentId={noteId} onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onPreview={vi.fn()} />);
+    render(<NoteHistoryPanel documentId={noteId} onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onRestoreFeedback={vi.fn()} onPreview={vi.fn()} />);
     await screen.findByRole("button", { name: /Older title/ });
     fireEvent.click(screen.getByRole("button", { name: "Load earlier" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("temporary error");
@@ -233,7 +265,7 @@ describe("workspace history mode", () => {
       return Promise.resolve(new Response(JSON.stringify({ entries: [nextEntry], nextCursor }), { status: 200, headers: { "content-type": "application/json" } }));
     });
     vi.stubGlobal("fetch", fetchMock);
-    const props = { onBeforeRestore: beforeRestore, onRestored: restored, onPreview: vi.fn() };
+    const props = { onBeforeRestore: beforeRestore, onRestored: restored, onRestoreFeedback: vi.fn(), onPreview: vi.fn() };
     const { rerender } = render(<NoteHistoryPanel documentId={noteId} {...props} />);
     await screen.findByRole("button", { name: /Older title/ });
     fireEvent.click(screen.getByRole("button", { name: "Load earlier" }));
@@ -249,7 +281,7 @@ describe("workspace history mode", () => {
   it("settles wheel scrubbing before selecting and supports keyboard navigation", async () => {
     stubHistoryApi();
     const preview = vi.fn();
-    render(<NoteHistoryPanel documentId={noteId} onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onPreview={preview} onExit={vi.fn()} />);
+    render(<NoteHistoryPanel documentId={noteId} onBeforeRestore={vi.fn().mockResolvedValue(undefined)} onRestored={vi.fn()} onRestoreFeedback={vi.fn()} onPreview={preview} onExit={vi.fn()} />);
     const tick = await screen.findByRole("button", { name: /Older title/ });
     const timeline = screen.getByRole("navigation", { name: "Note timeline" });
     Object.defineProperty(timeline, "clientHeight", { configurable: true, value: 200 });

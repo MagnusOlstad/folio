@@ -333,7 +333,7 @@ describe("WorkspaceSidebar preview navigation", () => {
     expect(actions.copyText).toHaveBeenCalledWith("projects/plan.md");
   });
 
-  it("offers file creation in the selected file's containing folder", () => {
+  it("opens a path-directed draft from the selected file's containing folder", () => {
     const actions: ExplorerFileActions = {
       renameFile: vi.fn().mockResolvedValue(undefined),
       createFile: vi.fn().mockResolvedValue(undefined),
@@ -355,13 +355,12 @@ describe("WorkspaceSidebar preview navigation", () => {
       actions,
       setMessage: vi.fn(),
     };
-    const { getByRole } = render(<WorkspaceSidebar {...props} />);
+    const { getByRole, queryByRole } = render(<WorkspaceSidebar {...props} />);
 
     fireEvent.contextMenu(getByRole("button", { name: "Plan" }), { clientX: 30, clientY: 40 });
     fireEvent.click(getByRole("menuitem", { name: "New note" }));
-    fireEvent.change(getByRole("textbox", { name: "New note" }), { target: { value: "meeting-notes" } });
-    fireEvent.click(within(getByRole("dialog")).getByRole("button", { name: "Save" }));
-    expect(actions.createFile).toHaveBeenCalledWith("/projects", "meeting-notes");
+    expect(actions.createFile).toHaveBeenCalledWith("/projects");
+    expect(queryByRole("textbox", { name: "New note" })).toBeNull();
   });
 
   it("requires confirmation before deleting a file from its context menu", () => {

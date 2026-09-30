@@ -20,10 +20,9 @@ test('loads the workspace shell with the seeded bundle', async ({ page }) => {
   await expect(page.getByText('todo-list.md')).toHaveCount(0)
 })
 
-test('creates and opens a Markdown file from the bundle root context menu', async ({ page, request }) => {
+test('opens a path-directed draft from a bundle directory context menu', async ({ page, request }) => {
   const token = Date.now().toString(36)
   const folderName = `e2e-${token}`
-  const fileName = `Explorer note ${token}.md`
   const title = `Explorer note ${token}`
   let createdId: string | null = null
 
@@ -38,16 +37,21 @@ test('creates and opens a Markdown file from the bundle root context menu', asyn
     await expect(folder).toBeVisible()
     await folder.click({ button: 'right' })
     await page.getByRole('menuitem', { name: 'New note', exact: true }).click()
-    await page.getByRole('textbox', { name: 'New note' }).fill(title)
-    await page.getByRole('button', { name: 'Save', exact: true }).click()
-
+    await expect(folder).toHaveAttribute('aria-expanded', 'true')
+    const editor = page.getByRole('textbox', { name: 'Write a new note' })
+    await expect(editor).toHaveText(`path: /${folderName}`)
+    await editor.fill(`path: /${folderName}\n${title}\nA note created through ordinary filing.`)
+    await page.getByRole('button', { name: 'File note' }).click()
+    await page.getByRole('dialog', { name: 'Filing confirmation' }).getByRole('button', { name: 'Accept' }).click()
+    const files = await request.get('/api/files')
+    const createdFile = (await files.json()).find((file: { id: string }) => file.id.startsWith(`/${folderName}/`))
+    expect(createdFile).toBeTruthy()
+    createdId = createdFile.id
     await expect(page.locator('button.tree-file[aria-label]').filter({ hasText: title })).toBeVisible()
-    const createdDocument = await request.get(`/api/file?path=${encodeURIComponent(`/${folderName}/${fileName}`)}`)
+    const createdDocument = await request.get(`/api/file?path=${encodeURIComponent(createdId!)}`)
     expect(createdDocument.ok()).toBeTruthy()
     const document = await createdDocument.json()
-    createdId = document.id
-    expect(document.content).toContain(`# ${title}`)
-    await expect(page.getByRole('textbox', { name: `Edit ${title}` })).toBeVisible()
+    expect(document.content).toContain('A note created through ordinary filing.')
   } finally {
     if (createdId) await request.delete(`/api/note?id=${encodeURIComponent(createdId)}`)
   }

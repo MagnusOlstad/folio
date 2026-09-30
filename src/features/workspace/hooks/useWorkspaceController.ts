@@ -515,6 +515,10 @@ export function useWorkspaceController(): WorkspaceShellProps {
     models,
     setMessage,
     draftTitle,
+    createNewTab: (initialContent) => {
+      setEditorFocusRequest(null);
+      tabs.createNewTab(undefined, initialContent);
+    },
     openLocalDraft: (id) => {
       setEditorFocusRequest(null);
       tabs.openLocalDraft(id);
@@ -701,6 +705,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
           ),
         beforeHistoryRestore,
         historyRestored,
+        notifyMessage: setMessage,
         dismissMessage: () => setMessage(""),
       },
     },
