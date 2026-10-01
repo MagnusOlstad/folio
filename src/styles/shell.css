@@ -311,6 +311,16 @@ body.resizing-horizontal * {
   margin: -5px 0 0;
   line-height: 1.4;
 }
+.mlx-model-settings-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--acid);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 
 .mlx-helper-status,
 .mlx-model-guidance,

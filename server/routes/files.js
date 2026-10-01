@@ -1,13 +1,15 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
+import { normalizeAggregateBaseContent, prepareAggregateContentForSave } from '../filing/aggregate-editing.js'
 
 export function registerRoutes(app, runtime) {
   const { embedModel, embeddingSchemaVersion, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, resolveBundleMarkdownPath, listBundleMarkdownFiles, bundleFileId, parseMarkdownFile,
     resolveCurrentConceptId, isMovableConceptId, queueMarkdownMutation, moveConceptMarkdown, migrateIndexedRecordsAfterMove, reindexBundle, writeRecords, publicSearchRecord,
-    rankedRecords, normalizeInlineText, normalizeTag, normalizeMarkdownBreaks, markdownDocument, updatedGenerated,
-    replaceIndexedConceptContent, embeddingInputHash, refreshRecordEmbeddings, queueIndexOperation,
+    rankedRecords, normalizeInlineText, normalizeTag, normalizeMoveDirectory, normalizeMarkdownBreaks, markdownDocument, updatedGenerated,
+    replaceIndexedConceptContent, indexedConceptContent, embeddingInputHash, refreshRecordEmbeddings, queueIndexOperation,
     performReindexBundle, persistEmbeddingUpdatesNow, relationshipIndex, recordIsStale,
-    semanticSuggestionSummaries, history } = runtime
+    semanticSuggestionSummaries, history, classify } = runtime
 app.get('/api/search', async (request, response, next) => {
   try {
     const query = String(request.query.q || '').trim()
@@ -143,6 +145,139 @@ app.post('/api/file/move', async (request, response, next) => {
   }
 })
 
+app.post('/api/file/refile/propose', async (request, response, next) => {
+  try {
+    const id = String(request.body?.id || '')
+    const filePath = resolveBundleMarkdownPath(id)
+    if (!filePath || !isMovableConceptId(id)) return response.status(400).json({ error: 'This note cannot be refiled.' })
+    const markdown = await fs.readFile(filePath, 'utf8')
+    const parsed = parseMarkdownFile(markdown, filePath)
+    const records = (await readRecords()).filter((record) => record.id !== id)
+    const concept = (await classify(parsed.content, records)).concept
+    const directory = Array.isArray(concept.path) ? `/${concept.path.map(String).join('/')}` : path.posix.dirname(id)
+    response.json({
+      id,
+      hash: createHash('sha256').update(markdown).digest('hex'),
+      proposal: {
+        directory: directory === '.' ? '/' : directory,
+        filename: path.posix.basename(id),
+        title: normalizeInlineText(concept.title).slice(0, 100),
+        description: normalizeInlineText(concept.description).slice(0, 240),
+        tags: Array.from(new Set((Array.isArray(concept.tags) ? concept.tags : []).map(normalizeTag).filter(Boolean))).slice(0, 12),
+      },
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/file/refile', async (request, response, next) => {
+  try {
+    const id = String(request.body?.id || '')
+    const expectedHash = String(request.body?.hash || '')
+    const fields = request.body?.fields || {}
+    const directoryInput = String(fields.directory || '')
+    const directory = normalizeMoveDirectory(directoryInput)
+    const filename = String(fields.filename || '')
+    const title = normalizeInlineText(fields.title).slice(0, 100)
+    const description = normalizeInlineText(fields.description).slice(0, 240)
+    const tags = Array.from(new Set((Array.isArray(fields.tags) ? fields.tags : []).map(normalizeTag).filter(Boolean))).slice(0, 12)
+    if (!resolveBundleMarkdownPath(id) || !isMovableConceptId(id)) return response.status(400).json({ error: 'This note cannot be refiled.' })
+    if ((filename !== path.posix.basename(id) && !/^[a-z0-9][a-z0-9-]*\.md$/i.test(filename)) || !title || !expectedHash) return response.status(400).json({ error: 'Choose a valid path and title.' })
+    if (!directory) return response.status(400).json({ error: 'Choose a valid destination path.' })
+
+    try { await history.reconcile(`Before refile ${id}`, [id]) }
+    catch (error) {
+      console.error(`Refusing to refile because the current note could not be checkpointed: ${error.message}`)
+      return response.status(409).json({ error: 'Could not save a history checkpoint before refiling. Your note was not changed.' })
+    }
+
+    const outcome = await queueIndexOperation(() => queueMarkdownMutation(async () => {
+      const currentPath = resolveBundleMarkdownPath(id)
+      const markdown = await fs.readFile(currentPath, 'utf8')
+      const currentHash = createHash('sha256').update(markdown).digest('hex')
+      if (currentHash !== expectedHash) return { conflict: true }
+      const originalRecords = await readRecords()
+      if (!originalRecords.some((record) => record.id === id)) return { missing: true }
+      const targetId = directory === '/' ? `/${filename}` : `${directory}/${filename}`
+      const targetPath = resolveBundleMarkdownPath(targetId)
+      if (!targetPath || !isMovableConceptId(targetId)) return { invalid: true }
+      if (targetId !== id) {
+        try {
+          await fs.access(targetPath)
+          return { collision: true }
+        } catch (error) { if (error.code !== 'ENOENT') throw error }
+      }
+      const parsed = parseMarkdownFile(markdown, currentPath)
+      const now = new Date().toISOString()
+      const frontmatter = {
+        title,
+        description,
+        tags,
+        generated: updatedGenerated(parsed.frontmatter, 'human:local', now),
+      }
+      let transaction = null
+      let missingEmbeddingIds = new Set()
+      try {
+        if (targetId !== id) {
+          transaction = await moveConceptMarkdown(id, directory, now, { filename, frontmatter })
+          missingEmbeddingIds = await migrateIndexedRecordsAfterMove(id, targetId)
+        } else {
+          parsed.frontmatter.title = title
+          parsed.frontmatter.description = description
+          parsed.frontmatter.tags = tags
+          parsed.frontmatter.generated = frontmatter.generated
+          await fs.writeFile(currentPath, markdownDocument(parsed.frontmatter, parsed.content))
+        }
+        const reindexed = await performReindexBundle({ markdownLocked: true })
+        const record = reindexed.records.find((item) => item.id === targetId)
+        if (!record) throw new Error('The updated note could not be indexed.')
+        return {
+          oldId: id, newId: targetId, record, warning: missingEmbeddingIds.size
+            ? 'The note was refiled, but part of its semantic index still needs refreshing.'
+            : null,
+        }
+      } catch (error) {
+        try {
+          if (transaction) await transaction.rollback()
+          else if (targetId === id) await fs.writeFile(currentPath, markdown)
+          await writeRecords(originalRecords)
+        } catch (rollbackError) {
+          console.error(`Could not fully roll back the refile: ${rollbackError.message}`)
+        }
+        throw error
+      }
+    }))
+
+    if (outcome.conflict) return response.status(409).json({ error: 'This note changed while Refile was open. Review the latest version and try again.' })
+    if (outcome.collision) return response.status(409).json({ error: 'That path already contains a note. Choose another path.' })
+    if (outcome.invalid) return response.status(400).json({ error: 'Choose a valid destination path.' })
+    if (outcome.missing) return response.status(404).json({ error: 'Note not found.' })
+    let warning = null
+    try { await history.reconcile(`Refiled ${outcome.oldId}`) }
+    catch { warning = 'The note was refiled, but its history checkpoint could not be saved.' }
+    warning ||= outcome.warning
+    const records = await readRecords()
+    const graph = await relationshipIndex()
+    if (warning) void refreshMissingEmbeddingsInBackground()
+    response.json({
+      oldId: outcome.oldId,
+      newId: outcome.newId,
+      warning,
+      note: {
+        ...publicRecord(outcome.record), content: outcome.record.content, deletable: true,
+        movable: isMovableConceptId(outcome.newId), stale: recordIsStale(outcome.record),
+        links: graph.outgoing.get(outcome.newId) || [],
+        backlinks: graph.incoming.get(outcome.newId) || [],
+        suggestions: semanticSuggestionSummaries(outcome.record, records),
+      },
+    })
+  } catch (error) {
+    if (error.status) return response.status(error.status).json({ error: error.message })
+    next(error)
+  }
+})
+
 app.get('/api/file', async (request, response, next) => {
   try {
     const requestedId = String(request.query.path || '')
@@ -227,6 +362,7 @@ app.patch('/api/note', async (request, response, next) => {
     const hasDescription = Object.prototype.hasOwnProperty.call(request.body || {}, 'description')
     const refreshEmbeddings = request.body?.refreshEmbeddings
     const content = hasContent ? normalizeMarkdownBreaks(request.body.content || '').trim() : null
+    const baseContent = normalizeAggregateBaseContent(request.body?.baseContent, normalizeMarkdownBreaks)
     const tags = hasTags
       ? Array.from(new Set((Array.isArray(request.body.tags) ? request.body.tags : []).map(normalizeTag).filter(Boolean))).slice(0, 12)
       : null
@@ -267,7 +403,18 @@ app.patch('/api/note', async (request, response, next) => {
         if (!hasMarkdownChanges) return null
 
         const updatedAt = new Date().toISOString()
-        if (hasContent) parsed.content = replaceIndexedConceptContent(parsed.content, content)
+        let contentToSave = content
+        if (hasContent && ['Todo List', 'Daily Note'].includes(parsed.type) && baseContent !== null) {
+          const aggregateEdit = prepareAggregateContentForSave({
+            baseContent,
+            content,
+            parsed,
+            indexedConceptContent,
+          })
+          if (aggregateEdit.error) return aggregateEdit
+          contentToSave = aggregateEdit.content
+        }
+        if (hasContent) parsed.content = replaceIndexedConceptContent(parsed.content, contentToSave)
         if (hasTags) parsed.frontmatter.tags = tags
         if (hasTitle) parsed.frontmatter.title = title
         if (hasDescription) parsed.frontmatter.description = description

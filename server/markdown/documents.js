@@ -127,8 +127,8 @@ function restoreCaptureMetadata(frontmatter, source, allSources) {
   }
 }
 
-function filingActor(classifiedByModel) {
-  return classifiedByModel ? `okf-notetaker/${classifierModel}` : 'process:folio-fallback'
+function filingActor(classifiedByModel, modelId = null) {
+  return classifiedByModel ? `okf-notetaker/${modelId || classifierModel}` : 'process:folio-fallback'
 }
 
 function confirmationIdFor(rawId) {

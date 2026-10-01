@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type {
   BundleFile,
@@ -6,6 +7,7 @@ import type {
   Note,
   NoteDetail,
   NoteUpdateResult,
+  RefileResult,
   TabGroup,
   ViewerDocument,
 } from "../../../domain/types.ts";
@@ -13,6 +15,7 @@ import { api } from "../../../lib/api.ts";
 import {
   filedDraftContent,
   isUntitledId,
+  mergeRemoteAppend,
   toggleTaskAtLine,
 } from "../../../lib/workspace.ts";
 import type { WorkspaceDocumentState } from "./useWorkspaceDocumentState.ts";
@@ -28,12 +31,14 @@ import {
 
 type UseWorkspaceDocumentMutationsOptions = {
   documents: WorkspaceDocumentState;
+  bundleId?: string;
   setGroups: Dispatch<SetStateAction<TabGroup[]>>;
   setNotes: Dispatch<SetStateAction<Note[]>>;
   setFiles: Dispatch<SetStateAction<BundleFile[]>>;
   setMessage: (message: string) => void;
   clearDiscovery: () => void;
   replaceDiscoveryDocument: (oldId: string, updated: NoteDetail) => void;
+  observeAggregateContent: (documentId: string, content: string, rebasedContent?: string) => void;
 };
 
 type FiledDraftResult = {
@@ -45,15 +50,40 @@ type FiledDraftResult = {
   filing?: Filing | null;
 };
 
+function isStrictAggregateAppend(prefix: string, content: string) {
+  const normalizedPrefix = prefix.replace(/\r\n/g, "\n").trimEnd();
+  const normalizedContent = content.replace(/\r\n/g, "\n").trimEnd();
+  return normalizedPrefix !== normalizedContent
+    && normalizedContent.startsWith(normalizedPrefix)
+    && /^\n/.test(normalizedContent.slice(normalizedPrefix.length));
+}
+
 export function useWorkspaceDocumentMutations({
   documents: state,
+  bundleId = "legacy-bundle",
   setGroups,
   setNotes,
   setFiles,
   setMessage,
   clearDiscovery,
   replaceDiscoveryDocument,
+  observeAggregateContent,
 }: UseWorkspaceDocumentMutationsOptions) {
+  const saveFailures = useRef(new Map<string, string>());
+  const contentSaveSnapshots = useRef(new Map<string, string>());
+  const contentObservedBases = useRef(new Map<string, string>());
+  const aggregateContentObservationVersions = useRef(new Map<string, number>());
+  const observedBundleId = useRef(bundleId);
+  const bundleGeneration = useRef(0);
+  useLayoutEffect(() => {
+    if (observedBundleId.current === bundleId) return;
+    observedBundleId.current = bundleId;
+    bundleGeneration.current += 1;
+    contentSaveSnapshots.current.clear();
+    contentObservedBases.current.clear();
+    aggregateContentObservationVersions.current.clear();
+  }, [bundleId]);
+  const observationKey = (documentId: string) => `${bundleId}\u0000${documentId}`;
   function updateFilingEntry(
     documentId: string,
     update: (entry: ReturnType<typeof filingEntry>) => ReturnType<typeof filingEntry>,
@@ -198,13 +228,45 @@ export function useWorkspaceDocumentMutations({
     }
     submitFiling(groupId, documentId, "accept", proposalFields(entry.filing.proposal));
   }
-  function applyUpdatedNote(updated: NoteDetail, oldId = updated.id) {
+
+  function rebaseOpenAggregateDraft(
+    updated: Pick<ViewerDocument, "id" | "type" | "content">,
+    previousContent: string,
+    contentBase?: string,
+  ) {
+    if (updated.type !== "Todo List" && updated.type !== "Daily Note") return;
+    const key = observationKey(updated.id);
+    const observationVersion = aggregateContentObservationVersions.current.get(key) ?? 0;
+    const baseContent = contentBase
+      ?? contentObservedBases.current.get(key)
+      ?? contentSaveSnapshots.current.get(key)
+      ?? previousContent;
+    const local = state.draftsRef.current[updated.id];
+    const rebased = local === undefined ? undefined : mergeRemoteAppend(baseContent, local, updated.content);
+    if (rebased !== undefined && rebased !== local) {
+      state.draftsRef.current = { ...state.draftsRef.current, [updated.id]: rebased };
+    }
+    state.setDrafts((current) => {
+      const latest = current[updated.id];
+      if (latest === undefined) return current;
+      const latestRebased = mergeRemoteAppend(baseContent, latest, updated.content);
+      if (latest === latestRebased) return current;
+      return { ...current, [updated.id]: latestRebased };
+    });
+    contentObservedBases.current.set(key, updated.content);
+    if (contentBase === undefined) aggregateContentObservationVersions.current.set(key, observationVersion + 1);
+    observeAggregateContent(updated.id, updated.content, rebased);
+  }
+
+  function applyUpdatedNote(updated: NoteDetail, oldId = updated.id, contentBase?: string) {
     const newId = updated.id;
+    const previous = state.documentsRef.current[oldId] || state.documentsRef.current[newId];
+    if (oldId === newId && previous) rebaseOpenAggregateDraft(updated, previous.content, contentBase);
     state.setDocuments((current) => {
       const next = { ...current };
-      const previous = current[oldId] || current[newId];
+      const currentDocument = current[oldId] || current[newId];
       if (oldId !== newId) delete next[oldId];
-      next[newId] = { ...previous, ...updated, deletable: true };
+      next[newId] = { ...currentDocument, ...updated, deletable: true };
       return next;
     });
     if (oldId !== newId) {
@@ -243,6 +305,21 @@ export function useWorkspaceDocumentMutations({
     replaceDiscoveryDocument(oldId, updated);
   }
 
+  function applyRefiledNote(result: RefileResult) {
+    applyUpdatedNote(result.note, result.oldId);
+    if (result.warning) setMessage(result.warning);
+  }
+
+  async function flushPendingNoteSaves(id: string) {
+    while (state.saveQueues.current[id]) {
+      const pending = state.saveQueues.current[id];
+      await pending.catch(() => undefined);
+      if (state.saveQueues.current[id] === pending) break;
+    }
+    const failed = saveFailures.current.get(id);
+    if (failed) throw new Error(failed);
+  }
+
   function persistMetadata(
     document: ViewerDocument,
     field: "title" | "description",
@@ -255,6 +332,7 @@ export function useWorkspaceDocumentMutations({
     }
     if (normalized === document[field]) return;
     const id = document.id;
+    saveFailures.current.delete(id);
     const existingQueue = state.saveQueues.current[id] || Promise.resolve();
     state.setSavingDocuments((current) => new Set(current).add(id));
     const save = existingQueue
@@ -267,6 +345,7 @@ export function useWorkspaceDocumentMutations({
             body: JSON.stringify({ [field]: normalized }),
           },
         );
+        saveFailures.current.delete(id);
         const [notesResult, filesResult] = await Promise.allSettled([
           api<Note[]>("/api/notes"),
           api<BundleFile[]>("/api/files"),
@@ -277,13 +356,11 @@ export function useWorkspaceDocumentMutations({
         clearDiscovery();
         if (result.warning) setMessage(result.warning);
       })
-      .catch((error) =>
-        setMessage(
-          error instanceof Error
-            ? error.message
-            : `Could not update note ${field}`,
-        ),
-      )
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : `Could not update note ${field}`;
+        saveFailures.current.set(id, message);
+        setMessage(message);
+      })
       .finally(() => {
         if (state.saveQueues.current[id] === save) {
           delete state.saveQueues.current[id];
@@ -303,6 +380,7 @@ export function useWorkspaceDocumentMutations({
     nextTags: string[],
     propagateError = false,
     refreshEmbeddings = true,
+    baseContent = document.content,
   ) {
     if (!document.deletable || !nextContent.trim()) return Promise.resolve();
     const id = document.id;
@@ -337,10 +415,13 @@ export function useWorkspaceDocumentMutations({
             api<NoteDetail>(`/api/note?id=${encodeURIComponent(result.note.id)}`),
             api<BundleFile[]>("/api/files"),
           ]);
-          const updated: ViewerDocument =
+          const previousDestination = state.documentsRef.current[result.note.id];
+          const destinationDetail: ViewerDocument =
             detailResult.status === "fulfilled"
               ? { ...detailResult.value, deletable: true }
-              : {
+              : previousDestination
+                ? { ...previousDestination, ...result.note, content: previousDestination.content, deletable: true }
+                : {
                   ...result.note,
                   content: filedContent,
                   deletable: true,
@@ -349,6 +430,19 @@ export function useWorkspaceDocumentMutations({
                   backlinks: [],
                   suggestions: [],
                 };
+          const observedDestinationContent = contentObservedBases.current.get(observationKey(destinationDetail.id));
+          const staleAggregateAppendRefresh = Boolean(
+            result.appended
+            && (previousDestination?.type === "Todo List" || previousDestination?.type === "Daily Note")
+            && (destinationDetail.type === "Todo List" || destinationDetail.type === "Daily Note")
+            && observedDestinationContent
+            && isStrictAggregateAppend(destinationDetail.content, observedDestinationContent),
+          );
+          const updated = staleAggregateAppendRefresh && previousDestination
+            ? { ...destinationDetail, content: previousDestination.content }
+            : destinationDetail;
+          if (previousDestination && !staleAggregateAppendRefresh)
+            rebaseOpenAggregateDraft(updated, previousDestination.content);
           setNotes((current) => [
             result.note,
             ...current.filter((note) => note.id !== result.note.id),
@@ -392,19 +486,43 @@ export function useWorkspaceDocumentMutations({
           if (refreshWarning) setMessage(refreshWarning);
           return;
         }
+        const key = observationKey(id);
+        const requestBundleId = bundleId;
+        const requestBundleGeneration = bundleGeneration.current;
+        const aggregateObservationVersion = aggregateContentObservationVersions.current.get(key) ?? 0;
+        if (!isUntitledId(id)) {
+          if (!contentObservedBases.current.has(key)) contentObservedBases.current.set(key, baseContent);
+          contentSaveSnapshots.current.set(key, nextContent);
+        }
         const updated = await api<NoteUpdateResult>(
           `/api/note?id=${encodeURIComponent(id)}`,
           {
             method: "PATCH",
             body: JSON.stringify({
               content: nextContent,
+              baseContent,
               tags: nextTags,
               refreshEmbeddings,
             }),
           },
         );
-        applyUpdatedNote(updated, updated.oldId);
+        let acknowledgementBase = nextContent;
+        if (document.type === "Todo List" || document.type === "Daily Note") {
+          if (observedBundleId.current !== requestBundleId
+            || bundleGeneration.current !== requestBundleGeneration) return updated.content;
+          const currentObservationVersion = aggregateContentObservationVersions.current.get(key) ?? 0;
+          if (currentObservationVersion !== aggregateObservationVersion) {
+            const latestObserved = contentObservedBases.current.get(key);
+            const expectedAcknowledgement = latestObserved === undefined
+              ? undefined
+              : mergeRemoteAppend(baseContent, nextContent, latestObserved);
+            if (updated.content !== expectedAcknowledgement || latestObserved === undefined) return updated.content;
+            acknowledgementBase = latestObserved;
+          }
+        }
+        applyUpdatedNote(updated, updated.oldId, acknowledgementBase);
         if (updated.warning) setMessage(updated.warning);
+        return updated.content;
       })
       .catch((error) => {
         if (isUntitledId(id)) {
@@ -421,6 +539,7 @@ export function useWorkspaceDocumentMutations({
       .finally(() => {
         if (state.saveQueues.current[id] === save) {
           delete state.saveQueues.current[id];
+          contentSaveSnapshots.current.delete(observationKey(id));
           state.setSavingDocuments((current) => {
             const next = new Set(current);
             next.delete(id);
@@ -485,7 +604,8 @@ export function useWorkspaceDocumentMutations({
   }
 
   function fileDraft(document: ViewerDocument) {
-    const content = state.drafts[document.id] ?? document.content;
+    if (state.filingDraftIds.current.has(document.id)) return;
+    const content = state.draftsRef.current[document.id] ?? document.content;
     if (
       !filedDraftContent(content).trim() ||
       state.savingDocuments.has(document.id)
@@ -525,6 +645,8 @@ export function useWorkspaceDocumentMutations({
   return {
     persistMetadata,
     persistDocument,
+    applyRefiledNote,
+    flushPendingNoteSaves,
     refreshDocumentEmbedding,
     beginEditing,
     finishEditing,

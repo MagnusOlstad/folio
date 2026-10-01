@@ -8,6 +8,7 @@ import { useWorkspaceModels } from "./useWorkspaceModels.ts";
 import { useWorkspaceTabs } from "./useWorkspaceTabs.ts";
 import { useWorkspaceDocumentState } from "./useWorkspaceDocumentState.ts";
 import { useWorkspaceDocumentMutations } from "./useWorkspaceDocumentMutations.ts";
+import { useNoteRefile } from "./useNoteRefile.ts";
 import { useWorkspaceDocumentNavigation } from "./useWorkspaceDocumentNavigation.ts";
 import { useWorkspaceExplorerState } from "./useWorkspaceExplorerState.ts";
 import { useWorkspaceSidebarProps } from "./useWorkspaceSidebarProps.ts";
@@ -19,6 +20,7 @@ import { expandedPathsForFiles, isUntitledId } from "../../../lib/workspace.ts";
 import { bundleDirectories } from "../model/directory-suggestions.ts";
 import { useNoteExport } from "./useNoteExport.ts";
 import { useThemeSettings } from "../../settings/hooks/useThemeSettings.ts";
+import type { SettingsCategory } from "../../settings/model/settings-category.ts";
 import { useObsidianImport } from "../../settings/hooks/useObsidianImport.ts";
 import {
   useWorkspaceSessionPersistence,
@@ -44,6 +46,12 @@ export function useWorkspaceController(): WorkspaceShellProps {
   } | null>(null);
   const noteExport = useNoteExport({ setMessage });
   const themeSettings = useThemeSettings();
+  const openThemeSettings = themeSettings.openSettings;
+  const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>("bundles");
+  const openSettings = useCallback((category: SettingsCategory = "bundles") => {
+    setSettingsCategory(category);
+    openThemeSettings();
+  }, [openThemeSettings]);
   const bundleSetup = useBundleSetup();
   const rendererBundleId = bundleSetup.activeBundleId || "legacy-bundle";
   const [initialWorkspaceState] = useState(() =>
@@ -117,7 +125,9 @@ export function useWorkspaceController(): WorkspaceShellProps {
     draftTitle,
     initialState: initialWorkspaceState,
   });
+  const observeAggregateContentRef = useRef<(documentId: string, content: string, rebasedContent?: string) => void>(() => {});
   const mutations = useWorkspaceDocumentMutations({
+    bundleId: persistenceBundleId,
     documents,
     setGroups: tabs.setGroups,
     setNotes: explorer.setNotes,
@@ -125,24 +135,57 @@ export function useWorkspaceController(): WorkspaceShellProps {
     setMessage,
     clearDiscovery: explorer.discovery.clearDiscovery,
     replaceDiscoveryDocument: explorer.discovery.replaceDocument,
+    observeAggregateContent: (documentId, content, rebasedContent) =>
+      observeAggregateContentRef.current(documentId, content, rebasedContent),
   });
   const autosave = useFiledDocumentAutosave({
-    save: async (documentId, content) => {
+    save: async (documentId, content, baseContent) => {
       const document = documents.documentsRef.current[documentId];
       if (!document || isUntitledId(documentId)) return;
       if (!content.trim()) {
         setMessage("A note cannot be empty.");
         throw new Error("A note cannot be empty.");
       }
-      await mutations.persistDocument(
+      return await mutations.persistDocument(
         document,
         content,
         document.tags,
         true,
         false,
+        baseContent,
       );
     },
   });
+  observeAggregateContentRef.current = autosave.observeContent;
+  const flushRefileSave = autosave.flushSave;
+  const isRefileSaveDirty = autosave.isDirty;
+  const flushPendingRefileSaves = mutations.flushPendingNoteSaves;
+  const prepareRefile = useCallback(async (documentId: string) => {
+    try {
+      await flushRefileSave(documentId);
+      await flushPendingRefileSaves(documentId);
+      if (isRefileSaveDirty(documentId)) throw new Error("Could not save the latest note edits before refiling.");
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save the latest note edits before refiling.");
+      return false;
+    }
+  }, [flushPendingRefileSaves, flushRefileSave, isRefileSaveDirty, setMessage]);
+  const refile = useNoteRefile({
+    bundleId: persistenceBundleId,
+    prepare: prepareRefile,
+    onComplete: mutations.applyRefiledNote,
+  });
+  const { flushAllSaves, hasDirtySaves } = autosave;
+  const { fileDraft } = mutations;
+  const fileDraftAfterAutosave = useCallback(async (document: ViewerDocument) => {
+    await flushAllSaves();
+    if (hasDirtySaves()) {
+      setMessage("The latest note edits could not be saved. Retry before filing this draft.");
+      return;
+    }
+    fileDraft(document);
+  }, [fileDraft, flushAllSaves, hasDirtySaves, setMessage]);
   const checkpointContextRef = useRef({
     bundleId: persistenceBundleId,
     movingFileId: explorer.movingFileId,
@@ -303,7 +346,6 @@ export function useWorkspaceController(): WorkspaceShellProps {
     enabled: persistenceEnabled,
   });
   const flushSession = session.flush;
-  const { flushAllSaves, hasDirtySaves } = autosave;
   const flushUpdateRestartState = useCallback(async () => {
     await flushAllSaves();
     flushSession();
@@ -507,7 +549,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       });
     },
     closeTab: closeDocumentTab,
-    fileDraft: mutations.fileDraft,
+    fileDraft: fileDraftAfterAutosave,
     flushDocument: finalizeFiledDocument,
     exportDocument: (document, format) =>
       void noteExport.exportDocument(
@@ -515,7 +557,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
         documents.drafts[document.id],
         format,
       ),
-    openSettings: themeSettings.openSettings,
+    openSettings,
   });
 
   const { sidebar, moveBundleFile } = useWorkspaceSidebarProps({
@@ -546,7 +588,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       return navigation.openDocument(...args);
     },
     bundleSetup: settingsBundleSetup,
-    openSettings: themeSettings.openSettings,
+    openSettings: () => openSettings(),
   });
 
   return {
@@ -559,14 +601,24 @@ export function useWorkspaceController(): WorkspaceShellProps {
       mlxActionModel: models.mlxActionModel,
       onInstallMlxModel: models.installMlxModel,
       onToggleMlxModel: models.toggleMlxModel,
-      onOpenSettings: themeSettings.openSettings,
+      onOpenSettings: (category) => openSettings(category),
     },
     settings: {
       open: themeSettings.settingsOpen,
+      initialCategory: settingsCategory,
       themeId: themeSettings.themeId,
       onSelectTheme: themeSettings.selectTheme,
       obsidianImport,
       bundleSetup: settingsBundleSetup,
+      modelSettings: {
+        status: models.mlxStatus,
+        actionModel: models.mlxActionModel,
+        action: models.mlxAction,
+        error: models.modelError,
+        install: models.installMlxModel,
+        remove: models.removeMlxModel,
+        select: models.selectGenerationModel,
+      },
       onClose: themeSettings.closeSettings,
     },
     sidebar,
@@ -598,6 +650,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
         movingFileId: explorer.movingFileId,
         filingDirectories: bundleDirectories(explorer.files),
         filingQueues: documents.filingQueues,
+        refileEntries: refile.entries,
         editorFocusRequest,
         message,
         exportingNoteId: noteExport.exportingNoteId,
@@ -655,14 +708,18 @@ export function useWorkspaceController(): WorkspaceShellProps {
           if (!isUntitledId(document.id)) {
             checkpointEditedNote(document.id, persistenceBundleId);
             markEmbeddingDirty(document.id);
-            autosave.scheduleSave(document.id, content);
+            autosave.scheduleSave(document.id, content, document.content);
           }
         },
-        fileDraft: mutations.fileDraft,
+        fileDraft: fileDraftAfterAutosave,
         changeFilingFields: mutations.changeFilingFields,
         revealStandaloneFiling: mutations.revealStandaloneFiling,
         confirmFiling: mutations.confirmFiling,
         dismissFiling: mutations.dismissFiling,
+        startRefile: (documentId) => { void refile.start(documentId); },
+        changeRefileFields: refile.change,
+        acceptRefile: (documentId) => { void refile.accept(documentId); },
+        dismissRefile: refile.dismiss,
         beginEditing: (groupId, document) => {
           tabs.pinTab(groupId, document.id);
           mutations.beginEditing(groupId, document);

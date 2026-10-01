@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { aggregateEntryContent } from './aggregate-formatting.js'
 
 export function createFilingService(runtime) {
   const { bundleRoot, generatedRelatedStart, generatedRelatedEnd, normalizeInlineText, normalizeTag,
@@ -14,25 +15,6 @@ function openingSpecialKind(content) {
   if (/^(?:todo|to-do|todos|task|tasks|oppgave|oppgaver|gj[øo]rem[aå]l)(?:\s*[:=-]\s*|\s+|$)/.test(normalized)) return 'todo'
   if (/^(?:daily note|daily|today log|today|daglig|dagsnotat)(?:\s*[:=-]\s*|\s+|$)/.test(normalized)) return 'daily'
   return null
-}
-
-function aggregateEntryContent(content, kind) {
-  const lines = content.split('\n')
-  const firstContentLine = lines.findIndex((line) => line.trim())
-  if (firstContentLine !== -1) {
-    const guide = kind === 'todo'
-      ? /^(?:todo|to-do|todos|task|tasks|oppgave|oppgaver|gj[øo]rem[aå]l)(?:\s*[:=-]\s*|\s+|$)/i
-      : /^(?:daily note|daily|today log|daglig|dagsnotat)(?:\s*[:=-]\s*|\s+|$)/i
-    const withoutHeading = lines[firstContentLine].replace(/^#{1,6}\s*/, '')
-    if (guide.test(withoutHeading)) {
-      const remainder = withoutHeading.replace(guide, '').trim()
-      if (remainder) lines[firstContentLine] = remainder
-      else lines.splice(firstContentLine, 1)
-    }
-  }
-
-  const entry = lines.join('\n').trim() || content.trim()
-  return kind === 'todo' ? `- [ ] ${entry.replace(/\n/g, '\n  ')}` : entry
 }
 
 function normalizedMorphology(value) {
@@ -133,6 +115,7 @@ function normalizeClassification(result, content, records, allowReconciliation =
       : conceptPath.length ? conceptPath : [slugify(type, 'notes'), slugify(title)],
     relatedIds: [],
     relationships: [],
+    generationModel: result?.model || null,
   }
 }
 
@@ -284,15 +267,15 @@ function conceptDocument(classification, rawId, createdAt, relatedConcepts, cont
     description: classification.description,
     tags: classification.tags,
     status: 'draft',
-    generated: { by: filingActor(classifiedByModel), at: createdAt },
-    filing: { by: filingActor(classifiedByModel), at: createdAt },
+    generated: { by: filingActor(classifiedByModel, classification.generationModel), at: createdAt },
+    filing: { by: filingActor(classifiedByModel, classification.generationModel), at: createdAt },
     sources: [{
       id: 'raw-capture',
       resource: rawId,
       title: 'Raw inbox capture',
       author: 'human:local',
       capture_id: captureId,
-      filing_by: filingActor(classifiedByModel),
+      filing_by: filingActor(classifiedByModel, classification.generationModel),
       capture_content: sourceContent,
     }],
   }, lines.join('\n'))
@@ -387,7 +370,7 @@ function localTimeLabel(value, timeZone, includeDate = false) {
   }).format(value).replace(',', '')
 }
 
-async function appendAggregateDocument({ filePath, id, kind, rawId, content, sourceContent = content, createdAt, timeZone, classifiedByModel, captureId }) {
+async function appendAggregateDocument({ filePath, id, kind, rawId, content, sourceContent = content, createdAt, timeZone, classifiedByModel, generationModel, captureId }) {
   let parsed = null
   try {
     parsed = parseMarkdownFile(await fs.readFile(filePath, 'utf8'), filePath)
@@ -410,7 +393,7 @@ async function appendAggregateDocument({ filePath, id, kind, rawId, content, sou
     title: 'Raw inbox capture',
     author: 'human:local',
     capture_id: captureId,
-    filing_by: filingActor(classifiedByModel),
+    filing_by: filingActor(classifiedByModel, generationModel),
     capture_content: sourceContent,
   })
 
@@ -422,9 +405,9 @@ async function appendAggregateDocument({ filePath, id, kind, rawId, content, sou
     tags: isDaily ? ['daily'] : ['todo'],
     status: parsed?.frontmatter.status || 'draft',
     generated: parsed
-      ? updatedGenerated(parsed.frontmatter, filingActor(classifiedByModel), createdAt)
-      : { by: filingActor(classifiedByModel), at: createdAt },
-    ...(parsed ? {} : { filing: { by: filingActor(classifiedByModel), at: createdAt } }),
+      ? updatedGenerated(parsed.frontmatter, filingActor(classifiedByModel, generationModel), createdAt)
+      : { by: filingActor(classifiedByModel, generationModel), at: createdAt },
+    ...(parsed ? {} : { filing: { by: filingActor(classifiedByModel, generationModel), at: createdAt } }),
     sources,
   }
   sources[sources.length - 1].capture_metadata = captureMetadata(

@@ -6,8 +6,10 @@ import { DocumentFooter } from "./DocumentFooter.tsx";
 import { DocumentHeader } from "./DocumentHeader.tsx";
 import type { MetadataField } from "../types.ts";
 import type { FilingFields, FilingQueueEntry } from "../model/filing.ts";
+import type { RefileEntry, RefileFields } from "../model/refile.ts";
 import { FilingConfirmation } from "./FilingConfirmation.tsx";
 import type { NoteExportFormat } from "../model/note-export.ts";
+import { RefileDialog } from "./RefileDialog.tsx";
 
 export type DocumentViewProps = {
   groupId: string;
@@ -72,11 +74,16 @@ export type DocumentViewProps = {
   onDelete: (document: ViewerDocument) => Promise<void>;
   onExport: (document: ViewerDocument, format: NoteExportFormat) => void;
   filing: FilingQueueEntry | undefined;
+  refile: RefileEntry | undefined;
   focusFiling: boolean;
   onChangeFilingFields: (documentId: string, fields: FilingFields) => void;
   onRevealStandaloneFiling: (documentId: string) => void;
   onConfirmFiling: (groupId: string, documentId: string, action: "accept" | "standalone") => void;
   onDismissFiling: (groupId: string, documentId: string) => void;
+  onStartRefile: (documentId: string) => void;
+  onChangeRefileFields: (documentId: string, fields: RefileFields) => void;
+  onAcceptRefile: (documentId: string) => void;
+  onDismissRefile: (documentId: string) => void;
 };
 
 export function DocumentView(props: DocumentViewProps) {
@@ -109,6 +116,8 @@ export function DocumentView(props: DocumentViewProps) {
             onBeginEditing={props.onBeginMetadataEditing}
             onChangeDraft={props.onChangeMetadataDraft}
             onFinishEditing={props.onFinishMetadataEditing}
+            onRefile={(target) => props.onStartRefile(target.id)}
+            refileDisabled={props.refile?.status === "preparing" || props.refile?.status === "proposing" || props.refile?.status === "submitting"}
           />
         )}
         <DocumentBody
@@ -165,6 +174,16 @@ export function DocumentView(props: DocumentViewProps) {
         onExport={props.onExport}
         onOpenDocument={props.onOpenDocument}
       />
+      {props.refile && (
+        <RefileDialog
+          entry={props.refile}
+          directories={props.filingDirectories}
+          onStart={() => props.onStartRefile(document.id)}
+          onChange={(fields) => props.onChangeRefileFields(document.id, fields)}
+          onAccept={() => props.onAcceptRefile(document.id)}
+          onClose={() => props.onDismissRefile(document.id)}
+        />
+      )}
     </article>
   );
 }

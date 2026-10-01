@@ -29,6 +29,19 @@ export function filedDraftContent(value: string) {
   const firstLineBreak = value.indexOf("\n");
   return firstLineBreak === -1 ? value : value.slice(firstLineBreak + 1);
 }
+export function mergeRemoteAppend(
+  baseContent: string,
+  localContent: string,
+  remoteContent: string,
+) {
+  const base = baseContent.replace(/\r\n/g, "\n").trimEnd();
+  const remote = remoteContent.replace(/\r\n/g, "\n").trimEnd();
+  const local = localContent.replace(/\r\n/g, "\n").trimEnd();
+  if (remote === base || !remote.startsWith(base) || !/^\n/.test(remote.slice(base.length))) return localContent;
+  const remoteTail = remote.slice(base.length);
+  if (!remoteTail.trim()) return localContent;
+  return `${local}${remoteTail}`;
+}
 export function expandedPathsForFiles(files: BundleFile[]) {
   const expanded = new Set<string>(["/"]);
   for (const file of files) {

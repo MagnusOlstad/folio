@@ -79,7 +79,7 @@ test('createApp does not fabricate a legacy bundle when setup is empty', async (
   const mlxStatusResponse = await fetch(`${baseUrl}/api/mlx/status`)
   assert.equal(mlxStatusResponse.status, 200)
   const mlxStatus = await mlxStatusResponse.json()
-  assert.deepEqual(mlxStatus.models.map(({ id }) => id), ['gemma4', 'embeddinggemma'])
+  assert.deepEqual(mlxStatus.models.map(({ id }) => id), ['gemma4', 'qwen35', 'llama32', 'embeddinggemma'])
   assert.equal(mlxStatus.models.every((model) => model.installed === false), true)
   const mlxUnloadResponse = await fetch(`${baseUrl}/api/mlx/models/gemma4/unload`, { method: 'POST' })
   assert.equal(mlxUnloadResponse.status, 200)

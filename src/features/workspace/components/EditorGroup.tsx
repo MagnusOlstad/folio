@@ -261,11 +261,16 @@ export function EditorGroup({
                 ? model.filingQueues[document.id]?.[0]
                 : undefined
             }
+            refile={model.activeGroupId === group.id ? model.refileEntries[document.id] : undefined}
             focusFiling={model.activeGroupId === group.id}
             onChangeFilingFields={actions.changeFilingFields}
             onRevealStandaloneFiling={actions.revealStandaloneFiling}
             onConfirmFiling={actions.confirmFiling}
             onDismissFiling={actions.dismissFiling}
+            onStartRefile={actions.startRefile}
+            onChangeRefileFields={actions.changeRefileFields}
+            onAcceptRefile={actions.acceptRefile}
+            onDismissRefile={actions.dismissRefile}
           />
           </div>
           {historyPreview && <HistoryDocumentView document={document} snapshot={historyPreview.snapshot} loading={historyPreview.loading} failed={historyPreview.failed} presentContent={historyPreview.presentContent} />}

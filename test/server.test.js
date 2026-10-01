@@ -828,13 +828,259 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal(uncheckResponse.status, 200, JSON.stringify(uncheckedTodo))
   assert.match(uncheckedTodo.content, /- \[ \] Buy milk/)
 
+  // Simulate an already-open Todo editor: its autosave snapshot predates this
+  // capture, while the task append has reached disk and awaits confirmation.
+  const racedTodoBase = uncheckedTodo.content
+  const racedTodo = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: 'todo: Book dentist\nCall Sam about Friday',
+    timeZone: 'America/New_York',
+  })
+  assert.equal(racedTodo.note.id, '/todo-list.md')
+  assert.equal(racedTodo.appended, true)
+  const staleTodoSave = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      content: `${racedTodoBase}\n- [ ] Review existing schedule`,
+      baseContent: racedTodoBase,
+      refreshEmbeddings: false,
+    }),
+  })
+  const staleTodoSaveBody = await staleTodoSave.json()
+  assert.equal(staleTodoSave.status, 200, JSON.stringify(staleTodoSaveBody))
+  assert.match(staleTodoSaveBody.content, /- \[ \] Book dentist/)
+  assert.match(staleTodoSaveBody.content, /Review existing schedule/)
+  const pendingTodoMarkdown = await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')
+  assert.match(pendingTodoMarkdown, new RegExp(`<!-- folio:capture:${racedTodo.filing.id}:start -->`))
+  assert.match(pendingTodoMarkdown, new RegExp(`<!-- folio:capture:${racedTodo.filing.id}:end -->`))
+  const pendingTodoContent = staleTodoSaveBody.content
+  const checkedPendingTask = pendingTodoContent.replace('- [ ] Book dentist', '- [x] Book dentist')
+  const checkedPendingResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: checkedPendingTask, baseContent: pendingTodoContent, refreshEmbeddings: false }),
+  })
+  const checkedPendingBody = await checkedPendingResponse.json()
+  assert.equal(checkedPendingResponse.status, 200, JSON.stringify(checkedPendingBody))
+  assert.match(checkedPendingBody.content, /- \[x\] Book dentist/)
+  const checkedPendingMarkdown = await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')
+  assert.match(checkedPendingMarkdown, new RegExp(`<!-- folio:capture:${racedTodo.filing.id}:start -->`))
+  const racedTodoAccept = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: racedTodo.filing.id, action: 'accept', fields: racedTodo.filing.proposal }),
+  })
+  const racedTodoAcceptBody = await racedTodoAccept.json()
+  assert.equal(racedTodoAccept.status, 200, JSON.stringify(racedTodoAcceptBody))
+  const observedTodoResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`)
+  const observedTodo = await observedTodoResponse.json()
+  assert.match(observedTodo.content, /- \[x\] Book dentist/)
+  assert.match(observedTodo.content, /Review existing schedule/)
+  const observedTodoContent = observedTodo.content
+  const checkedCapturedTask = observedTodoContent.replace('- [ ] Call Sam about Friday', '- [x] Call Sam about Friday')
+  const checkedCapturedTaskResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: checkedCapturedTask, baseContent: observedTodoContent, refreshEmbeddings: false }),
+  })
+  const checkedCapturedTaskBody = await checkedCapturedTaskResponse.json()
+  assert.equal(checkedCapturedTaskResponse.status, 200, JSON.stringify(checkedCapturedTaskBody))
+  assert.match(checkedCapturedTaskBody.content, /- \[x\] Call Sam about Friday/)
+  const intentionallyDeletedTask = checkedCapturedTaskBody.content.replace('- [x] Book dentist\n', '')
+  const deletedTaskResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: intentionallyDeletedTask, baseContent: checkedCapturedTaskBody.content, refreshEmbeddings: false }),
+  })
+  const deletedTaskBody = await deletedTaskResponse.json()
+  assert.equal(deletedTaskResponse.status, 200, JSON.stringify(deletedTaskBody))
+  assert.doesNotMatch(deletedTaskBody.content, /Book dentist/)
+  const todoMarkdownAfterTaskEdit = await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')
+  const racedTodoReceipt = markdownFrontmatter(todoMarkdownAfterTaskEdit).sources.find((source) => source.capture_id === racedTodo.filing.id)
+  assert.equal(racedTodoReceipt.capture_content, 'todo: Book dentist\nCall Sam about Friday')
+
+  const standaloneTodoCapture = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: 'todo: Archive the old paper receipt\nKeep only the signed copy.',
+    timeZone: 'America/New_York',
+  })
+  const standaloneTodoBaseResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`)
+  const standaloneTodoBase = await standaloneTodoBaseResponse.json()
+  const checkedStandaloneTodo = standaloneTodoBase.content.replace(
+    '- [ ] Archive the old paper receipt',
+    '- [x] Archive the old paper receipt',
+  )
+  const checkedStandaloneResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: checkedStandaloneTodo, baseContent: standaloneTodoBase.content, refreshEmbeddings: false }),
+  })
+  const checkedStandaloneBody = await checkedStandaloneResponse.json()
+  assert.equal(checkedStandaloneResponse.status, 200, JSON.stringify(checkedStandaloneBody))
+  const standalonePendingMarkdown = await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')
+  assert.match(standalonePendingMarkdown, new RegExp(`<!-- folio:capture:${standaloneTodoCapture.filing.id}:start -->`))
+  const standaloneTodoConfirmation = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: standaloneTodoCapture.filing.id, action: 'standalone', fields: standaloneTodoCapture.filing.standaloneProposal }),
+  })
+  const standaloneTodoConfirmationBody = await standaloneTodoConfirmation.json()
+  assert.equal(standaloneTodoConfirmation.status, 200, JSON.stringify(standaloneTodoConfirmationBody))
+  const todoAfterStandaloneResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`)
+  const todoAfterStandalone = await todoAfterStandaloneResponse.json()
+  assert.doesNotMatch(todoAfterStandalone.content, /Archive the old paper receipt/)
+  const standaloneMarkdown = await fs.readFile(path.join(dataRoot, 'bundle', standaloneTodoConfirmationBody.newId.slice(1)), 'utf8')
+  const standaloneSource = markdownFrontmatter(standaloneMarkdown).sources.find((source) => source.capture_id === standaloneTodoCapture.filing.id)
+  assert.equal(standaloneSource.capture_content, 'todo: Archive the old paper receipt\nKeep only the signed copy.')
+
+  const observedTaskCapture = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: 'todo: Prepare meeting notes',
+    timeZone: 'America/New_York',
+  })
+  const observedTaskResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`)
+  const observedTask = await observedTaskResponse.json()
+  const localCheckboxEdit = observedTask.content.replace('- [ ] Prepare meeting notes', '- [x] Prepare meeting notes')
+  const unseenTaskCapture = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: 'todo: Send meeting follow-up',
+    timeZone: 'America/New_York',
+  })
+  const mergedOverlappingSave = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: localCheckboxEdit, baseContent: observedTask.content, refreshEmbeddings: false }),
+  })
+  const mergedOverlappingBody = await mergedOverlappingSave.json()
+  assert.equal(mergedOverlappingSave.status, 200, JSON.stringify(mergedOverlappingBody))
+  assert.match(mergedOverlappingBody.content, /- \[x\] Prepare meeting notes/)
+  assert.match(mergedOverlappingBody.content, /- \[ \] Send meeting follow-up/)
+  assert.equal((mergedOverlappingBody.content.match(/Prepare meeting notes/g) || []).length, 1)
+  assert.equal((mergedOverlappingBody.content.match(/Send meeting follow-up/g) || []).length, 1)
+  for (const capture of [observedTaskCapture, unseenTaskCapture]) {
+    const accepted = await fetch(`${baseUrl}/api/filing/confirm`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filingId: capture.filing.id, action: 'accept', fields: capture.filing.proposal }),
+    })
+    assert.equal(accepted.status, 200, await accepted.text())
+  }
+
+  const identicalTodoBaseResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`)
+  const identicalTodoBase = await identicalTodoBaseResponse.json()
+  const duplicateCaptureText = 'todo: Prepare the identical meeting agenda\nReview the same two decisions.'
+  const [firstIdenticalCapture, secondIdenticalCapture] = await Promise.all([
+    jsonRequest(`${baseUrl}/api/notes`, { content: duplicateCaptureText, timeZone: 'America/New_York' }),
+    jsonRequest(`${baseUrl}/api/notes`, { content: duplicateCaptureText, timeZone: 'America/New_York' }),
+  ])
+  assert.equal(firstIdenticalCapture.note.id, '/todo-list.md')
+  assert.equal(secondIdenticalCapture.note.id, '/todo-list.md')
+  const duplicateStaleSave = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      content: identicalTodoBase.content,
+      baseContent: identicalTodoBase.content,
+      refreshEmbeddings: false,
+    }),
+  })
+  const duplicateStaleBody = await duplicateStaleSave.json()
+  assert.equal(duplicateStaleSave.status, 200, JSON.stringify(duplicateStaleBody))
+  assert.equal((duplicateStaleBody.content.match(/Prepare the identical meeting agenda/g) || []).length, 2)
+  const duplicateTodoMarkdown = await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')
+  for (const capture of [firstIdenticalCapture, secondIdenticalCapture]) {
+    assert.equal(
+      (duplicateTodoMarkdown.match(new RegExp(`<!-- folio:capture:${capture.filing.id}:start -->`, 'g')) || []).length,
+      1,
+    )
+    assert.equal(
+      (duplicateTodoMarkdown.match(new RegExp(`<!-- folio:capture:${capture.filing.id}:end -->`, 'g')) || []).length,
+      1,
+    )
+  }
+  const firstStandaloneIdentical = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      filingId: firstIdenticalCapture.filing.id,
+      action: 'standalone',
+      fields: firstIdenticalCapture.filing.standaloneProposal,
+    }),
+  })
+  assert.equal(firstStandaloneIdentical.status, 200, await firstStandaloneIdentical.text())
+  const afterFirstStandaloneResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`)
+  const afterFirstStandalone = await afterFirstStandaloneResponse.json()
+  assert.equal((afterFirstStandalone.content.match(/Prepare the identical meeting agenda/g) || []).length, 1)
+  const afterFirstStandaloneMarkdown = await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')
+  assert.match(afterFirstStandaloneMarkdown, new RegExp(`<!-- folio:capture:${secondIdenticalCapture.filing.id}:start -->`))
+  const secondIdenticalAccept = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      filingId: secondIdenticalCapture.filing.id,
+      action: 'accept',
+      fields: secondIdenticalCapture.filing.proposal,
+    }),
+  })
+  assert.equal(secondIdenticalAccept.status, 200, await secondIdenticalAccept.text())
+
+  const todoConflictBaseResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`)
+  const todoConflictBase = await todoConflictBaseResponse.json()
+  const acceptedTodoEditResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      content: todoConflictBase.content.replace('Review existing schedule', 'Review changed schedule'),
+      baseContent: todoConflictBase.content,
+      refreshEmbeddings: false,
+    }),
+  })
+  const acceptedTodoEdit = await acceptedTodoEditResponse.json()
+  assert.equal(acceptedTodoEditResponse.status, 200, JSON.stringify(acceptedTodoEdit))
+  const conflictingTodoSave = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      content: todoConflictBase.content.replace('Review existing schedule', 'Review conflict schedule'),
+      baseContent: todoConflictBase.content,
+      refreshEmbeddings: false,
+    }),
+  })
+  const conflictingTodoBody = await conflictingTodoSave.json()
+  assert.equal(conflictingTodoSave.status, 409, JSON.stringify(conflictingTodoBody))
+  assert.match(conflictingTodoBody.error, /changed in another editor/)
+  const todoAfterConflictResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`)
+  const todoAfterConflict = await todoAfterConflictResponse.json()
+  assert.equal(todoAfterConflict.content, acceptedTodoEdit.content)
+
   const firstDaily = await jsonRequest(`${baseUrl}/api/notes`, { content: 'daily: Felt focused today.', timeZone: 'America/New_York' })
+  const dailyBaseResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(firstDaily.note.id)}`)
+  const dailyBase = await dailyBaseResponse.json()
   const secondDaily = await jsonRequest(`${baseUrl}/api/notes`, { content: 'Daily - release route only\nFinished the release.', filedContent: 'Finished the release.', timeZone: 'America/New_York' })
   assert.match(firstDaily.note.id, /^\/daily\/\d{4}-\d{2}-\d{2}\.md$/)
   assert.equal(secondDaily.note.id, firstDaily.note.id)
   assert.equal(secondDaily.appended, true)
+  const rawCaptureDirectory = path.join(dataRoot, 'bundle', 'references', 'inbox')
+  const rawCaptureFiles = await fs.readdir(rawCaptureDirectory)
+  const secondDailyRawPath = (await Promise.all(rawCaptureFiles.map(async (filename) => ({
+    filename,
+    content: await fs.readFile(path.join(rawCaptureDirectory, filename), 'utf8'),
+  })))).find(({ content }) => content.includes('Daily - release route only'))
+  assert.ok(secondDailyRawPath)
+  const secondDailyRawFilePath = path.join(rawCaptureDirectory, secondDailyRawPath.filename)
+  const secondDailyRawBefore = secondDailyRawPath.content
+  assert.match(secondDailyRawBefore, /Daily - release route only\nFinished the release\./)
+  const staleDailyContent = `${dailyBase.content}\n\nA local paragraph edited before the capture arrived.`
+  const staleDailySave = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(firstDaily.note.id)}`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: staleDailyContent, baseContent: dailyBase.content, refreshEmbeddings: false }),
+  })
+  const staleDailyBody = await staleDailySave.json()
+  assert.equal(staleDailySave.status, 200, JSON.stringify(staleDailyBody))
+  assert.match(staleDailyBody.content, /Felt focused today\./)
+  assert.match(staleDailyBody.content, /A local paragraph edited before the capture arrived\./)
+  assert.match(staleDailyBody.content, /Finished the release\./)
+  assert.doesNotMatch(staleDailyBody.content, /- \[[ x]\]/, 'daily entries remain ordinary paragraphs')
   const dailyFile = await fs.readFile(path.join(dataRoot, 'bundle', firstDaily.note.id.slice(1)), 'utf8')
   assert.match(dailyFile, /Felt focused today\./)
+  assert.match(dailyFile, /A local paragraph edited before the capture arrived\./)
   assert.match(dailyFile, /Finished the release\./)
   assert.doesNotMatch(dailyFile, /release route only/)
   const dailyRawCaptures = await Promise.all((await fs.readdir(path.join(dataRoot, 'bundle', 'references', 'inbox')))
@@ -855,6 +1101,32 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   }
   assert.deepEqual(markdownManagedMetadata(await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')), todoMetadataBeforeAccept)
   assert.deepEqual(markdownManagedMetadata(await fs.readFile(path.join(dataRoot, 'bundle', firstDaily.note.id.slice(1)), 'utf8')), dailyMetadataBeforeAccept)
+
+  const acceptedDailyResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(firstDaily.note.id)}`)
+  const acceptedDaily = await acceptedDailyResponse.json()
+  const acceptedDailyMetadata = markdownFrontmatter(await fs.readFile(path.join(dataRoot, 'bundle', firstDaily.note.id.slice(1)), 'utf8'))
+  const secondDailyReceipt = acceptedDailyMetadata.sources.find((source) => source.capture_id === secondDaily.filing.id)
+  assert.equal(secondDailyReceipt.capture_content, 'Finished the release.')
+  const intentionalDailyEdit = acceptedDaily.content.replace('Finished the release.', 'Release shipped.\nFollow-up paragraph remains plain text.')
+  const postAcceptanceDailySave = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(firstDaily.note.id)}`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: intentionalDailyEdit, baseContent: acceptedDaily.content, refreshEmbeddings: false }),
+  })
+  const postAcceptanceDailyBody = await postAcceptanceDailySave.json()
+  assert.equal(postAcceptanceDailySave.status, 200, JSON.stringify(postAcceptanceDailyBody))
+  assert.match(postAcceptanceDailyBody.content, /Release shipped\.\nFollow-up paragraph remains plain text\./)
+  assert.doesNotMatch(postAcceptanceDailyBody.content, /- \[[ x]\]/, 'accepted daily edits stay as plain paragraphs')
+  const historyCheckpointDaily = await fetch(`${baseUrl}/api/note/history/checkpoint`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: firstDaily.note.id }),
+  })
+  assert.equal(historyCheckpointDaily.status, 200)
+  const dailyHistory = await (await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(firstDaily.note.id)}`)).json()
+  const dailySnapshot = await (await fetch(`${baseUrl}/api/note/history/version?id=${encodeURIComponent(firstDaily.note.id)}&revision=${encodeURIComponent(dailyHistory.entries[0].revision)}`)).json()
+  assert.match(dailySnapshot.note.content, /Release shipped\.\nFollow-up paragraph remains plain text\./)
+  assert.doesNotMatch(dailySnapshot.note.content, /- \[[ x]\]/)
+  const finalDailyMetadata = markdownFrontmatter(await fs.readFile(path.join(dataRoot, 'bundle', firstDaily.note.id.slice(1)), 'utf8'))
+  assert.equal(finalDailyMetadata.sources.find((source) => source.capture_id === secondDaily.filing.id).capture_content, 'Finished the release.')
+  assert.equal(await fs.readFile(secondDailyRawFilePath, 'utf8'), secondDailyRawBefore, 'the raw receipt remains unchanged after editing the daily aggregate')
 
   const existingAppend = await jsonRequest(`${baseUrl}/api/notes`, {
     content: 'Project Aurora details\nA third capture that must stay appended.',
@@ -950,7 +1222,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal(standaloneAuroraResponse.status, 200)
   const standaloneAurora = await standaloneAuroraResponse.json()
   assert.equal(standaloneAurora.note.id, `${mergedAurora.filing.standaloneProposal.directory}/${mergedAurora.filing.standaloneProposal.filename}`)
-  assert.equal(standaloneAurora.notes.length, 15)
+  assert.equal(standaloneAurora.notes.length, 17)
   assert.equal(standaloneAurora.note.type, 'Project')
   assert.match(await fs.readFile(path.join(dataRoot, 'bundle', standaloneAurora.note.id.slice(1)), 'utf8'), /filing:\n  by: human:local/)
   assert.match(await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8'), /The launch remains confidential\./)
@@ -1108,6 +1380,72 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   await assert.rejects(fs.access(nestedDeleteDirectory), { code: 'ENOENT' })
   await assert.rejects(fs.access(path.join(dataRoot, 'bundle', 'temporary', 'sole')), { code: 'ENOENT' })
   await assert.rejects(fs.access(path.join(dataRoot, 'bundle', 'temporary')), { code: 'ENOENT' })
+
+  await writeFakeMlxControl(fixture.controlPath, {})
+  const refileSourceId = '/refile/Original refile note.md'
+  const refileSourcePath = path.join(dataRoot, 'bundle', refileSourceId.slice(1))
+  await fs.mkdir(path.dirname(refileSourcePath), { recursive: true })
+  const originalRefileMarkdown = [
+    '---', 'title: Original refile note', 'type: Note', 'description: Original description.', 'tags: [original]',
+    'generated:', '  by: human:local', '  at: 2026-10-01T00:00:00.000Z', 'filing:', '  by: human:local',
+    '  at: 2026-10-01T00:00:00.000Z', '---', '', 'Original body before refile.', '',
+  ].join('\n')
+  await fs.writeFile(refileSourcePath, originalRefileMarkdown)
+  assert.equal((await (await fetch(`${baseUrl}/api/reindex`, { method: 'POST' })).json()).errors.length, 0)
+  await runtime.history.reconcile('Initial refile source', [refileSourceId])
+  const originalHistory = await (await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(refileSourceId)}`)).json()
+  const beforeRefileRevision = originalHistory.entries[0].revision
+
+  const proposalRequest = () => fetch(`${baseUrl}/api/file/refile/propose`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: refileSourceId }),
+  })
+  const refileRequest = (proposal, fields) => fetch(`${baseUrl}/api/file/refile`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: refileSourceId, hash: proposal.hash, fields }),
+  })
+  const staleProposal = await (await proposalRequest()).json()
+  assert.equal(staleProposal.proposal.filename, 'Original refile note.md', 'refile suggestions keep the existing filename')
+  const externallyUpdatedMarkdown = originalRefileMarkdown.replace('Original body before refile.', 'A newer saved edit.')
+  await fs.writeFile(refileSourcePath, externallyUpdatedMarkdown)
+  const staleResponse = await refileRequest(staleProposal, { directory: '/archive', filename: 'final.md', title: 'Final title', description: 'Updated description.', tags: ['updated'] })
+  assert.equal(staleResponse.status, 409)
+  assert.equal(await fs.readFile(refileSourcePath, 'utf8'), externallyUpdatedMarkdown, 'stale review leaves the note untouched')
+
+  const collisionProposal = await (await proposalRequest()).json()
+  const collisionPath = path.join(dataRoot, 'bundle', 'archive', 'conflict.md')
+  await fs.mkdir(path.dirname(collisionPath), { recursive: true })
+  await fs.writeFile(collisionPath, 'Existing conflict target.\n')
+  const collisionResponse = await refileRequest(collisionProposal, { directory: '/archive', filename: 'conflict.md', title: 'Conflicting title', description: 'Keep existing.', tags: [] })
+  assert.equal(collisionResponse.status, 409)
+  assert.equal(await fs.readFile(refileSourcePath, 'utf8'), externallyUpdatedMarkdown, 'destination collision leaves the source note untouched')
+  assert.equal(await fs.readFile(collisionPath, 'utf8'), 'Existing conflict target.\n')
+
+  const acceptedProposal = await (await proposalRequest()).json()
+  const acceptedResponse = await refileRequest(acceptedProposal, { directory: '/Archive Area/Mixed Topic', filename: acceptedProposal.proposal.filename, title: 'Reviewed title', description: 'Reviewed description.', tags: ['reviewed', 'refiled'] })
+  const accepted = await acceptedResponse.json()
+  assert.equal(acceptedResponse.status, 200, JSON.stringify(accepted))
+  assert.equal(accepted.oldId, refileSourceId)
+  assert.equal(accepted.newId, '/archive-area/mixed-topic/Original refile note.md')
+  assert.equal(accepted.note.content, 'A newer saved edit.')
+  await assert.rejects(fs.access(refileSourcePath), { code: 'ENOENT' })
+  const acceptedMarkdown = await fs.readFile(path.join(dataRoot, 'bundle', 'archive-area', 'mixed-topic', 'Original refile note.md'), 'utf8')
+  const acceptedFrontmatter = markdownFrontmatter(acceptedMarkdown)
+  assert.equal(acceptedFrontmatter.title, 'Reviewed title')
+  assert.equal(acceptedFrontmatter.description, 'Reviewed description.')
+  assert.deepEqual(acceptedFrontmatter.tags, ['reviewed', 'refiled'])
+  assert.deepEqual(acceptedFrontmatter.filing.previous_paths, [refileSourceId])
+  const continuedHistory = await (await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(accepted.newId)}`)).json()
+  assert.ok(continuedHistory.entries.some((entry) => entry.revision === beforeRefileRevision), 'old path checkpoints remain visible after refile')
+  const restoreRefileResponse = await fetch(`${baseUrl}/api/note/history/restore`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: accepted.newId, revision: beforeRefileRevision }),
+  })
+  assert.equal(restoreRefileResponse.status, 200)
+  const restoredRefile = await restoreRefileResponse.json()
+  assert.equal(restoredRefile.note.id, accepted.newId, 'history restore preserves the current path')
+  assert.equal(restoredRefile.note.content, 'Original body before refile.')
+  await assert.rejects(fs.access(refileSourcePath), { code: 'ENOENT' })
+  assert.ok(await fs.readFile(path.join(dataRoot, 'bundle', 'archive-area', 'mixed-topic', 'Original refile note.md'), 'utf8'))
 
   const notesResponse = await fetch(`${baseUrl}/api/notes`)
   const notes = await notesResponse.json()

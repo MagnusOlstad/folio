@@ -3,7 +3,10 @@ import fs from 'node:fs/promises'
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control'
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, testInfo) => {
+  if (testInfo.title !== 'first-open model setup opens the real model settings controls') {
+    await page.addInitScript(() => localStorage.setItem('folio:model-setup-prompt-seen', '1'))
+  }
   await page.goto('/')
   // Keyboard-shortcut tests dispatch keys with no element to auto-wait on, so make
   // sure React has mounted and attached its window keydown listener first.
@@ -57,17 +60,36 @@ test('opens a path-directed draft from a bundle directory context menu', async (
   }
 })
 
-test('shows explicit controls for the local MLX models', async ({ page }) => {
+test('shows controls for the selected local MLX model and fixed embedding model', async ({ page }) => {
   const models = page.getByRole('region', { name: 'MLX model management' })
   await expect(models).toBeVisible()
   await expect(models.getByText(/Gemma 4/)).toBeVisible()
+  await expect(models.getByText(/Qwen 3.5/)).toHaveCount(0)
+  await expect(models.getByText(/Llama 3.2/)).toHaveCount(0)
   await expect(models.getByText('EmbeddingGemma', { exact: true })).toBeVisible()
   await expect(models.locator('.mlx-model-action')).toHaveCount(2)
 })
 
-test('changes and restores the color theme from browser settings', async ({ page }) => {
-  await page.getByRole('button', { name: 'Settings' }).click()
+test('first-open model setup opens the real model settings controls', async ({ page }) => {
+  const setup = page.getByRole('region', { name: 'MLX model management' })
+  await expect(setup.getByRole('button', { name: 'Open model settings' })).toBeVisible()
+  await setup.getByRole('button', { name: 'Open model settings' }).click()
+
   const settings = page.getByRole('dialog', { name: 'Settings' })
+  const models = settings.getByRole('region', { name: 'Local models' })
+  await expect(models.getByRole('radio', { name: /Qwen 3\.5 4B/ })).toBeVisible()
+  await expect(models.getByRole('radio', { name: /Llama 3\.2 3B Instruct/ })).toBeVisible()
+  await expect(models.getByRole('radio', { name: /Gemma 4/ })).toBeVisible()
+  await expect(models.getByText('EmbeddingGemma', { exact: true })).toBeVisible()
+  await expect(models.getByRole('radio', { name: /EmbeddingGemma/ })).toHaveCount(0)
+  await expect(models.getByRole('button', { name: 'Download' }).first()).toBeDisabled()
+  await expect(models.getByText(/Local MLX models need Apple Silicon and macOS 14 or newer|local MLX helper is not ready/i)).toBeVisible()
+})
+
+test('changes and restores the color theme from browser settings', async ({ page }) => {
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await settings.getByRole('button', { name: 'Appearance' }).click()
   await expect(settings.getByRole('radio')).toHaveCount(4)
   await settings.getByText('Editorial', { exact: true }).click()
   await expect(settings.getByRole('radio', { name: /Editorial/ })).toBeChecked()
@@ -79,10 +101,66 @@ test('changes and restores the color theme from browser settings', async ({ page
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'editorial')
 })
 
+test('keeps the settings category sidebar stationary while model content scrolls', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 420 })
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await settings.getByRole('button', { name: 'Models' }).click()
+  const nav = settings.getByRole('navigation', { name: 'Settings categories' })
+  const content = settings.locator('.settings-content')
+  const before = await nav.boundingBox()
+  const overflow = await content.evaluate((element) => element.scrollHeight > element.clientHeight)
+  expect(overflow).toBe(true)
+  await content.evaluate((element) => { element.scrollTop = element.scrollHeight })
+  await expect.poll(() => content.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+  expect(await nav.boundingBox()).toEqual(before)
+  await expect(nav.getByRole('button', { name: 'Models' })).toBeVisible()
+})
+
+test('keeps every settings category inside a fixed-height dialog on wide and short narrow screens', async ({ page }) => {
+  const viewports = [{ width: 1280, height: 420 }, { width: 360, height: 360 }]
+  for (const [index, viewport] of viewports.entries()) {
+    if (index > 0) {
+      await page.setViewportSize({ width: 1280, height: 800 })
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    } else {
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    }
+    await page.setViewportSize(viewport)
+    const settings = page.getByRole('dialog', { name: 'Settings' })
+    const nav = settings.getByRole('navigation', { name: 'Settings categories' })
+    const content = settings.locator('.settings-content')
+    const dialogBounds = await settings.boundingBox()
+    expect(dialogBounds).not.toBeNull()
+    expect(dialogBounds!.y).toBeGreaterThanOrEqual(0)
+    expect(dialogBounds!.y + dialogBounds!.height).toBeLessThanOrEqual(viewport.height)
+
+    for (const [category, panel] of [
+      ['Bundles', 'bundles'],
+      ['Models', 'models'],
+      ['Appearance', 'appearance'],
+      ['Backup', 'backup'],
+    ]) {
+      await nav.getByRole('button', { name: category, exact: true }).click()
+      await expect(settings.locator(`#settings-panel-${panel}`)).toBeVisible()
+      const nextBounds = await settings.boundingBox()
+      expect(nextBounds?.height).toBeCloseTo(dialogBounds!.height, 0)
+      expect(await content.evaluate((element) => element.ownerDocument.defaultView?.getComputedStyle(element).overflowY)).toBe('auto')
+      const navBounds = await nav.boundingBox()
+      expect(navBounds).not.toBeNull()
+      expect(navBounds!.y).toBeGreaterThanOrEqual(dialogBounds!.y)
+      expect(navBounds!.y + navBounds!.height).toBeLessThanOrEqual(dialogBounds!.y + dialogBounds!.height)
+    }
+    await settings.getByRole('button', { name: 'Close' }).click()
+  }
+})
+
 test('downloads all attached bundle backups from settings', async ({ page }) => {
-  await page.getByRole('button', { name: 'Settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await settings.getByRole('button', { name: 'Backup' }).click()
   const downloadPromise = page.waitForEvent('download')
-  await page.getByRole('link', { name: 'Download all bundle backups' }).click()
+  await settings.getByRole('link', { name: 'Download all bundle backups' }).click()
   const download = await downloadPromise
 
   expect(download.suggestedFilename()).toMatch(/^folio-bundle-backup-.+\.zip$/)

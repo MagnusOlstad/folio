@@ -6,6 +6,7 @@ import type {
 } from "../../domain/types.ts";
 import type { FilingFields, FilingQueueEntry } from "./model/filing.ts";
 import type { NoteExportFormat } from "./model/note-export.ts";
+import type { RefileEntries, RefileFields } from "./model/refile.ts";
 
 export type TabDrag = { documentId: string; groupId: string };
 export type MetadataField = "title" | "description";
@@ -28,6 +29,7 @@ export type EditorWorkspaceModel = {
   movingFileId: string | null;
   filingDirectories: string[];
   filingQueues: Record<string, FilingQueueEntry[]>;
+  refileEntries: RefileEntries;
   editorFocusRequest: EditorFocusRequest | null;
   message: string;
   exportingNoteId: string | null;
@@ -59,6 +61,10 @@ export type EditorWorkspaceActions = {
   revealStandaloneFiling: (documentId: string) => void;
   confirmFiling: (groupId: string, documentId: string, action: "accept" | "standalone") => void;
   dismissFiling: (groupId: string, documentId: string) => void;
+  startRefile: (documentId: string) => void;
+  changeRefileFields: (documentId: string, fields: RefileFields) => void;
+  acceptRefile: (documentId: string) => void;
+  dismissRefile: (documentId: string) => void;
   beginEditing: (
     groupId: string,
     document: ViewerDocument,

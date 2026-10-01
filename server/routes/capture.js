@@ -124,7 +124,7 @@ app.post('/api/notes', async (request, response, next) => {
       classification.kind = 'note'
       classification.path = guidedPath === '/' ? [] : guidedPath.slice(1).split('/')
     }
-    const captureActor = filingActor(classifiedByModel)
+    const captureActor = filingActor(classifiedByModel, result.model)
     let noteEmbedding = null
     if (classification.kind === 'note') {
       try {
@@ -152,6 +152,7 @@ app.post('/api/notes', async (request, response, next) => {
         createdAt,
         timeZone,
         classifiedByModel,
+        generationModel: classification.generationModel,
         captureId: confirmationId,
       }))
       appended = aggregate.appended

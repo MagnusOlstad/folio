@@ -25,6 +25,7 @@ export function EditorWorkspace({ model, actions, paneControls, historyPreview }
     exportingNoteId: model.exportingNoteId,
     filingDirectories: model.filingDirectories,
     filingQueues: model.filingQueues,
+    refileEntries: model.refileEntries,
     filingOwnerGroupIds: owners,
     editorFocusRequest: model.editorFocusRequest,
   };
@@ -45,6 +46,10 @@ export function EditorWorkspace({ model, actions, paneControls, historyPreview }
     revealStandaloneFiling: actions.revealStandaloneFiling,
     confirmFiling: actions.confirmFiling,
     dismissFiling: actions.dismissFiling,
+    startRefile: actions.startRefile,
+    changeRefileFields: actions.changeRefileFields,
+    acceptRefile: actions.acceptRefile,
+    dismissRefile: actions.dismissRefile,
     beginEditing: actions.beginEditing,
     finishEditing: actions.finishEditing,
     openDocument: actions.openDocument,

@@ -108,6 +108,7 @@ for await (const line of lines) {
   const control = await readControl()
   if (control.exitOnOperation === request.operation) process.exit(Number(control.exitCode) || 19)
   if (request.operation === 'shutdown' && control.hangShutdown) continue
+  await appendLog({ event: 'request', operation: request.operation, id: request.id })
   if (control.operationDelayMs) await new Promise((resolve) => setTimeout(resolve, control.operationDelayMs))
   try {
     let response
@@ -122,7 +123,6 @@ for await (const line of lines) {
     else if (request.operation === 'generate') response = { id: request.id, text: await generate(request.messages), memory }
     else if (request.operation === 'embed') response = { id: request.id, embeddings: await embed(request.input), memory }
     else response = { id: request.id, error: `unknown operation: ${request.operation}`, memory }
-    await appendLog({ event: 'request', operation: request.operation, id: request.id })
     await appendLog({ event: 'response', operation: request.operation, error: response.error, memory: response.memory })
     process.stdout.write(`${JSON.stringify(response)}\n`)
     if (request.operation === 'shutdown') process.exit(0)

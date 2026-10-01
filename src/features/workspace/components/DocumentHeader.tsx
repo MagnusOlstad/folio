@@ -18,6 +18,8 @@ type DocumentHeaderProps = {
     field: MetadataField,
     value: string,
   ) => void;
+  onRefile?: (document: ViewerDocument) => void;
+  refileDisabled?: boolean;
   readOnly?: boolean;
 };
 
@@ -29,6 +31,8 @@ export function DocumentHeader({
   onBeginEditing,
   onChangeDraft,
   onFinishEditing,
+  onRefile = () => {},
+  refileDisabled = false,
   readOnly = false,
 }: DocumentHeaderProps) {
   const titleKey = `${groupId}:${document.id}:title`;
@@ -126,6 +130,9 @@ export function DocumentHeader({
         </button>
       ) : document.description ? (
         <span>{document.description}</span>
+      ) : null}
+      {!readOnly && document.deletable && document.movable ? (
+        <button type="button" className="document-refile-button" onClick={() => onRefile(document)} disabled={refileDisabled}>Refile</button>
       ) : null}
     </header>
   );

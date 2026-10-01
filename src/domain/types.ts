@@ -104,6 +104,12 @@ export type FileMoveResult = {
   warning: string | null;
   note: ViewerDocument;
 };
+export type RefileResult = {
+  oldId: string;
+  newId: string;
+  warning: string | null;
+  note: NoteDetail & { deletable: boolean };
+};
 export type BundleFile = {
   id: string;
   name: string;
@@ -148,7 +154,7 @@ export type DesktopUpdateState = {
   percent: number | null;
   error: string | null;
 };
-export type MlxModelId = "gemma4" | "embeddinggemma";
+export type MlxModelId = "gemma4" | "qwen35" | "llama32" | "embeddinggemma";
 export const MLX_GENERATION_MODEL = { id: "gemma4", name: "Gemma 4 E4B" } as const satisfies {
   id: MlxModelId;
   name: string;
@@ -159,15 +165,24 @@ export type MlxModelStatus = {
   purpose: "generation" | "embeddings";
   downloadSizeBytes: number;
   downloadSizeIsEstimate: boolean;
+  selected: boolean;
   installed: boolean;
   loaded: boolean;
   memory: { activeBytes: number; cacheBytes: number; peakResidentBytes: number } | null;
+};
+export type MlxDownloadProgress = {
+  downloadedBytes: number;
+  totalBytes: number;
+  percent: number;
+  phase: "downloading" | "loading";
 };
 export type MlxStatus = {
   available: boolean;
   helperAvailable: boolean;
   keepAliveMs: number;
   installing: string[];
+  selectedGenerationModel: MlxModelId;
+  downloads: { id: MlxModelId; progress: MlxDownloadProgress | null }[];
   models: MlxModelStatus[];
 };
 export type AskResult = {

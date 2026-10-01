@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import type { DesktopUpdateState, MlxModelId, MlxStatus, VersionInfo } from "../../domain/types.ts";
+import type { SettingsCategory } from "../settings/model/settings-category.ts";
 
 export type WorkspaceStatusProps = {
   mlxStatus: MlxStatus | null;
   mlxActionModel: MlxModelId | null;
   onInstallMlxModel: (id: MlxModelId) => void;
   onToggleMlxModel: (id: MlxModelId, loaded: boolean) => void;
+  onOpenSettings?: (category?: SettingsCategory) => void;
 };
 
 export function FolioBrand({ versionInfo }: { versionInfo: VersionInfo | null }) {
@@ -82,10 +84,12 @@ export function FolioBrand({ versionInfo }: { versionInfo: VersionInfo | null })
   );
 }
 
-const displayedMlxModels: { id: MlxModelId; name: string; purpose: string }[] = [
-  { id: "gemma4", name: "Gemma 4 E4B", purpose: "Generation" },
-  { id: "embeddinggemma", name: "EmbeddingGemma", purpose: "Embeddings" },
-];
+const modelNames: Record<MlxModelId, string> = {
+  qwen35: "Qwen 3.5 4B",
+  llama32: "Llama 3.2 3B Instruct",
+  gemma4: "Gemma 4 E4B",
+  embeddinggemma: "EmbeddingGemma",
+};
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
@@ -101,7 +105,39 @@ export function MlxModelStatusPanel({
   mlxActionModel,
   onInstallMlxModel,
   onToggleMlxModel,
+  onOpenSettings,
 }: WorkspaceStatusProps) {
+  const [showFirstOpenSettings, setShowFirstOpenSettings] = useState(false);
+  useEffect(() => {
+    if (!mlxStatus) return;
+    try {
+      if (window.localStorage.getItem("folio:model-setup-prompt-seen") === "1") return;
+      const generation = mlxStatus.models.filter((model) => model.purpose === "generation");
+      const selectedInstalled = generation.some((model) => model.id === mlxStatus.selectedGenerationModel && model.installed);
+      window.localStorage.setItem("folio:model-setup-prompt-seen", "1");
+      setShowFirstOpenSettings(!selectedInstalled);
+    } catch {
+      setShowFirstOpenSettings(!mlxStatus.models.some((model) => model.id === mlxStatus.selectedGenerationModel && model.installed));
+    }
+  }, [mlxStatus]);
+  const selectedGenerationId = mlxStatus?.selectedGenerationModel ?? "gemma4";
+  const selectedGenerationModel = mlxStatus?.models.find(
+    (model) => model.id === selectedGenerationId && model.purpose === "generation",
+  );
+  const displayedModels = [
+    {
+      id: selectedGenerationId,
+      name: selectedGenerationModel?.name ?? modelNames[selectedGenerationId],
+      purpose: "Generation",
+      model: selectedGenerationModel,
+    },
+    {
+      id: "embeddinggemma" as const,
+      name: modelNames.embeddinggemma,
+      purpose: "Embeddings",
+      model: mlxStatus?.models.find((model) => model.id === "embeddinggemma"),
+    },
+  ];
   const stateText = !mlxStatus
     ? "Checking"
     : mlxStatus.available
@@ -116,10 +152,15 @@ export function MlxModelStatusPanel({
       <div className="mlx-helper-status">
         Helper {mlxStatus ? (mlxStatus.helperAvailable ? "available" : "unavailable") : "checking"}
       </div>
-      <p className="mlx-model-guidance">Choose Install to download model files. Features load installed models when needed; Start and Stop let you manage them.</p>
+      <p className="mlx-model-guidance">
+        Choose Install to download model files. {showFirstOpenSettings && onOpenSettings ? (
+          <>Choose a generation model in Settings to enable filing and Ask. <button className="mlx-model-settings-link" type="button" onClick={() => { setShowFirstOpenSettings(false); onOpenSettings("models"); }}>Open model settings</button></>
+        ) : (
+          "Features load installed models when needed; Start and Stop let you manage them."
+        )}
+      </p>
       <div className="mlx-model-list">
-        {displayedMlxModels.map(({ id, name, purpose }) => {
-          const model = mlxStatus?.models.find((candidate) => candidate.id === id);
+        {displayedModels.map(({ id, name, purpose, model }) => {
           const installing = Boolean(mlxStatus?.installing.includes(id)) || mlxActionModel === id;
           const canAct = Boolean(mlxStatus?.available && mlxStatus.helperAvailable);
           const buttonDisabled = !canAct || installing || mlxActionModel !== null;

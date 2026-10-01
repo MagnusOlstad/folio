@@ -15,10 +15,11 @@ import { WorkspaceLeftPaneHeader } from "./WorkspaceLeftPaneHeader.tsx";
 import type { NoteExportSnapshot } from "../model/note-export.ts";
 import { NoteHistoryPanel } from "./NoteHistoryPanel.tsx";
 import { isUntitledId } from "../../../lib/workspace.ts";
+import type { SettingsCategory } from "../../settings/model/settings-category.ts";
 
 type WorkspaceAppProps = WorkspaceStatusProps & {
   versionInfo: VersionInfo | null;
-  onOpenSettings: () => void;
+  onOpenSettings: (category?: SettingsCategory) => void;
 };
 
 export type WorkspaceShellProps = {
@@ -100,7 +101,7 @@ export function WorkspaceShell({
           <aside className="workspace-left-pane">
             <WorkspaceLeftPaneHeader
               versionInfo={app.versionInfo}
-              onOpenSettings={app.onOpenSettings}
+              onOpenSettings={() => app.onOpenSettings()}
               sidebarOpen={layout.sidebarOpen}
               onToggleSidebar={() => layout.setSidebarOpen(false)}
             />
@@ -151,6 +152,8 @@ export function WorkspaceShell({
           onSelectTheme={settings.onSelectTheme}
           obsidianImport={settings.obsidianImport}
           bundleSetup={settings.bundleSetup}
+          modelSettings={settings.modelSettings}
+          initialCategory={settings.initialCategory}
           onClose={settings.onClose}
         />
       ) : null}

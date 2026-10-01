@@ -6,7 +6,7 @@ Folio is a local-first personal notetaker with one Markdown capture field. It pr
 
 - Plain Markdown capture with `Cmd/Ctrl + Enter` filing proposals and an in-note confirmation.
 - Immutable raw captures stored as OKF `Raw Capture` concepts.
-- Whole-note classification with Gemma 4 E4B through the bundled Swift MLX runtime: every capture remains one note and is never split into extracted concepts.
+- Whole-note classification with the selected local generation model through the bundled Swift MLX runtime: every capture remains one note and is never split into extracted concepts.
 - Open-ended hierarchical filing based on the whole note, with opening labels and headings treated as strong routing guidance.
 - Special aggregate concepts: explicit todos append to `/todo-list.md`, while explicit daily notes append to `/daily/YYYY-MM-DD.md` in the browser's local timezone.
 - Lightweight vocabulary reuse: the classifier receives capped guides of existing paths and types plus tags retrieved from lexically and semantically similar notes, favoring established terminology without closing the taxonomy.
@@ -21,6 +21,8 @@ Folio is a local-first personal notetaker with one Markdown capture field. It pr
 - In-app note viewer available from recent notes, search results, answer citations, and newly filed notes.
 - Markdown and PDF export for filed notes and local drafts, using the current editor content.
 - Manual bundle filing from the Explorer through editable paths or drag-and-drop, with link migration, human-filing metadata, and embedding reuse.
+- Refile saved notes through a review dialog that proposes a path and metadata update. Discard leaves the note unchanged; accepted moves keep the note's history and restore older content at its current path.
+- Settings organized into Bundles, Models, Appearance, and Backup. Choose, download, and remove Qwen 3.5 4B 4-bit, Llama 3.2 3B Instruct 4-bit, or Gemma 4 for generation; EmbeddingGemma remains the fixed embedding model. Downloads show cache progress and can be retried.
 - Lifecycle controls for `draft`, `stable`, `deprecated`, and `stale_after`, with stale and deprecated concepts ranked lower in retrieval.
 - Local filesystem storage. No cloud service or account is required.
 
@@ -50,7 +52,7 @@ the desktop app.
 
 ## Prerequisites
 
-You need Node.js 22 or newer for development. MLX inference requires macOS 14 or newer on Apple Silicon. The desktop release bundles Folio's Swift MLX helper and framework; model files remain separate and are downloaded only when you start an installation from the right pane. Gemma 4 E4B is about 5.18 GB and EmbeddingGemma is about 212 MB; these are repository-size estimates, and the actual download depends on files already cached by Hugging Face.
+You need Node.js 22 or newer for development. MLX inference requires macOS 14 or newer on Apple Silicon. The desktop release bundles Folio's Swift MLX helper and framework; model files remain separate and are downloaded from Settings. Qwen 3.5 4B 4-bit is about 3.06 GB, Llama 3.2 3B Instruct 4-bit is about 1.81 GB, Gemma 4 E4B is about 5.18 GB, and EmbeddingGemma is about 212 MB. These are repository-size estimates; the actual download depends on files already cached by Hugging Face.
 
 ## One-time setup
 
@@ -86,7 +88,7 @@ npm run dev
 
 Open the local address printed by Vite, normally `http://localhost:5173`.
 
-Use the model controls in the right pane to install Gemma 4 E4B for generation and EmbeddingGemma for semantic search. Folio does not silently download the runtime or model files. The pane reports each model's status and download size before installation.
+Choose a generation model in Settings and download it along with EmbeddingGemma for semantic search. Folio does not silently download the runtime or model files. Settings shows each model's size, current selection, installation status, and download progress. A first-run prompt links to model settings when no generation model is installed.
 
 ## macOS desktop app
 
@@ -105,7 +107,7 @@ npm run dist:mac
 This writes `release/Folio-<version>-arm64.dmg`, a matching `.zip`, and the unpacked
 `release/mac-arm64/Folio.app`.
 
-The packaged app stores its writable Markdown bundle and search index in `~/Documents/Folio`. On first launch it copies the notes bundled at build time into that folder. The Swift MLX runtime is bundled with the app; model files remain a separate, explicit install for each model from the right pane.
+The packaged app stores its writable Markdown bundle and search index in `~/Documents/Folio`. On first launch it copies the notes bundled at build time into that folder. The Swift MLX runtime is bundled with the app; model files remain a separate, explicit install from Settings.
 
 ### Signed distribution builds
 
@@ -194,7 +196,7 @@ Edit `.env` to change the API port:
 PORT=8787
 ```
 
-Ask retrieves concepts through OKF metadata, keywords, relationships, and paragraph-level embeddings, then supplies the current time and browser timezone so relative dates can be interpreted. Gemma 4 E4B is the generation model and EmbeddingGemma is the semantic model. Changing the embedding model or embedding schema invalidates incompatible stored vectors.
+Ask retrieves concepts through OKF metadata, keywords, relationships, and paragraph-level embeddings, then supplies the current time and browser timezone so relative dates can be interpreted. The selected generation model is shared by Ask and filing; EmbeddingGemma remains the fixed semantic model. Changing the embedding model or embedding schema invalidates incompatible stored vectors.
 
 ## Where your notes live
 

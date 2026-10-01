@@ -80,9 +80,12 @@ test('models install explicitly into their pinned snapshots and use the JSONL wo
   assert.equal(initial.available, true)
   assert.equal(initial.helperAvailable, true)
   assert.equal(initial.keepAliveMs, 60_000)
-  assert.deepEqual(initial.models.map(({ id, name, downloadSizeBytes, installed, loaded, memory }) => ({ id, name, downloadSizeBytes, installed, loaded, memory })), [
-    { id: 'gemma4', name: 'Gemma 4 E4B', downloadSizeBytes: 5_180_000_000, installed: false, loaded: false, memory: null },
-    { id: 'embeddinggemma', name: 'EmbeddingGemma', downloadSizeBytes: 212_000_000, installed: false, loaded: false, memory: null },
+  assert.equal(initial.selectedGenerationModel, 'gemma4')
+  assert.deepEqual(initial.models.map(({ id, purpose, downloadSizeBytes, selected }) => ({ id, purpose, downloadSizeBytes, selected })), [
+    { id: 'gemma4', purpose: 'generation', downloadSizeBytes: 5_180_000_000, selected: true },
+    { id: 'qwen35', purpose: 'generation', downloadSizeBytes: 3_060_000_000, selected: false },
+    { id: 'llama32', purpose: 'generation', downloadSizeBytes: 1_810_000_000, selected: false },
+    { id: 'embeddinggemma', purpose: 'embeddings', downloadSizeBytes: 212_000_000, selected: false },
   ])
 
   await assert.rejects(service.load('gemma4'), /not installed/)
@@ -132,6 +135,42 @@ test('models install explicitly into their pinned snapshots and use the JSONL wo
   assert.equal((await readLog(logPath)).findLast((entry) => entry.event === 'response' && entry.operation === 'shutdown').memory.cacheBytes, 0)
 })
 
+test('download progress counts deduplicated cached blobs and growing partial files', async (t) => {
+  const { root, logPath, service } = await fixture(t)
+  await setControl(root, { readyDelayMs: 1_000 })
+  const installation = service.install('qwen35')
+  await waitUntil(async () => (await readLog(logPath)).some((entry) => entry.event === 'ready' && entry.model?.includes('Qwen3.5')))
+
+  const definition = service.modelDefinitions.qwen35
+  const cacheRoot = path.join(root, 'models', 'hf-cache')
+  const repoRoot = path.join(cacheRoot, `models--${definition.repository.replaceAll('/', '--')}`)
+  const snapshot = path.join(repoRoot, 'snapshots', definition.revision)
+  const blobs = path.join(repoRoot, 'blobs')
+  await fs.rm(path.join(snapshot, 'model.safetensors'))
+  await fs.rm(path.join(snapshot, 'tokenizer_config.json'))
+  await fs.mkdir(blobs, { recursive: true })
+  const completeBlob = path.join(blobs, 'content-addressed-weight')
+  await fs.writeFile(completeBlob, Buffer.alloc(100))
+  await fs.symlink(completeBlob, path.join(snapshot, 'model.safetensors'))
+  await fs.symlink(completeBlob, path.join(snapshot, 'duplicate-weight-link'))
+  const incompleteBlob = path.join(blobs, 'download.incomplete')
+  await fs.writeFile(incompleteBlob, Buffer.alloc(20))
+
+  const first = (await service.status()).downloads.find(({ id }) => id === 'qwen35').progress
+  const otherCachedBytes = (await Promise.all(['config.json', 'tokenizer.json'].map(async (name) => (
+    (await fs.stat(path.join(snapshot, name))).size
+  )))).reduce((total, bytes) => total + bytes, 0)
+  assert.equal(first.phase, 'downloading')
+  assert.equal(first.downloadedBytes, otherCachedBytes + 100 + 20, 'snapshot and blob links plus partial bytes are counted once')
+  await fs.appendFile(incompleteBlob, Buffer.alloc(30))
+  const next = (await service.status()).downloads.find(({ id }) => id === 'qwen35').progress
+  assert.equal(next.downloadedBytes, first.downloadedBytes + 30)
+  assert.ok(next.percent >= first.percent && next.percent <= 99)
+
+  await setControl(root, {})
+  await installation
+})
+
 test('idle workers expire after keep-alive and status includes current memory', async (t) => {
   const { service } = await fixture(t, { warmKeepAliveMs: 30 })
   await service.install('gemma4')
@@ -169,6 +208,41 @@ test('deduplicates simultaneous launches for the same model', async (t) => {
   assert.equal(status.models.find((model) => model.id === 'gemma4').installed, true)
   assert.equal(status.models.find((model) => model.id === 'gemma4').loaded, true)
   assert.equal((await readLog(logPath)).filter((entry) => entry.event === 'ready' && entry.model.includes('gemma-4')).length, 1)
+})
+
+test('persists generation selection and consistently launches the selected model', async (t) => {
+  const { root, logPath, service } = await fixture(t)
+  const selection = await service.selectGenerationModel('qwen35')
+  assert.equal(selection.selectedGenerationModel, 'qwen35')
+  assert.equal(selection.models.find((model) => model.id === 'qwen35').selected, true)
+  await service.install('qwen35')
+  await service.generate([{ role: 'user', content: 'A planning note.' }])
+  const qwenDefinition = service.modelDefinitions.qwen35
+  assert.equal(qwenDefinition.revision, '0e7ffd5c629ef7719d4cbc04069232580bfa9d9c')
+  assert.ok((await readLog(logPath)).some((entry) => entry.event === 'ready' && entry.model === qwenDefinition.repository))
+  await service.close()
+
+  const reopened = createMlxService({
+    projectRoot: root,
+    modelRoot: path.join(root, 'models'),
+    mlxHelperPath: helperPath,
+  })
+  t.after(() => reopened.close())
+  assert.equal((await reopened.status()).selectedGenerationModel, 'qwen35')
+  assert.equal((await reopened.install('qwen35')).models.find((model) => model.id === 'qwen35').installed, true)
+})
+
+test('refuses cache removal during active requests and removes only after the worker is idle', async (t) => {
+  const { root, service } = await fixture(t)
+  await service.install('llama32')
+  await setControl(root, { operationDelayMs: 80 })
+  const generation = service.generate([{ role: 'user', content: 'Planning note.' }], { modelId: 'llama32' })
+  await waitUntil(async () => (await readLog(path.join(root, 'helper.jsonl'))).some((entry) => entry.event === 'request' && entry.operation === 'generate'))
+  await assert.rejects(service.remove('llama32'), /handling a request/)
+  await generation
+  await service.remove('llama32')
+  assert.equal((await service.status()).models.find((model) => model.id === 'llama32').installed, false)
+  await assert.rejects(service.generate([{ role: 'user', content: 'Planning note.' }], { modelId: 'llama32' }), /not installed/)
 })
 
 test('keeps a worker alive while a model request overlaps the idle deadline', async (t) => {

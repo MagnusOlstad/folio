@@ -81,6 +81,7 @@ describe("theme settings", () => {
           clearScan: () => {},
         }}
         onClose={onClose}
+        initialCategory="appearance"
         bundleSetup={{
           bundles: [{
             id: "bundle-1",
@@ -102,20 +103,56 @@ describe("theme settings", () => {
     );
 
     expect(screen.getAllByRole("radio", { name: /Original|Editorial|Light|Dark/ })).toHaveLength(4);
-    expect(
-      screen.getByText(/Download all attached bundles as one ZIP file/i),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: "Download all bundle backups" }),
-    ).toHaveAttribute("href", "/api/backup");
     expect(screen.getByRole("radio", { name: /Original/ })).toBeChecked();
     expect(screen.getByRole("button", { name: "Close" })).toHaveFocus();
 
     fireEvent.click(screen.getByRole("radio", { name: /Editorial/ }));
     expect(onSelectTheme).toHaveBeenCalledWith("editorial");
 
+    const categories = screen.getByRole("navigation", { name: "Settings categories" });
+    fireEvent.click(screen.getByRole("button", { name: "Bundles" }));
+    expect(screen.getByRole("region", { name: "Bundles settings" })).toBeInTheDocument();
+    expect(screen.getByText(/Create bundle or import Obsidian vault/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Backup" }));
+    expect(screen.getByRole("region", { name: "Backup settings" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Download all bundle backups" })).toHaveAttribute("href", "/api/backup");
+    expect(categories).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
+    fireEvent.keyDown(screen.getByRole("button", { name: "Appearance" }), { key: "ArrowRight" });
+    expect(screen.getByRole("button", { name: "Backup" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Backup" })).toHaveFocus();
+
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an in-progress bundle setup draft when switching categories", () => {
+    render(
+      <SettingsDialog
+        themeId="original"
+        onSelectTheme={() => {}}
+        obsidianImport={{ supported: false, busy: false, scan: null, job: null, error: "", selectVault: () => {}, confirmImport: () => {}, cancelImport: () => {}, clearScan: () => {} }}
+        onClose={() => {}}
+        bundleSetup={{
+          bundles: [{ id: "work", name: "Work", markdownPath: "/notes/work", managed: false, detached: false }],
+          activeBundleId: "work",
+          error: "",
+          selectBundle: () => {},
+          setupBundle: async () => ({ id: "work", name: "Work", markdownPath: "/notes/work", managed: false, detached: false }),
+          renameBundle: async () => {},
+          detachBundle: async () => {},
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create bundle or import Obsidian vault" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "Research notes" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Models" }));
+    expect(screen.getByRole("region", { name: "Models settings" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Bundles" }));
+
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Research notes");
   });
 
   it("summarizes a vault and requires one explicit import confirmation", async () => {

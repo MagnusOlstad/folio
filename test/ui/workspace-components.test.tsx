@@ -247,7 +247,7 @@ describe("workspace editor components", () => {
     }
   });
 
-  it("shows the two MLX models on first open without automatically installing", () => {
+  it("shows the selected generation model and EmbeddingGemma without automatically installing", () => {
     const onHide = vi.fn();
     const props = {
       mlxStatus: null,
@@ -266,6 +266,8 @@ describe("workspace editor components", () => {
     expect(header).toContainElement(toggle);
     expect(header).toHaveClass("right-pane-header");
     expect(screen.getByText("Gemma 4 E4B")).toBeInTheDocument();
+    expect(screen.queryByText("Qwen 3.5 4B")).not.toBeInTheDocument();
+    expect(screen.queryByText("Llama 3.2 3B Instruct")).not.toBeInTheDocument();
     expect(screen.getByText("EmbeddingGemma")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /^Install / })).toHaveLength(2);
     expect(screen.getAllByRole("button", { name: /^Install / }).every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
@@ -286,9 +288,13 @@ describe("workspace editor components", () => {
           helperAvailable: true,
           keepAliveMs: 0,
           installing: [],
+          selectedGenerationModel: "gemma4",
+          downloads: [],
           models: [
-            { id: "gemma4", name: "Gemma 4", purpose: "generation", downloadSizeBytes: 5_180_000_000, downloadSizeIsEstimate: true, installed: false, loaded: false, memory: null },
-            { id: "embeddinggemma", name: "EmbeddingGemma", purpose: "embeddings", downloadSizeBytes: 212_000_000, downloadSizeIsEstimate: true, installed: false, loaded: false, memory: null },
+            { id: "gemma4", name: "Gemma 4", purpose: "generation", downloadSizeBytes: 5_180_000_000, downloadSizeIsEstimate: true, selected: true, installed: false, loaded: false, memory: null },
+            { id: "qwen35", name: "Qwen 3.5", purpose: "generation", downloadSizeBytes: 3_060_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
+            { id: "llama32", name: "Llama 3.2", purpose: "generation", downloadSizeBytes: 1_810_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
+            { id: "embeddinggemma", name: "EmbeddingGemma", purpose: "embeddings", downloadSizeBytes: 212_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
           ],
         }}
         mlxActionModel={null}
@@ -303,6 +309,69 @@ describe("workspace editor components", () => {
     expect(screen.getByText("About 212 MB download")).toBeInTheDocument();
   });
 
+  it("shows the generation model selected by status alongside the fixed embedding model", () => {
+    const onInstallMlxModel = vi.fn();
+    render(
+      <WorkspaceRightPane
+        mlxStatus={{
+          available: true,
+          helperAvailable: true,
+          keepAliveMs: 0,
+          installing: [],
+          selectedGenerationModel: "qwen35",
+          downloads: [],
+          models: [
+            { id: "gemma4", name: "Gemma 4 E4B", purpose: "generation", downloadSizeBytes: 5_180_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
+            { id: "qwen35", name: "Qwen 3.5 4B", purpose: "generation", downloadSizeBytes: 3_060_000_000, downloadSizeIsEstimate: true, selected: true, installed: false, loaded: false, memory: null },
+            { id: "llama32", name: "Llama 3.2 3B Instruct", purpose: "generation", downloadSizeBytes: 1_810_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
+            { id: "embeddinggemma", name: "EmbeddingGemma", purpose: "embeddings", downloadSizeBytes: 212_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
+          ],
+        }}
+        mlxActionModel={null}
+        onInstallMlxModel={onInstallMlxModel}
+        onToggleMlxModel={vi.fn()}
+        onHide={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Qwen 3.5 4B")).toBeInTheDocument();
+    expect(screen.queryByText("Gemma 4 E4B")).not.toBeInTheDocument();
+    expect(screen.queryByText("Llama 3.2 3B Instruct")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^Install / })).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Install Qwen 3.5 4B" }));
+    expect(onInstallMlxModel).toHaveBeenCalledWith("qwen35");
+  });
+
+  it("links first-time setup to Settings only when the selected generation model is missing", async () => {
+    window.localStorage.removeItem("folio:model-setup-prompt-seen");
+    const onOpenSettings = vi.fn();
+    render(
+      <WorkspaceRightPane
+        mlxStatus={{
+          available: true, helperAvailable: true, keepAliveMs: 60_000, installing: [],
+          selectedGenerationModel: "qwen35", downloads: [],
+          models: [
+            { id: "gemma4", name: "Gemma 4 E4B", purpose: "generation", downloadSizeBytes: 5_180_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
+            { id: "qwen35", name: "Qwen 3.5 4B", purpose: "generation", downloadSizeBytes: 3_060_000_000, downloadSizeIsEstimate: true, selected: true, installed: false, loaded: false, memory: null },
+            { id: "llama32", name: "Llama 3.2 3B Instruct", purpose: "generation", downloadSizeBytes: 1_810_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
+            { id: "embeddinggemma", name: "EmbeddingGemma", purpose: "embeddings", downloadSizeBytes: 212_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
+          ],
+        }}
+        mlxActionModel={null}
+        onInstallMlxModel={vi.fn()}
+        onToggleMlxModel={vi.fn()}
+        onOpenSettings={onOpenSettings}
+        onHide={vi.fn()}
+      />,
+    );
+    const settingsLink = await screen.findByRole("button", { name: "Open model settings" });
+    expect(settingsLink.closest(".mlx-model-guidance")).not.toBeNull();
+    expect(screen.queryByText("Choose and download a generation model in Settings to enable filing and Ask.")).not.toBeInTheDocument();
+    fireEvent.click(settingsLink);
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    expect(window.localStorage.getItem("folio:model-setup-prompt-seen")).toBe("1");
+  });
+
   it("shows model start and stop state with memory while loaded", () => {
     const onToggleMlxModel = vi.fn();
     render(
@@ -312,9 +381,13 @@ describe("workspace editor components", () => {
           helperAvailable: true,
           keepAliveMs: 60_000,
           installing: [],
+          selectedGenerationModel: "gemma4",
+          downloads: [],
           models: [
-            { id: "gemma4", name: "Gemma 4", purpose: "generation", downloadSizeBytes: 5_180_000_000, downloadSizeIsEstimate: true, installed: true, loaded: true, memory: { activeBytes: 1_073_741_824, cacheBytes: 536_870_912, peakResidentBytes: 2_147_483_648 } },
-            { id: "embeddinggemma", name: "EmbeddingGemma", purpose: "embeddings", downloadSizeBytes: 212_000_000, downloadSizeIsEstimate: true, installed: true, loaded: false, memory: null },
+            { id: "gemma4", name: "Gemma 4", purpose: "generation", downloadSizeBytes: 5_180_000_000, downloadSizeIsEstimate: true, selected: true, installed: true, loaded: true, memory: { activeBytes: 1_073_741_824, cacheBytes: 536_870_912, peakResidentBytes: 2_147_483_648 } },
+            { id: "qwen35", name: "Qwen 3.5", purpose: "generation", downloadSizeBytes: 3_060_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
+            { id: "llama32", name: "Llama 3.2", purpose: "generation", downloadSizeBytes: 1_810_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
+            { id: "embeddinggemma", name: "EmbeddingGemma", purpose: "embeddings", downloadSizeBytes: 212_000_000, downloadSizeIsEstimate: true, selected: false, installed: true, loaded: false, memory: null },
           ],
         }}
         mlxActionModel={null}
