@@ -25,6 +25,7 @@ function coordinatorOptions({ updater, nativeUpdater, ...options }) {
 }
 
 test('updater skips unpackaged and non-macOS runs', async () => {
+  let scheduleCalls = 0
   for (const options of [
     { isPackaged: false, platform: 'darwin' },
     { isPackaged: true, platform: 'linux' },
@@ -32,10 +33,16 @@ test('updater skips unpackaged and non-macOS runs', async () => {
     const { updater, nativeUpdater } = createUpdater()
     let checks = 0
     updater.checkForUpdates = async () => { checks += 1 }
-    const coordinator = createUpdaterCoordinator(coordinatorOptions({ updater, nativeUpdater, ...options }))
+    const coordinator = createUpdaterCoordinator(coordinatorOptions({
+      updater,
+      nativeUpdater,
+      schedulePolling: () => { scheduleCalls += 1 },
+      ...options,
+    }))
     assert.equal(await coordinator.start(), false)
     assert.equal(checks, 0)
   }
+  assert.equal(scheduleCalls, 0)
 })
 
 test('checks without downloading until requested, then stages and restarts after save flush', async () => {
@@ -254,4 +261,135 @@ test('timed-out native staging ignores late readiness until the user retries', a
   nativeUpdater.emit('update-downloaded')
   await new Promise((resolve) => setImmediate(resolve))
   assert.equal(quits, 1)
+})
+
+test('packaged macOS updater polls daily, shares idempotent startup, and disposes its timer', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let checks = 0
+  let callback
+  let scheduledDelay
+  let scheduleCalls = 0
+  let unrefCalls = 0
+  let cancelled = null
+  let cancelCalls = 0
+  updater.checkForUpdates = async () => {
+    checks += 1
+    return { isUpdateAvailable: checks > 1, updateInfo: { version: checks === 2 ? '1.2.3' : '1.3.0' } }
+  }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    schedulePolling: (next, delay) => {
+      scheduleCalls += 1
+      callback = next
+      scheduledDelay = delay
+      return { unref: () => { unrefCalls += 1 } }
+    },
+    cancelPolling: (timer) => { cancelled = timer; cancelCalls += 1 },
+  }))
+
+  await coordinator.start()
+  await coordinator.start()
+  assert.equal(checks, 1)
+  assert.equal(scheduleCalls, 1)
+  assert.equal(scheduledDelay, 86_400_000)
+  assert.equal(unrefCalls, 1)
+  callback()
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(checks, 2)
+  assert.equal(coordinator.getState().status, 'available')
+  assert.equal(coordinator.getState().version, '1.2.3')
+  callback()
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(checks, 3)
+  assert.equal(coordinator.getState().version, '1.3.0')
+
+  coordinator.dispose()
+  assert.ok(cancelled)
+  coordinator.dispose()
+  assert.equal(cancelCalls, 1)
+})
+
+test('daily polling recovers after a network failure on a later tick', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let checks = 0
+  let callback
+  const logger = { error() {}, warn() {} }
+  updater.checkForUpdates = async () => {
+    checks += 1
+    if (checks === 2) throw new Error('network unavailable')
+    return { isUpdateAvailable: checks > 2, updateInfo: { version: '1.2.3' } }
+  }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    logger,
+    schedulePolling: (next) => { callback = next; return { unref() {} } },
+    cancelPolling: () => {},
+  }))
+
+  await coordinator.start()
+  callback()
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(coordinator.getState().status, 'error')
+  callback()
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(checks, 3)
+  assert.equal(coordinator.getState().status, 'available')
+})
+
+test('daily polling skips while a requested download is still in flight', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let checks = 0
+  let callback
+  let finishDownload
+  updater.checkForUpdates = async () => {
+    checks += 1
+    return { isUpdateAvailable: checks > 1, updateInfo: { version: '1.2.3' } }
+  }
+  updater.downloadUpdate = () => new Promise((resolve) => { finishDownload = resolve })
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    schedulePolling: (next) => { callback = next; return { unref() {} } },
+    cancelPolling: () => {},
+  }))
+
+  await coordinator.start()
+  const download = coordinator.startDownload()
+  await new Promise((resolve) => setImmediate(resolve))
+  callback()
+  assert.equal(checks, 2)
+  finishDownload([])
+  await download
+  assert.equal(coordinator.getState().status, 'staging')
+})
+
+test('daily polling skips checks while a check is active or a downloaded update awaits retry', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let checks = 0
+  let callback
+  let resolveCheck
+  updater.checkForUpdates = async () => {
+    checks += 1
+    if (checks === 1) return { isUpdateAvailable: false }
+    if (checks === 2) return new Promise((resolve) => { resolveCheck = resolve })
+    return { isUpdateAvailable: false }
+  }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    schedulePolling: (next) => { callback = next; return { unref() {} } },
+    cancelPolling: () => {},
+  }))
+
+  await coordinator.start()
+  callback()
+  callback()
+  assert.equal(checks, 2)
+  resolveCheck({ isUpdateAvailable: false })
+  await new Promise((resolve) => setImmediate(resolve))
+  updater.emit('update-downloaded', { version: '1.2.3' })
+  callback()
+  assert.equal(checks, 2)
 })
