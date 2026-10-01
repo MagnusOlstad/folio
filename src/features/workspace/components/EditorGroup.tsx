@@ -266,6 +266,8 @@ export function EditorGroup({
             onRevealStandaloneFiling={actions.revealStandaloneFiling}
             onConfirmFiling={actions.confirmFiling}
             onDismissFiling={actions.dismissFiling}
+            onApplyRefile={actions.applyRefiledNote}
+            onPrepareRefile={actions.prepareRefile}
           />
           </div>
           {historyPreview && <HistoryDocumentView document={document} snapshot={historyPreview.snapshot} loading={historyPreview.loading} failed={historyPreview.failed} presentContent={historyPreview.presentContent} />}

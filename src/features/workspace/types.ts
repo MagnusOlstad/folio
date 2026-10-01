@@ -5,6 +5,7 @@ import type {
   ViewerDocument,
 } from "../../domain/types.ts";
 import type { FilingFields, FilingQueueEntry } from "./model/filing.ts";
+import type { RefileResult } from "../../domain/types.ts";
 import type { NoteExportFormat } from "./model/note-export.ts";
 
 export type TabDrag = { documentId: string; groupId: string };
@@ -94,6 +95,8 @@ export type EditorWorkspaceActions = {
     document: ViewerDocument,
     format: NoteExportFormat,
   ) => void;
+  applyRefiledNote: (result: RefileResult) => void;
+  prepareRefile: (documentId: string) => Promise<boolean>;
   beforeHistoryRestore: (documentId: string) => Promise<void>;
   historyRestored: (documentId: string) => Promise<void>;
   notifyMessage: (message: string) => void;

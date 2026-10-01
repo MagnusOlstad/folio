@@ -4,14 +4,22 @@ export function registerRoutes(app, mlxService, manager) {
     try { response.json(await mlxService.status()) } catch (error) { next(error) }
   })
 
-  for (const action of ['install', 'load', 'unload']) {
+  app.put('/api/mlx/models/selection', async (request, response) => {
+    try { response.json(await mlxService.selectGenerationModel(String(request.body?.id || ''))) }
+    catch (error) {
+      const status = Number.isInteger(error.statusCode) ? error.statusCode : 503
+      response.status(status).json({ error: error.message || 'Could not select the generation model.' })
+    }
+  })
+
+  for (const action of ['install', 'load', 'unload', 'remove']) {
     app.post(`/api/mlx/models/:id/${action}`, async (request, response) => {
       const id = String(request.params.id || '')
       const key = `${id}:${action}`
       try {
         if (!modelActions.has(key)) {
           const operation = action === 'install' ? mlxService.install
-            : action === 'load' ? mlxService.load : mlxService.unload
+            : action === 'load' ? mlxService.load : action === 'remove' ? mlxService.remove : mlxService.unload
           modelActions.set(key, operation(id).finally(() => modelActions.delete(key)))
         }
         const status = await modelActions.get(key)

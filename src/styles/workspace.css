@@ -601,8 +601,8 @@
 .note-history-eyebrow { color: var(--acid); font-size: 9px; font-weight: 700; letter-spacing: .16em; }
 .note-history-exit { padding: 5px 11px; border-radius: 7px; background: var(--paper-raised); color: var(--muted); font-size: 12px; }
 .note-history-exit:hover { border-color: color-mix(in srgb, var(--muted) 55%, var(--line)); color: var(--ink); }
-.note-history-error { position: absolute; z-index: 4; top: 54px; left: 10px; right: 10px; margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--orange); background: var(--paper-raised); box-shadow: 0 4px 18px #0002; }
-.note-history-error button { border: 0; border-bottom: 1px solid currentColor; padding: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.note-history-error { position: absolute; z-index: 4; top: 54px; left: 10px; right: 10px; margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--orange); background: var(--paper-raised); box-shadow: 0 4px 18px #0002; pointer-events: none; }
+.note-history-error button { border: 0; border-bottom: 1px solid currentColor; padding: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; pointer-events: auto; }
 .note-history-track-wrap { position: relative; flex: 1 1 auto; min-height: 0; container-type: size; border-top: 1px solid color-mix(in srgb, var(--line) 72%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent); }
 .note-history-focus { position: absolute; z-index: 0; top: 50%; left: 10px; right: 10px; height: 52px; transform: translateY(-50%); border: 1px solid color-mix(in srgb, var(--line) 75%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--paper-raised) 76%, transparent); pointer-events: none; }
 .note-history-sticky-day { position: absolute; z-index: 2; top: 0; left: 0; right: 0; height: 38px; box-sizing: border-box; display: flex; align-items: center; gap: 14px; overflow: hidden; padding: 0 12px 0 21px; border-bottom: 1px solid var(--line); background: var(--paper); color: var(--muted); font-size: 11px; font-weight: 600; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
@@ -1156,9 +1156,73 @@
 }
 
 .document-heading {
+  position: relative;
   padding: clamp(20px, 3cqi, 32px) clamp(22px, 6cqi, 64px) 18px;
   border-bottom: 1px solid rgba(var(--line-rgb), 0.65);
 }
+.document-refile-button {
+  position: absolute;
+  top: clamp(20px, 3cqi, 32px);
+  right: clamp(22px, 6cqi, 64px);
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+.document-refile-button:hover { color: var(--ink); border-color: var(--muted); }
+.refile-layer {
+  position: fixed;
+  z-index: 60;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgb(0 0 0 / 42%);
+}
+.refile-dialog {
+  display: grid;
+  gap: 18px;
+  width: min(520px, 100%);
+  max-height: min(720px, 90dvh);
+  overflow-y: auto;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--paper);
+  box-shadow: 0 22px 80px rgb(0 0 0 / 24%);
+}
+.refile-dialog header span { color: var(--muted); font-size: 10px; }
+.refile-dialog h2 { margin: 4px 0 0; font-size: 18px; }
+.refile-dialog form { display: grid; gap: 14px; }
+.refile-dialog label { display: grid; gap: 6px; font-size: 11px; color: var(--muted); }
+.refile-dialog input,
+.refile-dialog textarea {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--paper-raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+.refile-dialog footer { display: flex; justify-content: flex-end; gap: 8px; }
+.refile-dialog footer button {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+.refile-dialog footer button[type="submit"] { background: var(--acid); color: var(--ink); border-color: transparent; }
+.refile-dialog [role="alert"] { color: var(--danger, #bd553e); font-size: 11px; }
 
 .document-heading p {
   margin: 0 0 10px;
@@ -1181,6 +1245,9 @@
   font: 500 clamp(18px, 2.4cqi, 24px)/1.25 ui-sans-serif, system-ui, sans-serif;
   letter-spacing: -0.01em;
   text-align: left;
+}
+.document-heading > :is(h1, .document-title, .document-title-editor) {
+  max-width: calc(100% - 112px);
 }
 
 .document-title:not(:disabled) {

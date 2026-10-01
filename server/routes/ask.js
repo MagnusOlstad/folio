@@ -8,12 +8,16 @@ export function registerRoutes(app, runtime) {
 app.post('/api/ask', async (request, response, next) => {
   try {
     const question = String(request.body?.question || '').trim()
-    const requestedModel = String(request.body?.model || answerModel).trim()
-    const selectedAnswerModel = requestedModel === 'gemma4' ? answerModel : requestedModel
+    const requestedModel = String(request.body?.model || await mlxService.selectedGenerationModel?.() || answerModel).trim()
+    const selectedAnswerModel = requestedModel === 'gemma4'
+      ? 'gemma4'
+      : mlxService.modelDefinitions[requestedModel]?.purpose === 'generation'
+        ? requestedModel
+        : Object.values(mlxService.modelDefinitions).find((model) => model.repository === requestedModel && model.purpose === 'generation')?.id
     const now = new Date()
     const timeZone = validTimeZone(String(request.body?.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone))
     if (!question) return response.status(400).json({ error: 'Ask a question first.' })
-    if (!answerModels.includes(selectedAnswerModel)) {
+    if (!selectedAnswerModel || (!request.body?.model && !answerModels.includes(answerModel))) {
       return response.status(400).json({ error: 'The selected Ask model is not configured.' })
     }
 
@@ -24,7 +28,7 @@ app.post('/api/ask', async (request, response, next) => {
       return response.json({
         answer: 'I could not find anything relevant in your notes yet.',
         sources: [],
-        model: selectedAnswerModel,
+        model: mlxService.modelDefinitions[selectedAnswerModel].repository,
         retrieval: retrievalLabel,
       })
     }
@@ -75,7 +79,7 @@ app.post('/api/ask', async (request, response, next) => {
             context,
           ].filter(Boolean).join('\n'),
         },
-      ], { temperature: 0.1, maxTokens: Math.min(4096, Math.floor(askContextLength / 2)) })
+      ], { modelId: selectedAnswerModel, temperature: 0.1, maxTokens: Math.min(4096, Math.floor(askContextLength / 2)) })
     } catch (error) {
       error.answerResponse = true
       throw error
@@ -107,7 +111,7 @@ app.post('/api/ask', async (request, response, next) => {
         linked: _linked,
         ...record
       }) => record),
-      model: selectedAnswerModel,
+      model: mlxService.modelDefinitions[selectedAnswerModel].repository,
       retrieval: retrievalLabel,
     })
   } catch (error) {

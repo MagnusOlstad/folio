@@ -264,7 +264,8 @@ export function createObsidianImportService(runtime) {
 
     try {
       const status = await runtime.mlxService.status()
-      if (!status.models.find((model) => model.id === 'gemma4')?.installed) throw new Error('Gemma 4 E4B must be installed before importing.')
+      if (!status.models.find((model) => model.id === status.selectedGenerationModel)?.installed) throw new Error('The selected generation model must be installed before importing.')
+      const selectedGenerationModel = runtime.mlxService.modelDefinitions[status.selectedGenerationModel]?.repository || runtime.classifierModel
       const records = await runtime.readRecords()
       const candidates = []
       for (const file of scan.files) {
@@ -340,6 +341,7 @@ export function createObsidianImportService(runtime) {
           const linked = rewriteObsidianLinks(source.content, file.relativePath, entry.destination, allNotes)
           const importedAt = new Date().toISOString()
           const tags = Array.from(new Set([...sourceTags(source.frontmatter, runtime.normalizeTag), ...classified.tags])).slice(0, 12)
+          const classificationModel = classified.generationModel || selectedGenerationModel
           const frontmatter = {
             title: sourceTitle(source, file.relativePath),
             type: String(source.frontmatter.type || classified.type),
@@ -347,7 +349,7 @@ export function createObsidianImportService(runtime) {
             tags,
             ...(sourceAliases(source.frontmatter).length ? { aliases: sourceAliases(source.frontmatter) } : {}),
             status: 'draft',
-            generated: { by: `okf-notetaker/${runtime.classifierModel}`, at: sourceDate(source.frontmatter, { birthtime: new Date(file.birthtime || file.mtime), birthtimeMs: Date.parse(file.birthtime || ''), mtime: new Date(file.mtime) }) },
+            generated: { by: `okf-notetaker/${classificationModel}`, at: sourceDate(source.frontmatter, { birthtime: new Date(file.birthtime || file.mtime), birthtimeMs: Date.parse(file.birthtime || ''), mtime: new Date(file.mtime) }) },
             filing: { by: 'import:obsidian', at: importedAt },
             import: { provider: 'obsidian', vault_id: scan.vaultId, source_path: file.relativePath, source_hash: file.hash, imported_at: importedAt, destination: entry.destination },
           }

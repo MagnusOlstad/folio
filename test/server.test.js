@@ -1109,6 +1109,71 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   await assert.rejects(fs.access(path.join(dataRoot, 'bundle', 'temporary', 'sole')), { code: 'ENOENT' })
   await assert.rejects(fs.access(path.join(dataRoot, 'bundle', 'temporary')), { code: 'ENOENT' })
 
+  await writeFakeMlxControl(fixture.controlPath, {})
+  const refileSourceId = '/refile/original.md'
+  const refileSourcePath = path.join(dataRoot, 'bundle', refileSourceId.slice(1))
+  await fs.mkdir(path.dirname(refileSourcePath), { recursive: true })
+  const originalRefileMarkdown = [
+    '---', 'title: Original refile note', 'type: Note', 'description: Original description.', 'tags: [original]',
+    'generated:', '  by: human:local', '  at: 2026-10-01T00:00:00.000Z', 'filing:', '  by: human:local',
+    '  at: 2026-10-01T00:00:00.000Z', '---', '', 'Original body before refile.', '',
+  ].join('\n')
+  await fs.writeFile(refileSourcePath, originalRefileMarkdown)
+  assert.equal((await (await fetch(`${baseUrl}/api/reindex`, { method: 'POST' })).json()).errors.length, 0)
+  await runtime.history.reconcile('Initial refile source', [refileSourceId])
+  const originalHistory = await (await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(refileSourceId)}`)).json()
+  const beforeRefileRevision = originalHistory.entries[0].revision
+
+  const proposalRequest = () => fetch(`${baseUrl}/api/file/refile/propose`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: refileSourceId }),
+  })
+  const refileRequest = (proposal, fields) => fetch(`${baseUrl}/api/file/refile`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: refileSourceId, hash: proposal.hash, fields }),
+  })
+  const staleProposal = await (await proposalRequest()).json()
+  const externallyUpdatedMarkdown = originalRefileMarkdown.replace('Original body before refile.', 'A newer saved edit.')
+  await fs.writeFile(refileSourcePath, externallyUpdatedMarkdown)
+  const staleResponse = await refileRequest(staleProposal, { directory: '/archive', filename: 'final.md', title: 'Final title', description: 'Updated description.', tags: ['updated'] })
+  assert.equal(staleResponse.status, 409)
+  assert.equal(await fs.readFile(refileSourcePath, 'utf8'), externallyUpdatedMarkdown, 'stale review leaves the note untouched')
+
+  const collisionProposal = await (await proposalRequest()).json()
+  const collisionPath = path.join(dataRoot, 'bundle', 'archive', 'conflict.md')
+  await fs.mkdir(path.dirname(collisionPath), { recursive: true })
+  await fs.writeFile(collisionPath, 'Existing conflict target.\n')
+  const collisionResponse = await refileRequest(collisionProposal, { directory: '/archive', filename: 'conflict.md', title: 'Conflicting title', description: 'Keep existing.', tags: [] })
+  assert.equal(collisionResponse.status, 409)
+  assert.equal(await fs.readFile(refileSourcePath, 'utf8'), externallyUpdatedMarkdown, 'destination collision leaves the source note untouched')
+  assert.equal(await fs.readFile(collisionPath, 'utf8'), 'Existing conflict target.\n')
+
+  const acceptedProposal = await (await proposalRequest()).json()
+  const acceptedResponse = await refileRequest(acceptedProposal, { directory: '/Archive Area/Mixed Topic', filename: 'final.md', title: 'Reviewed title', description: 'Reviewed description.', tags: ['reviewed', 'refiled'] })
+  const accepted = await acceptedResponse.json()
+  assert.equal(acceptedResponse.status, 200, JSON.stringify(accepted))
+  assert.equal(accepted.oldId, refileSourceId)
+  assert.equal(accepted.newId, '/archive-area/mixed-topic/final.md')
+  assert.equal(accepted.note.content, 'A newer saved edit.')
+  await assert.rejects(fs.access(refileSourcePath), { code: 'ENOENT' })
+  const acceptedMarkdown = await fs.readFile(path.join(dataRoot, 'bundle', 'archive-area', 'mixed-topic', 'final.md'), 'utf8')
+  const acceptedFrontmatter = markdownFrontmatter(acceptedMarkdown)
+  assert.equal(acceptedFrontmatter.title, 'Reviewed title')
+  assert.equal(acceptedFrontmatter.description, 'Reviewed description.')
+  assert.deepEqual(acceptedFrontmatter.tags, ['reviewed', 'refiled'])
+  assert.deepEqual(acceptedFrontmatter.filing.previous_paths, [refileSourceId])
+  const continuedHistory = await (await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(accepted.newId)}`)).json()
+  assert.ok(continuedHistory.entries.some((entry) => entry.revision === beforeRefileRevision), 'old path checkpoints remain visible after refile')
+  const restoreRefileResponse = await fetch(`${baseUrl}/api/note/history/restore`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: accepted.newId, revision: beforeRefileRevision }),
+  })
+  assert.equal(restoreRefileResponse.status, 200)
+  const restoredRefile = await restoreRefileResponse.json()
+  assert.equal(restoredRefile.note.id, accepted.newId, 'history restore preserves the current path')
+  assert.equal(restoredRefile.note.content, 'Original body before refile.')
+  await assert.rejects(fs.access(refileSourcePath), { code: 'ENOENT' })
+  assert.ok(await fs.readFile(path.join(dataRoot, 'bundle', 'archive-area', 'mixed-topic', 'final.md'), 'utf8'))
+
   const notesResponse = await fetch(`${baseUrl}/api/notes`)
   const notes = await notesResponse.json()
   assert.ok(notes.length >= 19)

@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 export function registerRoutes(app, runtime) {
-  const { appVersion, updateRepo, fetchLatestRelease, compareVersions, mlxService, classifierModel, answerModel, answerModels, embedModel,
+  const { appVersion, updateRepo, fetchLatestRelease, compareVersions, mlxService, classifierModel, embedModel,
     warmKeepAliveMs, askContextLength, indexEmbeddingCoverage, refreshMissingEmbeddingsInBackground,
     readRecords, publicRecord, readDrafts, normalizeDraftId, draftFilePath, queueDraftMutation, readDraft,
     writeDraft, resolveBundleMarkdownPath, isMovableConceptId, queueMarkdownMutation, reindexBundle,
@@ -12,13 +12,19 @@ app.get('/api/status', async (_request, response) => {
   const records = await readRecords()
   const embeddingCoverage = indexEmbeddingCoverage(records)
   const models = modelStatus.models
-  const installed = models.filter((model) => model.installed).map((model) => model.id === 'gemma4' ? classifierModel : embedModel)
-  const running = models.filter((model) => model.loaded).map((model) => model.id === 'gemma4' ? classifierModel : embedModel)
-  const configuredModels = [classifierModel, embedModel]
-  const missingModels = models.filter((model) => !model.installed).map((model) => model.id === 'gemma4' ? classifierModel : embedModel)
+  const selectedGeneration = mlxService.modelDefinitions[modelStatus.selectedGenerationModel]
+  const selectedModelName = selectedGeneration?.repository || classifierModel
+  const installed = models.filter((model) => model.installed).map((model) => (
+    model.purpose === 'embeddings' ? embedModel : mlxService.modelDefinitions[model.id]?.repository || model.id
+  ))
+  const running = models.filter((model) => model.loaded).map((model) => (
+    model.purpose === 'embeddings' ? embedModel : mlxService.modelDefinitions[model.id]?.repository || model.id
+  ))
+  const configuredModels = [selectedModelName, embedModel]
+  const missingModels = configuredModels.filter((model) => !installed.includes(model))
   response.json({
     online: modelStatus.available && modelStatus.helperAvailable,
-    classifierModel, answerModel, answerModels, embedModel, configuredModels, missingModels,
+    classifierModel: selectedModelName, answerModel: selectedModelName, answerModels: [selectedModelName], embedModel, configuredModels, missingModels,
     installingModels: modelStatus.installing, installed, running,
     warmKeepAlive: `${Math.floor(warmKeepAliveMs / 60_000)}m`, askContextLength, embeddingCoverage,
   })

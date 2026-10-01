@@ -19,6 +19,7 @@ import { expandedPathsForFiles, isUntitledId } from "../../../lib/workspace.ts";
 import { bundleDirectories } from "../model/directory-suggestions.ts";
 import { useNoteExport } from "./useNoteExport.ts";
 import { useThemeSettings } from "../../settings/hooks/useThemeSettings.ts";
+import type { SettingsCategory } from "../../settings/model/settings-category.ts";
 import { useObsidianImport } from "../../settings/hooks/useObsidianImport.ts";
 import {
   useWorkspaceSessionPersistence,
@@ -44,6 +45,12 @@ export function useWorkspaceController(): WorkspaceShellProps {
   } | null>(null);
   const noteExport = useNoteExport({ setMessage });
   const themeSettings = useThemeSettings();
+  const openThemeSettings = themeSettings.openSettings;
+  const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>("bundles");
+  const openSettings = useCallback((category: SettingsCategory = "bundles") => {
+    setSettingsCategory(category);
+    openThemeSettings();
+  }, [openThemeSettings]);
   const bundleSetup = useBundleSetup();
   const rendererBundleId = bundleSetup.activeBundleId || "legacy-bundle";
   const [initialWorkspaceState] = useState(() =>
@@ -515,7 +522,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
         documents.drafts[document.id],
         format,
       ),
-    openSettings: themeSettings.openSettings,
+    openSettings,
   });
 
   const { sidebar, moveBundleFile } = useWorkspaceSidebarProps({
@@ -546,7 +553,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       return navigation.openDocument(...args);
     },
     bundleSetup: settingsBundleSetup,
-    openSettings: themeSettings.openSettings,
+    openSettings: () => openSettings(),
   });
 
   return {
@@ -559,14 +566,24 @@ export function useWorkspaceController(): WorkspaceShellProps {
       mlxActionModel: models.mlxActionModel,
       onInstallMlxModel: models.installMlxModel,
       onToggleMlxModel: models.toggleMlxModel,
-      onOpenSettings: themeSettings.openSettings,
+      onOpenSettings: (category) => openSettings(category),
     },
     settings: {
       open: themeSettings.settingsOpen,
+      initialCategory: settingsCategory,
       themeId: themeSettings.themeId,
       onSelectTheme: themeSettings.selectTheme,
       obsidianImport,
       bundleSetup: settingsBundleSetup,
+      modelSettings: {
+        status: models.mlxStatus,
+        actionModel: models.mlxActionModel,
+        action: models.mlxAction,
+        error: models.modelError,
+        install: models.installMlxModel,
+        remove: models.removeMlxModel,
+        select: models.selectGenerationModel,
+      },
       onClose: themeSettings.closeSettings,
     },
     sidebar,
@@ -663,6 +680,18 @@ export function useWorkspaceController(): WorkspaceShellProps {
         revealStandaloneFiling: mutations.revealStandaloneFiling,
         confirmFiling: mutations.confirmFiling,
         dismissFiling: mutations.dismissFiling,
+        applyRefiledNote: mutations.applyRefiledNote,
+        prepareRefile: async (documentId) => {
+          try {
+            await autosave.flushSave(documentId);
+            await mutations.flushPendingNoteSaves(documentId);
+            if (autosave.isDirty(documentId)) throw new Error("Could not save the latest note edits before refiling.");
+            return true;
+          } catch (error) {
+            setMessage(error instanceof Error ? error.message : "Could not save the latest note edits before refiling.");
+            return false;
+          }
+        },
         beginEditing: (groupId, document) => {
           tabs.pinTab(groupId, document.id);
           mutations.beginEditing(groupId, document);

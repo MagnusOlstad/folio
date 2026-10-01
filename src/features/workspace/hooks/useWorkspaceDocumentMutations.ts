@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type {
   BundleFile,
@@ -6,6 +7,7 @@ import type {
   Note,
   NoteDetail,
   NoteUpdateResult,
+  RefileResult,
   TabGroup,
   ViewerDocument,
 } from "../../../domain/types.ts";
@@ -54,6 +56,7 @@ export function useWorkspaceDocumentMutations({
   clearDiscovery,
   replaceDiscoveryDocument,
 }: UseWorkspaceDocumentMutationsOptions) {
+  const saveFailures = useRef(new Map<string, string>());
   function updateFilingEntry(
     documentId: string,
     update: (entry: ReturnType<typeof filingEntry>) => ReturnType<typeof filingEntry>,
@@ -243,6 +246,21 @@ export function useWorkspaceDocumentMutations({
     replaceDiscoveryDocument(oldId, updated);
   }
 
+  function applyRefiledNote(result: RefileResult) {
+    applyUpdatedNote(result.note, result.oldId);
+    if (result.warning) setMessage(result.warning);
+  }
+
+  async function flushPendingNoteSaves(id: string) {
+    while (state.saveQueues.current[id]) {
+      const pending = state.saveQueues.current[id];
+      await pending.catch(() => undefined);
+      if (state.saveQueues.current[id] === pending) break;
+    }
+    const failed = saveFailures.current.get(id);
+    if (failed) throw new Error(failed);
+  }
+
   function persistMetadata(
     document: ViewerDocument,
     field: "title" | "description",
@@ -255,6 +273,7 @@ export function useWorkspaceDocumentMutations({
     }
     if (normalized === document[field]) return;
     const id = document.id;
+    saveFailures.current.delete(id);
     const existingQueue = state.saveQueues.current[id] || Promise.resolve();
     state.setSavingDocuments((current) => new Set(current).add(id));
     const save = existingQueue
@@ -267,6 +286,7 @@ export function useWorkspaceDocumentMutations({
             body: JSON.stringify({ [field]: normalized }),
           },
         );
+        saveFailures.current.delete(id);
         const [notesResult, filesResult] = await Promise.allSettled([
           api<Note[]>("/api/notes"),
           api<BundleFile[]>("/api/files"),
@@ -277,13 +297,11 @@ export function useWorkspaceDocumentMutations({
         clearDiscovery();
         if (result.warning) setMessage(result.warning);
       })
-      .catch((error) =>
-        setMessage(
-          error instanceof Error
-            ? error.message
-            : `Could not update note ${field}`,
-        ),
-      )
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : `Could not update note ${field}`;
+        saveFailures.current.set(id, message);
+        setMessage(message);
+      })
       .finally(() => {
         if (state.saveQueues.current[id] === save) {
           delete state.saveQueues.current[id];
@@ -525,6 +543,8 @@ export function useWorkspaceDocumentMutations({
   return {
     persistMetadata,
     persistDocument,
+    applyRefiledNote,
+    flushPendingNoteSaves,
     refreshDocumentEmbedding,
     beginEditing,
     finishEditing,

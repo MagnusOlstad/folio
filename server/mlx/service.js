@@ -11,6 +11,16 @@ const MODEL_DEFINITIONS = Object.freeze({
     repository: 'mlx-community/gemma-4-e4b-it-4bit', revision: '475b9088d29754a3379866cf5aeb6b41acd313c2',
     task: 'generation', downloadSizeBytes: 5_180_000_000,
   },
+  qwen35: {
+    id: 'qwen35', name: 'Qwen 3.5 4B (4-bit)', purpose: 'generation',
+    repository: 'mlx-community/Qwen3.5-4B-4bit', revision: '0e7ffd5c629ef7719d4cbc04069232580bfa9d9c',
+    task: 'generation', downloadSizeBytes: 3_060_000_000,
+  },
+  llama32: {
+    id: 'llama32', name: 'Llama 3.2 3B Instruct (4-bit)', purpose: 'generation',
+    repository: 'mlx-community/Llama-3.2-3B-Instruct-4bit', revision: '7f0dc925e0d0afb0322d96f9255cfddf2ba5636e',
+    task: 'generation', downloadSizeBytes: 1_810_000_000,
+  },
   embeddinggemma: {
     id: 'embeddinggemma', name: 'EmbeddingGemma', purpose: 'embeddings',
     repository: 'mlx-community/embeddinggemma-300m-4bit', revision: '5d9ef074df3957afc5c77127f208fddbc3c54187',
@@ -163,6 +173,9 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   const starting = new Map()
   const startingWorkers = new Map()
   const installing = new Set()
+  const removing = new Set()
+  const installationStartedAt = new Map()
+  const generationSelectionPath = path.join(modelRoot, 'generation-model.json')
   const idleTimers = new Map()
   const activeRequests = new Map()
   let closed = false
@@ -174,6 +187,64 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     const model = MODEL_DEFINITIONS[id]
     if (!model) throw Object.assign(new Error('Unknown MLX model.'), { statusCode: 404 })
     return model
+  }
+
+  async function selectedGenerationModel() {
+    try {
+      const saved = JSON.parse(await fs.readFile(generationSelectionPath, 'utf8'))
+      if (typeof saved.id === 'string' && MODEL_DEFINITIONS[saved.id]?.purpose === 'generation') return saved.id
+    } catch { /* use the migrated default */ }
+    return 'gemma4'
+  }
+
+  async function selectGenerationModel(id) {
+    const definition = modelDefinition(id)
+    if (definition.purpose !== 'generation') throw Object.assign(new Error('Choose a generation model.'), { statusCode: 400 })
+    await fs.mkdir(modelRoot, { recursive: true })
+    const temporaryPath = `${generationSelectionPath}.${randomUUID()}.tmp`
+    await fs.writeFile(temporaryPath, JSON.stringify({ id }), 'utf8')
+    await fs.rename(temporaryPath, generationSelectionPath)
+    return status()
+  }
+
+  async function installationProgress(definition) {
+    const startedAt = installationStartedAt.get(definition.id)
+    if (!startedAt) return null
+    const repoRoot = path.join(cacheRoot, `models--${definition.repository.replaceAll('/', '--')}`)
+    let downloadedBytes = 0
+    const countedFiles = new Set()
+    async function countFile(entryPath, partialOnly = false) {
+      try {
+        const stat = await fs.stat(entryPath)
+        if (!stat.isFile() || (partialOnly && stat.mtimeMs < startedAt)) return
+        const realPath = await fs.realpath(entryPath)
+        if (countedFiles.has(realPath)) return
+        countedFiles.add(realPath)
+        downloadedBytes += stat.size
+      } catch { /* an in-progress cache write may disappear between reads */ }
+    }
+    async function visitSnapshot(directory) {
+      let entries
+      try { entries = await fs.readdir(directory, { withFileTypes: true }) } catch { return }
+      await Promise.all(entries.map(async (entry) => {
+        const entryPath = path.join(directory, entry.name)
+        if (entry.isDirectory()) return visitSnapshot(entryPath)
+        if (entry.isFile() || entry.isSymbolicLink()) return countFile(entryPath)
+      }))
+    }
+    await visitSnapshot(path.join(modelSnapshotRoot(cacheRoot, definition), definition.revision))
+    let blobs = []
+    try { blobs = await fs.readdir(path.join(repoRoot, 'blobs'), { withFileTypes: true }) } catch { /* not downloaded yet */ }
+    await Promise.all(blobs.filter((entry) => entry.isFile() && entry.name.endsWith('.incomplete'))
+      .map((entry) => countFile(path.join(repoRoot, 'blobs', entry.name), true)))
+    const installed = await isInstalled(definition)
+    const percent = installed ? 100 : Math.min(99, Math.floor((downloadedBytes / definition.downloadSizeBytes) * 100))
+    return {
+      downloadedBytes: Math.min(downloadedBytes, definition.downloadSizeBytes),
+      totalBytes: definition.downloadSizeBytes,
+      percent,
+      phase: installed ? 'loading' : 'downloading',
+    }
   }
 
   async function isInstalled(definition) {
@@ -196,6 +267,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   async function startModel(id, { allowDownload = false } = {}) {
     const definition = modelDefinition(id)
     if (closed) throw new Error('The MLX service is shutting down.')
+    if (removing.has(id)) throw Object.assign(new Error('This model is being removed. Try again when it finishes.'), { statusCode: 409 })
     if (!isAvailable) throw new Error('Native MLX models require Apple Silicon and macOS 14 or newer.')
     if (workers.has(id)) return workers.get(id)
     if (starting.has(id)) return starting.get(id)
@@ -247,24 +319,28 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   }
 
   async function run(id, operation, payload, timeoutMs) {
-    const worker = await startModel(id)
-    stopIdleTimer(id)
+    if (removing.has(id)) throw Object.assign(new Error('This model is being removed. Try again when it finishes.'), { statusCode: 409 })
     activeRequests.set(id, (activeRequests.get(id) || 0) + 1)
+    let worker
     try {
+      worker = await startModel(id)
+      stopIdleTimer(id)
       return await worker.request(operation, payload, timeoutMs)
     } finally {
       activeRequests.set(id, Math.max(0, (activeRequests.get(id) || 1) - 1))
-      await touchModel(id, worker)
+      if (worker) await touchModel(id, worker)
     }
   }
 
   async function status() {
+    const selected = await selectedGenerationModel()
     const models = await Promise.all(Object.values(MODEL_DEFINITIONS).map(async (definition) => ({
       id: definition.id,
       name: definition.name,
       purpose: definition.purpose,
       downloadSizeBytes: definition.downloadSizeBytes,
       downloadSizeIsEstimate: true,
+      selected: definition.purpose === 'generation' && selected === definition.id,
       installed: await isInstalled(definition),
       loaded: workers.has(definition.id),
       memory: workers.get(definition.id)?.memory
@@ -281,17 +357,21 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
       keepAliveMs: warmKeepAliveMs,
       installing: [...installing],
       models,
+      selectedGenerationModel: selected,
+      downloads: await Promise.all([...installing].map(async (id) => ({ id, progress: await installationProgress(MODEL_DEFINITIONS[id]) }))),
     }
   }
 
   async function install(id) {
     modelDefinition(id)
     installing.add(id)
+    installationStartedAt.set(id, Date.now())
     try {
       await startModel(id, { allowDownload: true })
       return await status()
     } finally {
       installing.delete(id)
+      installationStartedAt.delete(id)
     }
   }
 
@@ -306,8 +386,31 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     return status()
   }
 
+  async function remove(id) {
+    const definition = modelDefinition(id)
+    if (installing.has(id) || starting.has(id)) throw Object.assign(new Error('Wait for this model operation to finish before removing it.'), { statusCode: 409 })
+    if ((activeRequests.get(id) || 0) > 0) throw Object.assign(new Error('This model is handling a request. Try again when it finishes.'), { statusCode: 409 })
+    if (removing.has(id)) throw Object.assign(new Error('This model is already being removed.'), { statusCode: 409 })
+    removing.add(id)
+    try {
+      if (installing.has(id) || starting.has(id) || (activeRequests.get(id) || 0) > 0) {
+        throw Object.assign(new Error('This model started a request. Try again when it finishes.'), { statusCode: 409 })
+      }
+      await stopModel(id)
+      const repoRoot = path.join(cacheRoot, `models--${definition.repository.replaceAll('/', '--')}`)
+      await fs.rm(repoRoot, { recursive: true, force: true })
+      return status()
+    } finally {
+      removing.delete(id)
+    }
+  }
+
   async function generate(messages, options = {}) {
-    return run('gemma4', 'generate', { messages, maxTokens: options.maxTokens, temperature: options.temperature }, 15 * 60_000)
+    const id = options.modelId || await selectedGenerationModel()
+    const definition = modelDefinition(id)
+    if (definition.purpose !== 'generation') throw new Error('The selected MLX model cannot generate text.')
+    const response = await run(id, 'generate', { messages, maxTokens: options.maxTokens, temperature: options.temperature }, 15 * 60_000)
+    return { ...response, modelId: id, model: definition.repository }
   }
 
   async function embed(input) {
@@ -323,6 +426,6 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     workers.clear()
   }
 
-  return { status, install, load, unload, generate, embed, close, keepAliveMs: warmKeepAliveMs,
+  return { status, install, load, unload, remove, selectGenerationModel, selectedGenerationModel, generate, embed, close, keepAliveMs: warmKeepAliveMs,
     modelDefinitions: MODEL_DEFINITIONS }
 }

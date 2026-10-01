@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { ViewerDocument } from "../../../domain/types.ts";
 import { isUntitledId } from "../../../lib/workspace.ts";
 import { DocumentBody } from "./DocumentBody.tsx";
@@ -8,6 +8,8 @@ import type { MetadataField } from "../types.ts";
 import type { FilingFields, FilingQueueEntry } from "../model/filing.ts";
 import { FilingConfirmation } from "./FilingConfirmation.tsx";
 import type { NoteExportFormat } from "../model/note-export.ts";
+import { RefileDialog } from "./RefileDialog.tsx";
+import type { RefileResult } from "./RefileDialog.tsx";
 
 export type DocumentViewProps = {
   groupId: string;
@@ -77,11 +79,15 @@ export type DocumentViewProps = {
   onRevealStandaloneFiling: (documentId: string) => void;
   onConfirmFiling: (groupId: string, documentId: string, action: "accept" | "standalone") => void;
   onDismissFiling: (groupId: string, documentId: string) => void;
+  onApplyRefile: (result: RefileResult) => void;
+  onPrepareRefile: (documentId: string) => Promise<boolean>;
 };
 
 export function DocumentView(props: DocumentViewProps) {
   const { document, getScrollTop, onScroll } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [refileOpen, setRefileOpen] = useState(false);
+  const [refilePreparing, setRefilePreparing] = useState(false);
 
   useLayoutEffect(() => {
     const scroll = scrollRef.current;
@@ -89,8 +95,10 @@ export function DocumentView(props: DocumentViewProps) {
   }, [document.id, getScrollTop]);
 
   return (
+    <>
     <article
       className={`document-view ${isUntitledId(document.id) ? "untitled" : ""}`}
+      inert={refileOpen || refilePreparing ? true : undefined}
     >
       <div
         className="document-scroll"
@@ -109,6 +117,14 @@ export function DocumentView(props: DocumentViewProps) {
             onBeginEditing={props.onBeginMetadataEditing}
             onChangeDraft={props.onChangeMetadataDraft}
             onFinishEditing={props.onFinishMetadataEditing}
+            onRefile={(target) => {
+              if (refilePreparing) return;
+              setRefilePreparing(true);
+              void props.onPrepareRefile(target.id).then((ready) => {
+                if (ready) setRefileOpen(true);
+              }).finally(() => setRefilePreparing(false));
+            }}
+            refileDisabled={refilePreparing}
           />
         )}
         <DocumentBody
@@ -166,5 +182,16 @@ export function DocumentView(props: DocumentViewProps) {
         onOpenDocument={props.onOpenDocument}
       />
     </article>
+    {refileOpen ? (
+      <RefileDialog
+        document={document}
+        onClose={() => setRefileOpen(false)}
+        onComplete={(result) => {
+          setRefileOpen(false);
+          props.onApplyRefile(result);
+        }}
+      />
+    ) : null}
+    </>
   );
 }
