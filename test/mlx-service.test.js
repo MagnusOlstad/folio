@@ -138,14 +138,19 @@ test('models install explicitly into their pinned snapshots and use the JSONL wo
 test('download progress counts deduplicated cached blobs and growing partial files', async (t) => {
   const { root, logPath, service } = await fixture(t)
   await setControl(root, { readyDelayMs: 1_000 })
-  const installation = service.install('qwen35')
-  await waitUntil(async () => (await readLog(logPath)).some((entry) => entry.event === 'ready' && entry.model?.includes('Qwen3.5')))
-
   const definition = service.modelDefinitions.qwen35
   const cacheRoot = path.join(root, 'models', 'hf-cache')
   const repoRoot = path.join(cacheRoot, `models--${definition.repository.replaceAll('/', '--')}`)
-  const snapshot = path.join(repoRoot, 'snapshots', definition.revision)
   const blobs = path.join(repoRoot, 'blobs')
+  await fs.mkdir(blobs, { recursive: true })
+  const incompleteBlob = path.join(blobs, 'resumed-download.incomplete')
+  await fs.writeFile(incompleteBlob, Buffer.alloc(20))
+  const old = new Date(Date.now() - 60_000)
+  await fs.utimes(incompleteBlob, old, old)
+  const installation = service.install('qwen35')
+  await waitUntil(async () => (await readLog(logPath)).some((entry) => entry.event === 'ready' && entry.model?.includes('Qwen3.5')))
+
+  const snapshot = path.join(repoRoot, 'snapshots', definition.revision)
   await fs.rm(path.join(snapshot, 'model.safetensors'))
   await fs.rm(path.join(snapshot, 'tokenizer_config.json'))
   await fs.mkdir(blobs, { recursive: true })
@@ -153,9 +158,6 @@ test('download progress counts deduplicated cached blobs and growing partial fil
   await fs.writeFile(completeBlob, Buffer.alloc(100))
   await fs.symlink(completeBlob, path.join(snapshot, 'model.safetensors'))
   await fs.symlink(completeBlob, path.join(snapshot, 'duplicate-weight-link'))
-  const incompleteBlob = path.join(blobs, 'download.incomplete')
-  await fs.writeFile(incompleteBlob, Buffer.alloc(20))
-
   const first = (await service.status()).downloads.find(({ id }) => id === 'qwen35').progress
   const otherCachedBytes = (await Promise.all(['config.json', 'tokenizer.json'].map(async (name) => (
     (await fs.stat(path.join(snapshot, name))).size
@@ -168,6 +170,27 @@ test('download progress counts deduplicated cached blobs and growing partial fil
   assert.ok(next.percent >= first.percent && next.percent <= 99)
 
   await setControl(root, {})
+  await installation
+})
+
+test('download progress includes native helper progress before cache files become visible', async (t) => {
+  const { root, logPath, service } = await fixture(t)
+  await setControl(root, { readyDelayMs: 1_000, downloadProgress: { downloadedBytes: 500, totalBytes: 1_000 } })
+  const installation = service.install('qwen35')
+  await waitUntil(async () => (await readLog(logPath)).some((entry) => entry.event === 'ready' && entry.model?.includes('Qwen3.5')))
+
+  const definition = service.modelDefinitions.qwen35
+  const snapshot = path.join(root, 'models', 'hf-cache', `models--${definition.repository.replaceAll('/', '--')}`, 'snapshots', definition.revision)
+  await fs.rm(path.join(snapshot, 'model.safetensors'))
+  await fs.rm(path.join(snapshot, 'tokenizer_config.json'))
+
+  await waitUntil(async () => (await service.status()).downloads
+    .find(({ id }) => id === 'qwen35').progress.downloadedBytes === 500)
+  const progress = (await service.status()).downloads.find(({ id }) => id === 'qwen35').progress
+  assert.equal(progress.downloadedBytes, 500)
+  assert.equal(progress.totalBytes, 1_000)
+  assert.equal(progress.percent, 50)
+  assert.equal(progress.phase, 'downloading')
   await installation
 })
 
@@ -212,9 +235,12 @@ test('deduplicates simultaneous launches for the same model', async (t) => {
 
 test('persists generation selection and consistently launches the selected model', async (t) => {
   const { root, logPath, service } = await fixture(t)
+  await service.install('gemma4')
   const selection = await service.selectGenerationModel('qwen35')
   assert.equal(selection.selectedGenerationModel, 'qwen35')
   assert.equal(selection.models.find((model) => model.id === 'qwen35').selected, true)
+  assert.equal(selection.models.find((model) => model.id === 'gemma4').loaded, false)
+  assert.ok((await readLog(logPath)).some((entry) => entry.event === 'request' && entry.operation === 'shutdown'))
   await service.install('qwen35')
   await service.generate([{ role: 'user', content: 'A planning note.' }])
   const qwenDefinition = service.modelDefinitions.qwen35

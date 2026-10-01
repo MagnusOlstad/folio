@@ -93,6 +93,13 @@ if (startupControl.exitBeforeReady) {
   process.stderr.write('fixture exited before readiness\n')
   process.exit(Number(startupControl.exitBeforeReady) || 23)
 }
+if (startupControl.downloadProgress) {
+  process.stdout.write(`${JSON.stringify({
+    event: 'download-progress',
+    downloadedBytes: startupControl.downloadProgress.downloadedBytes,
+    totalBytes: startupControl.downloadProgress.totalBytes,
+  })}\n`)
+}
 if (startupControl.readyDelayMs) await new Promise((resolve) => setTimeout(resolve, startupControl.readyDelayMs))
 if (process.env.FOLIO_MLX_FIXTURE_INVALID_JSON === '1') process.stdout.write('not-json\n')
 process.stdout.write(`${JSON.stringify({ event: 'ready', model, task, memory })}\n`)

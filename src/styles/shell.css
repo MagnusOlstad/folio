@@ -307,11 +307,9 @@ body.resizing-horizontal * {
   gap: 9px;
 }
 
-.mlx-model-guidance {
-  margin: -5px 0 0;
-  line-height: 1.4;
-}
 .mlx-model-settings-link {
+  align-self: flex-start;
+  margin-top: -5px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -322,8 +320,6 @@ body.resizing-horizontal * {
   text-underline-offset: 2px;
 }
 
-.mlx-helper-status,
-.mlx-model-guidance,
 .mlx-model-state,
 .mlx-model-details,
 .mlx-model-heading span {

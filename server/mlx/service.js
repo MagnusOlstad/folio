@@ -88,6 +88,7 @@ function makeWorker({ id, definition, executable, cacheRoot, modelDirectory, onE
     id,
     ready,
     memory: null,
+    downloadProgress: null,
     closed: false,
     request(operation, payload = {}, timeoutMs = 120_000) {
       if (worker.closed || !child.stdin.writable) return Promise.reject(new Error('The MLX worker is not running.'))
@@ -137,6 +138,16 @@ function makeWorker({ id, definition, executable, cacheRoot, modelDirectory, onE
         readyResolve(message)
         continue
       }
+      if (message.event === 'download-progress') {
+        if (Number.isFinite(message.downloadedBytes) && Number.isFinite(message.totalBytes)
+          && message.downloadedBytes >= 0 && message.totalBytes > 0) {
+          worker.downloadProgress = {
+            downloadedBytes: Math.max(worker.downloadProgress?.downloadedBytes || 0, message.downloadedBytes),
+            totalBytes: message.totalBytes,
+          }
+        }
+        continue
+      }
       const pendingRequest = pending.get(message.id)
       if (!pendingRequest) continue
       clearTimeout(pendingRequest.timer)
@@ -174,7 +185,6 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   const startingWorkers = new Map()
   const installing = new Set()
   const removing = new Set()
-  const installationStartedAt = new Map()
   const generationSelectionPath = path.join(modelRoot, 'generation-model.json')
   const idleTimers = new Map()
   const activeRequests = new Map()
@@ -200,6 +210,8 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   async function selectGenerationModel(id) {
     const definition = modelDefinition(id)
     if (definition.purpose !== 'generation') throw Object.assign(new Error('Choose a generation model.'), { statusCode: 400 })
+    const previous = await selectedGenerationModel()
+    if (previous !== id) await stopModel(previous)
     await fs.mkdir(modelRoot, { recursive: true })
     const temporaryPath = `${generationSelectionPath}.${randomUUID()}.tmp`
     await fs.writeFile(temporaryPath, JSON.stringify({ id }), 'utf8')
@@ -208,15 +220,14 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   }
 
   async function installationProgress(definition) {
-    const startedAt = installationStartedAt.get(definition.id)
-    if (!startedAt) return null
+    if (!installing.has(definition.id)) return null
     const repoRoot = path.join(cacheRoot, `models--${definition.repository.replaceAll('/', '--')}`)
     let downloadedBytes = 0
     const countedFiles = new Set()
-    async function countFile(entryPath, partialOnly = false) {
+    async function countFile(entryPath) {
       try {
         const stat = await fs.stat(entryPath)
-        if (!stat.isFile() || (partialOnly && stat.mtimeMs < startedAt)) return
+        if (!stat.isFile()) return
         const realPath = await fs.realpath(entryPath)
         if (countedFiles.has(realPath)) return
         countedFiles.add(realPath)
@@ -236,12 +247,17 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     let blobs = []
     try { blobs = await fs.readdir(path.join(repoRoot, 'blobs'), { withFileTypes: true }) } catch { /* not downloaded yet */ }
     await Promise.all(blobs.filter((entry) => entry.isFile() && entry.name.endsWith('.incomplete'))
-      .map((entry) => countFile(path.join(repoRoot, 'blobs', entry.name), true)))
+      .map((entry) => countFile(path.join(repoRoot, 'blobs', entry.name))))
     const installed = await isInstalled(definition)
-    const percent = installed ? 100 : Math.min(99, Math.floor((downloadedBytes / definition.downloadSizeBytes) * 100))
+    const worker = startingWorkers.get(definition.id) || workers.get(definition.id)
+    const nativeProgress = worker?.downloadProgress
+    if (nativeProgress) downloadedBytes = Math.max(downloadedBytes, nativeProgress.downloadedBytes)
+    const totalBytes = nativeProgress?.totalBytes || definition.downloadSizeBytes
+    const percent = installed ? 100 : Math.min(99, Math.floor((downloadedBytes
+      / totalBytes) * 100))
     return {
-      downloadedBytes: Math.min(downloadedBytes, definition.downloadSizeBytes),
-      totalBytes: definition.downloadSizeBytes,
+      downloadedBytes: Math.min(downloadedBytes, totalBytes),
+      totalBytes,
       percent,
       phase: installed ? 'loading' : 'downloading',
     }
@@ -309,8 +325,18 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     const worker = workers.get(id)
     if (!worker || (expectedWorker && worker !== expectedWorker)) return
     stopIdleTimer(id)
+    const childClosed = new Promise((resolve) => worker.child.once('close', resolve))
     try { await worker.request('shutdown', {}, 5_000) } catch { worker.child.kill() }
     if (!worker.child.killed) worker.child.kill()
+    if (!worker.closed) {
+      let timeout
+      const closed = await Promise.race([childClosed.then(() => true), new Promise((resolve) => {
+        timeout = setTimeout(() => resolve(false), 1_000)
+      })])
+      clearTimeout(timeout)
+      if (!closed) worker.child.kill('SIGKILL')
+      await childClosed
+    }
     workers.delete(id)
   }
 
@@ -365,13 +391,11 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   async function install(id) {
     modelDefinition(id)
     installing.add(id)
-    installationStartedAt.set(id, Date.now())
     try {
       await startModel(id, { allowDownload: true })
       return await status()
     } finally {
       installing.delete(id)
-      installationStartedAt.delete(id)
     }
   }
 
