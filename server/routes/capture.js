@@ -14,7 +14,8 @@ export function registerRoutes(app, runtime) {
   const bundleRootForRequest = typeof getBundleRoot === 'function' ? getBundleRoot : () => runtime.bundleRoot
 app.post('/api/notes', async (request, response, next) => {
   try {
-    const content = String(request.body?.content || '').trim()
+    const requestContent = String(request.body?.content || '')
+    const content = requestContent.trim()
     if (!content) return response.status(400).json({ error: 'Write something before saving.' })
     const sourceDraftId = normalizeDraftId(request.body?.draftId)
     if (sourceDraftId) {
@@ -36,10 +37,20 @@ app.post('/api/notes', async (request, response, next) => {
     const openingLine = content.split('\n').find((line) => line.trim())?.trim() || ''
     const pathGuide = openingLine.match(/^path\s*:\s*(.*)$/i)
     const filedContent = request.body?.filedContent === undefined
-      ? pathGuide ? content.slice(content.indexOf(openingLine) + openingLine.length).trim() : content
-      : String(request.body.filedContent).trim()
-    if (!filedContent) return response.status(400).json({ error: 'Write note content below the steering line before saving.' })
+      ? pathGuide
+        ? requestContent.slice(requestContent.indexOf(openingLine) + openingLine.length).replace(/^\r?\n/, '')
+        : requestContent
+      : String(request.body.filedContent)
+    if (!filedContent.trim()) return response.status(400).json({ error: 'Write note content below the steering line before saving.' })
     const conceptContent = normalizeMarkdownBreaks(filedContent)
+    const steering = request.body?.filedContent === undefined
+      ? pathGuide ? openingLine : ''
+      : (() => {
+        const bodyOffset = requestContent.indexOf(filedContent)
+        return bodyOffset < 0
+          ? requestContent.trim()
+          : `${requestContent.slice(0, bodyOffset)}${requestContent.slice(bodyOffset + filedContent.length)}`.trim()
+      })()
 
     let guidedPath = null
     if (pathGuide) {
@@ -81,10 +92,17 @@ app.post('/api/notes', async (request, response, next) => {
     let classifiedByModel = true
     let warning = null
     try {
-      result = await classify(content, records)
-    } catch {
+      result = await classify(filedContent, records, { steering, timeZone, now: new Date(createdAt) })
+    } catch (error) {
       classifiedByModel = false
-      warning = guidedKind
+      const invalidOutput = error?.code === 'INVALID_CLASSIFICATION_OUTPUT'
+      warning = invalidOutput
+        ? guidedPath !== null
+          ? 'The raw note was saved at the requested path, but the local generation model could not return valid filing metadata. Review the fallback title and description.'
+          : guidedKind
+            ? `The raw note was saved and the opening ${guidedKind} guide was used, but the local generation model could not return valid filing metadata.`
+            : 'The raw note was saved, but the local generation model could not return valid filing metadata. It was filed as Unsorted Note.'
+        : guidedKind
         ? `The raw note was saved and the opening ${guidedKind} guide was used, but the local generation model was unavailable for classification.`
         : guidedPath !== null
           ? 'The raw note was saved and the opening path guide was used, but the local generation model was unavailable for classification.'
@@ -101,7 +119,7 @@ app.post('/api/notes', async (request, response, next) => {
       }
     }
 
-    const classification = normalizeClassification(result, content, records)
+    const classification = normalizeClassification(result, filedContent, records, classifiedByModel, steering)
     if (guidedPath !== null) {
       classification.kind = 'note'
       classification.path = guidedPath === '/' ? [] : guidedPath.slice(1).split('/')
@@ -130,6 +148,7 @@ app.post('/api/notes', async (request, response, next) => {
         kind: classification.kind,
         rawId,
         content: conceptContent,
+        sourceContent: filedContent,
         createdAt,
         timeZone,
         classifiedByModel,
@@ -154,6 +173,7 @@ app.post('/api/notes', async (request, response, next) => {
             classification,
             rawId,
             content: conceptContent,
+            sourceContent: filedContent,
             createdAt,
             captureId: confirmationId,
             filingBy: captureActor,
@@ -165,7 +185,7 @@ app.post('/api/notes', async (request, response, next) => {
         classification.id = folder ? `/${folder}/${filename}` : `/${filename}`
         await fs.writeFile(
           path.join(targetFolder, filename),
-          conceptDocument(classification, rawId, createdAt, relatedConcepts, conceptContent, classifiedByModel, confirmationId),
+          conceptDocument(classification, rawId, createdAt, relatedConcepts, conceptContent, classifiedByModel, confirmationId, filedContent),
           { flag: 'wx' },
         )
       })

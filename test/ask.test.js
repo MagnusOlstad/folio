@@ -120,6 +120,29 @@ test('creation relationships keep only high-confidence existing concepts', () =>
   ], [1, 0])
   assert.deepEqual(relationships, [{ id: '/projects/aurora.md', relation: 'Mentions' }])
 
+  const calibrated = createFilingService({
+    ...createTextHelpers(),
+    searchTerms: (value) => String(value).toLowerCase().match(/[a-z0-9]+/g) || [],
+    cosineSimilarity: (left, right) => left?.[0] === 1 ? right?.[0] || 0 : 0,
+    lexicalScore: () => 0,
+  })
+  assert.deepEqual(calibrated.creationRelationships('A research workspace rollout and data import plan.', [
+    { id: '/projects/atlas/launch-plan.md', title: 'Atlas launch plan', embedding: [0.5], chunks: [{ embedding: [0.694] }] },
+    { id: '/engineering/observability.md', title: 'Observability', embedding: [0.54], chunks: [] },
+    { id: '/studio/ceramics.md', title: 'Ceramics', embedding: [0.368], chunks: [] },
+  ], [1]), [{ id: '/projects/atlas/launch-plan.md', relation: 'Related' }])
+  assert.deepEqual(calibrated.creationRelationships('An unclear general note.', [
+    { id: '/projects/atlas/launch-plan.md', title: 'Atlas launch plan', embedding: [0.61], chunks: [] },
+    { id: '/engineering/observability.md', title: 'Observability', embedding: [0.59], chunks: [] },
+  ], [1]), [], 'a weak semantic margin never creates an automatic link')
+  assert.deepEqual(calibrated.creationRelationships('A note with no shared terms.', [
+    { id: '/projects/atlas.md', title: 'Atlas', embedding: [0.9], chunks: [] },
+    { id: '/projects/orion.md', title: 'Orion', embedding: [0.89], chunks: [] },
+  ], [1]), [
+    { id: '/projects/atlas.md', relation: 'Related' },
+    { id: '/projects/orion.md', relation: 'Related' },
+  ], 'multiple high-confidence semantic links remain available')
+
   const search = createSearchService({
     ...createTextHelpers(),
     recordIsStale: () => false,
