@@ -3,6 +3,7 @@ import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useFiledDocumentAutosave } from "../../src/features/workspace/hooks/useFiledDocumentAutosave.ts";
+import { mergeRemoteAppend } from "../../src/lib/workspace.ts";
 
 async function advance(milliseconds: number) {
   await act(async () => {
@@ -12,6 +13,13 @@ async function advance(milliseconds: number) {
 
 describe("useFiledDocumentAutosave", () => {
   afterEach(() => vi.useRealTimers());
+
+  it("keeps an identical capture when the same text already appears in its observed base", () => {
+    const section = "\n\n## 2026-10-01 10:30\n\n- [ ] Repeat the same task";
+    const base = `# Todo${section}`;
+    const remote = `${base}${section}`;
+    expect(mergeRemoteAppend(base, base, remote)).toBe(`${base}${section}`);
+  });
 
   it("waits 500ms of idle time before saving the newest content", async () => {
     vi.useFakeTimers();
@@ -157,6 +165,7 @@ describe("useFiledDocumentAutosave", () => {
       "- [x] A edited\n\n## 2026-10-01 10:30\n\n- [x] B",
       "- [ ] A",
     ));
+    act(() => result.current.observeContent("todo", canonical, "- [x] A edited\n\n## 2026-10-01 10:30\n\n- [x] B"));
     await act(async () => resolveFirst?.(canonical));
 
     expect(save).toHaveBeenCalledTimes(2);
@@ -198,5 +207,30 @@ describe("useFiledDocumentAutosave", () => {
     expect(queuedContent).toContain("- [ ] B");
     expect(queuedContent.match(/- \[[x ]\] B/g)).toHaveLength(1);
     expect(save.mock.calls[1][2]).toBe(canonical);
+  });
+
+  it("does not let an older save response roll back a newer observed Todo version", async () => {
+    vi.useFakeTimers();
+    let resolveFirst: ((content: string) => void) | undefined;
+    const first = new Promise<string>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const staleResponse = "- [x] A saved by old request";
+    const observed = "- [x] A saved by old request\n\n## 2026-10-01 11:15\n\n- [ ] B";
+    const rebasedPending = "- [x] A locally edited\n\n## 2026-10-01 11:15\n\n- [ ] B";
+    const save = vi
+      .fn<(documentId: string, content: string, baseContent: string) => Promise<string>>()
+      .mockImplementationOnce(() => first)
+      .mockResolvedValueOnce(rebasedPending);
+    const { result } = renderHook(() => useFiledDocumentAutosave({ save }));
+
+    act(() => result.current.scheduleSave("todo", staleResponse, "- [ ] A"));
+    await advance(500);
+    act(() => result.current.scheduleSave("todo", "- [x] A locally edited", "- [ ] A"));
+    act(() => result.current.observeContent("todo", observed, rebasedPending));
+    await act(async () => resolveFirst?.(staleResponse));
+
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save.mock.calls[1]).toEqual(["todo", rebasedPending, observed]);
   });
 });

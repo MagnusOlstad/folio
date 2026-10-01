@@ -12,6 +12,8 @@ test("Todo append survives a held stale autosave and Enter filing acceptance", a
   const holdStaleSave = new Promise<void>((resolve) => { releaseStaleSave = resolve; });
   let resolveIntercepted: ((body: Record<string, unknown>) => void) | undefined;
   const interceptedSave = new Promise<Record<string, unknown>>((resolve) => { resolveIntercepted = resolve; });
+  let resolveFilingPost: (() => void) | undefined;
+  const filingPost = new Promise<void>((resolve) => { resolveFilingPost = resolve; });
   await page.route("**/api/note*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -20,6 +22,10 @@ test("Todo append survives a held stale autosave and Enter filing acceptance", a
       resolveIntercepted?.(body);
       await holdStaleSave;
     }
+    await route.continue();
+  });
+  await page.route("**/api/notes", async (route) => {
+    if (route.request().method() === "POST") resolveFilingPost?.();
     await route.continue();
   });
 
@@ -40,25 +46,30 @@ test("Todo append survives a held stale autosave and Enter filing acceptance", a
     await page.keyboard.press(`${modifier}+s`);
 
     const confirmation = page.getByRole("dialog", { name: "Filing confirmation" });
-    await expect(confirmation).toContainText("Append to destination");
-    await page.keyboard.press("Enter");
     await expect(confirmation).toHaveCount(0);
-    await expect.poll(() => todoEditor.innerText()).toContain("Book dentist");
-    await expect.poll(() => todoEditor.innerText()).toContain("Call Sam about Friday");
-    await expect.poll(() => todoEditor.innerText()).toContain("Keep my local Todo edit");
-
+    expect(await Promise.race([filingPost.then(() => true), page.waitForTimeout(50).then(() => false)])).toBe(false);
+    await draft.fill("Todo\nBook dentist\nCall Sam about Friday\nReview the launch notes");
     const staleResponse = page.waitForResponse((response) =>
       response.request().method() === "PATCH"
       && new URL(response.url()).searchParams.get("id") === "/todo-list.md",
     );
     releaseStaleSave?.();
     expect((await staleResponse).ok()).toBeTruthy();
+    await filingPost;
+    await expect(confirmation).toContainText("Append to destination");
+    await page.keyboard.press("Enter");
+    await expect(confirmation).toHaveCount(0);
+    await expect.poll(() => todoEditor.innerText()).toContain("Book dentist");
+    await expect.poll(() => todoEditor.innerText()).toContain("Call Sam about Friday");
+    await expect.poll(() => todoEditor.innerText()).toContain("Review the launch notes");
+    await expect.poll(() => todoEditor.innerText()).toContain("Keep my local Todo edit");
 
     const finalResponse = await request.get(todoUrl);
     const finalNote = await finalResponse.json() as { content: string };
     expect(finalResponse.ok()).toBeTruthy();
     expect(finalNote.content).toContain("Book dentist");
     expect(finalNote.content).toContain("Call Sam about Friday");
+    expect(finalNote.content).toContain("Review the launch notes");
     expect(finalNote.content).toContain("Keep my local Todo edit");
 
     const restoreResponse = await request.patch(todoUrl, {

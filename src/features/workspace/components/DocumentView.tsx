@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef } from "react";
 import type { ViewerDocument } from "../../../domain/types.ts";
 import { isUntitledId } from "../../../lib/workspace.ts";
 import { DocumentBody } from "./DocumentBody.tsx";
@@ -6,10 +6,10 @@ import { DocumentFooter } from "./DocumentFooter.tsx";
 import { DocumentHeader } from "./DocumentHeader.tsx";
 import type { MetadataField } from "../types.ts";
 import type { FilingFields, FilingQueueEntry } from "../model/filing.ts";
+import type { RefileEntry, RefileFields } from "../model/refile.ts";
 import { FilingConfirmation } from "./FilingConfirmation.tsx";
 import type { NoteExportFormat } from "../model/note-export.ts";
 import { RefileDialog } from "./RefileDialog.tsx";
-import type { RefileResult } from "./RefileDialog.tsx";
 
 export type DocumentViewProps = {
   groupId: string;
@@ -74,20 +74,21 @@ export type DocumentViewProps = {
   onDelete: (document: ViewerDocument) => Promise<void>;
   onExport: (document: ViewerDocument, format: NoteExportFormat) => void;
   filing: FilingQueueEntry | undefined;
+  refile: RefileEntry | undefined;
   focusFiling: boolean;
   onChangeFilingFields: (documentId: string, fields: FilingFields) => void;
   onRevealStandaloneFiling: (documentId: string) => void;
   onConfirmFiling: (groupId: string, documentId: string, action: "accept" | "standalone") => void;
   onDismissFiling: (groupId: string, documentId: string) => void;
-  onApplyRefile: (result: RefileResult) => void;
-  onPrepareRefile: (documentId: string) => Promise<boolean>;
+  onStartRefile: (documentId: string) => void;
+  onChangeRefileFields: (documentId: string, fields: RefileFields) => void;
+  onAcceptRefile: (documentId: string) => void;
+  onDismissRefile: (documentId: string) => void;
 };
 
 export function DocumentView(props: DocumentViewProps) {
   const { document, getScrollTop, onScroll } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [refileOpen, setRefileOpen] = useState(false);
-  const [refilePreparing, setRefilePreparing] = useState(false);
 
   useLayoutEffect(() => {
     const scroll = scrollRef.current;
@@ -95,10 +96,8 @@ export function DocumentView(props: DocumentViewProps) {
   }, [document.id, getScrollTop]);
 
   return (
-    <>
     <article
       className={`document-view ${isUntitledId(document.id) ? "untitled" : ""}`}
-      inert={refileOpen || refilePreparing ? true : undefined}
     >
       <div
         className="document-scroll"
@@ -117,14 +116,8 @@ export function DocumentView(props: DocumentViewProps) {
             onBeginEditing={props.onBeginMetadataEditing}
             onChangeDraft={props.onChangeMetadataDraft}
             onFinishEditing={props.onFinishMetadataEditing}
-            onRefile={(target) => {
-              if (refilePreparing) return;
-              setRefilePreparing(true);
-              void props.onPrepareRefile(target.id).then((ready) => {
-                if (ready) setRefileOpen(true);
-              }).finally(() => setRefilePreparing(false));
-            }}
-            refileDisabled={refilePreparing}
+            onRefile={(target) => props.onStartRefile(target.id)}
+            refileDisabled={props.refile?.status === "preparing" || props.refile?.status === "proposing" || props.refile?.status === "submitting"}
           />
         )}
         <DocumentBody
@@ -181,17 +174,16 @@ export function DocumentView(props: DocumentViewProps) {
         onExport={props.onExport}
         onOpenDocument={props.onOpenDocument}
       />
+      {props.refile && (
+        <RefileDialog
+          entry={props.refile}
+          directories={props.filingDirectories}
+          onStart={() => props.onStartRefile(document.id)}
+          onChange={(fields) => props.onChangeRefileFields(document.id, fields)}
+          onAccept={() => props.onAcceptRefile(document.id)}
+          onClose={() => props.onDismissRefile(document.id)}
+        />
+      )}
     </article>
-    {refileOpen ? (
-      <RefileDialog
-        document={document}
-        onClose={() => setRefileOpen(false)}
-        onComplete={(result) => {
-          setRefileOpen(false);
-          props.onApplyRefile(result);
-        }}
-      />
-    ) : null}
-    </>
   );
 }

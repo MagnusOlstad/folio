@@ -1,61 +1,144 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { RefileResult, ViewerDocument } from "../../src/domain/types.ts";
+import type { RefileEntry } from "../../src/features/workspace/model/refile.ts";
+import { refileRequestFields } from "../../src/features/workspace/model/refile.ts";
+import { useNoteRefile } from "../../src/features/workspace/hooks/useNoteRefile.ts";
 import { RefileDialog } from "../../src/features/workspace/components/RefileDialog.tsx";
 
-const note: ViewerDocument = {
-  id: "/notes/original.md", title: "Original", type: "Note", description: "Before.", tags: [],
-  createdAt: "2026-10-01T00:00:00.000Z", content: "Latest edits stay intact.", deletable: true, movable: true,
-  status: "draft", staleAfter: null, stale: false, filedBy: "human:local", filedAt: "2026-10-01T00:00:00.000Z",
-  links: [], backlinks: [], suggestions: [],
+const entry: RefileEntry = {
+  documentId: "/notes/original.md",
+  status: "ready",
+  proposal: {
+    id: "/notes/original.md",
+    hash: "a".repeat(64),
+    proposal: {
+      directory: "/ideas",
+      filename: "new-idea.md",
+      title: "New idea",
+      description: "Suggested description.",
+      tags: ["ideas"],
+    },
+  },
+  fields: {
+    directory: "/ideas",
+    filename: "new-idea.md",
+    title: "New idea",
+    description: "Suggested description.",
+    tags: ["ideas"],
+  },
+  error: null,
 };
 
-describe("refile dialog", () => {
+describe("refile review", () => {
   afterEach(() => vi.unstubAllGlobals());
-  it("accepts the untouched suggested path and metadata", async () => {
-    const proposal = {
-      id: note.id,
-      hash: "a".repeat(64),
-      proposal: { directory: "/ideas", filename: "new-idea.md", title: "New idea", description: "Suggested description.", tags: ["ideas"] },
-    };
-    const result: RefileResult = {
-      oldId: note.id,
-      newId: "/ideas/new-idea.md",
-      warning: null,
-      note: { ...note, id: "/ideas/new-idea.md", title: "New idea", rawId: null, classifiedByModel: false, relatedIds: [] },
-    };
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(proposal), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(result), { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-    const onComplete = vi.fn();
-    render(<RefileDialog document={note} onClose={vi.fn()} onComplete={onComplete} />);
 
-    await screen.findByDisplayValue("/ideas/new-idea.md");
-    fireEvent.click(screen.getByRole("button", { name: "Accept and refile" }));
+  it("shares filing fields, suggestions, Enter acceptance, and Escape discard", () => {
+    const onAccept = vi.fn();
+    const onClose = vi.fn();
+    const onChange = vi.fn();
+    render(
+      <RefileDialog
+        entry={entry}
+        directories={["/", "/ideas", "/ideas/writing", "/notes"]}
+        onStart={vi.fn()}
+        onChange={onChange}
+        onAccept={onAccept}
+        onClose={onClose}
+      />,
+    );
 
-    await waitFor(() => expect(onComplete).toHaveBeenCalledWith(result));
-    const request = fetchMock.mock.calls[1];
-    expect(String(request[0])).toBe("/api/file/refile");
-    const body = JSON.parse(String(request[1]?.body));
-    expect(body.fields).toEqual({
-      directory: "/ideas", filename: "new-idea.md", title: "New idea", description: "Suggested description.", tags: ["ideas"],
+    const dialog = screen.getByRole("dialog", { name: "Refile note" });
+    expect(dialog).not.toHaveAttribute("aria-modal", "true");
+    expect(screen.getByRole("combobox", { name: "Path" })).toHaveValue("/ideas");
+    fireEvent.change(screen.getByRole("combobox", { name: "Path" }), { target: { value: "/ideas/writing" } });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      directory: "/ideas/writing",
+      filename: "new-idea.md",
+    }));
+    fireEvent.keyDown(screen.getByLabelText("Title"), { key: "Enter" });
+    expect(onAccept).toHaveBeenCalledOnce();
+    fireEvent.keyDown(screen.getByLabelText("Title"), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("uses Enter on a path suggestion before it can accept the refile", () => {
+    const onAccept = vi.fn();
+    const onChange = vi.fn();
+    render(
+      <RefileDialog
+        entry={{ ...entry, fields: { ...entry.fields!, directory: "/ide" } }}
+        directories={["/", "/ideas", "/ideas/writing"]}
+        onStart={vi.fn()}
+        onChange={onChange}
+        onAccept={onAccept}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const path = screen.getByRole("combobox", { name: "Path" });
+    path.focus();
+    path.setSelectionRange(3, 3);
+    fireEvent.select(path);
+    expect(screen.getByRole("option", { name: "/ideas" })).toBeInTheDocument();
+    fireEvent.keyDown(path, { key: "ArrowDown" });
+    fireEvent.keyDown(path, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ directory: "/ideas" }));
+    expect(onAccept).not.toHaveBeenCalled();
+  });
+
+  it("does not accept when Enter is pressed in another part of the workspace", () => {
+    const onAccept = vi.fn();
+    render(
+      <>
+        <RefileDialog entry={entry} directories={["/", "/ideas"]} onStart={vi.fn()} onChange={vi.fn()} onAccept={onAccept} onClose={vi.fn()} />
+        <input aria-label="Another note" />
+      </>,
+    );
+    fireEvent.keyDown(screen.getByLabelText("Another note"), { key: "Enter" });
+    expect(onAccept).not.toHaveBeenCalled();
+  });
+
+  it("submits the proposed filename with its separate directory", () => {
+    expect(refileRequestFields({
+      directory: "/archive/ideas/",
+      filename: "final.md",
+      title: "Final title",
+      description: "Updated.",
+      tags: ["ready"],
+    })).toEqual({
+      directory: "/archive/ideas",
+      filename: "final.md",
+      title: "Final title",
+      description: "Updated.",
+      tags: ["ready"],
     });
   });
 
-  it("keeps focus while parent callbacks change identity", async () => {
-    const proposal = {
-      id: note.id,
-      hash: "b".repeat(64),
-      proposal: { directory: "/ideas", filename: "new-idea.md", title: "New idea", description: "Suggested description.", tags: ["ideas"] },
-    };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(proposal), { status: 200 })));
-    const view = render(<RefileDialog document={note} onClose={() => {}} onComplete={() => {}} />);
-    const title = await screen.findByDisplayValue("New idea");
-    title.focus();
+  it("retains a proposal while another file is active and clears cancelled work", async () => {
+    let resolveProposal: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { resolveProposal = resolve; }));
+    vi.stubGlobal("fetch", fetchMock);
+    const prepare = vi.fn().mockResolvedValue(true);
+    const onComplete = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ activeDocumentId }: { activeDocumentId: string }) => {
+        const refile = useNoteRefile({ bundleId: "bundle-1", prepare, onComplete });
+        return { ...refile, activeEntry: refile.entries[activeDocumentId] };
+      },
+      { initialProps: { activeDocumentId: entry.documentId } },
+    );
 
-    view.rerender(<RefileDialog document={note} onClose={() => {}} onComplete={() => {}} />);
+    await act(async () => { void result.current.start(entry.documentId); });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    rerender({ activeDocumentId: "/notes/other.md" });
+    await act(async () => {
+      resolveProposal?.(new Response(JSON.stringify(entry.proposal), { status: 200 }));
+    });
+    expect(result.current.activeEntry).toBeUndefined();
+    expect(result.current.entries[entry.documentId]?.fields?.filename).toBe("new-idea.md");
 
-    expect(document.activeElement).toBe(title);
+    await act(async () => { result.current.dismiss(entry.documentId); });
+    rerender({ activeDocumentId: entry.documentId });
+    expect(result.current.activeEntry).toBeUndefined();
   });
 });

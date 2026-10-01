@@ -8,6 +8,7 @@ import { useWorkspaceModels } from "./useWorkspaceModels.ts";
 import { useWorkspaceTabs } from "./useWorkspaceTabs.ts";
 import { useWorkspaceDocumentState } from "./useWorkspaceDocumentState.ts";
 import { useWorkspaceDocumentMutations } from "./useWorkspaceDocumentMutations.ts";
+import { useNoteRefile } from "./useNoteRefile.ts";
 import { useWorkspaceDocumentNavigation } from "./useWorkspaceDocumentNavigation.ts";
 import { useWorkspaceExplorerState } from "./useWorkspaceExplorerState.ts";
 import { useWorkspaceSidebarProps } from "./useWorkspaceSidebarProps.ts";
@@ -124,7 +125,9 @@ export function useWorkspaceController(): WorkspaceShellProps {
     draftTitle,
     initialState: initialWorkspaceState,
   });
+  const observeAggregateContentRef = useRef<(documentId: string, content: string, rebasedContent?: string) => void>(() => {});
   const mutations = useWorkspaceDocumentMutations({
+    bundleId: persistenceBundleId,
     documents,
     setGroups: tabs.setGroups,
     setNotes: explorer.setNotes,
@@ -132,6 +135,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
     setMessage,
     clearDiscovery: explorer.discovery.clearDiscovery,
     replaceDiscoveryDocument: explorer.discovery.replaceDocument,
+    observeAggregateContent: (documentId, content, rebasedContent) =>
+      observeAggregateContentRef.current(documentId, content, rebasedContent),
   });
   const autosave = useFiledDocumentAutosave({
     save: async (documentId, content, baseContent) => {
@@ -151,6 +156,36 @@ export function useWorkspaceController(): WorkspaceShellProps {
       );
     },
   });
+  observeAggregateContentRef.current = autosave.observeContent;
+  const flushRefileSave = autosave.flushSave;
+  const isRefileSaveDirty = autosave.isDirty;
+  const flushPendingRefileSaves = mutations.flushPendingNoteSaves;
+  const prepareRefile = useCallback(async (documentId: string) => {
+    try {
+      await flushRefileSave(documentId);
+      await flushPendingRefileSaves(documentId);
+      if (isRefileSaveDirty(documentId)) throw new Error("Could not save the latest note edits before refiling.");
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save the latest note edits before refiling.");
+      return false;
+    }
+  }, [flushPendingRefileSaves, flushRefileSave, isRefileSaveDirty, setMessage]);
+  const refile = useNoteRefile({
+    bundleId: persistenceBundleId,
+    prepare: prepareRefile,
+    onComplete: mutations.applyRefiledNote,
+  });
+  const { flushAllSaves, hasDirtySaves } = autosave;
+  const { fileDraft } = mutations;
+  const fileDraftAfterAutosave = useCallback(async (document: ViewerDocument) => {
+    await flushAllSaves();
+    if (hasDirtySaves()) {
+      setMessage("The latest note edits could not be saved. Retry before filing this draft.");
+      return;
+    }
+    fileDraft(document);
+  }, [fileDraft, flushAllSaves, hasDirtySaves, setMessage]);
   const checkpointContextRef = useRef({
     bundleId: persistenceBundleId,
     movingFileId: explorer.movingFileId,
@@ -311,7 +346,6 @@ export function useWorkspaceController(): WorkspaceShellProps {
     enabled: persistenceEnabled,
   });
   const flushSession = session.flush;
-  const { flushAllSaves, hasDirtySaves } = autosave;
   const flushUpdateRestartState = useCallback(async () => {
     await flushAllSaves();
     flushSession();
@@ -515,7 +549,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       });
     },
     closeTab: closeDocumentTab,
-    fileDraft: mutations.fileDraft,
+    fileDraft: fileDraftAfterAutosave,
     flushDocument: finalizeFiledDocument,
     exportDocument: (document, format) =>
       void noteExport.exportDocument(
@@ -616,6 +650,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
         movingFileId: explorer.movingFileId,
         filingDirectories: bundleDirectories(explorer.files),
         filingQueues: documents.filingQueues,
+        refileEntries: refile.entries,
         editorFocusRequest,
         message,
         exportingNoteId: noteExport.exportingNoteId,
@@ -676,23 +711,15 @@ export function useWorkspaceController(): WorkspaceShellProps {
             autosave.scheduleSave(document.id, content, document.content);
           }
         },
-        fileDraft: mutations.fileDraft,
+        fileDraft: fileDraftAfterAutosave,
         changeFilingFields: mutations.changeFilingFields,
         revealStandaloneFiling: mutations.revealStandaloneFiling,
         confirmFiling: mutations.confirmFiling,
         dismissFiling: mutations.dismissFiling,
-        applyRefiledNote: mutations.applyRefiledNote,
-        prepareRefile: async (documentId) => {
-          try {
-            await autosave.flushSave(documentId);
-            await mutations.flushPendingNoteSaves(documentId);
-            if (autosave.isDirty(documentId)) throw new Error("Could not save the latest note edits before refiling.");
-            return true;
-          } catch (error) {
-            setMessage(error instanceof Error ? error.message : "Could not save the latest note edits before refiling.");
-            return false;
-          }
-        },
+        startRefile: (documentId) => { void refile.start(documentId); },
+        changeRefileFields: refile.change,
+        acceptRefile: (documentId) => { void refile.accept(documentId); },
+        dismissRefile: refile.dismiss,
         beginEditing: (groupId, document) => {
           tabs.pinTab(groupId, document.id);
           mutations.beginEditing(groupId, document);

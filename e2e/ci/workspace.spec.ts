@@ -117,6 +117,44 @@ test('keeps the settings category sidebar stationary while model content scrolls
   await expect(nav.getByRole('button', { name: 'Models' })).toBeVisible()
 })
 
+test('keeps every settings category inside a fixed-height dialog on wide and short narrow screens', async ({ page }) => {
+  const viewports = [{ width: 1280, height: 420 }, { width: 360, height: 360 }]
+  for (const [index, viewport] of viewports.entries()) {
+    if (index > 0) {
+      await page.setViewportSize({ width: 1280, height: 800 })
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    } else {
+      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    }
+    await page.setViewportSize(viewport)
+    const settings = page.getByRole('dialog', { name: 'Settings' })
+    const nav = settings.getByRole('navigation', { name: 'Settings categories' })
+    const content = settings.locator('.settings-content')
+    const dialogBounds = await settings.boundingBox()
+    expect(dialogBounds).not.toBeNull()
+    expect(dialogBounds!.y).toBeGreaterThanOrEqual(0)
+    expect(dialogBounds!.y + dialogBounds!.height).toBeLessThanOrEqual(viewport.height)
+
+    for (const [category, panel] of [
+      ['Bundles', 'bundles'],
+      ['Models', 'models'],
+      ['Appearance', 'appearance'],
+      ['Backup', 'backup'],
+    ]) {
+      await nav.getByRole('button', { name: category, exact: true }).click()
+      await expect(settings.locator(`#settings-panel-${panel}`)).toBeVisible()
+      const nextBounds = await settings.boundingBox()
+      expect(nextBounds?.height).toBeCloseTo(dialogBounds!.height, 0)
+      expect(await content.evaluate((element) => element.ownerDocument.defaultView?.getComputedStyle(element).overflowY)).toBe('auto')
+      const navBounds = await nav.boundingBox()
+      expect(navBounds).not.toBeNull()
+      expect(navBounds!.y).toBeGreaterThanOrEqual(dialogBounds!.y)
+      expect(navBounds!.y + navBounds!.height).toBeLessThanOrEqual(dialogBounds!.y + dialogBounds!.height)
+    }
+    await settings.getByRole('button', { name: 'Close' }).click()
+  }
+})
+
 test('downloads all attached bundle backups from settings', async ({ page }) => {
   const settings = page.getByRole('dialog', { name: 'Settings' })
   await page.getByRole('button', { name: 'Settings', exact: true }).click()

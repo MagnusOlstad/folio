@@ -1,138 +1,144 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { RefileResult, ViewerDocument } from "../../../domain/types.ts";
-import { api } from "../../../lib/api.ts";
+import { useEffect, useId, useRef } from "react";
+import { isInternalBundlePath, normalizeDirectoryInput } from "../../../lib/paths.ts";
+import type { RefileEntry, RefileFields } from "../model/refile.ts";
+import { FilingFieldsForm } from "./FilingFieldsForm.tsx";
 
-type Proposal = {
-  id: string;
-  hash: string;
-  proposal: { directory: string; filename: string; title: string; description: string; tags: string[] };
-};
 export type { RefileResult } from "../../../domain/types.ts";
 
-export function RefileDialog({
-  document: viewDocument,
-  onClose,
-  onComplete,
-}: {
-  document: ViewerDocument;
+type RefileDialogProps = {
+  entry: RefileEntry;
+  directories: string[];
+  onStart: () => void;
+  onChange: (fields: RefileFields) => void;
+  onAccept: () => void;
   onClose: () => void;
-  onComplete: (result: RefileResult) => void;
-}) {
-  const [proposal, setProposal] = useState<Proposal | null>(null);
-  const [fields, setFields] = useState<Proposal["proposal"] | null>(null);
-  const [pathInput, setPathInput] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const dialogRef = useRef<HTMLElement>(null);
-  const pathRef = useRef<HTMLInputElement>(null);
+};
+
+function statusLabel(entry: RefileEntry) {
+  if (entry.status === "preparing") return "Saving";
+  if (entry.status === "proposing") return "Reviewing";
+  if (entry.status === "submitting") return "Refiling";
+  if (entry.status === "error") return "Needs attention";
+  return "Ready";
+}
+
+export function RefileDialog({
+  entry,
+  directories,
+  onStart,
+  onChange,
+  onAccept,
+  onClose,
+}: RefileDialogProps) {
+  const rootRef = useRef<HTMLElement>(null);
+  const formId = useId();
+  const acceptRef = useRef<HTMLButtonElement>(null);
   const discardRef = useRef<HTMLButtonElement>(null);
-  const onCloseRef = useRef(onClose);
-  const savingRef = useRef(saving);
-
-  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
-  useEffect(() => { savingRef.current = saving; }, [saving]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void api<Proposal>("/api/file/refile/propose", {
-      method: "POST",
-      body: JSON.stringify({ id: viewDocument.id }),
-    }).then((next) => {
-      if (cancelled) return;
-      setProposal(next);
-      setFields(next.proposal);
-      setPathInput(next.proposal.directory === "/" ? `/${next.proposal.filename}` : `${next.proposal.directory}/${next.proposal.filename}`);
-    }).catch((reason: unknown) => {
-      if (!cancelled) setError(reason instanceof Error ? reason.message : "Could not propose a new filing.");
-    }).finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [viewDocument.id]);
+  const canAccept = Boolean(entry.proposal && entry.fields) && entry.status !== "submitting";
+  const fields = entry.fields;
+  const hasFields = fields !== null;
+  const reviewReady = entry.status === "ready" && hasFields;
+  const reviewPending = entry.status === "preparing" || entry.status === "proposing";
 
   useEffect(() => {
-    const previouslyFocused = document.activeElement;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        if (savingRef.current) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !event.defaultPrevented && event.target instanceof Node && rootRef.current?.contains(event.target) && entry.status !== "submitting") {
         event.preventDefault();
-        onCloseRef.current();
-        return;
-      }
-      const dialog = dialogRef.current;
-      if (event.key !== "Tab" || !dialog) return;
-      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled])'))
-        .filter((element) => element.getClientRects().length > 0);
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last?.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first?.focus();
+        onClose();
       }
     }
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
-    };
-  }, []);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [entry.status, onClose]);
 
   useEffect(() => {
-    if (loading) discardRef.current?.focus();
-    else if (fields) pathRef.current?.focus();
-  }, [loading, fields !== null]);
+    if (reviewReady) acceptRef.current?.focus();
+    else if (reviewPending) discardRef.current?.focus();
+  }, [reviewPending, reviewReady]);
 
-  async function accept(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!proposal || !fields || saving) return;
-    const normalizedPath = pathInput.trim().replace(/\\/g, "/").replace(/\/+$/, "");
-    const splitAt = normalizedPath.lastIndexOf("/");
-    const directory = splitAt <= 0 ? "/" : normalizedPath.slice(0, splitAt);
-    const filename = splitAt < 0 ? normalizedPath : normalizedPath.slice(splitAt + 1);
-    setSaving(true);
-    setError("");
-    try {
-      const result = await api<RefileResult>("/api/file/refile", {
-        method: "POST",
-        body: JSON.stringify({
-          id: proposal.id,
-          hash: proposal.hash,
-          fields: { ...fields, directory, filename },
-        }),
-      });
-      onComplete(result);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not refile this note.");
-      setSaving(false);
-    }
-  }
-
-  const update = (key: keyof Proposal["proposal"], value: string) => {
-    setFields((current) => {
-      if (!current) return current;
-      return { ...current, [key]: key === "tags" ? value.split(",").map((tag) => tag.trim()).filter(Boolean) : value };
-    });
-  };
+  const reservedDirectory = fields
+    ? isInternalBundlePath(normalizeDirectoryInput(fields.directory))
+    : false;
 
   return (
-    <div className="refile-layer" onPointerDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
-      <section ref={dialogRef} className="refile-dialog" role="dialog" aria-modal="true" aria-label="Refile note">
-        <header><div><span>Review suggested changes</span><h2>Refile note</h2></div></header>
-        {loading ? <><p role="status">Reviewing the latest note…</p><footer><button ref={discardRef} type="button" onClick={onClose}>Discard</button></footer></> : fields ? (
-          <form onSubmit={(event) => { void accept(event); }}>
-            <label>Path<input ref={pathRef} value={pathInput} onChange={(event) => setPathInput(event.currentTarget.value)} /></label>
-            <label>Title<input value={fields.title} onChange={(event) => update("title", event.currentTarget.value)} /></label>
-            <label>Description<textarea rows={3} value={fields.description} onChange={(event) => update("description", event.currentTarget.value)} /></label>
-            <label>Tags<input value={fields.tags.join(", ")} onChange={(event) => update("tags", event.currentTarget.value)} /></label>
-            {error ? <p role="alert">{error}</p> : null}
-            <footer><button type="button" onClick={onClose} disabled={saving}>Discard</button><button type="submit" disabled={saving}>{saving ? "Refiling…" : "Accept and refile"}</button></footer>
+    <div className="filing-confirmation-layer">
+      <aside
+        ref={rootRef}
+        className="filing-confirmation"
+        role="dialog"
+        aria-label="Refile note"
+        aria-live={entry.status === "preparing" || entry.status === "proposing" ? "polite" : undefined}
+      >
+        <header>
+          <div><h2>Refile note</h2></div>
+          <span className="filing-status">{statusLabel(entry)}</span>
+        </header>
+        {entry.status === "preparing" || entry.status === "proposing" ? (
+          <>
+            <div className="refile-progress">
+              <span className="filing-spinner" aria-hidden="true" />
+              <p>{entry.status === "preparing" ? "Saving the latest note edits…" : "Choosing a path and updating metadata…"}</p>
+            </div>
+            <div className="filing-actions">
+              <span>Esc to discard</span>
+              <div><button ref={discardRef} className="filing-button filing-button-secondary" type="button" onClick={onClose}>Discard</button></div>
+            </div>
+          </>
+        ) : fields ? (
+          <>
+          <form
+            id={formId}
+            onSubmit={(event) => { event.preventDefault(); if (canAccept && !reservedDirectory) onAccept(); }}
+            onKeyDown={(event) => {
+              if (event.defaultPrevented || event.key !== "Enter" || !(event.target instanceof HTMLInputElement)) return;
+              event.preventDefault();
+              if (canAccept && !reservedDirectory) onAccept();
+            }}
+          >
+            <FilingFieldsForm
+              fields={fields}
+              directories={directories}
+              onChange={(next) => onChange({
+                directory: next.directory,
+                filename: fields.filename,
+                title: next.title,
+                description: next.description,
+                tags: next.tags,
+              })}
+            />
+            <button type="submit" hidden>Submit refile</button>
           </form>
+          {reservedDirectory && <p className="filing-error" role="alert">References is an internal folder. Choose another path.</p>}
+          {entry.error && <p className="filing-error" role="alert">{entry.error}</p>}
+          <div className="filing-actions">
+            <span>Enter to accept · Esc to discard</span>
+            <div>
+              <button className="filing-button filing-button-secondary" type="button" onClick={onClose} disabled={entry.status === "submitting"}>Discard</button>
+              <button
+                className="filing-button filing-button-primary"
+                ref={acceptRef}
+                form={formId}
+                type="submit"
+                disabled={!canAccept || reservedDirectory}
+              >
+                {entry.status === "submitting" ? "Refiling…" : entry.error ? "Retry" : "Accept and refile"}
+              </button>
+            </div>
+          </div>
+          </>
         ) : (
-          <div>{error ? <p role="alert">{error}</p> : null}<footer><button ref={discardRef} type="button" onClick={onClose}>Discard</button></footer></div>
+          <>
+            {entry.error && <p className="filing-error" role="alert">{entry.error}</p>}
+            <div className="filing-actions">
+              <span>Esc to discard</span>
+              <div>
+                <button className="filing-button filing-button-secondary" type="button" onClick={onClose}>Discard</button>
+                {entry.status === "error" && <button className="filing-button filing-button-primary" type="button" onClick={onStart}>Retry review</button>}
+              </div>
+            </div>
+          </>
         )}
-      </section>
-      </div>
+      </aside>
+    </div>
   );
 }

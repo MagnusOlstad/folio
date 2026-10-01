@@ -39,6 +39,7 @@ export function useWorkspaceDocumentState({
         .map((document) => [document.id, document.content]),
     ),
   );
+  const draftsRef = useRef(drafts);
   const [savingDocuments, setSavingDocuments] = useState<Set<string>>(
     () => new Set(),
   );
@@ -55,6 +56,10 @@ export function useWorkspaceDocumentState({
   const filingDraftIds = useRef<Set<string>>(new Set());
   const documentsRef = useRef(documents);
   const draftSnapshotRef = useRef<StoredDraft[]>([]);
+
+  useEffect(() => {
+    draftsRef.current = drafts;
+  }, [drafts]);
 
   function queueDraftSync(draft: StoredDraft) {
     if (filingDraftIds.current.has(draft.id)) return Promise.resolve();
@@ -101,7 +106,8 @@ export function useWorkspaceDocumentState({
   }
 
   function changeDraftContent(document: ViewerDocument, content: string) {
-    setDrafts((current) => ({ ...current, [document.id]: content }));
+    draftsRef.current = { ...draftsRef.current, [document.id]: content };
+    setDrafts(draftsRef.current);
     if (!isUntitledId(document.id)) return;
     setDocuments((current) => ({
       ...current,
@@ -159,6 +165,7 @@ export function useWorkspaceDocumentState({
     saveQueues,
     draftSyncQueues,
     filingDraftIds,
+    draftsRef,
     documentsRef,
     mergeRemoteDrafts,
     changeDraftContent,

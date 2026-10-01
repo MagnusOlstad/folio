@@ -18,6 +18,7 @@ export type FiledDocumentAutosaveOptions = {
 
 export type FiledDocumentAutosave = {
   scheduleSave: (documentId: string, content: string, baseContent: string) => void;
+  observeContent: (documentId: string, content: string, rebasedContent?: string) => void;
   flushSave: (documentId: string) => Promise<void>;
   flushAllSaves: () => Promise<void>;
   isDirty: (documentId: string) => boolean;
@@ -39,6 +40,7 @@ type DocumentSaveRecord = {
   timer: ReturnType<typeof setTimeout> | undefined;
   followUpAfterFlight: boolean;
   dirty: boolean;
+  observationVersion: number;
 };
 
 const DEFAULT_DELAY_MS = 500;
@@ -85,6 +87,7 @@ export function useFiledDocumentAutosave({
       timer: undefined,
       followUpAfterFlight: false,
       dirty: false,
+      observationVersion: 0,
     };
     recordsRef.current.set(documentId, record);
     return record;
@@ -108,6 +111,7 @@ export function useFiledDocumentAutosave({
       if (!record.pending) return Promise.resolve();
 
       const snapshot = record.pending;
+      const observationVersion = record.observationVersion;
       record.pending = undefined;
       record.inFlight = snapshot;
       reportState(documentId, record);
@@ -116,6 +120,7 @@ export function useFiledDocumentAutosave({
         .then(() => saveRef.current(documentId, snapshot.content, snapshot.baseContent))
         .then((savedContent) => {
           if (typeof savedContent !== "string") return;
+          if (record.observationVersion !== observationVersion) return;
           record.baseContent = savedContent;
           if (record.pending) {
             record.pending = {
@@ -177,6 +182,25 @@ export function useFiledDocumentAutosave({
     [clearTimer, delayMs, getRecord, reportState],
   );
 
+  const observeContent = useCallback(
+    (documentId: string, content: string, rebasedContent?: string) => {
+      const record = getRecord(documentId);
+      record.observationVersion += 1;
+      record.baseContent = content;
+      if (record.pending) {
+        record.pending = {
+          ...record.pending,
+          content:
+            rebasedContent ??
+            mergeRemoteAppend(record.pending.baseContent, record.pending.content, content),
+          baseContent: content,
+        };
+      }
+      reportState(documentId, record);
+    },
+    [getRecord, reportState],
+  );
+
   const flushSave = useCallback(
     async (documentId: string) => {
       const record = getRecord(documentId);
@@ -218,5 +242,5 @@ export function useFiledDocumentAutosave({
     [flushAllSaves],
   );
 
-  return { scheduleSave, flushSave, flushAllSaves, isDirty, hasDirtySaves };
+  return { scheduleSave, observeContent, flushSave, flushAllSaves, isDirty, hasDirtySaves };
 }

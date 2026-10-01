@@ -4,11 +4,16 @@ import { createHash } from 'node:crypto'
 test('refile flushes edits, discard preserves the note, and history restore keeps the new path', async ({ page, request }) => {
   const token = Date.now().toString(36)
   const title = `Refile E2E ${token}`
+  const otherTitle = `Refile navigation ${token}`
   const originalBody = `# ${title}\n\nOriginal text stays in the note.`
   const latestBody = `# ${title}\n\nLatest edited text is saved before review.`
   const created = await request.post('/api/file/create', { data: { directory: '/', name: title } })
   expect(created.status()).toBe(201)
   const createdId = (await created.json()).id as string
+  const otherCreated = await request.post('/api/file/create', { data: { directory: '/', name: otherTitle } })
+  expect(otherCreated.status()).toBe(201)
+  const otherId = (await otherCreated.json()).id as string
+  const existingBasename = createdId.split('/').at(-1) as string
   let currentId = createdId
   try {
     const edited = await request.patch(`/api/note?id=${encodeURIComponent(createdId)}`, {
@@ -32,7 +37,7 @@ test('refile flushes edits, discard preserves the note, and history restore keep
           hash: createHash('sha256').update(markdown).digest('hex'),
           proposal: {
             directory: `/refiled-e2e-${token}`,
-            filename: `reviewed-${token}.md`,
+            filename: existingBasename,
             title: `Reviewed ${title}`,
             description: 'Reviewed description.',
             tags: ['reviewed', 'e2e'],
@@ -48,8 +53,16 @@ test('refile flushes edits, discard preserves the note, and history restore keep
     await page.getByRole('button', { name: 'Refile', exact: true }).click()
     await expect.poll(() => proposalsObserved.length).toBe(1)
     const dialog = page.getByRole('dialog', { name: 'Refile note' })
-    await expect(dialog.getByRole('textbox', { name: 'Path' })).toHaveValue(`/refiled-e2e-${token}/reviewed-${token}.md`)
-    await dialog.getByRole('button', { name: 'Discard' }).click()
+    await expect(dialog.getByRole('combobox', { name: 'Path' })).toHaveValue(`/refiled-e2e-${token}`)
+    const reviewedDirectory = `/refiled-e2e-${token}/kept-${token}`
+    await dialog.getByRole('combobox', { name: 'Path' }).fill(reviewedDirectory)
+    await page.getByRole('button', { name: otherTitle, exact: true }).first().click()
+    await expect(page.getByRole('textbox', { name: `Edit ${otherTitle}` })).toBeVisible()
+    await page.getByRole('button', { name: title, exact: true }).first().click()
+    const returnedDialog = page.getByRole('dialog', { name: 'Refile note' })
+    await expect(returnedDialog.getByRole('combobox', { name: 'Path' })).toHaveValue(reviewedDirectory)
+    expect(proposalsObserved).toHaveLength(1)
+    await returnedDialog.getByRole('button', { name: 'Discard' }).click()
     await expect(page.getByRole('button', { name: 'Refile', exact: true })).toBeVisible()
     let current = await request.get(`/api/file?path=${encodeURIComponent(createdId)}`)
     expect((await current.json()).content).toContain('Latest edited text is saved before review.')
@@ -58,7 +71,7 @@ test('refile flushes edits, discard preserves the note, and history restore keep
     await page.getByRole('button', { name: 'Refile', exact: true }).click()
     const acceptedDialog = page.getByRole('dialog', { name: 'Refile note' })
     await acceptedDialog.getByRole('button', { name: 'Accept and refile' }).click()
-    currentId = `/refiled-e2e-${token}/reviewed-${token}.md`
+    currentId = `/refiled-e2e-${token}/${existingBasename}`
     await expect(page.getByRole('button', { name: `Reviewed ${title}`, exact: true })).toBeVisible()
     current = await request.get(`/api/file?path=${encodeURIComponent(currentId)}`)
     const refiled = await current.json()
@@ -93,5 +106,6 @@ test('refile flushes edits, discard preserves the note, and history restore keep
     await expect(page.getByText('Original text stays in the note.')).toBeVisible()
   } finally {
     await request.delete(`/api/note?id=${encodeURIComponent(currentId)}`)
+    await request.delete(`/api/note?id=${encodeURIComponent(otherId)}`)
   }
 })
