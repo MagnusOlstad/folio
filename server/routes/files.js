@@ -2,11 +2,68 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 
+function mergeAppendedContent(baseContent, incomingContent, currentContent) {
+  const base = String(baseContent).trimEnd()
+  const current = String(currentContent).trimEnd()
+  const incoming = String(incomingContent).trimEnd()
+  if (current === base) return incoming
+  if (!current.startsWith(base) || !/^\r?\n/.test(current.slice(base.length))) return null
+  const remoteTail = current.slice(base.length)
+  if (!remoteTail.trim()) return incoming
+  const normalizeCheckboxState = (value) => value.replace(/\[[ xX]\]/g, '[ ]')
+  const normalizedRemoteTail = normalizeCheckboxState(remoteTail)
+  const normalizedIncoming = normalizeCheckboxState(incoming)
+  if (normalizedIncoming.includes(normalizedRemoteTail.trim())) return incoming
+  if (!incoming.startsWith(base)) return `${incoming}\n\n${remoteTail.trim()}`
+
+  const localTail = incoming.slice(base.length)
+  const normalizedLocalTail = normalizeCheckboxState(localTail)
+  if (normalizedRemoteTail === normalizedLocalTail) return incoming
+  if (normalizedRemoteTail.startsWith(normalizedLocalTail)) {
+    return `${incoming}${remoteTail.slice(localTail.length)}`
+  }
+  if (normalizedLocalTail.startsWith(normalizedRemoteTail)) return incoming
+  let sharedLength = 0
+  while (sharedLength < remoteTail.length && remoteTail[sharedLength] === localTail[sharedLength]) sharedLength += 1
+  const sharedBoundary = remoteTail.lastIndexOf('\n', sharedLength - 1) + 1
+  const shared = remoteTail.slice(0, sharedBoundary)
+  const localOnly = localTail.slice(sharedBoundary).trim()
+  const remoteOnly = remoteTail.slice(sharedBoundary).trim()
+  const mergedTail = [shared.trimEnd(), localOnly, remoteOnly].filter(Boolean).join('\n')
+  return `${base}\n${mergedTail}`
+}
+
+function preservePendingCaptureMarkers(currentContent, nextContent, sources) {
+  let result = nextContent
+  for (const source of Array.isArray(sources) ? sources : []) {
+    const captureId = String(source?.capture_id || '')
+    if (!captureId || !source?.confirmation || source.confirmation.finalId) continue
+    const escapedId = captureId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const pattern = new RegExp(`<!-- folio:capture:${escapedId}:start -->[\\s\\S]*?<!-- folio:capture:${escapedId}:end -->`)
+    const block = String(currentContent).match(pattern)?.[0]
+    if (!block) continue
+    const visible = block
+      .replace(`<!-- folio:capture:${captureId}:start -->`, '')
+      .replace(`<!-- folio:capture:${captureId}:end -->`, '')
+      .trim()
+    if (!visible) continue
+    const normalizeCheckboxState = (value) => value.replace(/\[[ xX]\]/g, '[ ]')
+    const normalizedVisible = normalizeCheckboxState(visible)
+    const normalizedResult = normalizeCheckboxState(result)
+    const position = normalizedResult.indexOf(normalizedVisible)
+    if (position === -1) return null
+    const editedVisible = result.slice(position, position + visible.length)
+    const marked = `<!-- folio:capture:${captureId}:start -->\n${editedVisible}\n<!-- folio:capture:${captureId}:end -->`
+    result = `${result.slice(0, position)}${marked}${result.slice(position + visible.length)}`
+  }
+  return result
+}
+
 export function registerRoutes(app, runtime) {
   const { embedModel, embeddingSchemaVersion, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, resolveBundleMarkdownPath, listBundleMarkdownFiles, bundleFileId, parseMarkdownFile,
     resolveCurrentConceptId, isMovableConceptId, queueMarkdownMutation, moveConceptMarkdown, migrateIndexedRecordsAfterMove, reindexBundle, writeRecords, publicSearchRecord,
     rankedRecords, normalizeInlineText, normalizeTag, normalizeMoveDirectory, normalizeMarkdownBreaks, markdownDocument, updatedGenerated,
-    replaceIndexedConceptContent, embeddingInputHash, refreshRecordEmbeddings, queueIndexOperation,
+    replaceIndexedConceptContent, indexedConceptContent, embeddingInputHash, refreshRecordEmbeddings, queueIndexOperation,
     performReindexBundle, persistEmbeddingUpdatesNow, relationshipIndex, recordIsStale,
     semanticSuggestionSummaries, history, classify } = runtime
 app.get('/api/search', async (request, response, next) => {
@@ -364,6 +421,9 @@ app.patch('/api/note', async (request, response, next) => {
     const hasDescription = Object.prototype.hasOwnProperty.call(request.body || {}, 'description')
     const refreshEmbeddings = request.body?.refreshEmbeddings
     const content = hasContent ? normalizeMarkdownBreaks(request.body.content || '').trim() : null
+    const baseContent = typeof request.body?.baseContent === 'string'
+      ? normalizeMarkdownBreaks(request.body.baseContent).trim()
+      : null
     const tags = hasTags
       ? Array.from(new Set((Array.isArray(request.body.tags) ? request.body.tags : []).map(normalizeTag).filter(Boolean))).slice(0, 12)
       : null
@@ -404,7 +464,29 @@ app.patch('/api/note', async (request, response, next) => {
         if (!hasMarkdownChanges) return null
 
         const updatedAt = new Date().toISOString()
-        if (hasContent) parsed.content = replaceIndexedConceptContent(parsed.content, content)
+        let contentToSave = content
+        if (hasContent && parsed.type === 'Todo List' && baseContent !== null) {
+          const currentContent = indexedConceptContent(parsed.content)
+          contentToSave = mergeAppendedContent(baseContent, content, currentContent)
+          if (contentToSave === null) {
+            return {
+              status: 409,
+              error: 'The Todo list changed in another editor. Reload it before saving these changes.',
+            }
+          }
+          contentToSave = preservePendingCaptureMarkers(
+            parsed.content,
+            contentToSave,
+            parsed.frontmatter.sources,
+          )
+          if (contentToSave === null) {
+            return {
+              status: 409,
+              error: 'A Todo capture is still awaiting filing. Finish its filing before editing or removing its task.',
+            }
+          }
+        }
+        if (hasContent) parsed.content = replaceIndexedConceptContent(parsed.content, contentToSave)
         if (hasTags) parsed.frontmatter.tags = tags
         if (hasTitle) parsed.frontmatter.title = title
         if (hasDescription) parsed.frontmatter.description = description

@@ -15,6 +15,7 @@ import { api } from "../../../lib/api.ts";
 import {
   filedDraftContent,
   isUntitledId,
+  mergeRemoteAppend,
   toggleTaskAtLine,
 } from "../../../lib/workspace.ts";
 import type { WorkspaceDocumentState } from "./useWorkspaceDocumentState.ts";
@@ -57,6 +58,7 @@ export function useWorkspaceDocumentMutations({
   replaceDiscoveryDocument,
 }: UseWorkspaceDocumentMutationsOptions) {
   const saveFailures = useRef(new Map<string, string>());
+  const contentSaveBases = useRef(new Map<string, string>());
   function updateFilingEntry(
     documentId: string,
     update: (entry: ReturnType<typeof filingEntry>) => ReturnType<typeof filingEntry>,
@@ -201,13 +203,31 @@ export function useWorkspaceDocumentMutations({
     }
     submitFiling(groupId, documentId, "accept", proposalFields(entry.filing.proposal));
   }
-  function applyUpdatedNote(updated: NoteDetail, oldId = updated.id) {
+
+  function rebaseOpenTodoDraft(
+    updated: Pick<ViewerDocument, "id" | "type" | "content">,
+    previousContent: string,
+    contentBase?: string,
+  ) {
+    if (updated.type !== "Todo List") return;
+    const baseContent = contentBase ?? contentSaveBases.current.get(updated.id) ?? previousContent;
+    state.setDrafts((current) => {
+      const local = current[updated.id];
+      if (local === undefined) return current;
+      const rebased = mergeRemoteAppend(baseContent, local, updated.content);
+      return rebased === local ? current : { ...current, [updated.id]: rebased };
+    });
+  }
+
+  function applyUpdatedNote(updated: NoteDetail, oldId = updated.id, contentBase?: string) {
     const newId = updated.id;
+    const previous = state.documentsRef.current[oldId] || state.documentsRef.current[newId];
+    if (oldId === newId && previous) rebaseOpenTodoDraft(updated, previous.content, contentBase);
     state.setDocuments((current) => {
       const next = { ...current };
-      const previous = current[oldId] || current[newId];
+      const currentDocument = current[oldId] || current[newId];
       if (oldId !== newId) delete next[oldId];
-      next[newId] = { ...previous, ...updated, deletable: true };
+      next[newId] = { ...currentDocument, ...updated, deletable: true };
       return next;
     });
     if (oldId !== newId) {
@@ -321,6 +341,7 @@ export function useWorkspaceDocumentMutations({
     nextTags: string[],
     propagateError = false,
     refreshEmbeddings = true,
+    baseContent = document.content,
   ) {
     if (!document.deletable || !nextContent.trim()) return Promise.resolve();
     const id = document.id;
@@ -329,6 +350,8 @@ export function useWorkspaceDocumentMutations({
       : nextContent;
     if (!filedContent.trim()) return Promise.resolve();
     const existingQueue = state.saveQueues.current[id] || Promise.resolve();
+    if (!isUntitledId(id) && !contentSaveBases.current.has(id))
+      contentSaveBases.current.set(id, baseContent);
     state.setDocuments((current) => ({
       ...current,
       [id]: { ...current[id], content: nextContent, tags: nextTags },
@@ -355,10 +378,13 @@ export function useWorkspaceDocumentMutations({
             api<NoteDetail>(`/api/note?id=${encodeURIComponent(result.note.id)}`),
             api<BundleFile[]>("/api/files"),
           ]);
+          const previousDestination = state.documentsRef.current[result.note.id];
           const updated: ViewerDocument =
             detailResult.status === "fulfilled"
               ? { ...detailResult.value, deletable: true }
-              : {
+              : previousDestination
+                ? { ...previousDestination, ...result.note, content: previousDestination.content, deletable: true }
+                : {
                   ...result.note,
                   content: filedContent,
                   deletable: true,
@@ -367,6 +393,8 @@ export function useWorkspaceDocumentMutations({
                   backlinks: [],
                   suggestions: [],
                 };
+          if (previousDestination)
+            rebaseOpenTodoDraft(updated, previousDestination.content);
           setNotes((current) => [
             result.note,
             ...current.filter((note) => note.id !== result.note.id),
@@ -416,13 +444,15 @@ export function useWorkspaceDocumentMutations({
             method: "PATCH",
             body: JSON.stringify({
               content: nextContent,
+              baseContent,
               tags: nextTags,
               refreshEmbeddings,
             }),
           },
         );
-        applyUpdatedNote(updated, updated.oldId);
+        applyUpdatedNote(updated, updated.oldId, nextContent);
         if (updated.warning) setMessage(updated.warning);
+        return updated.content;
       })
       .catch((error) => {
         if (isUntitledId(id)) {
@@ -439,6 +469,7 @@ export function useWorkspaceDocumentMutations({
       .finally(() => {
         if (state.saveQueues.current[id] === save) {
           delete state.saveQueues.current[id];
+          contentSaveBases.current.delete(id);
           state.setSavingDocuments((current) => {
             const next = new Set(current);
             next.delete(id);

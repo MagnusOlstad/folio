@@ -32,7 +32,34 @@ function aggregateEntryContent(content, kind) {
   }
 
   const entry = lines.join('\n').trim() || content.trim()
-  return kind === 'todo' ? `- [ ] ${entry.replace(/\n/g, '\n  ')}` : entry
+  if (kind !== 'todo') return entry
+
+  const tasks = []
+  for (const line of lines) {
+    if (!line.trim()) continue
+    const indentation = line.match(/^[\t ]*/)?.[0] || ''
+    const text = line.trim()
+    if (indentation && tasks.length) {
+      const continuationIndent = indentation.length >= 2 ? indentation : '  '
+      tasks[tasks.length - 1] += `\n${continuationIndent}${line.trimStart()}`
+      continue
+    }
+
+    if (/^-\s+\[[ xX]\]/.test(text)) {
+      tasks.push(text)
+      continue
+    }
+
+    const checkbox = text.match(/^(?:[-*+]|\d+[.)])\s+\[([ xX])\]\s*(.*)$/)
+    if (checkbox) {
+      tasks.push(`- [${checkbox[1].toLowerCase()}]${checkbox[2] ? ` ${checkbox[2]}` : ''}`)
+      continue
+    }
+
+    const task = text.replace(/^(?:[-*+]|\d+[.)])\s+/, '')
+    tasks.push(`- [ ] ${task}`)
+  }
+  return tasks.join('\n')
 }
 
 function normalizedMorphology(value) {

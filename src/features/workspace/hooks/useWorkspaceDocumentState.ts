@@ -50,7 +50,7 @@ export function useWorkspaceDocumentState({
     Record<string, FilingQueueEntry[]>
   >({});
   const documentRequests = useRef<Record<string, number>>({});
-  const saveQueues = useRef<Record<string, Promise<void>>>({});
+  const saveQueues = useRef<Record<string, Promise<unknown>>>({});
   const draftSyncQueues = useRef<Record<string, Promise<void>>>({});
   const filingDraftIds = useRef<Set<string>>(new Set());
   const documentsRef = useRef(documents);

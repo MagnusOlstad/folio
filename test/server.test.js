@@ -828,6 +828,172 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal(uncheckResponse.status, 200, JSON.stringify(uncheckedTodo))
   assert.match(uncheckedTodo.content, /- \[ \] Buy milk/)
 
+  // Simulate an already-open Todo editor: its autosave snapshot predates this
+  // capture, while the task append has reached disk and awaits confirmation.
+  const racedTodoBase = uncheckedTodo.content
+  const racedTodo = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: 'todo: Book dentist\nCall Sam about Friday',
+    timeZone: 'America/New_York',
+  })
+  assert.equal(racedTodo.note.id, '/todo-list.md')
+  assert.equal(racedTodo.appended, true)
+  const staleTodoSave = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      content: `${racedTodoBase}\n- [ ] Review existing schedule`,
+      baseContent: racedTodoBase,
+      refreshEmbeddings: false,
+    }),
+  })
+  const staleTodoSaveBody = await staleTodoSave.json()
+  assert.equal(staleTodoSave.status, 200, JSON.stringify(staleTodoSaveBody))
+  assert.match(staleTodoSaveBody.content, /- \[ \] Book dentist/)
+  assert.match(staleTodoSaveBody.content, /Review existing schedule/)
+  const pendingTodoMarkdown = await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')
+  assert.match(pendingTodoMarkdown, new RegExp(`<!-- folio:capture:${racedTodo.filing.id}:start -->`))
+  assert.match(pendingTodoMarkdown, new RegExp(`<!-- folio:capture:${racedTodo.filing.id}:end -->`))
+  const pendingTodoContent = staleTodoSaveBody.content
+  const checkedPendingTask = pendingTodoContent.replace('- [ ] Book dentist', '- [x] Book dentist')
+  const checkedPendingResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: checkedPendingTask, baseContent: pendingTodoContent, refreshEmbeddings: false }),
+  })
+  const checkedPendingBody = await checkedPendingResponse.json()
+  assert.equal(checkedPendingResponse.status, 200, JSON.stringify(checkedPendingBody))
+  assert.match(checkedPendingBody.content, /- \[x\] Book dentist/)
+  const checkedPendingMarkdown = await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')
+  assert.match(checkedPendingMarkdown, new RegExp(`<!-- folio:capture:${racedTodo.filing.id}:start -->`))
+  const racedTodoAccept = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: racedTodo.filing.id, action: 'accept', fields: racedTodo.filing.proposal }),
+  })
+  const racedTodoAcceptBody = await racedTodoAccept.json()
+  assert.equal(racedTodoAccept.status, 200, JSON.stringify(racedTodoAcceptBody))
+  const observedTodoResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`)
+  const observedTodo = await observedTodoResponse.json()
+  assert.match(observedTodo.content, /- \[x\] Book dentist/)
+  assert.match(observedTodo.content, /Review existing schedule/)
+  const observedTodoContent = observedTodo.content
+  const checkedCapturedTask = observedTodoContent.replace('- [ ] Call Sam about Friday', '- [x] Call Sam about Friday')
+  const checkedCapturedTaskResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: checkedCapturedTask, baseContent: observedTodoContent, refreshEmbeddings: false }),
+  })
+  const checkedCapturedTaskBody = await checkedCapturedTaskResponse.json()
+  assert.equal(checkedCapturedTaskResponse.status, 200, JSON.stringify(checkedCapturedTaskBody))
+  assert.match(checkedCapturedTaskBody.content, /- \[x\] Call Sam about Friday/)
+  const intentionallyDeletedTask = checkedCapturedTaskBody.content.replace('- [x] Book dentist\n', '')
+  const deletedTaskResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: intentionallyDeletedTask, baseContent: checkedCapturedTaskBody.content, refreshEmbeddings: false }),
+  })
+  const deletedTaskBody = await deletedTaskResponse.json()
+  assert.equal(deletedTaskResponse.status, 200, JSON.stringify(deletedTaskBody))
+  assert.doesNotMatch(deletedTaskBody.content, /Book dentist/)
+  const todoMarkdownAfterTaskEdit = await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')
+  const racedTodoReceipt = markdownFrontmatter(todoMarkdownAfterTaskEdit).sources.find((source) => source.capture_id === racedTodo.filing.id)
+  assert.equal(racedTodoReceipt.capture_content, 'todo: Book dentist\nCall Sam about Friday')
+
+  const standaloneTodoCapture = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: 'todo: Archive the old paper receipt\nKeep only the signed copy.',
+    timeZone: 'America/New_York',
+  })
+  const standaloneTodoBaseResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`)
+  const standaloneTodoBase = await standaloneTodoBaseResponse.json()
+  const checkedStandaloneTodo = standaloneTodoBase.content.replace(
+    '- [ ] Archive the old paper receipt',
+    '- [x] Archive the old paper receipt',
+  )
+  const checkedStandaloneResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: checkedStandaloneTodo, baseContent: standaloneTodoBase.content, refreshEmbeddings: false }),
+  })
+  const checkedStandaloneBody = await checkedStandaloneResponse.json()
+  assert.equal(checkedStandaloneResponse.status, 200, JSON.stringify(checkedStandaloneBody))
+  const standalonePendingMarkdown = await fs.readFile(path.join(dataRoot, 'bundle', 'todo-list.md'), 'utf8')
+  assert.match(standalonePendingMarkdown, new RegExp(`<!-- folio:capture:${standaloneTodoCapture.filing.id}:start -->`))
+  const standaloneTodoConfirmation = await fetch(`${baseUrl}/api/filing/confirm`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ filingId: standaloneTodoCapture.filing.id, action: 'standalone', fields: standaloneTodoCapture.filing.standaloneProposal }),
+  })
+  const standaloneTodoConfirmationBody = await standaloneTodoConfirmation.json()
+  assert.equal(standaloneTodoConfirmation.status, 200, JSON.stringify(standaloneTodoConfirmationBody))
+  const todoAfterStandaloneResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`)
+  const todoAfterStandalone = await todoAfterStandaloneResponse.json()
+  assert.doesNotMatch(todoAfterStandalone.content, /Archive the old paper receipt/)
+  const standaloneMarkdown = await fs.readFile(path.join(dataRoot, 'bundle', standaloneTodoConfirmationBody.newId.slice(1)), 'utf8')
+  const standaloneSource = markdownFrontmatter(standaloneMarkdown).sources.find((source) => source.capture_id === standaloneTodoCapture.filing.id)
+  assert.equal(standaloneSource.capture_content, 'todo: Archive the old paper receipt\nKeep only the signed copy.')
+
+  const overlappingTodoBaseResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`)
+  const overlappingTodoBase = await overlappingTodoBaseResponse.json()
+  const observedTaskCapture = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: 'todo: Prepare meeting notes',
+    timeZone: 'America/New_York',
+  })
+  const observedTaskResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`)
+  const observedTask = await observedTaskResponse.json()
+  const localCheckboxEdit = observedTask.content.replace('- [ ] Prepare meeting notes', '- [x] Prepare meeting notes')
+  const unseenTaskCapture = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: 'todo: Send meeting follow-up',
+    timeZone: 'America/New_York',
+  })
+  const mergedOverlappingSave = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ content: localCheckboxEdit, baseContent: overlappingTodoBase.content, refreshEmbeddings: false }),
+  })
+  const mergedOverlappingBody = await mergedOverlappingSave.json()
+  assert.equal(mergedOverlappingSave.status, 200, JSON.stringify(mergedOverlappingBody))
+  assert.match(mergedOverlappingBody.content, /- \[x\] Prepare meeting notes/)
+  assert.match(mergedOverlappingBody.content, /- \[ \] Send meeting follow-up/)
+  assert.equal((mergedOverlappingBody.content.match(/Prepare meeting notes/g) || []).length, 1)
+  assert.equal((mergedOverlappingBody.content.match(/Send meeting follow-up/g) || []).length, 1)
+  for (const capture of [observedTaskCapture, unseenTaskCapture]) {
+    const accepted = await fetch(`${baseUrl}/api/filing/confirm`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filingId: capture.filing.id, action: 'accept', fields: capture.filing.proposal }),
+    })
+    assert.equal(accepted.status, 200, await accepted.text())
+  }
+
+  const todoConflictBaseResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`)
+  const todoConflictBase = await todoConflictBaseResponse.json()
+  const acceptedTodoEditResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      content: todoConflictBase.content.replace('Review existing schedule', 'Review changed schedule'),
+      baseContent: todoConflictBase.content,
+      refreshEmbeddings: false,
+    }),
+  })
+  const acceptedTodoEdit = await acceptedTodoEditResponse.json()
+  assert.equal(acceptedTodoEditResponse.status, 200, JSON.stringify(acceptedTodoEdit))
+  const conflictingTodoSave = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      content: todoConflictBase.content.replace('Review existing schedule', 'Review conflict schedule'),
+      baseContent: todoConflictBase.content,
+      refreshEmbeddings: false,
+    }),
+  })
+  const conflictingTodoBody = await conflictingTodoSave.json()
+  assert.equal(conflictingTodoSave.status, 409, JSON.stringify(conflictingTodoBody))
+  assert.match(conflictingTodoBody.error, /changed in another editor/)
+  const todoAfterConflictResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent('/todo-list.md')}`)
+  const todoAfterConflict = await todoAfterConflictResponse.json()
+  assert.equal(todoAfterConflict.content, acceptedTodoEdit.content)
+
   const firstDaily = await jsonRequest(`${baseUrl}/api/notes`, { content: 'daily: Felt focused today.', timeZone: 'America/New_York' })
   const secondDaily = await jsonRequest(`${baseUrl}/api/notes`, { content: 'Daily - release route only\nFinished the release.', filedContent: 'Finished the release.', timeZone: 'America/New_York' })
   assert.match(firstDaily.note.id, /^\/daily\/\d{4}-\d{2}-\d{2}\.md$/)
@@ -950,7 +1116,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal(standaloneAuroraResponse.status, 200)
   const standaloneAurora = await standaloneAuroraResponse.json()
   assert.equal(standaloneAurora.note.id, `${mergedAurora.filing.standaloneProposal.directory}/${mergedAurora.filing.standaloneProposal.filename}`)
-  assert.equal(standaloneAurora.notes.length, 15)
+  assert.equal(standaloneAurora.notes.length, 16)
   assert.equal(standaloneAurora.note.type, 'Project')
   assert.match(await fs.readFile(path.join(dataRoot, 'bundle', standaloneAurora.note.id.slice(1)), 'utf8'), /filing:\n  by: human:local/)
   assert.match(await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8'), /The launch remains confidential\./)

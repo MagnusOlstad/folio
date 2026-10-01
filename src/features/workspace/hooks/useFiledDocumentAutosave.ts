@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { mergeRemoteAppend } from "../../../lib/workspace.ts";
 
 export type FiledDocumentSaveState = {
   dirty: boolean;
@@ -6,7 +7,7 @@ export type FiledDocumentSaveState = {
 };
 
 export type FiledDocumentAutosaveOptions = {
-  save: (documentId: string, content: string) => Promise<void>;
+  save: (documentId: string, content: string, baseContent: string) => Promise<string | void>;
   delayMs?: number;
   onSaveError?: (documentId: string, error: unknown) => void;
   onSaveStateChange?: (
@@ -16,7 +17,7 @@ export type FiledDocumentAutosaveOptions = {
 };
 
 export type FiledDocumentAutosave = {
-  scheduleSave: (documentId: string, content: string) => void;
+  scheduleSave: (documentId: string, content: string, baseContent: string) => void;
   flushSave: (documentId: string) => Promise<void>;
   flushAllSaves: () => Promise<void>;
   isDirty: (documentId: string) => boolean;
@@ -25,11 +26,13 @@ export type FiledDocumentAutosave = {
 
 type PendingSave = {
   content: string;
+  baseContent: string;
   revision: number;
 };
 
 type DocumentSaveRecord = {
   nextRevision: number;
+  baseContent: string | undefined;
   pending: PendingSave | undefined;
   inFlight: PendingSave | undefined;
   savePromise: Promise<void> | undefined;
@@ -75,6 +78,7 @@ export function useFiledDocumentAutosave({
 
     const record: DocumentSaveRecord = {
       nextRevision: 0,
+      baseContent: undefined,
       pending: undefined,
       inFlight: undefined,
       savePromise: undefined,
@@ -109,7 +113,18 @@ export function useFiledDocumentAutosave({
       reportState(documentId, record);
 
       const savePromise = Promise.resolve()
-        .then(() => saveRef.current(documentId, snapshot.content))
+        .then(() => saveRef.current(documentId, snapshot.content, snapshot.baseContent))
+        .then((savedContent) => {
+          if (typeof savedContent !== "string") return;
+          record.baseContent = savedContent;
+          if (record.pending) {
+            record.pending = {
+              ...record.pending,
+              content: mergeRemoteAppend(snapshot.content, record.pending.content, savedContent),
+              baseContent: savedContent,
+            };
+          }
+        })
         .catch((error: unknown) => {
           errorRef.current?.(documentId, error);
           // Do not let a failed response erase a newer local edit. If there is
@@ -142,10 +157,14 @@ export function useFiledDocumentAutosave({
   }, [startSave]);
 
   const scheduleSave = useCallback(
-    (documentId: string, content: string) => {
+    (documentId: string, content: string, baseContent: string) => {
       const record = getRecord(documentId);
       clearTimer(record);
-      record.pending = { content, revision: record.nextRevision + 1 };
+      if (!record.inFlight && !record.pending && !record.dirty)
+        record.baseContent = baseContent;
+      const currentBase = record.baseContent ?? baseContent;
+      record.baseContent = currentBase;
+      record.pending = { content, baseContent: currentBase, revision: record.nextRevision + 1 };
       record.nextRevision += 1;
       record.dirty = true;
       if (record.inFlight) record.followUpAfterFlight = true;

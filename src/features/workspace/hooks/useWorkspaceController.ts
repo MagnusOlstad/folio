@@ -134,19 +134,20 @@ export function useWorkspaceController(): WorkspaceShellProps {
     replaceDiscoveryDocument: explorer.discovery.replaceDocument,
   });
   const autosave = useFiledDocumentAutosave({
-    save: async (documentId, content) => {
+    save: async (documentId, content, baseContent) => {
       const document = documents.documentsRef.current[documentId];
       if (!document || isUntitledId(documentId)) return;
       if (!content.trim()) {
         setMessage("A note cannot be empty.");
         throw new Error("A note cannot be empty.");
       }
-      await mutations.persistDocument(
+      return await mutations.persistDocument(
         document,
         content,
         document.tags,
         true,
         false,
+        baseContent,
       );
     },
   });
@@ -672,7 +673,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
           if (!isUntitledId(document.id)) {
             checkpointEditedNote(document.id, persistenceBundleId);
             markEmbeddingDirty(document.id);
-            autosave.scheduleSave(document.id, content);
+            autosave.scheduleSave(document.id, content, document.content);
           }
         },
         fileDraft: mutations.fileDraft,
