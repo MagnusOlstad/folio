@@ -205,6 +205,28 @@ test('opens a seeded note and shows its content', async ({ page }) => {
   await expect(page.getByText('Add your first task')).toBeVisible()
 })
 
+test('shows the indexed last-edited date after a search result title', async ({ page, request }) => {
+  const response = await request.get('/api/search?q=recommended%20first%20steps')
+  expect(response.ok()).toBeTruthy()
+  const results = await response.json()
+  const startHere = results.find((result: { id: string }) => result.id === '/getting-started/start-here.md')
+  expect(startHere?.createdAt).toBe('2026-09-03T12:00:00.000Z')
+  expect(Number.isNaN(Date.parse(startHere?.updatedAt))).toBe(false)
+
+  await page.getByRole('button', { name: 'search', exact: true }).click()
+  await page.getByRole('textbox', { name: 'Search your notes' }).fill('recommended first steps')
+  await page.getByRole('button', { name: 'Go', exact: true }).click()
+
+  const result = page.locator('.sidebar-result').filter({ hasText: 'Start Here' })
+  const date = result.locator('time')
+  await expect(date).toBeVisible()
+  await expect(date).toHaveAttribute('datetime', startHere.updatedAt)
+  const formattedDate = await page.evaluate((value: string) => new Intl.DateTimeFormat(undefined, {
+    month: 'short', day: 'numeric', year: 'numeric',
+  }).format(new Date(value)), startHere.updatedAt)
+  await expect(date).toHaveText(formattedDate)
+})
+
 test('creates a new local draft note from the editor', async ({ page }) => {
   await page.getByTitle('New note (Cmd+T)').click()
   const editor = page.getByLabel('Write a new note')

@@ -495,8 +495,12 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     'Unique tiephrase content.',
     '',
   ].join('\n')
-  await fs.writeFile(path.join(dataRoot, 'bundle', olderTieId.slice(1)), tieDocument('2026-08-01T12:00:00Z'))
-  await fs.writeFile(path.join(dataRoot, 'bundle', newerTieId.slice(1)), tieDocument('2026-09-01T12:00:00Z'))
+  const olderTiePath = path.join(dataRoot, 'bundle', olderTieId.slice(1))
+  const newerTiePath = path.join(dataRoot, 'bundle', newerTieId.slice(1))
+  await fs.writeFile(olderTiePath, tieDocument('2026-08-01T12:00:00Z'))
+  await fs.writeFile(newerTiePath, tieDocument('2026-09-01T12:00:00Z'))
+  await fs.utimes(olderTiePath, new Date('2026-09-27T12:00:00.000Z'), new Date('2026-09-27T12:00:00.000Z'))
+  await fs.utimes(newerTiePath, new Date('2026-09-28T12:00:00.000Z'), new Date('2026-09-28T12:00:00.000Z'))
   const rawSemanticPath = path.join(dataRoot, 'bundle', semantic.note.rawId.slice(1))
   const rawSemanticWithLink = `${await fs.readFile(rawSemanticPath, 'utf8')}\nRaw example [Odd File](/manual/Odd%20%28File%29.md).\n`
   await fs.writeFile(rawSemanticPath, rawSemanticWithLink)
@@ -507,6 +511,10 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   await fetch(`${baseUrl}/api/reindex`, { method: 'POST' })
   const tieSearch = await (await fetch(`${baseUrl}/api/search?q=tiephrase`)).json()
   assert.deepEqual(tieSearch.slice(0, 2).map((record) => record.id), [newerTieId, olderTieId])
+  assert.deepEqual(tieSearch.slice(0, 2).map((record) => [record.createdAt, record.updatedAt]), [
+    ['2026-09-01T12:00:00.000Z', '2026-09-28T12:00:00.000Z'],
+    ['2026-08-01T12:00:00.000Z', '2026-09-27T12:00:00.000Z'],
+  ])
   const explorerFiles = await (await fetch(`${baseUrl}/api/files`)).json()
   const tieFiles = explorerFiles.filter((file) => file.title === 'Tie result')
   assert.deepEqual(tieFiles.map((file) => file.createdAt).sort().reverse(), ['2026-09-01T12:00:00.000Z', '2026-08-01T12:00:00.000Z'])

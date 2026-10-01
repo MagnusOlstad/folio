@@ -7,6 +7,7 @@ export type Note = {
   tags: string[];
   relatedIds: string[];
   createdAt: string;
+  updatedAt?: string;
   classifiedByModel: boolean;
   status: "draft" | "stable" | "deprecated";
   staleAfter: string | null;
