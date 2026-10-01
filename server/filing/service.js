@@ -12,7 +12,7 @@ function openingSpecialKind(content) {
   const firstLine = content.split('\n').find((line) => line.trim())?.trim() || ''
   const normalized = firstLine.replace(/^#{1,6}\s*/, '').toLowerCase()
   if (/^(?:todo|to-do|todos|task|tasks|oppgave|oppgaver|gj[øo]rem[aå]l)(?:\s*[:=-]\s*|\s+|$)/.test(normalized)) return 'todo'
-  if (/^(?:daily note|daily|today log|daglig|dagsnotat)(?:\s*[:=-]\s*|\s+|$)/.test(normalized)) return 'daily'
+  if (/^(?:daily note|daily|today log|today|daglig|dagsnotat)(?:\s*[:=-]\s*|\s+|$)/.test(normalized)) return 'daily'
   return null
 }
 
@@ -35,7 +35,73 @@ function aggregateEntryContent(content, kind) {
   return kind === 'todo' ? `- [ ] ${entry.replace(/\n/g, '\n  ')}` : entry
 }
 
-function normalizeClassification(result, content, records) {
+function normalizedMorphology(value) {
+  const word = String(value).toLocaleLowerCase()
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+  const suffixes = ['ingly', 'edly', 'ing', 'ed', 'ies', 'es', 's']
+  for (const suffix of suffixes) {
+    if (word.endsWith(suffix) && word.length > suffix.length + 2) {
+      const stem = suffix === 'ies' ? `${word.slice(0, -3)}y` : word.slice(0, -suffix.length)
+      return stem.length > 2 && stem.at(-1) === stem.at(-2) ? stem.slice(0, -1) : stem
+    }
+  }
+  return word
+}
+
+function canonicalizeExistingTags(tags, records) {
+  const existing = new Map()
+  for (const record of records) {
+    if (record.id === '/todo-list.md' || record.id.startsWith('/daily/') || record.id.startsWith('/references/')) continue
+    for (const value of record.tags || []) {
+      const tag = normalizeTag(value)
+      if (!tag) continue
+      const key = tag.split('-').map(normalizedMorphology).sort().join('-')
+      const entry = existing.get(key) || new Map()
+      entry.set(tag, (entry.get(tag) || 0) + 1)
+      existing.set(key, entry)
+    }
+  }
+  return tags.map((tag) => {
+    const key = tag.split('-').map(normalizedMorphology).sort().join('-')
+    const spellings = existing.get(key)
+    if (!spellings) return tag
+    return [...spellings.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0][0]
+  })
+}
+
+function continuationTarget(content, proposedPath, records) {
+  if (!/\b(?:update|updated|follow[ -]?up|addendum|addition|additional|extension|correction|corrected|revision|revised|new development|oppdatering|oppdatert|tillegg|rettelse|revidert)\b/i.test(content)) return null
+  const directory = proposedPath.join('/')
+  const primaryText = String(content).replace(/```[\s\S]*?```/g, ' ').replace(/`[^`]*`/g, ' ')
+    .split(/\r?\n/).filter((line) => !/^\s*>/.test(line)).join('\n')
+    .replace(/"[^"\n]*"|“[^”\n]*”|‘[^’\n]*’/g, ' ')
+  const searchableText = ` ${primaryText.toLocaleLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `
+  const matches = records.flatMap((record) => {
+    if (record.id === '/todo-list.md' || record.id.startsWith('/daily/') || record.id.startsWith('/references/')) return []
+    const recordDirectory = path.posix.dirname(record.id).replace(/^\/+/, '')
+    if (!directory || recordDirectory !== directory) return []
+    const titleWords = searchTerms(record.title || '')
+    if (titleWords.length < 2) return []
+    const titlePhrase = record.title.toLocaleLowerCase().normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+    const phrase = ` ${titlePhrase} `
+    const titleOffset = searchableText.indexOf(phrase)
+    if (titleOffset < 0) return []
+    const opening = primaryText.split('\n').filter((line) => line.trim()).slice(0, 2).join(' ')
+      .toLocaleLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ')
+    if (!` ${opening} `.includes(phrase)) return []
+    const before = searchableText.slice(Math.max(0, titleOffset - 90), titleOffset)
+    const after = searchableText.slice(titleOffset + phrase.length, titleOffset + phrase.length + 120)
+    if (/(?:\bno\s+(?:relation|connection|link)|\bnot\s+(?:about|related|connected)|\bunrelated\s+to|\bwithout\s+relation|\bexcept\s+for)\s*$/i.test(before)
+      || /\b(?:unrelated\s+to|not\s+(?:related|connected)|no\s+(?:relation|connection|link))\b/i.test(after)
+      || !/\b(?:update|updated|follow[ -]?up|addendum|addition|additional|extension|correction|corrected|revision|revised|new development|oppdatering|oppdatert|tillegg|rettelse|revidert)\b/i.test(after)) return []
+    return [{ record, specificity: titleWords.length }]
+  }).sort((left, right) => right.specificity - left.specificity || left.record.id.localeCompare(right.record.id))
+  if (!matches.length || (matches[1] && matches[0].specificity === matches[1].specificity)) return null
+  return matches[0].record
+}
+
+function normalizeClassification(result, content, records, allowReconciliation = false, steering = '') {
   const firstLine = content.split('\n').find((line) => line.trim())?.replace(/^#+\s*/, '').replace(/:$/, '') || 'Untitled note'
   const candidate = result?.concept || (Array.isArray(result?.concepts) ? result.concepts[0] : result) || {}
   const title = normalizeInlineText(candidate.title || firstLine).slice(0, 100)
@@ -50,16 +116,21 @@ function normalizeClassification(result, content, records) {
   const conceptPath = reuseExistingClassificationPath(proposedPath, records)
   const proposedKind = ['note', 'todo', 'daily'].includes(candidate.kind) ? candidate.kind : 'note'
 
+  const proposedTags = Array.from(new Set((Array.isArray(candidate.tags) ? candidate.tags : [])
+    .map(normalizeTag)
+    .filter(Boolean)))
+  const reconciledTags = canonicalizeExistingTags(proposedTags, records)
+  const continuation = allowReconciliation ? continuationTarget(content, conceptPath, records) : null
+
   return {
-    title,
-    type,
+    title: continuation?.title || title,
+    type: continuation?.type || type,
     description,
-    tags: Array.from(new Set((Array.isArray(candidate.tags) ? candidate.tags : [])
-      .map(normalizeTag)
-      .filter(Boolean)))
-      .slice(0, 6),
-    kind: openingSpecialKind(content) || proposedKind,
-    path: conceptPath.length ? conceptPath : [slugify(type, 'notes'), slugify(title)],
+    tags: Array.from(new Set(reconciledTags)).slice(0, 6),
+    kind: openingSpecialKind(steering) || openingSpecialKind(content) || proposedKind,
+    path: continuation
+      ? path.posix.dirname(continuation.id).replace(/^\/+/, '').split('/').filter(Boolean)
+      : conceptPath.length ? conceptPath : [slugify(type, 'notes'), slugify(title)],
     relatedIds: [],
     relationships: [],
   }
@@ -93,16 +164,26 @@ function creationRelationships(content, records, noteEmbedding = null) {
     record.id !== '/todo-list.md'
     && !record.id.startsWith('/daily/')
     && !record.id.startsWith('/references/')
-    && path.posix.dirname(record.id) !== '/'
   ))
   const mentionedIds = new Set(mentionedRecordIds(content, candidates))
-  const ranked = candidates
-    .map((record) => ({
+  const ranked = candidates.map((record) => {
+    const chunkSimilarity = noteEmbedding
+      ? Math.max(0, ...(record.chunks || []).map((chunk) => cosineSimilarity(noteEmbedding, chunk.embedding)))
+      : 0
+    return {
       record,
-      semantic: noteEmbedding ? cosineSimilarity(noteEmbedding, record.embedding) : 0,
+      semantic: Math.max(noteEmbedding ? cosineSimilarity(noteEmbedding, record.embedding) : 0, chunkSimilarity),
       lexical: lexicalScore(record, content),
-    }))
-    .filter(({ record, semantic, lexical }) => mentionedIds.has(record.id) || semantic >= 0.75 || lexical >= 0.45)
+    }
+  })
+  const semanticOrder = [...ranked].sort((left, right) => right.semantic - left.semantic || left.record.id.localeCompare(right.record.id))
+  const bestSemantic = semanticOrder[0]
+  const nextSemantic = semanticOrder[1]?.semantic || 0
+  // The native Atlas evaluation scored .694 against a .540 nearest unrelated note.
+  const semanticMatchIds = new Set(ranked.filter(({ semantic }) => semantic >= 0.75).map(({ record }) => record.id))
+  if (bestSemantic?.semantic >= 0.6 && bestSemantic.semantic - nextSemantic >= 0.08) semanticMatchIds.add(bestSemantic.record.id)
+  const eligible = ranked
+    .filter(({ record, lexical }) => mentionedIds.has(record.id) || lexical >= 0.45 || semanticMatchIds.has(record.id))
     .sort((left, right) => (
       Number(mentionedIds.has(right.record.id)) - Number(mentionedIds.has(left.record.id))
       || right.semantic - left.semantic
@@ -111,7 +192,7 @@ function creationRelationships(content, records, noteEmbedding = null) {
     ))
     .slice(0, 3)
 
-  return ranked.map(({ record }) => ({
+  return eligible.map(({ record }) => ({
     id: record.id,
     relation: mentionedIds.has(record.id) ? 'Mentions' : 'Related',
   }))
@@ -189,7 +270,7 @@ async function recalculateGeneratedRelationships(records, documents) {
   }
 }
 
-function conceptDocument(classification, rawId, createdAt, relatedConcepts, content, classifiedByModel, captureId) {
+function conceptDocument(classification, rawId, createdAt, relatedConcepts, content, classifiedByModel, captureId, sourceContent = content) {
   const related = classification.relationships
     .map((relationship) => ({ ...relationship, concept: relatedConcepts.get(relationship.id) }))
     .filter((relationship) => relationship.concept)
@@ -212,7 +293,7 @@ function conceptDocument(classification, rawId, createdAt, relatedConcepts, cont
       author: 'human:local',
       capture_id: captureId,
       filing_by: filingActor(classifiedByModel),
-      capture_content: content,
+      capture_content: sourceContent,
     }],
   }, lines.join('\n'))
 }
@@ -259,10 +340,10 @@ async function availableConceptFilename(
   }
 }
 
-async function appendConceptDocument({ filePath, classification, rawId, content, createdAt, captureId, filingBy }) {
+async function appendConceptDocument({ filePath, classification, rawId, content, sourceContent = content, createdAt, captureId, filingBy }) {
   const parsed = parseMarkdownFile(await fs.readFile(filePath, 'utf8'), filePath)
   const existingContent = stripGeneratedRelatedSection(parsed.content).trim()
-  const nextCapture = content.trim()
+  const nextCapture = content
   const combinedContent = parsed.content.includes(captureMarker(captureId, 'start'))
     ? existingContent
     : `${existingContent}\n\n---\n\n${captureContribution(captureId, nextCapture)}`.trim()
@@ -274,7 +355,7 @@ async function appendConceptDocument({ filePath, classification, rawId, content,
     author: 'human:local',
     capture_id: captureId,
     filing_by: filingBy,
-    capture_content: content,
+    capture_content: sourceContent,
   })
   const tags = Array.from(new Set([
     ...parsed.tags.map(normalizeTag),
@@ -306,7 +387,7 @@ function localTimeLabel(value, timeZone, includeDate = false) {
   }).format(value).replace(',', '')
 }
 
-async function appendAggregateDocument({ filePath, id, kind, rawId, content, createdAt, timeZone, classifiedByModel, captureId }) {
+async function appendAggregateDocument({ filePath, id, kind, rawId, content, sourceContent = content, createdAt, timeZone, classifiedByModel, captureId }) {
   let parsed = null
   try {
     parsed = parseMarkdownFile(await fs.readFile(filePath, 'utf8'), filePath)
@@ -330,7 +411,7 @@ async function appendAggregateDocument({ filePath, id, kind, rawId, content, cre
     author: 'human:local',
     capture_id: captureId,
     filing_by: filingActor(classifiedByModel),
-    capture_content: content,
+    capture_content: sourceContent,
   })
 
   const frontmatter = {

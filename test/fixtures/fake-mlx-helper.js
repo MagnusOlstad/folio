@@ -43,6 +43,7 @@ async function ensureSnapshot() {
 
 function classify(content) {
   if (content.includes('Path override todo')) return { kind: 'todo', path: ['wrong'], title: 'Path Override Todo', type: 'Task', description: 'A deliberately misclassified task.', tags: ['task'] }
+  if (content.includes('Aurora extension evidence')) return { kind: 'note', path: ['projects'], title: 'Aurora Budget Update', type: 'Update', description: 'The note adds an update to Project Aurora.', tags: ['project-plans'] }
   if (content.includes('Project Aurora details')) return { kind: 'note', path: ['projects'], title: 'Project Aurora', type: 'Project', description: 'Details about Project Aurora.', tags: ['prosjekt', 'nordisk'] }
   if (content.includes('Planning note')) return { kind: 'note', path: ['planning'], title: 'Planning Note', type: 'Plan', description: 'Planning details that reference a future project.', tags: ['planlegging', 'økonomi'] }
   if (content.includes('Long archive')) return { kind: 'note', path: ['research'], title: 'Long Archive', type: 'Research', description: 'A long note used to verify complete chunk retrieval.', tags: ['arkiv', 'langtekst'] }
@@ -65,11 +66,12 @@ async function generate(messages) {
   const control = await readControl()
   if (control.classificationOffline && !content.includes('grounded research assistant')) throw new Error('fixture generation unavailable')
   const note = noteFromPrompt(messages)
+  const steering = content.match(/<filing-steering>\n([\s\S]*?)\n<\/filing-steering>/)?.[1] || ''
   const text = control.emptyAnswer
     ? ''
     : content.includes('grounded research assistant')
       ? 'The launch is planned for Friday.'
-    : JSON.stringify({ concept: classify(note) })
+      : JSON.stringify({ concept: classify(`${steering}\n${note}`) })
   await appendLog({ operation: 'generate', task, model, messages, text })
   return text
 }

@@ -64,7 +64,7 @@ function captureMarker(captureId, edge) {
 }
 
 function captureContribution(captureId, content) {
-  return `${captureMarker(captureId, 'start')}\n${content.trim()}\n${captureMarker(captureId, 'end')}`
+  return `${captureMarker(captureId, 'start')}\n${content}\n${captureMarker(captureId, 'end')}`
 }
 
 function captureMetadata(

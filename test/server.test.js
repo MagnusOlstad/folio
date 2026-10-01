@@ -122,6 +122,11 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   )
 
   const runtime = createRuntime(process.env)
+  const rootRelated = runtime.creationRelationships('Follow Root Guidance before launch.', [{
+    id: '/root-guidance.md', title: 'Root Guidance', type: 'Reference', description: 'Shared rules.',
+    tags: [], content: 'Follow these rules before a launch.', status: 'stable', chunks: [],
+  }])
+  assert.deepEqual(rootRelated.map(({ id }) => id), ['/root-guidance.md'], 'safe root-level concepts can be linked')
   fixture.restorePlatform()
   const api = await startServer(0, runtime)
   const apiPort = api.address().port
@@ -248,6 +253,13 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal(meetingDetail.content, 'Morning meeting\nDiscussed the launch plan.  \nDecision: ship Friday.\nTodo: call Sam.')
   const meetingFile = await fs.readFile(path.join(dataRoot, 'bundle', meetingResult.note.id.slice(1)), 'utf8')
   assert.match(meetingFile, /Morning meeting\nDiscussed the launch plan\.  \nDecision: ship Friday\.\nTodo: call Sam\./)
+  assert.equal(markdownFrontmatter(meetingFile).sources[0].capture_content, meeting, 'the source receipt keeps the authored body exactly')
+  const meetingClassification = (await readFakeMlxLog(fixture.logPath)).findLast((entry) => (
+    entry.operation === 'generate' && entry.messages?.at(-1)?.content?.includes('meeting-notes/morning-meeting - classify this capture')
+  ))
+  assert.equal(meetingClassification.messages.length, 2, 'native Gemma protocol keeps a system and user message')
+  assert.match(meetingClassification.messages[1].content, /<filing-steering>\nmeeting-notes\/morning-meeting - classify this capture\n<\/filing-steering>/)
+  assert.match(meetingClassification.messages[1].content, /<new-note>\nMorning meeting\nDiscussed the launch plan/)
   const rawMeetingFile = await fs.readFile(path.join(dataRoot, 'bundle', meetingResult.note.rawId.slice(1)), 'utf8')
   assert.match(rawMeetingFile, /classify this capture/)
   assert.doesNotMatch(meetingFile, /classify this capture/)
@@ -378,6 +390,13 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   })
   assert.equal(mergedAurora.note.id, auroraId)
   assert.equal(mergedAurora.appended, true)
+  const auroraExtension = await jsonRequest(`${baseUrl}/api/notes`, {
+    content: 'Project Aurora extension evidence\nUpdate: the launch budget was approved.',
+    timeZone: 'America/New_York',
+  })
+  assert.equal(auroraExtension.note.id, auroraId)
+  assert.equal(auroraExtension.note.title, 'Project Aurora', 'clear named updates reconcile to the exact existing title before append')
+  assert.equal(auroraExtension.appended, true)
   const mergedAuroraFile = await fs.readFile(path.join(dataRoot, 'bundle', auroraId.slice(1)), 'utf8')
   assert.match(mergedAuroraFile, /The launch remains confidential\./)
   assert.match(mergedAuroraFile, /The launch budget was approved\./)
@@ -620,6 +639,8 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const longContent = `Long archive\n${Array.from({ length: 1600 }, (_, index) => `filler-${index}`).join(' ')} hidden constellation`
   const longNote = await jsonRequest(`${baseUrl}/api/notes`, { content: longContent, timeZone: 'America/New_York' })
   await refreshModelLogs()
+  assert.ok(classificationPrompts.at(-1).includes('hidden constellation'), 'classification sees the complete long note')
+  assert.equal(markdownFrontmatter(await fs.readFile(path.join(dataRoot, 'bundle', longNote.note.id.slice(1)), 'utf8')).sources[0].capture_content, longContent)
   assert.match(classificationPrompts.at(-1), /path: \["manual","curated"\]; types: \["Reference"\]/)
   const longSearchResponse = await fetch(`${baseUrl}/api/search?q=${encodeURIComponent('hidden constellation')}`)
   const longSearch = await longSearchResponse.json()
@@ -632,6 +653,11 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.ok(index.every((record) => record.embedding))
   assert.ok(index.every((record) => record.chunks.length > 0 && record.chunks.every((chunk) => chunk.embedding)))
   assert.ok(index.find((record) => record.id === longNote.note.id).chunks.length > 6)
+
+  const exactMarkdown = '  ```md\n# Preserved heading\nline with intentional hard break  \n```  \n'
+  const exactCapture = await jsonRequest(`${baseUrl}/api/notes`, { content: exactMarkdown, timeZone: 'America/New_York' })
+  const exactFile = await fs.readFile(path.join(dataRoot, 'bundle', exactCapture.note.id.slice(1)), 'utf8')
+  assert.equal(markdownFrontmatter(exactFile).sources.at(-1).capture_content, exactMarkdown, 'captures without filedContent retain the exact authored body')
 
   const editedLongResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(longNote.note.id)}`, {
     method: 'PATCH',
