@@ -431,6 +431,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  updaterCoordinator?.dispose()
   flushRendererStorageSync()
   if (updateFlushTimer !== null) clearTimeout(updateFlushTimer)
   updateFlushTimer = null

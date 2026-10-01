@@ -16,9 +16,13 @@ export function createUpdaterCoordinator({
   platform,
   prepareForRestart = async () => true,
   stagingTimeoutMs = 120_000,
+  pollIntervalMs = 24 * 60 * 60 * 1000,
+  schedulePolling = (callback, delay) => setInterval(callback, delay),
+  cancelPolling = (timer) => clearInterval(timer),
   logger = console,
 }) {
   let started = false
+  let pollingTimer = null
   let checkPromise = null
   let downloadPromise = null
   let installStarted = false
@@ -53,6 +57,12 @@ export function createUpdaterCoordinator({
       }
     })()
     return checkPromise
+  }
+
+  function pollForUpdates() {
+    if (checkPromise || downloadPromise || nativeStageActive || installStarted || hasDownloadedUpdate || nativeUpdateReady) return
+    if (['downloading', 'downloaded', 'staging', 'installing'].includes(state.status)) return
+    void check()
   }
 
   async function requestInstall() {
@@ -155,6 +165,8 @@ export function createUpdaterCoordinator({
     if (!isPackaged || platform !== 'darwin') return false
     if (started) return true
     started = true
+    pollingTimer = schedulePolling(pollForUpdates, pollIntervalMs)
+    pollingTimer?.unref?.()
     updater.autoDownload = false
     updater.autoInstallOnAppQuit = false
     updater.on('update-available', (info) => publish({ status: 'available', version: info?.version ?? null, error: null }))
@@ -188,5 +200,10 @@ export function createUpdaterCoordinator({
     return true
   }
 
-  return { start, startDownload, getState }
+  function dispose() {
+    if (pollingTimer !== null) cancelPolling(pollingTimer)
+    pollingTimer = null
+  }
+
+  return { start, startDownload, getState, dispose }
 }
