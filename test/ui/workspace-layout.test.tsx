@@ -74,6 +74,7 @@ describe("workspace pane layout", () => {
     expect(screen.getByText("MLX checking")).toBeInTheDocument();
     expect(screen.getByText("Gemma 4 E4B")).toBeInTheDocument();
     expect(screen.getByText("EmbeddingGemma")).toBeInTheDocument();
+    expect(screen.queryByText(/helper|choose install|features load installed models/i)).not.toBeInTheDocument();
   });
 
   it("resizes the right pane from its inside edge and supports keyboard control", () => {

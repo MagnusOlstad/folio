@@ -1,4 +1,4 @@
-import { fireEvent, render, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { MLX_GENERATION_MODEL } from "../../src/domain/types.ts";
@@ -87,6 +87,15 @@ function sidebarProps(
 }
 
 describe("WorkspaceSidebar preview navigation", () => {
+  it("submits a note search when Enter is pressed in the search field", () => {
+    const props = sidebarProps(vi.fn());
+    render(<WorkspaceSidebar {...props} />);
+
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Search your notes" }), { key: "Enter" });
+
+    expect(props.searchNotes).toHaveBeenCalledOnce();
+  });
+
   it("previews single-clicked Search and Recent notes and pins double-clicks", () => {
     const openDocument = vi.fn().mockResolvedValue(undefined);
     const props = sidebarProps(openDocument);

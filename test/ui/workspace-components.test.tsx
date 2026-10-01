@@ -365,8 +365,10 @@ describe("workspace editor components", () => {
       />,
     );
     const settingsLink = await screen.findByRole("button", { name: "Open model settings" });
-    expect(settingsLink.closest(".mlx-model-guidance")).not.toBeNull();
-    expect(screen.queryByText("Choose and download a generation model in Settings to enable filing and Ask.")).not.toBeInTheDocument();
+    expect(screen.getByText("MLX available")).toBeInTheDocument();
+    expect(screen.getAllByText("Not installed")).toHaveLength(2);
+    expect(settingsLink.closest(".mlx-status")).not.toBeNull();
+    expect(screen.queryByText(/helper|choose install|features load installed models/i)).not.toBeInTheDocument();
     fireEvent.click(settingsLink);
     expect(onOpenSettings).toHaveBeenCalledOnce();
     expect(window.localStorage.getItem("folio:model-setup-prompt-seen")).toBe("1");

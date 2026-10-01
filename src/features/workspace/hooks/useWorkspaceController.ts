@@ -198,7 +198,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       deletingNoteId: documents.deletingNoteId,
     };
   }, [documents.deletingNoteId, explorer.movingFileId, persistenceBundleId]);
-  const checkpointEditedNote = useNoteHistoryCheckpoint({
+  const { markEdited: checkpointEditedNote, checkpointPending, checkpointScope } = useNoteHistoryCheckpoint({
     checkpoint: async (documentId, scopeId) => {
       if (checkpointContextRef.current.bundleId !== scopeId) return false;
       const bundleId = scopeId;
@@ -228,6 +228,20 @@ export function useWorkspaceController(): WorkspaceShellProps {
       setMessage(error instanceof Error ? error.message : "Could not save a note history checkpoint.");
     },
   });
+
+  const previousActiveDocumentRef = useRef<{ documentId: string | null; scopeId: string }>({
+    documentId: null,
+    scopeId: persistenceBundleId,
+  });
+  useEffect(() => {
+    const activeGroup = tabs.groups.find((group) => group.id === tabs.activeGroupId);
+    const documentId = activeGroup?.activeId ?? null;
+    const previous = previousActiveDocumentRef.current;
+    if (previous.documentId && previous.documentId !== documentId && previous.scopeId === persistenceBundleId && !isUntitledId(previous.documentId)) {
+      void checkpointPending(previous.documentId, previous.scopeId);
+    }
+    previousActiveDocumentRef.current = { documentId, scopeId: persistenceBundleId };
+  }, [checkpointPending, persistenceBundleId, tabs.activeGroupId, tabs.groups]);
 
   function markEmbeddingDirty(documentId: string) {
     embeddingRevisionsRef.current.set(
@@ -445,7 +459,10 @@ export function useWorkspaceController(): WorkspaceShellProps {
 
   function selectBundle(bundleId: string) {
     void Promise.all([finalizeAllFiledDocuments(), documents.flushDrafts()])
-      .then(() => bundleSetup.selectBundle(bundleId))
+      .then(async () => {
+        if (!await checkpointScope(persistenceBundleId)) throw new Error("Could not save note history before switching bundles.");
+        await bundleSetup.selectBundle(bundleId);
+      })
       .catch((error) => {
         setMessage(error instanceof Error ? error.message : "Could not save the current bundle before switching.");
       });
@@ -464,10 +481,12 @@ export function useWorkspaceController(): WorkspaceShellProps {
   }, [documents, explorer, tabs]);
   async function setupBundle(input: Parameters<typeof bundleSetup.setupBundle>[0]) {
     await Promise.all([finalizeAllFiledDocuments(), documents.flushDrafts()]);
+    if (!await checkpointScope(persistenceBundleId)) throw new Error("Could not save note history before creating a bundle.");
     return bundleSetup.setupBundle(input);
   }
   async function detachBundle(bundleId: string) {
     await Promise.all([finalizeAllFiledDocuments(), documents.flushDrafts()]);
+    if (!await checkpointScope(persistenceBundleId)) throw new Error("Could not save note history before removing a bundle.");
     await bundleSetup.detachBundle(bundleId);
     if (bundleSetup.activeBundleId === bundleId && bundleSetup.bundles.length === 1)
       clearEmptyWorkspace();

@@ -174,11 +174,20 @@ test('downloads all attached bundle backups from settings', async ({ page }) => 
 
 test('keeps a new bundle draft isolated across legacy bundle switches', async ({ page }) => {
   const bundleName = `E2E isolation ${Date.now()}`
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  const noteEditor = page.getByRole('textbox', { name: 'Edit Start Here' })
+  await noteEditor.fill('# Start Here\n\nEdited before creating another bundle')
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Settings' }).click()
   const settings = page.getByRole('dialog', { name: 'Settings' })
   await settings.getByRole('button', { name: 'Create bundle or import Obsidian vault' }).click()
   await settings.getByRole('textbox', { name: 'Name' }).fill(bundleName)
+  const checkpoint = page.waitForResponse(response => {
+    const url = new URL(response.url())
+    return url.pathname.endsWith('/checkpoint') && response.request().method() === 'POST'
+  })
   await settings.getByRole('button', { name: 'Create bundle' }).click()
+  expect((await checkpoint).ok()).toBeTruthy()
   await expect(settings.getByRole('listitem').filter({ hasText: bundleName })).toBeVisible()
   await settings.getByRole('button', { name: 'Close' }).click()
 

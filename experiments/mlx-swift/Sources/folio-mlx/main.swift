@@ -48,6 +48,12 @@ private struct ReadyResponse: Encodable {
     let memory: MemoryStatus
 }
 
+private struct DownloadProgressResponse: Encodable {
+    let event = "download-progress"
+    let downloadedBytes: Int64
+    let totalBytes: Int64
+}
+
 private struct ErrorResponse: Encodable {
     let id: String?
     let error: String
@@ -90,6 +96,11 @@ private func writeLine<T: Encodable>(_ value: T) {
     encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
     guard let data = try? encoder.encode(value) else { return }
     FileHandle.standardOutput.write(data + Data([0x0a]))
+}
+
+private func writeDownloadProgress(_ progress: Progress) {
+    writeLine(DownloadProgressResponse(downloadedBytes: progress.completedUnitCount,
+                                      totalBytes: progress.totalUnitCount))
 }
 
 private func memoryStatus() -> MemoryStatus {
@@ -146,10 +157,11 @@ private struct FolioMLX {
             if let modelDirectory {
                 generator = try await loadModelContainer(from: modelDirectory, using: #huggingFaceTokenizerLoader())
             } else {
+                let configuration = ModelConfiguration(id: modelID, revision: revision,
+                    extraEOSTokens: Set(stopTokens(for: modelID)))
                 generator = try await #huggingFaceLoadModelContainer(
-                    configuration: ModelConfiguration(id: modelID, revision: revision,
-                        extraEOSTokens: Set(stopTokens(for: modelID)))
-                )
+                    configuration: configuration,
+                    progressHandler: writeDownloadProgress)
             }
             embedder = nil
         } else {
@@ -160,7 +172,8 @@ private struct FolioMLX {
             } else {
                 embedder = try await EmbedderModelFactory.shared.loadContainer(
                     from: #hubDownloader(), using: #huggingFaceTokenizerLoader(),
-                    configuration: ModelConfiguration(id: modelID, revision: revision))
+                    configuration: ModelConfiguration(id: modelID, revision: revision),
+                    progressHandler: writeDownloadProgress)
             }
             generator = nil
         }

@@ -149,16 +149,9 @@ export function MlxModelStatusPanel({
         <span className="status-dot" />
         <span>MLX {stateText.toLowerCase()}</span>
       </div>
-      <div className="mlx-helper-status">
-        Helper {mlxStatus ? (mlxStatus.helperAvailable ? "available" : "unavailable") : "checking"}
-      </div>
-      <p className="mlx-model-guidance">
-        Choose Install to download model files. {showFirstOpenSettings && onOpenSettings ? (
-          <>Choose a generation model in Settings to enable filing and Ask. <button className="mlx-model-settings-link" type="button" onClick={() => { setShowFirstOpenSettings(false); onOpenSettings("models"); }}>Open model settings</button></>
-        ) : (
-          "Features load installed models when needed; Start and Stop let you manage them."
-        )}
-      </p>
+      {showFirstOpenSettings && onOpenSettings ? (
+        <button className="mlx-model-settings-link" type="button" onClick={() => { setShowFirstOpenSettings(false); onOpenSettings("models"); }}>Open model settings</button>
+      ) : null}
       <div className="mlx-model-list">
         {displayedModels.map(({ id, name, purpose, model }) => {
           const installing = Boolean(mlxStatus?.installing.includes(id)) || mlxActionModel === id;

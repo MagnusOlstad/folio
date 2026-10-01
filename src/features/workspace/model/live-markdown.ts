@@ -558,7 +558,7 @@ function parseListItem(line: string): ParsedListItem | null {
   return match ? { prefix: match[1], marker: match[2] } : null;
 }
 
-type OrderedListSequence = { nextNumber: number; ordered: boolean };
+type OrderedListSequence = { nextNumber: number; ordered: boolean; depth: number };
 export type LiveMarkdownOrderedListChange = {
   from: number;
   to: number;
@@ -587,15 +587,29 @@ export function liveMarkdownOrderedListChanges(value: string) {
       continue;
     }
     const ordered = /^\d/.test(item.marker);
+    const indentation = item.prefix.replace(/(?:[ \t]*>[ \t]*)+/g, "");
+    const depth = Math.floor(indentation.replace(/\t/g, "  ").length / 2);
+    for (const [prefix, nestedSequence] of sequences) {
+      if (nestedSequence.depth > depth) sequences.delete(prefix);
+    }
     const sequence = sequences.get(item.prefix);
     if (!ordered) {
-      sequences.set(item.prefix, { nextNumber: 1, ordered: false });
+      sequences.set(item.prefix, { nextNumber: 1, ordered: false, depth });
       lineStart += line.length + 1;
       continue;
     }
     const currentNumber = Number.parseInt(item.marker, 10);
     if (!sequence?.ordered) {
-      sequences.set(item.prefix, { nextNumber: currentNumber + 1, ordered: true });
+      const startNumber = depth > 0 ? 1 : currentNumber;
+      if (currentNumber !== startNumber) {
+        const markerStart = lineStart + item.prefix.length;
+        changes.push({
+          from: markerStart,
+          to: markerStart + item.marker.length,
+          insert: `${startNumber}${item.marker.at(-1)}`,
+        });
+      }
+      sequences.set(item.prefix, { nextNumber: startNumber + 1, ordered: true, depth });
       lineStart += line.length + 1;
       continue;
     }
