@@ -148,25 +148,27 @@ export type DesktopUpdateState = {
   percent: number | null;
   error: string | null;
 };
-export type ModelStatus = {
-  online: boolean;
-  canLaunch: boolean;
-  classifierModel: string;
-  answerModel: string;
-  answerModels: string[];
-  embedModel: string;
-  configuredModels: string[];
-  missingModels: string[];
-  installingModels: string[];
-  installed: string[];
-  running: string[];
-  embeddingCoverage: {
-    conceptsEmbedded: number;
-    conceptsTotal: number;
-    chunksEmbedded: number;
-    chunksTotal: number;
-    refreshing: boolean;
-  };
+export type MlxModelId = "gemma4" | "embeddinggemma";
+export const MLX_GENERATION_MODEL = { id: "gemma4", name: "Gemma 4 E4B" } as const satisfies {
+  id: MlxModelId;
+  name: string;
+};
+export type MlxModelStatus = {
+  id: MlxModelId;
+  name: string;
+  purpose: "generation" | "embeddings";
+  downloadSizeBytes: number;
+  downloadSizeIsEstimate: boolean;
+  installed: boolean;
+  loaded: boolean;
+  memory: { activeBytes: number; cacheBytes: number; peakResidentBytes: number } | null;
+};
+export type MlxStatus = {
+  available: boolean;
+  helperAvailable: boolean;
+  keepAliveMs: number;
+  installing: string[];
+  models: MlxModelStatus[];
 };
 export type AskResult = {
   answer: string;

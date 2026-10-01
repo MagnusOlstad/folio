@@ -1,12 +1,33 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 export function registerRoutes(app, runtime) {
-  const { appVersion, updateRepo, embedModel, fetchLatestRelease, compareVersions, ollamaStatus, hasOllamaModel, refreshMissingEmbeddingsInBackground,
-    toggleOllamaService, installConfiguredModels, readRecords, publicRecord, readDrafts, normalizeDraftId, draftFilePath, queueDraftMutation, readDraft,
+  const { appVersion, updateRepo, fetchLatestRelease, compareVersions, mlxService, classifierModel, answerModel, answerModels, embedModel,
+    warmKeepAliveMs, askContextLength, indexEmbeddingCoverage, refreshMissingEmbeddingsInBackground,
+    readRecords, publicRecord, readDrafts, normalizeDraftId, draftFilePath, queueDraftMutation, readDraft,
     writeDraft, resolveBundleMarkdownPath, isMovableConceptId, queueMarkdownMutation, reindexBundle,
     relationshipIndex, recordIsStale, semanticSuggestionSummaries, removeEmptyBundleDirectories,
     assertNoBundleSymlinks, history } = runtime
-  const ollamaServiceToggles = new Map()
+app.get('/api/status', async (_request, response) => {
+  const modelStatus = await mlxService.status()
+  const records = await readRecords()
+  const embeddingCoverage = indexEmbeddingCoverage(records)
+  const models = modelStatus.models
+  const installed = models.filter((model) => model.installed).map((model) => model.id === 'gemma4' ? classifierModel : embedModel)
+  const running = models.filter((model) => model.loaded).map((model) => model.id === 'gemma4' ? classifierModel : embedModel)
+  const configuredModels = [classifierModel, embedModel]
+  const missingModels = models.filter((model) => !model.installed).map((model) => model.id === 'gemma4' ? classifierModel : embedModel)
+  response.json({
+    online: modelStatus.available && modelStatus.helperAvailable,
+    classifierModel, answerModel, answerModels, embedModel, configuredModels, missingModels,
+    installingModels: modelStatus.installing, installed, running,
+    warmKeepAlive: `${Math.floor(warmKeepAliveMs / 60_000)}m`, askContextLength, embeddingCoverage,
+  })
+  if (models.find((model) => model.id === 'embeddinggemma')?.loaded
+    && (embeddingCoverage.conceptsEmbedded < embeddingCoverage.conceptsTotal
+      || embeddingCoverage.chunksEmbedded < embeddingCoverage.chunksTotal)) {
+    void refreshMissingEmbeddingsInBackground()
+  }
+})
 app.get('/api/version', async (request, response) => {
   const payload = { version: appVersion, repo: updateRepo }
   if (request.query.check === '0') {
@@ -22,55 +43,6 @@ app.get('/api/version', async (request, response) => {
     checkError: latest.error,
     updateAvailable: Boolean(latest.version) && compareVersions(latest.version, appVersion) > 0,
   })
-})
-
-app.get('/api/status', async (_request, response) => {
-  const status = await ollamaStatus()
-  response.json(status)
-  const coverage = status.embeddingCoverage
-  if (status.online
-    && hasOllamaModel(embedModel, status.installed)
-    && (coverage.conceptsEmbedded < coverage.conceptsTotal || coverage.chunksEmbedded < coverage.chunksTotal)) {
-    void refreshMissingEmbeddingsInBackground()
-  }
-})
-
-app.post('/api/ollama/toggle/:service', async (request, response) => {
-  const service = String(request.params.service || '')
-  const requestedModel = String(request.body?.model || '').trim()
-  const toggleKey = `${service}:${requestedModel}`
-  try {
-    if (!ollamaServiceToggles.has(toggleKey)) {
-      ollamaServiceToggles.set(toggleKey, toggleOllamaService(service, requestedModel).finally(() => {
-        ollamaServiceToggles.delete(toggleKey)
-      }))
-    }
-    response.json(await ollamaServiceToggles.get(toggleKey))
-    if (service === 'search') void refreshMissingEmbeddingsInBackground()
-  } catch (error) {
-    const detail = error.code === 'ENOENT'
-      ? 'Ollama is not installed or is not available on the server PATH.'
-      : error.message
-    const statusCode = detail === 'Unknown Ollama service.'
-      ? 404
-      : detail === 'Ask model is not configured.'
-        ? 400
-        : 500
-    response.status(statusCode).json({ error: detail })
-  }
-})
-
-app.post('/api/ollama/install', async (_request, response) => {
-  try {
-    const status = await installConfiguredModels()
-    response.json(status)
-    void refreshMissingEmbeddingsInBackground()
-  } catch (error) {
-    const detail = error.code === 'ENOENT'
-      ? 'Ollama is not installed or is not available on the server PATH.'
-      : error.message
-    response.status(503).json({ error: detail })
-  }
 })
 
 app.get('/api/notes', async (_request, response, next) => {

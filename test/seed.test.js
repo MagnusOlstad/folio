@@ -25,7 +25,7 @@ test('starter bundle contains valid linked onboarding notes', async () => {
   const expectedIds = [
     '/daily/2026-09-03.md',
     '/getting-started/capture-and-organize.md',
-    '/getting-started/ollama.md',
+    '/getting-started/local-models.md',
     '/getting-started/search-ask-and-workspace.md',
     '/getting-started/start-here.md',
     '/todo-list.md',
@@ -59,5 +59,6 @@ test('starter bundle contains valid linked onboarding notes', async () => {
   assert.match(concepts.get('/todo-list.md').content, /- \[ \] Add your first task/)
   assert.match(concepts.get('/todo-list.md').content, /todo:/)
   assert.match(concepts.get('/daily/2026-09-03.md').content, /daily:/)
-  assert.match(concepts.get('/getting-started/ollama.md').content, /embeddinggemma/)
+  assert.match(concepts.get('/getting-started/local-models.md').content, /EmbeddingGemma/)
+  assert.match(concepts.get('/getting-started/local-models.md').content, /Gemma 4 E4B/)
 })

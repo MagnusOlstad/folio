@@ -1,26 +1,4 @@
 
-.endpoint-status {
-  gap: 5px;
-  letter-spacing: 0.04em;
-}
-
-.model-toggle {
-  width: 17px;
-  height: 17px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-}
-
-.model-toggle:disabled,
-.model-setup button:disabled {
-  cursor: wait;
-  opacity: 0.55;
-}
-
 .workbench-sidebar {
   min-width: 0;
   height: 100%;
@@ -2196,15 +2174,6 @@
 @media (max-width: 900px) {
   :root {
     --sidebar-width: 270px;
-  }
-
-  .ollama-status,
-  .endpoint-statuses {
-    gap: 7px;
-  }
-
-  .endpoint-status {
-    font-size: 8px;
   }
 
   .editor-groups.is-split {

@@ -294,7 +294,10 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
 
   async function close() {
     const allRuntimes = new Set([defaultRuntime, pendingRuntime, ...runtimes.values()])
-    await Promise.allSettled(Array.from(allRuntimes, (runtime) => runtime.history?.close?.()))
+    await Promise.allSettled([
+      ...Array.from(allRuntimes, (runtime) => runtime.history?.close?.()),
+      defaultRuntime.mlxService?.close?.(),
+    ])
   }
 
   function proxyRuntime() {

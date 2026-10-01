@@ -4,7 +4,6 @@ import { conceptUrl } from "../../../lib/paths.ts";
 import { buildFileTree } from "../../../lib/tree.ts";
 import {
   formatDate,
-  hasInstalledModel,
   isUntitledId,
 } from "../../../lib/workspace.ts";
 import { useWorkspaceBundleActions } from "./useWorkspaceBundleActions.ts";
@@ -148,7 +147,6 @@ export function useWorkspaceSidebarProps({
       activeBundleId: bundleSetup.activeBundleId,
       selectBundle: bundleSetup.selectBundle,
       openSettings,
-      status: models.status,
       notes: explorer.notes,
       searchInputRef: explorer.searchInputRef,
       searchQuery: discovery.searchQuery,
@@ -162,11 +160,7 @@ export function useWorkspaceSidebarProps({
       searchTag: discovery.searchTag,
       searchResults: discovery.searchResults,
       selectedAnswerModel: models.selectedAnswerModel,
-      setAskModel: models.setAskModel,
-      setAnswer: discovery.setAnswer,
       asking: discovery.asking,
-      configuredAnswerModels: models.configuredAnswerModels,
-      hasInstalledModel,
       question: discovery.question,
       setQuestion: discovery.setQuestion,
       selectedAnswerModelMissing: models.selectedAnswerModelMissing,

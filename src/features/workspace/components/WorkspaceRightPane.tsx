@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { OllamaStatus } from "../../status/WorkspaceStatus.tsx";
+import { MlxModelStatusPanel } from "../../status/WorkspaceStatus.tsx";
 import type { WorkspaceStatusProps } from "../../status/WorkspaceStatus.tsx";
 
 type WorkspaceRightPaneProps = WorkspaceStatusProps & {
@@ -26,7 +26,7 @@ export function WorkspaceRightPane({ onHide, historyContent, ...props }: Workspa
         </button>
       </header>
       <div className="right-pane-content">{historyContent}</div>
-      <footer className="right-pane-status"><OllamaStatus {...props} /></footer>
+      <footer className="right-pane-status"><MlxModelStatusPanel {...props} /></footer>
     </aside>
   );
 }

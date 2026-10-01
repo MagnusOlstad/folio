@@ -263,8 +263,8 @@ export function createObsidianImportService(runtime) {
     }
 
     try {
-      const status = await runtime.ollamaStatus()
-      if (!status.online || !runtime.hasOllamaModel(runtime.classifierModel, status.installed)) throw new Error(`The classifier model ${runtime.classifierModel} must be installed before importing.`)
+      const status = await runtime.mlxService.status()
+      if (!status.models.find((model) => model.id === 'gemma4')?.installed) throw new Error('Gemma 4 E4B must be installed before importing.')
       const records = await runtime.readRecords()
       const candidates = []
       for (const file of scan.files) {

@@ -1,12 +1,10 @@
 import { expect, test } from '@playwright/test'
 
-// This suite needs a real local Ollama with the configured models installed
-// (checked up front by global-setup.mjs) and talks to it for real, so results
-// depend on actual model output and can be slower than the CI suite.
+// This suite needs Gemma 4 E4B and EmbeddingGemma installed from the right-pane
+// controls. It exercises actual local model output and can be slower than CI.
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/')
-  await expect(page.getByText('Ollama online')).toBeVisible({ timeout: 15_000 })
 })
 
 test('capturing a real note classifies and files it (not Unsorted Note)', async ({ page }) => {
@@ -16,7 +14,6 @@ test('capturing a real note classifies and files it (not Unsorted Note)', async 
   await page.keyboard.press('Control+s')
 
   await expect(page.getByRole('status')).toContainText(/Filed/, { timeout: 60_000 })
-  await expect(page.getByRole('status')).not.toContainText('Ollama was unavailable')
   await expect(page.getByRole('status')).not.toContainText('Unsorted Note')
 })
 

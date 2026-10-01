@@ -90,8 +90,8 @@ test('loads older history pages before the focus reaches the edge and keeps the 
   await expect(timeline.locator('[aria-current="step"]')).toHaveAttribute('data-history-stop', selectedRevision)
 
   const loadAndRelease = async (cursor: string) => {
-    await expect(page.locator('.note-history-page-status').getByRole('status', { name: 'Loading earlier moments' })).toBeVisible()
     await timeline.evaluate(node => { node.scrollTop = Math.max(0, node.scrollHeight - node.clientHeight - 80) })
+    await expect(page.locator('.note-history-page-status').getByRole('status', { name: 'Loading earlier moments' })).toBeVisible()
     const focused = await timeline.evaluate(node => {
       const center = node.getBoundingClientRect().top + node.clientHeight / 2
       const stops = [...node.querySelectorAll('[data-history-stop]:not([data-history-stop=""])')]

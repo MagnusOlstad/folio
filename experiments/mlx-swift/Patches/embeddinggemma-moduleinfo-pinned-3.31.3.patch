@@ -1,0 +1,42 @@
+--- a/Libraries/MLXEmbedders/Models/Gemma3.swift
++++ b/Libraries/MLXEmbedders/Models/Gemma3.swift
+@@ -185,13 +185,13 @@
+         self.isSliding = (layerIdx + 1) % config.slidingWindowPattern != 0
+ 
+         if isSliding {
+-            self.rope = RoPE(
++            self._rope.wrappedValue = RoPE(
+                 dimensions: headDim,
+                 traditional: false,
+                 base: config.ropeLocalBaseFreq
+             )
+         } else {
+-            self.rope = RoPE(
++            self._rope.wrappedValue = RoPE(
+                 dimensions: headDim,
+                 traditional: false,
+                 base: config.ropeTheta
+@@ -293,7 +293,7 @@
+     ///   - layerIdx: The index of this block in the stack.
+     init(_ config: Gemma3Configuration, layerIdx: Int) {
+         self._selfAttention.wrappedValue = Attention(config, layerIdx: layerIdx)
+-        self.mlp = MLP(dimensions: config.hiddenSize, hiddenDimensions: config.intermediateSize)
++        self._mlp.wrappedValue = MLP(dimensions: config.hiddenSize, hiddenDimensions: config.intermediateSize)
+ 
+         self._inputLayerNorm.wrappedValue = Gemma.RMSNorm(
+             dimensions: config.hiddenSize, eps: config.rmsNormEps)
+@@ -474,10 +474,10 @@
+ 
+         // Initialize projection head if weights are present
+         if processedWeights.keys.contains(where: { $0.hasPrefix("dense.") }) {
+-            self._dense.wrappedValue = [
+-                Linear(config.hiddenSize, config.intermediateSize, bias: false),
+-                Linear(config.intermediateSize, config.hiddenSize, bias: false),
+-            ]
++            update(modules: ModuleChildren.unflattened([
++                ("dense.0", Linear(config.hiddenSize, config.hiddenSize * 4, bias: false)),
++                ("dense.1", Linear(config.hiddenSize * 4, config.hiddenSize, bias: false)),
++            ]))
+         }
+ 
+         // Truncate vocab if weights were trained with extra padding tokens

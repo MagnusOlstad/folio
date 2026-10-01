@@ -67,10 +67,9 @@
 
 .brand,
 .brand-group,
-.ollama-status,
+.mlx-status,
 .model-status,
-.endpoint-statuses,
-.endpoint-status {
+.mlx-model-heading {
   display: flex;
   align-items: center;
 }
@@ -200,7 +199,7 @@ button.update-badge {
   background: var(--overlay-background);
 }
 
-.right-pane-status .ollama-status {
+.right-pane-status .mlx-status {
   width: 100%;
   min-width: 0;
   align-items: flex-start;
@@ -208,47 +207,7 @@ button.update-badge {
   gap: 8px;
 }
 
-.right-pane-status .model-setup {
-  min-width: 0;
-  width: 100%;
-  flex-wrap: wrap;
-  gap: 6px 8px;
-  white-space: normal;
-}
-
-.right-pane-status .model-setup > span {
-  flex: 1 1 100%;
-  min-width: 0;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.right-pane-status .model-setup a,
-.right-pane-status .model-setup button {
-  flex: 0 1 auto;
-  min-width: 0;
-  white-space: normal;
-}
-
-.right-pane-status .model-setup-copy {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.right-pane-status .endpoint-statuses {
-  min-width: 0;
-  width: 100%;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-}
-
-.right-pane-status .endpoint-status {
-  min-width: 0;
-  white-space: normal;
-}
-
-.right-pane-status .endpoint-status > span:last-child {
+.right-pane-status .mlx-model-details {
   white-space: normal;
   overflow-wrap: anywhere;
 }
@@ -314,7 +273,7 @@ body.resizing-horizontal * {
   outline-offset: -1px;
 }
 
-.ollama-status {
+.mlx-status {
   gap: 12px;
 }
 
@@ -327,8 +286,7 @@ body.resizing-horizontal * {
   white-space: nowrap;
 }
 
-.status-dot,
-.toggle-symbol {
+.status-dot {
   width: 7px;
   height: 7px;
   flex: 0 0 auto;
@@ -337,60 +295,91 @@ body.resizing-horizontal * {
   box-shadow: 0 0 0 4px rgba(var(--orange-rgb), 0.08);
 }
 
-.model-status.online .status-dot,
-.endpoint-status.online .toggle-symbol {
+.model-status.online .status-dot {
   background: var(--acid);
   box-shadow: 0 0 0 4px rgba(var(--acid-rgb), 0.08);
 }
 
-.model-setup,
-.endpoint-statuses {
+.mlx-model-list {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 9px;
 }
 
-.model-setup,
-.model-setup-copy,
-.endpoint-status {
+.mlx-model-guidance {
+  margin: -5px 0 0;
+  line-height: 1.4;
+}
+
+.mlx-helper-status,
+.mlx-model-guidance,
+.mlx-model-state,
+.mlx-model-details,
+.mlx-model-heading span {
   color: var(--muted);
   font-size: 10px;
+}
+
+.mlx-model {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+}
+
+.mlx-model-heading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.mlx-model-heading strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.model-setup a,
-.model-setup button {
+.mlx-model-state {
+  grid-column: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.mlx-model-state.online {
+  color: var(--acid);
+}
+
+.mlx-model-details {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mlx-model-action {
+  grid-column: 2;
+  grid-row: 1 / span 2;
   padding: 5px 8px;
   border: 1px solid var(--line);
   color: var(--acid);
   background: transparent;
   font: inherit;
-  text-decoration: none;
+  font-size: 10px;
+  cursor: pointer;
 }
 
-.model-setup a:hover,
-.model-setup button:hover:not(:disabled) {
+.mlx-model-action:hover:not(:disabled) {
   border-color: var(--acid);
 }
 
-.endpoint-status {
-  gap: 5px;
-  letter-spacing: 0.04em;
-}
-
-.model-toggle {
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-}
-
-.model-toggle:disabled,
-.model-setup button:disabled {
+.mlx-model-action:disabled {
   cursor: wait;
   opacity: 0.55;
 }

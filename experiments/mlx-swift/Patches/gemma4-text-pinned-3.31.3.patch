@@ -1,0 +1,169 @@
+--- a/Libraries/MLXLLM/Models/Gemma4Text.swift
++++ b/Libraries/MLXLLM/Models/Gemma4Text.swift
+@@ -160,21 +160,6 @@
+     }
+ }
+ 
+-private class ScaledLinear: Module {
+-    let weight: MLXArray
+-    let scalar: Float
+-
+-    init(inFeatures: Int, outFeatures: Int, scalar: Float) {
+-        self.weight = MLXArray.zeros([outFeatures, inFeatures])
+-        self.scalar = scalar
+-        super.init()
+-    }
+-
+-    func callAsFunction(_ x: MLXArray) -> MLXArray {
+-        matmul(x, weight.T) * scalar
+-    }
+-}
+-
+ private enum Gemma4PositionOffset {
+     case scalar(Int)
+     case batch(MLXArray)
+@@ -214,14 +199,15 @@
+     let nKvHeads: Int
+     let useKeqV: Bool
+     let scale: Float
++    let isKvSharedLayer: Bool
+ 
+     @ModuleInfo(key: "q_proj") var qProj: Linear
+-    @ModuleInfo(key: "k_proj") var kProj: Linear
++    @ModuleInfo(key: "k_proj") var kProj: Linear?
+     @ModuleInfo(key: "v_proj") var vProj: Linear?
+     @ModuleInfo(key: "o_proj") var oProj: Linear
+ 
+     @ModuleInfo(key: "q_norm") var qNorm: RMSNorm
+-    @ModuleInfo(key: "k_norm") var kNorm: RMSNorm
++    @ModuleInfo(key: "k_norm") var kNorm: RMSNorm?
+     @ModuleInfo(key: "v_norm") var vNorm: RMSNormNoScale
+ 
+     @ModuleInfo var rope: RoPELayer
+@@ -231,6 +217,8 @@
+         self.layerIdx = layerIdx
+         self.layerType = config.layerTypes[layerIdx]
+         self.isSliding = layerType == "sliding_attention"
++        let firstKvSharedLayerIdx = config.numHiddenLayers - config.numKvSharedLayers
++        self.isKvSharedLayer = layerIdx >= firstKvSharedLayerIdx && firstKvSharedLayerIdx > 0
+ 
+         // Full attention uses globalHeadDim, sliding uses headDim
+         self.effectiveHeadDim =
+@@ -250,14 +238,16 @@
+         self.scale = 1.0
+ 
+         self._qProj.wrappedValue = Linear(dim, nHeads * effectiveHeadDim, bias: false)
+-        self._kProj.wrappedValue = Linear(dim, nKvHeads * effectiveHeadDim, bias: false)
+-        if !useKeqV {
+-            self._vProj.wrappedValue = Linear(dim, nKvHeads * effectiveHeadDim, bias: false)
++        if !isKvSharedLayer {
++            self._kProj.wrappedValue = Linear(dim, nKvHeads * effectiveHeadDim, bias: false)
++            if !useKeqV {
++                self._vProj.wrappedValue = Linear(dim, nKvHeads * effectiveHeadDim, bias: false)
++            }
++            self._kNorm.wrappedValue = RMSNorm(dimensions: effectiveHeadDim, eps: config.rmsNormEps)
+         }
+         self._oProj.wrappedValue = Linear(nHeads * effectiveHeadDim, dim, bias: false)
+ 
+         self._qNorm.wrappedValue = RMSNorm(dimensions: effectiveHeadDim, eps: config.rmsNormEps)
+-        self._kNorm.wrappedValue = RMSNorm(dimensions: effectiveHeadDim, eps: config.rmsNormEps)
+         self._vNorm.wrappedValue = RMSNormNoScale(eps: config.rmsNormEps)
+ 
+         // RoPE: sliding uses default, full uses proportional with partial rotation
+@@ -299,8 +289,10 @@
+             keys = sharedK
+             values = sharedV
+         } else {
+-            var k = kProj(x).reshaped(B, L, nKvHeads, effectiveHeadDim)
+-            k = kNorm(k)
++            guard let kProj, let kNorm else {
++                fatalError("Gemma4 attention layer \(layerIdx) has no local K/V projection and received no shared K/V")
++            }
++            var k = kNorm(kProj(x).reshaped(B, L, nKvHeads, effectiveHeadDim))
+             k = k.transposed(0, 2, 1, 3)
+             k = gemma4ApplyRotaryPosition(rope, to: k, offset: activePositionOffset)
+ 
+@@ -485,8 +477,9 @@
+ 
+     // Per-layer embeddings (PLE)
+     @ModuleInfo(key: "embed_tokens_per_layer") var embedTokensPerLayer: Embedding?
+-    @ModuleInfo(key: "per_layer_model_projection") var perLayerModelProjection: ScaledLinear?
++    @ModuleInfo(key: "per_layer_model_projection") var perLayerModelProjection: Linear?
+     @ModuleInfo(key: "per_layer_projection_norm") var perLayerProjectionNorm: RMSNorm?
++    let perLayerProjectionScale: Float
+ 
+     // KV sharing mapping: for each layer, which earlier layer provides KVs
+     let previousKvs: [Int]
+@@ -496,6 +489,9 @@
+         self.config = config
+         self.embedScale = Float(config.hiddenSize).squareRoot()
+         self.hiddenSizePerLayerInput = config.hiddenSizePerLayerInput
++        self.perLayerProjectionScale = config.hiddenSizePerLayerInput > 0
++            ? pow(Float(config.hiddenSize), -0.5)
++            : 1.0
+ 
+         self._embedTokens.wrappedValue = Embedding(
+             embeddingCount: config.vocabSize, dimensions: config.hiddenSize)
+@@ -509,10 +505,9 @@
+             self._embedTokensPerLayer.wrappedValue = Embedding(
+                 embeddingCount: config.vocabSizePerLayerInput,
+                 dimensions: config.numHiddenLayers * config.hiddenSizePerLayerInput)
+-            self._perLayerModelProjection.wrappedValue = ScaledLinear(
+-                inFeatures: config.hiddenSize,
+-                outFeatures: config.numHiddenLayers * config.hiddenSizePerLayerInput,
+-                scalar: pow(Float(config.hiddenSize), -0.5))
++            self._perLayerModelProjection.wrappedValue = Linear(
++                config.hiddenSize, config.numHiddenLayers * config.hiddenSizePerLayerInput,
++                bias: false)
+             self._perLayerProjectionNorm.wrappedValue = RMSNorm(
+                 dimensions: config.hiddenSizePerLayerInput, eps: config.rmsNormEps)
+         }
+@@ -563,7 +558,7 @@
+                 config.numHiddenLayers, config.hiddenSizePerLayerInput)
+ 
+             // Model projection PLE
+-            let modelPLE = modelProj(h).reshaped(
++            let modelPLE = (modelProj(h) * perLayerProjectionScale).reshaped(
+                 h.dim(0), h.dim(1),
+                 config.numHiddenLayers, config.hiddenSizePerLayerInput)
+             let normedModelPLE = projNorm(modelPLE)
+@@ -665,6 +660,7 @@
+ 
+     public func sanitize(weights: [String: MLXArray]) -> [String: MLXArray] {
+         var sanitized = [String: MLXArray]()
++        let firstKvSharedLayerIdx = config.numHiddenLayers - config.numKvSharedLayers
+         for (k, v) in weights {
+             // Skip vision/audio/rotary weights
+             if k.contains("self_attn.rotary_emb")
+@@ -672,6 +668,18 @@
+                 || k.contains("input_min")
+                 || k.contains("output_max")
+                 || k.contains("output_min")
++            {
++                continue
++            }
++            // Shared-tail layers reuse the last local K/V layer of the same
++            // attention type, so packed QAT checkpoints omit these tensors.
++            // Drop redundant K/V keys from PTQ snapshots that still include them.
++            if firstKvSharedLayerIdx > 0,
++                k.contains("self_attn.k_proj")
++                    || k.contains("self_attn.v_proj")
++                    || k.contains("self_attn.k_norm"),
++                let layerIdx = Self.decoderLayerIndex(in: k),
++                layerIdx >= firstKvSharedLayerIdx
+             {
+                 continue
+             }
+@@ -680,6 +688,12 @@
+         return sanitized
+     }
+ 
++    private static func decoderLayerIndex(in key: String) -> Int? {
++        guard let range = key.range(of: "layers.") else { return nil }
++        let digits = key[range.upperBound...].prefix { $0.isNumber }
++        return Int(digits)
++    }
++
+     public func newCache(parameters: GenerateParameters?) -> [any KVCache] {
+         let firstKvShared = config.numHiddenLayers - config.numKvSharedLayers
+ 

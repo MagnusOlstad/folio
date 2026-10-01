@@ -335,13 +335,13 @@ export function useWorkspaceController(): WorkspaceShellProps {
         apiForBundle<BundleFile[]>(bundleId, "/api/files"),
         apiForBundle<BundleDirectory[]>(bundleId, "/api/directories"),
         apiForBundle<import("../../../domain/types.ts").StoredDraft[]>(bundleId, "/api/drafts"),
-        apiForBundle<import("../../../domain/types.ts").ModelStatus>(bundleId, "/api/status"),
+        apiForBundle<import("../../../domain/types.ts").MlxStatus>(bundleId, "/api/mlx/status"),
       ]);
       if (revision !== bundleSwitchRevisionRef.current) return;
       explorer.setNotes(notes);
       explorer.setFiles(files);
       explorer.setDirectories(directories);
-      models.setStatus(status);
+      models.setMlxStatus(status);
       explorer.setExpandedDirectories(expandedPathsForFiles(files));
       {
       const nextDocuments = Object.fromEntries(drafts.map((draft) => [draft.id, {
@@ -461,7 +461,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
   }
 
   useWorkspaceBootstrap({
-    setStatus: models.setStatus,
+    setMlxStatus: models.setMlxStatus,
     setFilesLoading: explorer.setFilesLoading,
     setMessage,
     setNotes: explorer.setNotes,
@@ -555,13 +555,10 @@ export function useWorkspaceController(): WorkspaceShellProps {
     historyScopeId: persistenceBundleId,
     app: {
       versionInfo: models.versionInfo,
-      status: models.status,
-      missingModels: models.missingModels,
-      modelInstallInProgress: models.modelInstallInProgress,
-      modelEndpoints: models.modelEndpoints,
-      togglingService: models.togglingService,
-      onInstall: models.installOllamaModels,
-      onToggle: models.toggleOllamaService,
+      mlxStatus: models.mlxStatus,
+      mlxActionModel: models.mlxActionModel,
+      onInstallMlxModel: models.installMlxModel,
+      onToggleMlxModel: models.toggleMlxModel,
       onOpenSettings: themeSettings.openSettings,
     },
     settings: {

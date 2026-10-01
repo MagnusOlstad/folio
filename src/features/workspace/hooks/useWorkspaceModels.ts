@@ -1,104 +1,50 @@
 import { useState } from "react";
-import type { ModelStatus, VersionInfo } from "../../../domain/types.ts";
+import { MLX_GENERATION_MODEL } from "../../../domain/types.ts";
+import type { MlxModelId, MlxStatus, VersionInfo } from "../../../domain/types.ts";
 import { api } from "../../../lib/api.ts";
-import { hasInstalledModel } from "../../../lib/workspace.ts";
 
 export function useWorkspaceModels(setMessage: (message: string) => void) {
-  const [status, setStatus] = useState<ModelStatus | null>(null);
-  const [askModel, setAskModel] = useState("");
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
-  const [togglingService, setTogglingService] = useState<string | null>(null);
-  const [installingModels, setInstallingModels] = useState(false);
+  const [mlxStatus, setMlxStatus] = useState<MlxStatus | null>(null);
+  const [mlxActionModel, setMlxActionModel] = useState<MlxModelId | null>(null);
 
-  async function toggleOllamaService(service: string, model?: string) {
-    if (togglingService) return;
-    setTogglingService(service);
-    setMessage("");
+  async function refreshMlxStatus() {
     try {
-      setStatus(
-        await api<ModelStatus>(`/api/ollama/toggle/${service}`, {
-          method: "POST",
-          body: JSON.stringify({ model }),
-        }),
-      );
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Could not toggle Ollama service",
-      );
-    } finally {
-      setTogglingService(null);
+      setMlxStatus(await api<MlxStatus>("/api/mlx/status"));
+    } catch {
+      setMlxStatus(null);
     }
   }
 
-  async function installOllamaModels() {
-    if (installingModels) return;
-    setInstallingModels(true);
+  async function runMlxAction(id: MlxModelId, action: "install" | "load" | "unload") {
+    if (mlxActionModel) return;
+    setMlxActionModel(id);
     setMessage("");
     try {
-      setStatus(
-        await api<ModelStatus>("/api/ollama/install", { method: "POST" }),
-      );
-      setMessage("Ollama models installed and ready.");
+      await api<MlxStatus>(`/api/mlx/models/${id}/${action}`, { method: "POST" });
+      await refreshMlxStatus();
     } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Could not install Ollama models",
-      );
+      setMessage(error instanceof Error ? error.message : `Could not ${action} ${id}`);
     } finally {
-      setInstallingModels(false);
+      setMlxActionModel(null);
     }
   }
 
-  const configuredAnswerModels = status?.answerModels || [];
-  const missingModels = status?.missingModels || [];
-  const modelInstallInProgress =
-    installingModels || Boolean(status?.installingModels.length);
-  const selectedAnswerModel = status?.answerModels.includes(askModel)
-    ? askModel
-    : status?.answerModel || "";
-  const selectedAnswerModelMissing = Boolean(
-    status?.online &&
-      selectedAnswerModel &&
-      !hasInstalledModel(selectedAnswerModel, status.installed),
+  const selectedAnswerModel = MLX_GENERATION_MODEL.id;
+  const selectedAnswerModelMissing = !mlxStatus?.available || !mlxStatus.helperAvailable || !mlxStatus.models.some(
+    (model) => model.id === selectedAnswerModel && model.installed,
   );
-  const modelEndpoints = [
-    { id: "capture", label: "Capture", model: status?.classifierModel },
-    { id: "search", label: "Search", model: status?.embedModel },
-    { id: "ask", label: "Ask", model: selectedAnswerModel },
-  ].map((endpoint) => ({
-    ...endpoint,
-    state: !status
-      ? "checking"
-      : !status.online
-        ? "offline"
-        : !endpoint.model ||
-            !hasInstalledModel(endpoint.model, status.installed)
-          ? "missing"
-          : hasInstalledModel(endpoint.model, status.running)
-            ? "online"
-            : "stopped",
-  }));
-
   return {
-    status,
-    setStatus,
-    askModel,
-    setAskModel,
     versionInfo,
     setVersionInfo,
-    togglingService,
-    installingModels,
-    configuredAnswerModels,
-    missingModels,
-    modelInstallInProgress,
     selectedAnswerModel,
     selectedAnswerModelMissing,
-    modelEndpoints,
-    toggleOllamaService,
-    installOllamaModels,
+    mlxStatus,
+    setMlxStatus,
+    mlxActionModel,
+    installMlxModel: (id: MlxModelId) => runMlxAction(id, "install"),
+    toggleMlxModel: (id: MlxModelId, loaded: boolean) => runMlxAction(id, loaded ? "unload" : "load"),
+    refreshMlxStatus,
   };
 }
 

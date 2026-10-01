@@ -7,7 +7,6 @@ import { buildFileTree } from "../../src/lib/tree.ts";
 import {
   expandedPathsForFiles,
   filedDraftContent,
-  hasInstalledModel,
   isUntitledId,
   parseTags,
   storedDraftDocument,
@@ -35,13 +34,8 @@ function file(
 }
 
 describe("workspace pure helpers", () => {
-  it("normalizes tags, model aliases, draft identity/content, and draft documents", () => {
+  it("normalizes tags, draft identity/content, and draft documents", () => {
     expect(parseTags(" work, ideas,work, , ideas ")).toEqual(["work", "ideas"]);
-    expect(hasInstalledModel("embeddinggemma", ["embeddinggemma:latest"])).toBe(
-      true,
-    );
-    expect(hasInstalledModel("llama3.2:3b", ["llama3.2:3b"])).toBe(true);
-    expect(hasInstalledModel("missing", ["other:latest"])).toBe(false);
     expect(isUntitledId("untitled:123")).toBe(true);
     expect(isUntitledId("/notes/123.md")).toBe(false);
     expect(filedDraftContent("# Suggested path\nThe useful content")).toBe(

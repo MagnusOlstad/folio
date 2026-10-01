@@ -104,7 +104,7 @@ async function rankedRecords(query, records, limit = 8, tag = '') {
   try {
     queryEmbedding = await embedQuery(query, embeddingDimension(candidates))
   } catch {
-    // Full-text search remains available while Ollama is stopped.
+    // Full-text search remains available while models are unavailable.
   }
 
   return candidates
