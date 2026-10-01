@@ -4,12 +4,11 @@ const port = Number(process.env.FOLIO_E2E_PORT || 4174)
 const baseURL = `http://127.0.0.1:${port}`
 
 // The broader, slower suite: exercises real capture classification, semantic
-// search, and Ask against a real local Ollama. Not run in CI (runners don't
-// have Ollama) - this is meant for `npm run test:e2e:local`, normally invoked
+// search, and Ask through local MLX models. Not run in CI (runners don't
+// have the models installed) - this is meant for `npm run test:e2e:local`, normally invoked
 // by the pre-push hook (see .githooks/pre-push).
 export default defineConfig({
   testDir: './e2e/local',
-  globalSetup: './e2e/local/global-setup.mjs',
   fullyParallel: false,
   workers: 1,
   timeout: 90_000,

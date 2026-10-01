@@ -1,22 +1,12 @@
 import assert from 'node:assert/strict'
 import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
-import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import YAML from 'yaml'
-
-function listen(server) {
-  return new Promise((resolve, reject) => {
-    server.listen(0, '127.0.0.1', resolve)
-    server.once('error', reject)
-  })
-}
-
-function close(server) {
-  return new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
-}
+import { createRuntime } from '../server/app.js'
+import { configureFakeMlx, readFakeMlxLog, writeFakeMlxControl } from './fixtures/mlx-test-support.js'
 
 async function jsonRequest(url, body) {
   const response = await fetch(url, {
@@ -41,128 +31,29 @@ function markdownManagedMetadata(markdown) {
 
 test('files whole notes hierarchically and appends todo and daily captures', async (context) => {
   const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-test-'))
-  let classificationRequests = 0
-  let classificationOffline = false
-  const classificationPrompts = []
-  let invalidEmbeddingResponse = false
-  const embeddingInputs = []
-  const installedModels = new Set(['llama3.2:3b'])
-  const pulledModels = []
-  const ollama = http.createServer(async (request, response) => {
-    const chunks = []
-    for await (const chunk of request) chunks.push(chunk)
-    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {}
-    response.setHeader('content-type', 'application/json')
-
-    if (request.url === '/api/tags') {
-      response.end(JSON.stringify({ models: [...installedModels].map((name) => ({ name })) }))
-      return
-    }
-
-    if (request.url === '/api/ps') {
-      response.end(JSON.stringify({ models: [] }))
-      return
-    }
-
-    if (request.url === '/api/pull') {
-      pulledModels.push(body.model)
-      installedModels.add(body.model.includes(':') ? body.model : `${body.model}:latest`)
-      response.end(JSON.stringify({ status: 'success' }))
-      return
-    }
-
-    if (request.url === '/api/chat') {
-      classificationRequests += 1
-      if (classificationOffline) {
-        response.statusCode = 503
-        response.end(JSON.stringify({ error: 'offline' }))
-        return
-      }
-      const note = body.messages?.at(-1)?.content || ''
-      classificationPrompts.push(note)
-      const concept = note.includes('Path override todo')
-        ? { kind: 'todo', path: ['wrong'], title: 'Path Override Todo', type: 'Task', description: 'A deliberately misclassified task.', tags: ['task'] }
-        : note.includes('Project Aurora details')
-        ? {
-            kind: 'note',
-            path: ['projects'],
-            title: 'Project Aurora',
-            type: 'Project',
-            description: 'Details about Project Aurora.',
-            tags: ['prosjekt', 'nordisk'],
-          }
-        : note.includes('Planning note')
-          ? {
-              kind: 'note',
-              path: ['planning'],
-              title: 'Planning Note',
-              type: 'Plan',
-              description: 'Planning details that reference a future project.',
-              tags: ['planlegging', 'økonomi'],
-            }
-          : note.includes('Long archive')
-            ? {
-                kind: 'note',
-                path: ['research'],
-                title: 'Long Archive',
-                type: 'Research',
-                description: 'A long note used to verify complete chunk retrieval.',
-                tags: ['arkiv', 'langtekst'],
-              }
-          : note.includes('Semantic neighbor')
-            ? {
-                kind: 'note',
-                path: ['ideas'],
-                title: 'Semantic Neighbor',
-                type: 'Idea',
-                description: 'A separate concept with similar meaning.',
-                tags: ['idé', 'søk'],
-              }
-            : note.includes('Attribution description')
-              ? { kind: 'note', path: ['attribution'], title: 'Attribution Description', type: 'Note', description: 'Agent description.', tags: ['agent'] }
-              : note.includes('Attribution title')
-                ? { kind: 'note', path: ['attribution'], title: 'Attribution Title', type: 'Note', description: 'Agent title.', tags: ['agent'] }
-                : note.includes('Attribution path')
-                  ? { kind: 'note', path: ['attribution'], title: 'Attribution Path', type: 'Note', description: 'Agent path.', tags: ['agent'] }
-                  : note.includes('Marker collision capture')
-                    ? { kind: 'note', path: ['marker-tests'], title: 'Captured note', type: 'Note', description: 'Marker placement regression.', tags: [] }
-                    : {
-                        kind: 'note',
-                        path: ['meeting-notes', 'morning-meeting'],
-                        title: 'Morning<br>launch meeting',
-                        type: 'Meeting Note',
-                        description: 'The morning meeting covered the launch<br />and its follow-up.',
-                        tags: ['launch', 'morning'],
-                      }
-      response.end(JSON.stringify({
-        message: {
-          content: JSON.stringify({ concept }),
-        },
-      }))
-      return
-    }
-
-    if (request.url === '/api/embed') {
-      const inputs = Array.isArray(body.input) ? body.input : [body.input]
-      embeddingInputs.push(...inputs)
-      response.end(JSON.stringify({
-        embeddings: invalidEmbeddingResponse
-          ? []
-          : inputs.map((input) => input.includes('hidden constellation') ? [0, 1, 0] : [1, 0, 0]),
-      }))
-      return
-    }
-
-    response.statusCode = 404
-    response.end(JSON.stringify({ error: 'not found' }))
+  const fixture = await configureFakeMlx(context, {
+    modelRoot: path.join(dataRoot, 'models'),
+    logPath: path.join(dataRoot, 'mlx-helper.jsonl'),
+    controlPath: path.join(dataRoot, 'mlx-control.json'),
   })
-
-  await listen(ollama)
-  const ollamaPort = ollama.address().port
+  const classificationPrompts = []
+  const embeddingInputs = []
+  let classificationRequests = 0
+  async function refreshModelLogs() {
+    const entries = await readFakeMlxLog(fixture.logPath)
+    const classifications = entries.filter((entry) => entry.operation === 'generate' && entry.task === 'generation'
+      && !entry.messages?.some((message) => message.content?.includes('grounded research assistant')))
+    classificationRequests = classifications.length
+    classificationPrompts.splice(0, classificationPrompts.length,
+      ...classifications.map((entry) => entry.messages.at(-1)?.content || ''))
+    const embeddings = entries.filter((entry) => entry.operation === 'embed' && entry.task === 'embedding')
+    embeddingInputs.splice(0, embeddingInputs.length, ...embeddings.flatMap((entry) => entry.input || []))
+  }
   process.env.FOLIO_DATA_ROOT = dataRoot
   await fs.mkdir(path.join(dataRoot, 'bundle'), { recursive: true })
   process.env.FOLIO_DIST_ROOT = path.join(dataRoot, 'dist')
-  process.env.OLLAMA_URL = `http://127.0.0.1:${ollamaPort}`
+  process.env.FOLIO_MODEL_ROOT = fixture.modelRoot
+  process.env.FOLIO_MLX_HELPER = fixture.helperPath
 
   const {
     existingClassificationGuide,
@@ -230,24 +121,31 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     ['ai', 'dei', 'presentasjon'],
   )
 
-  const api = await startServer(0)
+  const runtime = createRuntime(process.env)
+  fixture.restorePlatform()
+  const api = await startServer(0, runtime)
   const apiPort = api.address().port
   const baseUrl = `http://127.0.0.1:${apiPort}`
   context.after(async () => {
-    await close(api)
+    await new Promise((resolve, reject) => api.close((error) => error ? reject(error) : resolve()))
     await api.waitForBackground?.()
-    await close(ollama)
+    await runtime.mlxService.close()
     await fs.rm(dataRoot, { recursive: true, force: true })
   })
 
-  const initialStatusResponse = await fetch(`${baseUrl}/api/status`)
+  const initialStatusResponse = await fetch(`${baseUrl}/api/mlx/status`)
   const initialStatus = await initialStatusResponse.json()
-  assert.deepEqual(initialStatus.missingModels, ['embeddinggemma'])
-  const installResponse = await fetch(`${baseUrl}/api/ollama/install`, { method: 'POST' })
-  const installedStatus = await installResponse.json()
-  assert.equal(installResponse.status, 200, JSON.stringify(installedStatus))
-  assert.deepEqual(pulledModels, ['embeddinggemma'])
-  assert.deepEqual(installedStatus.missingModels, [])
+  assert.equal(initialStatus.models.every((model) => !model.installed && !model.loaded), true)
+  const loadResponse = await fetch(`${baseUrl}/api/mlx/models/gemma4/load`, { method: 'POST' })
+  assert.equal(loadResponse.status, 503)
+  assert.match((await loadResponse.json()).error, /not installed/)
+  assert.deepEqual(await readFakeMlxLog(fixture.logPath), [])
+  for (const id of ['gemma4', 'embeddinggemma']) {
+    const installResponse = await fetch(`${baseUrl}/api/mlx/models/${id}/install`, { method: 'POST' })
+    const installedStatus = await installResponse.json()
+    assert.equal(installResponse.status, 200, JSON.stringify(installedStatus))
+    assert.equal(installedStatus.models.find((model) => model.id === id).installed, true)
+  }
 
   const draftId = 'untitled:server-persistence-test'
   const draftCreatedAt = '2026-09-03T06:00:00.000Z'
@@ -365,7 +263,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.ok(filedTimeline.entries.every((entry) => !entry.revision.startsWith('draft-')), 'filed history contains Git checkpoints only')
   assert.equal(meetingResult.filing.draftId, meetingDraftId)
   assert.equal(meetingResult.filing.mode, 'new')
-  assert.equal(meetingResult.filing.actor, 'okf-notetaker/llama3.2:3b')
+  assert.equal(meetingResult.filing.actor, 'okf-notetaker/mlx-community/gemma-4-e4b-it-4bit')
   assert.equal(meetingResult.filing.proposal.filename, path.posix.basename(meetingResult.note.id))
   const forbiddenNewStandalone = await fetch(`${baseUrl}/api/filing/confirm`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
@@ -399,6 +297,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
 
   const editedInput = 'Morning meeting\nDiscussed the revised launch plan.<br/>Decision: ship Monday.'
   const editedContent = 'Morning meeting\nDiscussed the revised launch plan.  \nDecision: ship Monday.'
+  await refreshModelLogs()
   const embeddingCountBeforeEdit = embeddingInputs.length
   const editResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(meetingResult.note.id)}`, {
     method: 'PATCH',
@@ -409,6 +308,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal(editResponse.status, 200, JSON.stringify(editedMeeting))
   assert.equal(editedMeeting.content, editedContent)
   assert.deepEqual(editedMeeting.tags, ['launch', 'morning'])
+  await refreshModelLogs()
   assert.equal(classificationRequests, 1)
   assert.match(classificationPrompts[0], /No existing filing options yet/)
   assert.match(classificationPrompts[0], /No relevant existing tag candidates found/)
@@ -423,6 +323,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const reembeddedMeeting = await reembedResponse.json()
   assert.equal(reembedResponse.status, 200, JSON.stringify(reembeddedMeeting))
   assert.equal(reembeddedMeeting.content, editedContent)
+  await refreshModelLogs()
   assert.ok(embeddingInputs.includes(`title: Morning launch meeting | text: The morning meeting covered the launch and its follow-up.\n${editedContent}`))
   assert.ok(embeddingInputs.some((input) => input.startsWith('title: Morning launch meeting | text: ')))
   const editedMeetingFile = await fs.readFile(editedMeetingPath, 'utf8')
@@ -454,6 +355,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     content: 'Planning note\nWe depend on Project Aurora.',
     timeZone: 'America/New_York',
   })
+  await refreshModelLogs()
   assert.match(classificationPrompts[1], /path: \["meeting-notes","morning-meeting"\]; types: \["Meeting Note"\]/)
   assert.match(classificationPrompts[1], /matching existing concepts: \[\{"title":"Morning launch meeting","tags":\["møte","økonomi","café"\]\}\]/)
   assert.match(classificationPrompts[1], /- økonomi \(used 1 time; similar note: "Morning launch meeting"\)/)
@@ -607,6 +509,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
 
   const indexBeforeMove = JSON.parse(await fs.readFile(path.join(dataRoot, 'search-index.json'), 'utf8'))
   const embeddingBeforeMove = indexBeforeMove.find((record) => record.id === spacedId)
+  await refreshModelLogs()
   const embeddingRequestsBeforeMove = embeddingInputs.length
   const movedId = '/manual/curated/Odd (File).md'
   const conflictMarkdown = '---\ntype: Reference\ntitle: Existing destination\n---\n\nDo not overwrite.\n'
@@ -676,6 +579,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.doesNotMatch(semanticAfterMove, /\/manual\/Odd%20%28File%29\.md/)
   const indexAfterMove = JSON.parse(await fs.readFile(path.join(dataRoot, 'search-index.json'), 'utf8'))
   const embeddingAfterMove = indexAfterMove.find((record) => record.id === movedId)
+  await refreshModelLogs()
   assert.deepEqual(embeddingAfterMove.embedding, embeddingBeforeMove.embedding)
   assert.notEqual(embeddingAfterMove.embeddingInputHash, embeddingBeforeMove.embeddingInputHash)
   assert.ok(embeddingAfterMove.chunks.every((chunk) => chunk.embedding))
@@ -710,10 +614,12 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
 
   const searchResponse = await fetch(`${baseUrl}/api/search?q=${encodeURIComponent('launch decision')}`)
   assert.equal(searchResponse.status, 200)
+  await refreshModelLogs()
   assert.ok(embeddingInputs.includes('task: search result | query: launch decision'))
 
   const longContent = `Long archive\n${Array.from({ length: 1600 }, (_, index) => `filler-${index}`).join(' ')} hidden constellation`
   const longNote = await jsonRequest(`${baseUrl}/api/notes`, { content: longContent, timeZone: 'America/New_York' })
+  await refreshModelLogs()
   assert.match(classificationPrompts.at(-1), /path: \["manual","curated"\]; types: \["Reference"\]/)
   const longSearchResponse = await fetch(`${baseUrl}/api/search?q=${encodeURIComponent('hidden constellation')}`)
   const longSearch = await longSearchResponse.json()
@@ -733,6 +639,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     body: JSON.stringify({ title: 'Deep Archive', description: 'Updated archive description.' }),
   })
   const editedLong = await editedLongResponse.json()
+  await refreshModelLogs()
   assert.equal(editedLongResponse.status, 200, JSON.stringify(editedLong))
   assert.equal(editedLong.oldId, longNote.note.id)
   assert.equal(editedLong.newId, longNote.note.id)
@@ -748,7 +655,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.ok(editedIndex.some((record) => record.id === longNote.note.id && record.title === 'Deep Archive'))
   assert.ok(embeddingInputs.some((input) => input.startsWith('title: Deep Archive | text: Updated archive description.\nLong archive')))
 
-  invalidEmbeddingResponse = true
+  await writeFakeMlxControl(fixture.controlPath, { invalidEmbeddingResponse: true })
   const invalidEmbeddingResponseResult = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(semantic.note.id)}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
@@ -757,7 +664,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const invalidEmbeddingUpdate = await invalidEmbeddingResponseResult.json()
   assert.equal(invalidEmbeddingResponseResult.status, 200, JSON.stringify(invalidEmbeddingUpdate))
   assert.equal(invalidEmbeddingUpdate.warning, 'The note was updated, but its semantic index could not be refreshed.')
-  invalidEmbeddingResponse = false
+  await writeFakeMlxControl(fixture.controlPath, {})
 
   const rootMoveResponse = await fetch(`${baseUrl}/api/file/move`, {
     method: 'POST',
@@ -1092,7 +999,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     {
       content: 'Attribution description',
       fields: (filing) => ({ ...filing.proposal, description: 'Human description.' }),
-      generated: 'human:local', filing: 'okf-notetaker/llama3.2:3b',
+      generated: 'human:local', filing: 'okf-notetaker/mlx-community/gemma-4-e4b-it-4bit',
     },
     {
       content: 'Attribution title',
@@ -1102,7 +1009,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
     {
       content: 'Attribution path',
       fields: (filing) => ({ ...filing.proposal, directory: '/corrected', filename: 'ignored-name.md' }),
-      generated: 'okf-notetaker/llama3.2:3b', filing: 'human:local',
+      generated: 'okf-notetaker/mlx-community/gemma-4-e4b-it-4bit', filing: 'human:local',
     },
   ]
   for (const attribution of attributionCases) {
@@ -1132,7 +1039,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.deepEqual(concurrentResponses.map((result) => result.status), [200, 200])
   assert.equal(concurrentResponses.filter((result) => result.body.idempotent).length, 1)
 
-  classificationOffline = true
+  await writeFakeMlxControl(fixture.controlPath, { classificationOffline: true })
   const offline = await jsonRequest(`${baseUrl}/api/notes`, { content: 'Offline capture', timeZone: 'America/New_York' })
   assert.equal(offline.filing.actor, 'process:folio-fallback')
   assert.match(await fs.readFile(path.join(dataRoot, 'bundle', offline.note.id.slice(1)), 'utf8'), /filing:\n  by: process:folio-fallback/)

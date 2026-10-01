@@ -57,8 +57,12 @@ test('opens a path-directed draft from a bundle directory context menu', async (
   }
 })
 
-test('reports Ollama as offline when no local model server is running', async ({ page }) => {
-  await expect(page.getByText('Ollama offline')).toBeVisible()
+test('shows explicit controls for the local MLX models', async ({ page }) => {
+  const models = page.getByRole('region', { name: 'MLX model management' })
+  await expect(models).toBeVisible()
+  await expect(models.getByText(/Gemma 4/)).toBeVisible()
+  await expect(models.getByText('EmbeddingGemma', { exact: true })).toBeVisible()
+  await expect(models.locator('.mlx-model-action')).toHaveCount(2)
 })
 
 test('changes and restores the color theme from browser settings', async ({ page }) => {

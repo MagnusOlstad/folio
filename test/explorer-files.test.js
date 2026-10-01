@@ -11,13 +11,10 @@ test('explorer folders persist and file operations validate, index, and rename p
   await fs.mkdir(path.join(bundleRoot, 'archive', 'empty'), { recursive: true })
   await fs.mkdir(path.join(dataRoot, 'outside'), { recursive: true })
   await fs.symlink(path.join(dataRoot, 'outside'), path.join(bundleRoot, 'linked-folder'))
-  const previousOllamaUrl = process.env.OLLAMA_URL
-  process.env.OLLAMA_URL = 'http://127.0.0.1:9'
   const app = await createApp(createRuntime({
     ...process.env,
     FOLIO_DATA_ROOT: dataRoot,
     FOLIO_BUNDLE_ROOT: path.join(dataRoot, 'unused-default-bundle'),
-    OLLAMA_URL: 'http://127.0.0.1:9',
   }))
   const bundle = await app.bundleManager.registry.setup({ name: 'External', markdownPath: bundleRoot, source: 'existing' })
   const server = app.listen(0, '127.0.0.1')
@@ -30,8 +27,6 @@ test('explorer folders persist and file operations validate, index, and rename p
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
     await bundleRuntime.embeddingRefresh
     await fs.rm(dataRoot, { recursive: true, force: true })
-    if (previousOllamaUrl === undefined) delete process.env.OLLAMA_URL
-    else process.env.OLLAMA_URL = previousOllamaUrl
   })
   const baseUrl = `http://127.0.0.1:${server.address().port}`
   const headers = { 'content-type': 'application/json', 'x-folio-bundle': bundle.id }

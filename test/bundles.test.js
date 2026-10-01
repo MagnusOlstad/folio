@@ -61,7 +61,7 @@ test('malformed registries refuse mutations and missing legacy roots stay absent
 
 test('createApp does not fabricate a legacy bundle when setup is empty', async (context) => {
   const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-empty-app-'))
-  const app = await createApp(createRuntime({ ...process.env, FOLIO_DATA_ROOT: dataRoot, OLLAMA_URL: 'http://127.0.0.1:9' }))
+  const app = await createApp(createRuntime({ ...process.env, FOLIO_DATA_ROOT: dataRoot }))
   const server = await new Promise((resolve) => {
     const listener = app.listen(0, '127.0.0.1', () => resolve(listener))
   })
@@ -76,6 +76,14 @@ test('createApp does not fabricate a legacy bundle when setup is empty', async (
     assert.equal(response.status, 409)
     assert.equal((await response.json()).code, 'NO_BUNDLE')
   }
+  const mlxStatusResponse = await fetch(`${baseUrl}/api/mlx/status`)
+  assert.equal(mlxStatusResponse.status, 200)
+  const mlxStatus = await mlxStatusResponse.json()
+  assert.deepEqual(mlxStatus.models.map(({ id }) => id), ['gemma4', 'embeddinggemma'])
+  assert.equal(mlxStatus.models.every((model) => model.installed === false), true)
+  const mlxUnloadResponse = await fetch(`${baseUrl}/api/mlx/models/gemma4/unload`, { method: 'POST' })
+  assert.equal(mlxUnloadResponse.status, 200)
+  assert.equal((await mlxUnloadResponse.json()).models.find((model) => model.id === 'gemma4').loaded, false)
   const scanResponse = await fetch(`${baseUrl}/api/imports/obsidian/scan`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -99,7 +107,7 @@ test('scoped runtimes isolate same file and draft IDs', async (context) => {
     fs.writeFile(path.join(firstPath, 'same.md'), '# First\n\nFirst body'),
     fs.writeFile(path.join(secondPath, 'same.md'), '# Second\n\nSecond body'),
   ])
-  const app = await createApp(createRuntime({ ...process.env, FOLIO_DATA_ROOT: dataRoot, OLLAMA_URL: 'http://127.0.0.1:9' }))
+  const app = await createApp(createRuntime({ ...process.env, FOLIO_DATA_ROOT: dataRoot }))
   const first = await app.bundleManager.registry.setup({ name: 'First', markdownPath: firstPath, source: 'existing' })
   const second = await app.bundleManager.registry.setup({ name: 'Second', markdownPath: secondPath, source: 'existing' })
   const server = await new Promise((resolve) => {

@@ -40,7 +40,7 @@ jobs:
     needs: release-please
     if: github.event_name == 'push' && needs.release-please.outputs.releases_created == 'true'
     runs-on: macos-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ needs.release-please.outputs.tag_name }}

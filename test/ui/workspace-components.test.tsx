@@ -247,39 +247,17 @@ describe("workspace editor components", () => {
     }
   });
 
-  it("puts the right-pane hide control in its top header", () => {
+  it("shows the two MLX models on first open without automatically installing", () => {
     const onHide = vi.fn();
     const props = {
-      status: {
-        online: false,
-        canLaunch: false,
-        classifierModel: "",
-        answerModel: "",
-        answerModels: [],
-        embedModel: "",
-        configuredModels: [],
-        missingModels: [],
-        installingModels: [],
-        installed: [],
-        running: [],
-        embeddingCoverage: {
-          conceptsEmbedded: 0,
-          conceptsTotal: 0,
-          chunksEmbedded: 0,
-          chunksTotal: 0,
-          refreshing: false,
-        },
-      },
-      missingModels: [],
-      modelInstallInProgress: false,
-      modelEndpoints: [],
-      togglingService: null,
-      onInstall: vi.fn(),
-      onToggle: vi.fn(),
+      mlxStatus: null,
+      mlxActionModel: null,
+      onInstallMlxModel: vi.fn(),
+      onToggleMlxModel: vi.fn(),
       onHide,
       historyContent: <div>History timeline</div>,
     };
-    const { container, rerender } = render(
+    const { container } = render(
       <WorkspaceRightPane {...props} />,
     );
 
@@ -287,27 +265,70 @@ describe("workspace editor components", () => {
     const toggle = screen.getByRole("button", { name: "Hide right sidebar" });
     expect(header).toContainElement(toggle);
     expect(header).toHaveClass("right-pane-header");
-    expect(screen.getByText("Install or start Ollama first.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Get Ollama" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Set up" })).toBeInTheDocument();
+    expect(screen.getByText("Gemma 4 E4B")).toBeInTheDocument();
+    expect(screen.getByText("EmbeddingGemma")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^Install / })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: /^Install / }).every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+    expect(props.onInstallMlxModel).not.toHaveBeenCalled();
     expect(screen.getByText("History timeline")).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "Workspace tools" })).toBeInTheDocument();
     fireEvent.click(toggle);
     expect(onHide).toHaveBeenCalledOnce();
 
-    const onlineStatus = {
-      ...props.status,
-      online: true,
-    };
-    rerender(
+  });
+
+  it("offers explicit install controls for missing MLX models", () => {
+    const onInstallMlxModel = vi.fn();
+    render(
       <WorkspaceRightPane
-        {...props}
-        status={onlineStatus}
-        modelEndpoints={[{ id: "answer", label: "Answer model", model: "local", state: "online" }]}
+        mlxStatus={{
+          available: true,
+          helperAvailable: true,
+          keepAliveMs: 0,
+          installing: [],
+          models: [
+            { id: "gemma4", name: "Gemma 4", purpose: "generation", downloadSizeBytes: 5_180_000_000, downloadSizeIsEstimate: true, installed: false, loaded: false, memory: null },
+            { id: "embeddinggemma", name: "EmbeddingGemma", purpose: "embeddings", downloadSizeBytes: 212_000_000, downloadSizeIsEstimate: true, installed: false, loaded: false, memory: null },
+          ],
+        }}
+        mlxActionModel={null}
+        onInstallMlxModel={onInstallMlxModel}
+        onToggleMlxModel={vi.fn()}
+        onHide={vi.fn()}
       />,
     );
-    expect(screen.getByText("Answer model")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Stop Answer model" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Install Gemma 4" }));
+    expect(onInstallMlxModel).toHaveBeenCalledWith("gemma4");
+    expect(screen.getByText("About 5.18 GB download")).toBeInTheDocument();
+    expect(screen.getByText("About 212 MB download")).toBeInTheDocument();
+  });
+
+  it("shows model start and stop state with memory while loaded", () => {
+    const onToggleMlxModel = vi.fn();
+    render(
+      <WorkspaceRightPane
+        mlxStatus={{
+          available: true,
+          helperAvailable: true,
+          keepAliveMs: 60_000,
+          installing: [],
+          models: [
+            { id: "gemma4", name: "Gemma 4", purpose: "generation", downloadSizeBytes: 5_180_000_000, downloadSizeIsEstimate: true, installed: true, loaded: true, memory: { activeBytes: 1_073_741_824, cacheBytes: 536_870_912, peakResidentBytes: 2_147_483_648 } },
+            { id: "embeddinggemma", name: "EmbeddingGemma", purpose: "embeddings", downloadSizeBytes: 212_000_000, downloadSizeIsEstimate: true, installed: true, loaded: false, memory: null },
+          ],
+        }}
+        mlxActionModel={null}
+        onInstallMlxModel={vi.fn()}
+        onToggleMlxModel={onToggleMlxModel}
+        onHide={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(screen.getByText("Memory 1.07 GB active · 537 MB allocator cache · 2.15 GB peak process")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stop Gemma 4" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start EmbeddingGemma" }));
+    expect(onToggleMlxModel).toHaveBeenNthCalledWith(1, "gemma4", true);
+    expect(onToggleMlxModel).toHaveBeenNthCalledWith(2, "embeddinggemma", false);
   });
 
   it("keeps history out of editor tab actions", () => {

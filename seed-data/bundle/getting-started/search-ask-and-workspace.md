@@ -12,7 +12,7 @@ generated:
   at: 2026-09-03T12:00:00.000Z
 folio_related:
   - /getting-started/start-here.md
-  - /getting-started/ollama.md
+  - /getting-started/local-models.md
   - /getting-started/capture-and-organize.md
 ---
 

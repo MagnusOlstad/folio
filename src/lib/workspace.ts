@@ -22,10 +22,6 @@ export function parseTags(value: string) {
     ),
   );
 }
-export function hasInstalledModel(model: string, installed: string[]) {
-  const canonicalName = model.includes(":") ? model : `${model}:latest`;
-  return installed.includes(model) || installed.includes(canonicalName);
-}
 export function isUntitledId(id: string) {
   return id.startsWith("untitled:");
 }

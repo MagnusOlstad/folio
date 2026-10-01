@@ -3,12 +3,13 @@ import path from 'node:path'
 import express from 'express'
 
 export function registerRoutes(app, runtime) {
-  const { answerModel, answerModels, classifierModel, warmKeepAlive, askContextLength, distRoot, readRecords, retrieveKnowledge,
-    validTimeZone, buildKnowledgeContext, ollamaRequest, ensureAnswerCitations } = runtime
+  const { answerModel, answerModels, askContextLength, distRoot, readRecords, retrieveKnowledge,
+    validTimeZone, buildKnowledgeContext, mlxService, ensureAnswerCitations } = runtime
 app.post('/api/ask', async (request, response, next) => {
   try {
     const question = String(request.body?.question || '').trim()
-    const selectedAnswerModel = String(request.body?.model || answerModel).trim()
+    const requestedModel = String(request.body?.model || answerModel).trim()
+    const selectedAnswerModel = requestedModel === 'gemma4' ? answerModel : requestedModel
     const now = new Date()
     const timeZone = validTimeZone(String(request.body?.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone))
     if (!question) return response.status(400).json({ error: 'Ask a question first.' })
@@ -36,12 +37,9 @@ app.post('/api/ask', async (request, response, next) => {
       timeZone,
     }).format(now)
 
-    const result = await ollamaRequest('/api/chat', {
-      model: selectedAnswerModel,
-      keep_alive: selectedAnswerModel === classifierModel ? warmKeepAlive : 0,
-      stream: false,
-      options: { temperature: 0.1, num_ctx: askContextLength },
-      messages: [
+    let result
+    try {
+      result = await mlxService.generate([
         {
           role: 'system',
           content: [
@@ -77,11 +75,14 @@ app.post('/api/ask', async (request, response, next) => {
             context,
           ].filter(Boolean).join('\n'),
         },
-      ],
-    })
-    const answer = result?.message?.content
+      ], { temperature: 0.1, maxTokens: Math.min(4096, Math.floor(askContextLength / 2)) })
+    } catch (error) {
+      error.answerResponse = true
+      throw error
+    }
+    const answer = result?.text
     if (typeof answer !== 'string' || !answer.trim()) {
-      const error = new Error('Ollama returned an empty answer.')
+      const error = new Error('The generation model returned an empty answer.')
       error.answerResponse = true
       throw error
     }
@@ -110,11 +111,10 @@ app.post('/api/ask', async (request, response, next) => {
       retrieval: retrievalLabel,
     })
   } catch (error) {
-    if (error.name === 'TimeoutError' || error.cause?.code === 'ECONNREFUSED') {
-      return response.status(503).json({ error: 'Ollama is not available. Start it and make sure the configured models are installed.' })
-    }
-    if (error.answerResponse || error.ollamaStatus >= 400 || error.ollamaResponse) {
-      return response.status(502).json({ error: 'Ollama could not produce an answer. Check the selected model and try again.' })
+    if (error.answerResponse) {
+      const detail = error.message || 'The generation model could not produce an answer.'
+      const needsSetup = /not installed|choose install|helper|Apple Silicon|macOS 14|timed out/i.test(detail)
+      return response.status(needsSetup ? 503 : 502).json({ error: detail })
     }
     next(error)
   }

@@ -138,7 +138,7 @@ function replaceIndexedConceptContent(currentContent, nextContent) {
 }
 
 function isEmbeddingGemma() {
-  return /(?:^|\/)embeddinggemma(?::|$)/i.test(embedModel)
+  return /(?:^|\/)embeddinggemma(?:[-/:]|$)/i.test(embedModel)
 }
 
 function embeddingQueryInput(query) {

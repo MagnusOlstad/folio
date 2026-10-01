@@ -343,6 +343,11 @@ app.whenReady().then(async () => {
   registerRendererStorage()
   process.env.FOLIO_VERSION = app.getVersion()
   process.env.FOLIO_DATA_ROOT = await prepareDataDirectory()
+  process.env.FOLIO_MODEL_ROOT = path.join(app.getPath('userData'), 'models')
+  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  process.env.FOLIO_MLX_HELPER = app.isPackaged
+    ? path.join(process.resourcesPath, 'mlx', 'MacOS', 'folio-mlx')
+    : path.join(projectRoot, 'experiments', 'mlx-swift', '.cache', 'staged', 'Folio.app', 'Contents', 'MacOS', 'folio-mlx')
 
   const { createRuntime } = await import('../server/app.js')
   const { startServer } = await import('../server/index.js')
@@ -447,5 +452,6 @@ app.on('before-quit', () => {
   ipcMain.removeAllListeners('folio:get-storage')
   ipcMain.removeAllListeners('folio:set-storage')
   ipcMain.removeAllListeners('folio:remove-storage')
+  void localRuntime?.mlxService?.close?.()
   localServer?.close()
 })

@@ -1,6 +1,7 @@
 import { fireEvent, render, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { MLX_GENERATION_MODEL } from "../../src/domain/types.ts";
 import type { Note, SearchResult } from "../../src/domain/types.ts";
 import { WorkspaceSidebar } from "../../src/features/sidebar/WorkspaceSidebar.tsx";
 import type { WorkspaceSidebarProps } from "../../src/features/sidebar/WorkspaceSidebar.tsx";
@@ -52,7 +53,6 @@ function sidebarProps(
     setDraggedFileId: vi.fn(),
     setDropDirectoryPath: vi.fn(),
     moveBundleFile: vi.fn().mockResolvedValue(undefined),
-    status: null,
     notes: [note],
     searchInputRef: { current: null },
     searchQuery: "preview",
@@ -65,12 +65,8 @@ function sidebarProps(
     setSearchResults: vi.fn(),
     searchTag: vi.fn(),
     searchResults: [searchResult],
-    selectedAnswerModel: "model",
-    setAskModel: vi.fn(),
-    setAnswer: vi.fn(),
+    selectedAnswerModel: MLX_GENERATION_MODEL.id,
     asking: false,
-    configuredAnswerModels: ["model"],
-    hasInstalledModel: () => true,
     question: "",
     setQuestion: vi.fn(),
     selectedAnswerModelMissing: false,

@@ -4,7 +4,6 @@ import { WorkspaceSidebarHandle } from "../../src/features/workspace/components/
 import { WorkspaceLeftPaneHeader } from "../../src/features/workspace/components/WorkspaceLeftPaneHeader.tsx";
 import { WorkspaceRightPane } from "../../src/features/workspace/components/WorkspaceRightPane.tsx";
 import { useWorkspaceLayout } from "../../src/features/workspace/hooks/useWorkspaceLayout.ts";
-import type { ModelStatus } from "../../src/domain/types.ts";
 
 describe("workspace pane layout", () => {
   it("keeps both panes independently collapsible", () => {
@@ -61,41 +60,20 @@ describe("workspace pane layout", () => {
     expect(toggle).toHaveBeenCalledOnce();
   });
 
-  it("keeps the right pane available as an empty feature surface with Ollama status below", () => {
+  it("keeps the right pane available with MLX model status below", () => {
     render(
       <WorkspaceRightPane
-        status={{
-          online: false,
-          canLaunch: false,
-          classifierModel: "",
-          answerModel: "",
-          answerModels: [],
-          embedModel: "",
-          configuredModels: [],
-          missingModels: [],
-          installingModels: [],
-          installed: [],
-          running: [],
-          embeddingCoverage: {
-            conceptsEmbedded: 0,
-            conceptsTotal: 0,
-            chunksEmbedded: 0,
-            chunksTotal: 0,
-            refreshing: false,
-          },
-        } satisfies ModelStatus}
-        missingModels={[]}
-        modelInstallInProgress={false}
-        modelEndpoints={[]}
-        togglingService={null}
-        onInstall={() => {}}
-        onToggle={() => {}}
+        mlxStatus={null}
+        mlxActionModel={null}
+        onInstallMlxModel={() => {}}
+        onToggleMlxModel={() => {}}
       />,
     );
 
     expect(screen.getByRole("complementary", { name: "Workspace tools" })).toBeInTheDocument();
-    expect(screen.getByText("Ollama offline")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Get Ollama" })).toBeInTheDocument();
+    expect(screen.getByText("MLX checking")).toBeInTheDocument();
+    expect(screen.getByText("Gemma 4 E4B")).toBeInTheDocument();
+    expect(screen.getByText("EmbeddingGemma")).toBeInTheDocument();
   });
 
   it("resizes the right pane from its inside edge and supports keyboard control", () => {

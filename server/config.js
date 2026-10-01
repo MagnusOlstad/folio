@@ -15,16 +15,11 @@ export function createConfig(env = process.env) {
   const dataRoot = env.FOLIO_DATA_ROOT || path.join(projectRoot, 'data')
   const bundleRoot = env.FOLIO_BUNDLE_ROOT || path.join(dataRoot, 'bundle')
   const historyBundleId = env.FOLIO_HISTORY_BUNDLE_ID || 'legacy-bundle'
-  const ollamaUrl = env.OLLAMA_URL || 'http://127.0.0.1:11434'
-  const classifierModel = env.OLLAMA_CLASSIFIER_MODEL || 'llama3.2:3b'
-  const answerModel = env.OLLAMA_ANSWER_MODEL || 'llama3.2:3b'
-  const answerModels = Array.from(new Set([
-    answerModel,
-    ...(env.OLLAMA_ANSWER_MODELS || 'llama3.2:3b').split(',').map((model) => model.trim()).filter(Boolean),
-  ]))
-  const embedModel = env.OLLAMA_EMBED_MODEL || 'embeddinggemma'
-  const configuredAskContextLength = Number(env.OLLAMA_ASK_CONTEXT_LENGTH || 8192)
-  const parsedOllamaUrl = new URL(ollamaUrl)
+  const classifierModel = 'mlx-community/gemma-4-e4b-it-4bit'
+  const answerModel = classifierModel
+  const answerModels = [classifierModel]
+  const embedModel = 'mlx-community/embeddinggemma-300m-4bit'
+  const configuredAskContextLength = Number(env.FOLIO_ASK_CONTEXT_LENGTH || 8192)
 
   return {
     projectRoot,
@@ -37,16 +32,16 @@ export function createConfig(env = process.env) {
     draftsRoot: env.FOLIO_DRAFTS_ROOT || path.join(dataRoot, 'drafts'),
     importsRoot: env.FOLIO_IMPORTS_ROOT || path.join(dataRoot, 'imports'),
     indexPath: env.FOLIO_INDEX_PATH || path.join(dataRoot, 'search-index.json'),
+    modelRoot: env.FOLIO_MODEL_ROOT || path.join(dataRoot, 'models'),
+    mlxHelperPath: env.FOLIO_MLX_HELPER || null,
     distRoot: env.FOLIO_DIST_ROOT || path.join(projectRoot, 'dist'),
-    ollamaUrl,
-    parsedOllamaUrl,
     classifierModel,
     answerModel,
     answerModels,
     embedModel,
     configuredModels: Array.from(new Set([classifierModel, embedModel, ...answerModels])),
-    warmKeepAlive: env.OLLAMA_WARM_KEEP_ALIVE || '1h',
-    embeddingSchemaVersion: 2,
+    warmKeepAliveMs: 60 * 60 * 1000,
+    embeddingSchemaVersion: 3,
     generatedRelatedStart: '<!-- folio:generated-related:start -->',
     generatedRelatedEnd: '<!-- folio:generated-related:end -->',
     askContextLength: Number.isFinite(configuredAskContextLength)
@@ -56,7 +51,5 @@ export function createConfig(env = process.env) {
     updateCheckTtl: 6 * 60 * 60 * 1000,
     appVersion: env.FOLIO_VERSION || readPackageVersion(projectRoot),
     port: Number(env.PORT || 8787),
-    canLaunchOllama: parsedOllamaUrl.protocol === 'http:'
-      && ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(parsedOllamaUrl.hostname),
   }
 }

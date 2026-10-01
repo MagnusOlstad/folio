@@ -3,7 +3,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type {
   BundleFile,
   BundleDirectory,
-  ModelStatus,
+  MlxStatus,
   Note,
   StoredDraft,
   VersionInfo,
@@ -13,7 +13,7 @@ import { api, apiWithRetry } from "../../../lib/api.ts";
 import { expandedPathsForFiles } from "../../../lib/workspace.ts";
 
 type UseWorkspaceBootstrapOptions = {
-  setStatus: Dispatch<SetStateAction<ModelStatus | null>>;
+  setMlxStatus: Dispatch<SetStateAction<MlxStatus | null>>;
   setFilesLoading: Dispatch<SetStateAction<boolean>>;
   setMessage: Dispatch<SetStateAction<string>>;
   setNotes: Dispatch<SetStateAction<Note[]>>;
@@ -49,7 +49,7 @@ export function useWorkspaceBootstrap(options: UseWorkspaceBootstrapOptions) {
         const registry = await api<BundleRegistryResponse>("/api/bundles");
         if (!registry.bundles.length) {
           if (cancelled) return;
-          latest().setStatus(null);
+          latest().setMlxStatus(null);
           latest().setNotes([]);
           latest().setFiles([]);
           latest().setDirectories([]);
@@ -57,13 +57,13 @@ export function useWorkspaceBootstrap(options: UseWorkspaceBootstrapOptions) {
           latest().onNoBundle?.();
           return;
         }
-        const currentStatus = await apiWithRetry<ModelStatus>("/api/status");
+        const currentStatus = await apiWithRetry<MlxStatus>("/api/mlx/status");
         if (cancelled) return;
-        latest().setStatus(currentStatus);
+        latest().setMlxStatus(currentStatus);
       } catch {
         if (cancelled) return;
         latest().setFilesLoading(false);
-        latest().setStatus(null);
+        latest().setMlxStatus(null);
         latest().setMessage(reconnectMessage);
         reconnectTimer = window.setTimeout(loadWorkspace, 2_000);
         return;
@@ -115,9 +115,13 @@ export function useWorkspaceBootstrap(options: UseWorkspaceBootstrapOptions) {
     void loadWorkspace();
 
     const refreshStatus = () => {
-      api<ModelStatus>("/api/status")
-        .then(latest().setStatus)
-        .catch(() => latest().setStatus(null));
+      api<MlxStatus>("/api/mlx/status")
+        .then(latest().setMlxStatus)
+        .catch(() => latest().setMlxStatus(null));
+      // Keep the existing status endpoint active: it reports semantic-index
+      // coverage and queues missing embeddings only while EmbeddingGemma is
+      // already loaded. This never triggers installation or model loading.
+      void api("/api/status").catch(() => {});
     };
     const interval = window.setInterval(refreshStatus, 10_000);
     return () => {

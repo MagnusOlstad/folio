@@ -19,9 +19,10 @@
     "test:e2e": "playwright test",
     "test:e2e:local": "playwright test --config=playwright.local.config.ts",
     "benchmark:history": "node scripts/benchmark-history.js",
-    "desktop": "npm run build && electron .",
-    "dist:mac": "npm run build && electron-builder --mac --arm64 --publish never",
-    "dist:mac:staged": "npm run build && electron-builder --mac dir --arm64 --publish never --config.mac.notarize=false",
+    "desktop": "npm run build:mlx && npm run build && electron .",
+    "build:mlx": "bash experiments/mlx-swift/Scripts/build-native.sh",
+    "dist:mac": "npm run build:mlx && npm run build && electron-builder --mac --arm64 --publish never",
+    "dist:mac:staged": "npm run build:mlx && npm run build && electron-builder --mac dir --arm64 --publish never --config.mac.notarize=false",
     "lint": "oxlint",
     "preview": "vite preview",
     "start": "node server/index.js"
@@ -79,10 +80,15 @@
       {
         "from": "seed-data",
         "to": "seed-data"
+      },
+      {
+        "from": "experiments/mlx-swift/.cache/staged/Folio.app/Contents",
+        "to": "mlx"
       }
     ],
     "mac": {
       "category": "public.app-category.productivity",
+      "minimumSystemVersion": "14.0",
       "icon": "build/icon.icns",
       "hardenedRuntime": true,
       "notarize": true,

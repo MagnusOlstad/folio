@@ -3,14 +3,14 @@ import { defineConfig, devices } from '@playwright/test'
 const port = Number(process.env.FOLIO_E2E_PORT || 4173)
 const baseURL = `http://127.0.0.1:${port}`
 
-// This is the narrow, CI-safe suite: real server, seeded temp data, Ollama forced
-// offline so it's fast and deterministic on a runner with no local model. It's what
+// This is the narrow, CI-safe suite: real server and seeded temp data, so it is
+// fast and deterministic on a runner with no locally installed models. It's what
 // `npm run test:e2e` and the GitHub Actions `e2e` job run.
 //
-// The broader suite that exercises real Ollama capture/search/ask lives in
+// The broader suite that exercises real MLX capture/search/ask lives in
 // e2e/local and runs via `npm run test:e2e:local` (see playwright.local.config.ts)
-// - normally from the pre-push hook, since it needs a local Ollama with models
-// installed and isn't something CI runners have.
+// - normally from the pre-push hook, since it needs the models installed locally
+// and isn't something CI runners have.
 export default defineConfig({
   testDir: './e2e/ci',
   fullyParallel: true,

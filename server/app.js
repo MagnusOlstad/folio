@@ -9,13 +9,14 @@ import { createFileStorage } from './storage/files.js'
 import { createMarkdownDocuments } from './markdown/documents.js'
 import { createMarkdownMoves } from './markdown/moves.js'
 import { createKnowledgeIndex } from './knowledge/indexing.js'
-import { createOllamaService } from './ollama/service.js'
+import { createMlxService } from './mlx/service.js'
 import { createClassificationService } from './knowledge/classification.js'
 import { createSearchService } from './knowledge/search.js'
 import { createFilingService } from './filing/service.js'
 import { createReleaseService } from './updates/service.js'
 import { createObsidianImportService } from './imports/obsidian.js'
 import { createHistoryService } from './history/service.js'
+import { registerRoutes as registerMlxRoutes } from './routes/mlx.js'
 import { registerRoutes as registerSystemRoutes } from './routes/system.js'
 import { registerRoutes as registerFileRoutes } from './routes/files.js'
 import { registerRoutes as registerExplorerRoutes } from './routes/explorer.js'
@@ -28,13 +29,13 @@ import { registerRoutes as registerBundleRoutes } from './routes/bundles.js'
 import { registerRoutes as registerHistoryRoutes } from './routes/history.js'
 import { createBundleRuntimeManager } from './bundles/registry.js'
 
-export function createRuntime(env = process.env) {
+export function createRuntime(env = process.env, sharedMlxService = null) {
   const runtime = { ...createConfig(env), ...createTextHelpers() }
+  runtime.mlxService = sharedMlxService || createMlxService(runtime)
   Object.assign(runtime, createFileStorage(runtime))
   Object.assign(runtime, createMarkdownDocuments(runtime))
   Object.assign(runtime, createMarkdownMoves(runtime))
   Object.assign(runtime, createKnowledgeIndex(runtime))
-  Object.assign(runtime, createOllamaService(runtime))
   Object.assign(runtime, createClassificationService(runtime))
   Object.assign(runtime, createSearchService(runtime))
   Object.assign(runtime, createFilingService(runtime))
@@ -59,7 +60,8 @@ export async function createApp(runtime = createRuntime()) {
       FOLIO_HISTORY_BUNDLE_ID: bundleConfig.historyBundleId,
       FOLIO_HISTORY_GIT_DIR: bundleConfig.historyGitDir,
       FOLIO_LEGACY_HISTORY_GIT_DIR: bundleConfig.legacyHistoryGitDir,
-    }),
+      FOLIO_MODEL_ROOT: runtime.modelRoot,
+    }, runtime.mlxService),
   })
   const initialBundles = await manager.initialize()
   const legacyBundle = initialBundles.find((bundle) => bundle.markdownPath === runtime.bundleRoot)
@@ -84,6 +86,7 @@ export async function createApp(runtime = createRuntime()) {
   app.use(express.json({ limit: '1mb' }))
   registerBundleRoutes(app, manager)
   registerBackupRoutes(app, manager)
+  registerMlxRoutes(app, runtime.mlxService, manager)
   app.use((request, response, next) => {
     const requestedId = request.header('x-folio-bundle') || request.header('x-folio-bundle-id') || String(request.query.bundle || '') || null
     const entry = requestedId ? manager.registry.get(requestedId) : manager.registry.list()[0] || null

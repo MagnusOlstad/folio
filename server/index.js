@@ -20,7 +20,9 @@ export function startServer(requestedPort, injectedRuntime = null) {
         resolve(server)
       })
       server.waitForBackground = () => app.bundleManager.waitForBackground()
-      server.once('close', () => { void app.bundleManager.close() })
+      server.once('close', () => {
+        void Promise.allSettled([app.bundleManager.close(), runtime.mlxService.close()])
+      })
       server.once('error', reject)
     })
   })

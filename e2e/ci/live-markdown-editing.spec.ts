@@ -267,8 +267,8 @@ test("keeps the caret after two newlines at the end of a note", async ({ page })
 });
 
 test("keeps the caret after two newlines at the end of a filed note", async ({ page }) => {
-  await openSeededNote(page, "Set Up Ollama");
-  const editor = liveEditor(page, "Set Up Ollama");
+  await openSeededNote(page, "Set Up Local Models");
+  const editor = liveEditor(page, "Set Up Local Models");
   const lines = editor.locator(".cm-line");
   const save = page.waitForResponse(
     (response) =>

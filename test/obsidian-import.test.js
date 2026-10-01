@@ -5,7 +5,17 @@ import path from 'node:path'
 import test from 'node:test'
 
 import { createRuntime } from '../server/app.js'
+import { createMlxService } from '../server/mlx/service.js'
 import { rewriteObsidianLinks } from '../server/imports/obsidian.js'
+import { configureFakeMlx } from './fixtures/mlx-test-support.js'
+
+async function runtimeWithInstalledGenerationModel(t, dataRoot) {
+  const fixture = await configureFakeMlx(t)
+  const mlxService = createMlxService({ modelRoot: fixture.modelRoot, mlxHelperPath: fixture.helperPath })
+  await mlxService.install('gemma4')
+  t.after(() => mlxService.close())
+  return createRuntime({ FOLIO_DATA_ROOT: dataRoot }, mlxService)
+}
 
 async function waitForJob(runtime, jobId) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -37,12 +47,11 @@ test('imports each vault note once and reports changed sources without overwriti
   await fs.writeFile(path.join(vaultRoot, 'image.png'), 'not copied')
   context.after(() => fs.rm(root, { recursive: true, force: true }))
 
-  const runtime = createRuntime({ FOLIO_DATA_ROOT: dataRoot })
+  const runtime = await runtimeWithInstalledGenerationModel(context, dataRoot)
   await Promise.all([
     fs.mkdir(runtime.bundleRoot, { recursive: true }),
     fs.mkdir(runtime.importsRoot, { recursive: true }),
   ])
-  runtime.ollamaStatus = async () => ({ online: true, installed: [runtime.classifierModel] })
   const classificationOptions = []
   runtime.classify = async (content, _records, options) => {
     classificationOptions.push(options)
@@ -89,12 +98,11 @@ test('reindexes files written before an Obsidian import is cancelled', async (co
   ])
   context.after(() => fs.rm(root, { recursive: true, force: true }))
 
-  const runtime = createRuntime({ FOLIO_DATA_ROOT: dataRoot })
+  const runtime = await runtimeWithInstalledGenerationModel(context, dataRoot)
   await Promise.all([
     fs.mkdir(runtime.bundleRoot, { recursive: true }),
     fs.mkdir(runtime.importsRoot, { recursive: true }),
   ])
-  runtime.ollamaStatus = async () => ({ online: true, installed: [runtime.classifierModel] })
   runtime.classify = async (content) => ({ concept: {
     kind: 'note',
     path: ['imported'],

@@ -85,10 +85,10 @@ app.post('/api/notes', async (request, response, next) => {
     } catch {
       classifiedByModel = false
       warning = guidedKind
-        ? `The raw note was saved and the opening ${guidedKind} guide was used, but Ollama was unavailable for classification.`
+        ? `The raw note was saved and the opening ${guidedKind} guide was used, but the local generation model was unavailable for classification.`
         : guidedPath !== null
-          ? 'The raw note was saved and the opening path guide was used, but Ollama was unavailable for classification.'
-        : 'The raw note was saved, but Ollama was unavailable. It was filed as Unsorted Note.'
+          ? 'The raw note was saved and the opening path guide was used, but the local generation model was unavailable for classification.'
+        : 'The raw note was saved, but the local generation model was unavailable. It was filed as Unsorted Note.'
       result = {
         concept: {
           kind: guidedKind || 'note',
@@ -116,7 +116,7 @@ app.post('/api/notes', async (request, response, next) => {
           embeddingDimension(records),
         )
       } catch {
-        warning ||= 'The note was classified, but semantic indexing is unavailable until the embedding model is installed.'
+      warning ||= 'The note was classified, but semantic indexing is unavailable until EmbeddingGemma is installed.'
       }
     }
 

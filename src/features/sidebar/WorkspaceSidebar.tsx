@@ -3,13 +3,14 @@ import remarkGfm from "remark-gfm";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type {
   AskResult,
-  ModelStatus,
+  MlxModelId,
   Note,
   SearchResult,
   SidebarMode,
   TreeDirectory,
   ViewerDocument,
 } from "../../domain/types.ts";
+import { MLX_GENERATION_MODEL } from "../../domain/types.ts";
 import type { Bundle } from "../../domain/types.ts";
 import { WorkspaceExplorer } from "../workspace/components/WorkspaceExplorer.tsx";
 import type { ExplorerFileActions } from "../workspace/model/explorer.ts";
@@ -47,7 +48,6 @@ export type WorkspaceSidebarProps = {
   setDraggedFileId: Dispatch<SetStateAction<string | null>>;
   setDropDirectoryPath: Dispatch<SetStateAction<string | null>>;
   moveBundleFile: (id: string, directory: string) => Promise<void>;
-  status: ModelStatus | null;
   notes: Note[];
   searchInputRef: RefObject<HTMLInputElement | null>;
   searchQuery: string;
@@ -60,12 +60,8 @@ export type WorkspaceSidebarProps = {
   setSearchResults: Dispatch<SetStateAction<SearchResult[]>>;
   searchTag: (tag: string) => void;
   searchResults: SearchResult[];
-  selectedAnswerModel: string;
-  setAskModel: Dispatch<SetStateAction<string>>;
-  setAnswer: Dispatch<SetStateAction<AskResult | null>>;
+  selectedAnswerModel: MlxModelId;
   asking: boolean;
-  configuredAnswerModels: string[];
-  hasInstalledModel: (model: string, installed: string[]) => boolean;
   question: string;
   setQuestion: Dispatch<SetStateAction<string>>;
   selectedAnswerModelMissing: boolean;
@@ -83,11 +79,10 @@ export type WorkspaceSidebarProps = {
 
 export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
   const {
-    sidebarMode, setSidebarMode, openDocument, status, notes, searchInputRef, searchQuery,
+    sidebarMode, setSidebarMode, openDocument, notes, searchInputRef, searchQuery,
     setSearchQuery, selectedTag, searching, searchNotes, availableTags,
     setSelectedTag, setSearchResults, searchTag, searchResults,
-    selectedAnswerModel, setAskModel, setAnswer, asking,
-    configuredAnswerModels, hasInstalledModel, question, setQuestion,
+    selectedAnswerModel, asking, question, setQuestion,
     selectedAnswerModelMissing, askNotes, answer, conceptUrl, formatDate,
   } = props;
 
@@ -114,9 +109,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
             <div className="sidebar-heading">
               <span>Search</span>
               <small>
-                {status?.embeddingCoverage?.refreshing
-                  ? "Indexing"
-                  : `${notes.length} notes`}
+                {notes.length} notes
               </small>
             </div>
             <form
@@ -196,27 +189,8 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
           <>
             <div className="sidebar-heading">
               <span>Ask</span>
-              <select
-                value={selectedAnswerModel}
-                onChange={(event) => {
-                  setAskModel(event.target.value);
-                  setAnswer(null);
-                }}
-                disabled={asking || !configuredAnswerModels.length}
-                aria-label="Answer model"
-              >
-                {configuredAnswerModels.map((model) => (
-                  <option
-                    key={model}
-                    value={model}
-                    disabled={Boolean(
-                      status?.online &&
-                        !hasInstalledModel(model, status.installed),
-                    )}
-                  >
-                    {model}
-                  </option>
-                ))}
+              <select defaultValue={selectedAnswerModel} disabled aria-label="Answer model">
+                <option value={MLX_GENERATION_MODEL.id}>{MLX_GENERATION_MODEL.name}</option>
               </select>
             </div>
             <form

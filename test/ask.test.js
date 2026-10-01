@@ -7,6 +7,8 @@ import { registerRoutes } from '../server/routes/ask.js'
 import { createTextHelpers } from '../server/core/text.js'
 import { createFilingService } from '../server/filing/service.js'
 import { createSearchService } from '../server/knowledge/search.js'
+import { createMlxService } from '../server/mlx/service.js'
+import { configureFakeMlx, writeFakeMlxControl } from './fixtures/mlx-test-support.js'
 
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -19,16 +21,17 @@ function close(server) {
   return new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
 }
 
-test('Ask returns the model answer and maps invalid Ollama responses', async (context) => {
+test('Ask uses the generation worker and maps empty MLX responses', async (context) => {
+  const fixture = await configureFakeMlx(context)
+  const mlxService = createMlxService({ modelRoot: fixture.modelRoot, mlxHelperPath: fixture.helperPath })
+  await mlxService.install('gemma4')
+  context.after(() => mlxService.close())
+  fixture.restorePlatform()
+  const model = mlxService.modelDefinitions.gemma4.repository
   const app = express()
   app.use(express.json())
-  const calls = []
   registerRoutes(app, {
     ...createTextHelpers(),
-    answerModel: 'answer-model',
-    answerModels: ['answer-model'],
-    classifierModel: 'classifier-model',
-    warmKeepAlive: '1h',
     askContextLength: 4096,
     distRoot: '/tmp/folio-test-dist',
     validTimeZone: (timeZone) => timeZone,
@@ -47,22 +50,11 @@ test('Ask returns the model answer and maps invalid Ollama responses', async (co
       temporal: null,
     }),
     buildKnowledgeContext: () => 'knowledge context',
-    ollamaRequest: async (_endpoint, body) => {
-      const question = body.messages.at(-1).content
-      calls.push(question)
-      if (question.includes('empty response')) return { message: {} }
-      if (question.includes('upstream failure')) {
-        const error = new Error('Ollama returned 500')
-        error.ollamaStatus = 500
-        throw error
-      }
-      if (question.includes('missing model')) {
-        const error = new Error('Ollama returned 404')
-        error.ollamaStatus = 404
-        throw error
-      }
-      return { message: { content: 'The launch is planned for Friday.' } }
-    },
+    mlxService,
+    warmKeepAliveMs: mlxService.keepAliveMs,
+    answerModel: model,
+    answerModels: [model],
+    classifierModel: model,
     ensureAnswerCitations: (answer) => answer,
   })
   const server = await listen(http.createServer(app))
@@ -72,35 +64,18 @@ test('Ask returns the model answer and maps invalid Ollama responses', async (co
   const success = await fetch(`${baseUrl}/api/ask`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ question: 'When is the launch?', model: 'answer-model' }),
+    body: JSON.stringify({ question: 'When is the launch?', model }),
   })
   assert.equal(success.status, 200)
   assert.equal((await success.json()).answer, 'The launch is planned for Friday.')
-
+  await writeFakeMlxControl(fixture.controlPath, { emptyAnswer: true })
   const empty = await fetch(`${baseUrl}/api/ask`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ question: 'What about the empty response?', model: 'answer-model' }),
+    body: JSON.stringify({ question: 'What about the empty response?', model }),
   })
   assert.equal(empty.status, 502)
-  assert.equal((await empty.json()).error, 'Ollama could not produce an answer. Check the selected model and try again.')
-
-  const upstream = await fetch(`${baseUrl}/api/ask`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ question: 'What about the upstream failure?', model: 'answer-model' }),
-  })
-  assert.equal(upstream.status, 502)
-  assert.equal((await upstream.json()).error, 'Ollama could not produce an answer. Check the selected model and try again.')
-
-  const missingModel = await fetch(`${baseUrl}/api/ask`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ question: 'What about the missing model?', model: 'answer-model' }),
-  })
-  assert.equal(missingModel.status, 502)
-  assert.equal((await missingModel.json()).error, 'Ollama could not produce an answer. Check the selected model and try again.')
-  assert.equal(calls.length, 4)
+  assert.equal((await empty.json()).error, 'The generation model returned an empty answer.')
 })
 
 test('Ask context builder includes note titles without throwing', () => {
