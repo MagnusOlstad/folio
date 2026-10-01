@@ -30,7 +30,7 @@ The two pinned model snapshots are:
 
 ## Build
 
-On an arm64 Mac with Swift 6.4 and Xcode Command Line Tools, run:
+On an arm64 Mac with working SwiftPM from Xcode Command Line Tools or Xcode, run:
 
 ```sh
 npm run build:mlx
@@ -41,6 +41,23 @@ the ignored `.cache` directory, compiles the helper, then stages a relocatable
 app tree at `.cache/staged/Folio.app`. This builds the runtime only; it does
 not download either model. `npm run desktop` and the macOS packaging scripts
 run this build before launching or packaging Folio.
+The package declares Swift tools version 6.1; this build has been validated with
+Swift 6.4. The preflight verifies that the selected SwiftPM launches and leaves
+manifest and compiler compatibility checks to SwiftPM itself.
+
+The build uses `xcrun swift` throughout, respecting per-command `DEVELOPER_DIR`
+and `TOOLCHAINS` settings. Before creating its cache or fetching sources, it
+checks that the selected Swift Package Manager can run with
+`xcrun swift package --version`. If this fails with a `dyld` or missing-symbol
+error, repair or update Command Line Tools through macOS Software Update or
+Apple Developer downloads, then verify that command before retrying. If a full
+Xcode installation is available, select it for one build without changing the
+global selection:
+
+```sh
+DEVELOPER_DIR="/path/to/Xcode.app/Contents/Developer" xcrun swift package --version
+DEVELOPER_DIR="/path/to/Xcode.app/Contents/Developer" npm run build:mlx
+```
 
 ## Helper protocol
 

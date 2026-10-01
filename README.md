@@ -66,13 +66,15 @@ The JavaScript dependencies are already declared. If `node_modules` is missing, 
 npm install
 ```
 
-For local native inference during development, build the helper once with Swift 6.4 and Xcode Command Line Tools installed:
+For local native inference during development, build the helper once on an Apple Silicon Mac with working SwiftPM from Xcode Command Line Tools or Xcode:
 
 ```bash
 npm run build:mlx
 ```
 
 This builds the pinned Swift MLX runtime into an ignored cache. It does not download model weights. On unsupported systems, the app still starts with model controls unavailable.
+
+The build uses the selected `xcrun swift` toolchain and checks SwiftPM before downloading build sources. If it reports a `dyld` or missing-symbol error, repair or update Command Line Tools, or use an installed full Xcode for one build with `DEVELOPER_DIR=/path/to/Xcode.app/Contents/Developer npm run build:mlx`. See [the native helper build notes](experiments/mlx-swift/README.md) for troubleshooting.
 
 ## Run the app
 

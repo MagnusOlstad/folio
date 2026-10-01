@@ -39,12 +39,6 @@ while (($#)); do
     esac
 done
 
-APP_DIR="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$APP_DIR")"
-DEFAULT_APP_DIR="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$DEFAULT_APP_DIR")"
-if [[ "$APP_DIR" != "$DEFAULT_APP_DIR" && ( -e "$APP_DIR" || -L "$APP_DIR" ) ]]; then
-    die "custom output already exists; choose an unused --output path: $APP_DIR"
-fi
-
 MLX_SWIFT_VERSION=0.31.3
 MLX_SWIFT_LM_VERSION=3.31.3
 CMLX_URL="https://github.com/ml-explore/mlx-swift/releases/download/$MLX_SWIFT_VERSION/Cmlx.xcframework.zip"
@@ -55,7 +49,7 @@ require_command() {
     command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 }
 
-for command_name in curl ditto file git install_name_tool lipo otool python3 shasum swift xcrun; do
+for command_name in curl ditto file git install_name_tool lipo otool python3 shasum xcrun; do
     require_command "$command_name"
 done
 
@@ -64,6 +58,42 @@ done
 [[ -f "$EXPERIMENT_DIR/Package.swift" && -f "$EXPERIMENT_DIR/Package.resolved" ]] \
     || die "the pinned experiment Package.swift and Package.resolved are required"
 [[ -f "$SCRIPT_DIR/prepare-prebuilt-build.py" ]] || die "prepare-prebuilt-build.py is missing"
+
+if (( STAGE_ONLY == 0 )); then
+    selected_developer_dir="${DEVELOPER_DIR:-$(xcode-select -p 2>/dev/null || printf 'unavailable')}"
+    if ! swiftpm_version="$(xcrun swift package --version 2>&1)"; then
+        first_error_line="${swiftpm_version%%$'\n'*}"
+        printf 'build-native: SwiftPM preflight failed using xcrun-selected Swift.\n' >&2
+        printf 'Selected developer directory: %s\n' "$selected_developer_dir" >&2
+        printf 'Selected toolchain: %s\n' "${TOOLCHAINS:-default}" >&2
+        printf 'SwiftPM error: %s\n' "$first_error_line" >&2
+        if [[ "$swiftpm_version" == *dyld* || "$swiftpm_version" == *'Symbol not found'* || "$swiftpm_version" == *'image not found'* ]]; then
+            printf 'The selected swift-package cannot load a required Swift framework; this is a broken or mismatched SwiftPM installation.\n' >&2
+        fi
+
+        full_xcode_developer_dir=""
+        for candidate in /Applications/Xcode*.app/Contents/Developer "${HOME:-/nonexistent}"/Applications/Xcode*.app/Contents/Developer; do
+            if [[ -d "$candidate" ]]; then
+                full_xcode_developer_dir="$candidate"
+                break
+            fi
+        done
+        if [[ -n "$full_xcode_developer_dir" ]]; then
+            printf 'Try this build with the installed full Xcode (without changing the global selection):\n' >&2
+            printf '  DEVELOPER_DIR=%q npm run build:mlx\n' "$full_xcode_developer_dir" >&2
+            printf 'Verify the same selection first with: DEVELOPER_DIR=%q xcrun swift package --version\n' "$full_xcode_developer_dir" >&2
+        else
+            printf 'Update or repair Command Line Tools through macOS Software Update or Apple Developer downloads, then verify `xcrun swift package --version` before retrying.\n' >&2
+        fi
+        exit 1
+    fi
+fi
+
+APP_DIR="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$APP_DIR")"
+DEFAULT_APP_DIR="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$DEFAULT_APP_DIR")"
+if [[ "$APP_DIR" != "$DEFAULT_APP_DIR" && ( -e "$APP_DIR" || -L "$APP_DIR" ) ]]; then
+    die "custom output already exists; choose an unused --output path: $APP_DIR"
+fi
 
 mkdir -p "$STAGE_ROOT"
 
@@ -172,9 +202,9 @@ fi
 
 # SwiftPM resolves remote transitive packages from the checked-in lockfile.
 cp "$EXPERIMENT_DIR/Package.resolved" "$BUILD_DIR/Package.resolved"
-swift package --package-path "$BUILD_DIR" resolve
-swift build --package-path "$BUILD_DIR" --configuration release --arch arm64
-PRODUCTS_DIR="$(swift build --package-path "$BUILD_DIR" --configuration release --arch arm64 --show-bin-path)"
+xcrun swift package --package-path "$BUILD_DIR" resolve
+xcrun swift build --package-path "$BUILD_DIR" --configuration release --arch arm64
+PRODUCTS_DIR="$(xcrun swift build --package-path "$BUILD_DIR" --configuration release --arch arm64 --show-bin-path)"
 else
     [[ -n "$STAGE_ONLY_PRODUCTS" && -d "$STAGE_ONLY_PRODUCTS" ]] \
         || die "--stage-only requires an existing SwiftPM products directory"
