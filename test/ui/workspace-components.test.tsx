@@ -269,7 +269,9 @@ describe("workspace editor components", () => {
     expect(screen.getByText("Qwen 3.5 4B")).toBeInTheDocument();
     expect(screen.getByText("Llama 3.2 3B")).toBeInTheDocument();
     expect(screen.getByText("EmbeddingGemma")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /^Manage / })).toHaveLength(5);
+    expect(screen.getAllByRole("button", { name: /^Manage / })).toHaveLength(6);
+    expect(screen.getByRole("button", { name: "Manage Whisper Large v3 Turbo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Manage Whisper Large v3" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /^Manage / }).every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
     expect(props.onInstallMlxModel).not.toHaveBeenCalled();
     expect(screen.getByText("History timeline")).toBeInTheDocument();
@@ -296,6 +298,8 @@ describe("workspace editor components", () => {
             { id: "qwen35", name: "Qwen 3.5", purpose: "generation", downloadSizeBytes: 3_060_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
             { id: "llama32", name: "Llama 3.2", purpose: "generation", downloadSizeBytes: 1_810_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
             { id: "embeddinggemma", name: "EmbeddingGemma", purpose: "embeddings", downloadSizeBytes: 212_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
+            { id: "whisper", name: "Whisper Large v3 Turbo", purpose: "transcription", downloadSizeBytes: 1_610_000_000, downloadSizeIsEstimate: true, selected: true, installed: false, loaded: false, memory: null },
+            { id: "whisperlarge", name: "Whisper Large v3", purpose: "transcription", downloadSizeBytes: 3_100_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
           ],
         }}
         mlxActionModel={null}
@@ -310,6 +314,8 @@ describe("workspace editor components", () => {
     expect(onInstallMlxModel).not.toHaveBeenCalled();
     expect(screen.getByText("About 5.18 GB download")).toBeInTheDocument();
     expect(screen.getByText("About 212 MB download")).toBeInTheDocument();
+    expect(screen.getByText("About 1.61 GB download")).toBeInTheDocument();
+    expect(screen.getByText("About 3.10 GB download")).toBeInTheDocument();
   });
 
   it("marks the selected generation model while keeping every model visible", () => {
@@ -329,6 +335,8 @@ describe("workspace editor components", () => {
             { id: "qwen35", name: "Qwen 3.5 4B", purpose: "generation", downloadSizeBytes: 3_060_000_000, downloadSizeIsEstimate: true, selected: true, installed: false, loaded: false, memory: null },
             { id: "llama32", name: "Llama 3.2 3B Instruct", purpose: "generation", downloadSizeBytes: 1_810_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
             { id: "embeddinggemma", name: "EmbeddingGemma", purpose: "embeddings", downloadSizeBytes: 212_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
+            { id: "whisper", name: "Whisper Large v3 Turbo", purpose: "transcription", downloadSizeBytes: 1_610_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
+            { id: "whisperlarge", name: "Whisper Large v3", purpose: "transcription", downloadSizeBytes: 3_100_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
           ],
         }}
         mlxActionModel={null}
@@ -342,7 +350,9 @@ describe("workspace editor components", () => {
     expect(screen.getByText("Qwen 3.5 4B")).toBeInTheDocument();
     expect(screen.getByText("Gemma 4 E4B")).toBeInTheDocument();
     expect(screen.getByText("Llama 3.2 3B")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /^Manage / })).toHaveLength(5);
+    expect(screen.getAllByRole("button", { name: /^Manage / })).toHaveLength(6);
+    expect(screen.getByRole("button", { name: "Manage Whisper Large v3 Turbo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Manage Whisper Large v3" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Manage Qwen 3.5 4B" }));
     expect(onOpenSettings).toHaveBeenCalledWith("models");
     expect(onInstallMlxModel).not.toHaveBeenCalled();
@@ -361,6 +371,8 @@ describe("workspace editor components", () => {
             { id: "qwen35", name: "Qwen 3.5 4B", purpose: "generation", downloadSizeBytes: 3_060_000_000, downloadSizeIsEstimate: true, selected: true, installed: false, loaded: false, memory: null },
             { id: "llama32", name: "Llama 3.2 3B Instruct", purpose: "generation", downloadSizeBytes: 1_810_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
             { id: "embeddinggemma", name: "EmbeddingGemma", purpose: "embeddings", downloadSizeBytes: 212_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
+            { id: "whisper", name: "Whisper Large v3 Turbo", purpose: "transcription", downloadSizeBytes: 1_610_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
+            { id: "whisperlarge", name: "Whisper Large v3", purpose: "transcription", downloadSizeBytes: 3_100_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
           ],
         }}
         mlxActionModel={null}
@@ -372,7 +384,7 @@ describe("workspace editor components", () => {
     );
     const settingsLink = await screen.findByRole("button", { name: "Open model settings" });
     expect(screen.getByText("MLX available")).toBeInTheDocument();
-    expect(screen.getAllByText("Not installed")).toHaveLength(5);
+    expect(screen.getAllByText("Not installed")).toHaveLength(6);
     expect(settingsLink.closest(".mlx-status")).not.toBeNull();
     expect(screen.queryByText(/helper|choose install|features load installed models/i)).not.toBeInTheDocument();
     fireEvent.click(settingsLink);
