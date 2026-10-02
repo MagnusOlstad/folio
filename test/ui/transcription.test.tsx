@@ -7,6 +7,7 @@ import type {
   TranscriptionDockModel,
 } from "../../src/features/transcription/hooks/useTranscription.ts";
 import { useTranscription } from "../../src/features/transcription/hooks/useTranscription.ts";
+import { useAudioRecorder } from "../../src/features/transcription/hooks/useAudioRecorder.ts";
 
 const { apiMock, apiForBundleMock } = vi.hoisted(() => ({ apiMock: vi.fn(), apiForBundleMock: vi.fn() }));
 vi.mock("../../src/lib/api.ts", () => ({ api: apiMock, apiForBundle: apiForBundleMock }));
@@ -19,6 +20,7 @@ function model(overrides: Partial<TranscriptionDockModel> = {}): TranscriptionDo
     status: null,
     progress: "",
     error: "",
+    recording: { phase: "idle", duration: "0:00", error: "", saving: false },
     ...overrides,
   };
 }
@@ -26,6 +28,10 @@ function model(overrides: Partial<TranscriptionDockModel> = {}): TranscriptionDo
 function actions(): TranscriptionDockActions {
   return {
     importFile: vi.fn(),
+    startRecording: vi.fn(),
+    stopRecording: vi.fn(),
+    discardRecording: vi.fn(),
+    retryRecording: vi.fn(),
     installModel: vi.fn(),
     transcribe: vi.fn(),
     cancel: vi.fn(),
@@ -78,6 +84,7 @@ describe("transcription UI", () => {
     const dockActions = actions();
     const { container } = render(<TranscriptionDock model={model({ status, pending: [session] })} actions={dockActions} />);
     expect(screen.getByRole("button", { name: "Choose audio" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Start recording" })).toBeEnabled();
     expect(screen.getByText(/mlx-community\/whisper-large-v3-turbo/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Download model" })).toBeEnabled();
     const file = new File(["local audio"], "meeting.wav", { type: "audio/wav" });
@@ -85,6 +92,158 @@ describe("transcription UI", () => {
     expect(dockActions.importFile).toHaveBeenCalledWith(file);
     expect(screen.getByText("meeting.wav")).toBeInTheDocument();
     expect(screen.getByText(/Duration unavailable|1:01/)).toBeInTheDocument();
+  });
+
+  it("records to WAV, retains failed saves for retry, and keeps the starting note association", async () => {
+    const stoppedTracks = vi.fn();
+    const stream = { getTracks: () => [{ stop: stoppedTracks }] };
+    const getUserMedia = vi.fn(async () => stream);
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia },
+    });
+    class MockMediaRecorder extends EventTarget {
+      state = "inactive";
+      mimeType = "audio/webm";
+      start() { this.state = "recording"; }
+      stop() {
+        this.state = "inactive";
+        const data = new Event("dataavailable") as Event & { data: Blob };
+        Object.defineProperty(data, "data", { value: new Blob(["recorded"]) });
+        this.dispatchEvent(data);
+        this.dispatchEvent(new Event("stop"));
+      }
+    }
+    vi.stubGlobal("MediaRecorder", MockMediaRecorder);
+    class MockAudioContext {
+      decodeAudioData = vi.fn(async () => ({
+        numberOfChannels: 1,
+        length: 2,
+        sampleRate: 16_000,
+        getChannelData: () => new Float32Array([-0.5, 0.5]),
+      } as unknown as AudioBuffer));
+      close = vi.fn(async () => undefined);
+    }
+    vi.stubGlobal("AudioContext", MockAudioContext);
+    const importFile = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const options = {
+      association: { sourceNoteId: "notes/source.md", sourceBundleId: "bundle-a" },
+      onImport: importFile,
+    };
+    const { result, rerender, unmount } = renderHook((props: typeof options) => useAudioRecorder(props), { initialProps: options });
+    await act(async () => { await Promise.all([result.current.start(), result.current.start()]); });
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(result.current.phase).toBe("recording");
+    rerender({ ...options, association: { sourceNoteId: "notes/other.md", sourceBundleId: "bundle-b" } });
+    await act(async () => { result.current.stop(); });
+    await waitFor(() => expect(importFile).toHaveBeenCalledTimes(1));
+    const firstFile = importFile.mock.calls[0]?.[0] as File;
+    expect(firstFile.name).toMatch(/\.wav$/);
+    expect(firstFile.type).toBe("audio/wav");
+    expect(new TextDecoder().decode(await firstFile.slice(0, 4).arrayBuffer())).toBe("RIFF");
+    expect(importFile.mock.calls[0]?.[1]).toEqual({ sourceNoteId: "notes/source.md", sourceBundleId: "bundle-a" });
+    expect(result.current.phase).toBe("ready");
+    await act(async () => { await result.current.retry(); });
+    expect(importFile).toHaveBeenCalledTimes(2);
+    expect(importFile.mock.calls[1]?.[0]).toBe(firstFile);
+    expect(stoppedTracks).toHaveBeenCalledTimes(1);
+    expect(result.current.phase).toBe("idle");
+    await act(async () => { await result.current.start(); });
+    unmount();
+    await waitFor(() => expect(importFile).toHaveBeenCalledTimes(3));
+    expect(stoppedTracks).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
+  });
+
+  it("stops tracks when the dock navigates away during a pending permission request", async () => {
+    let grantAccess: ((stream: MediaStream) => void) | undefined;
+    const stoppedTrack = vi.fn();
+    const stream = { getTracks: () => [{ stop: stoppedTrack }] } as unknown as MediaStream;
+    const getUserMedia = vi.fn(() => new Promise<MediaStream>((resolve) => { grantAccess = resolve }));
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia } });
+    vi.stubGlobal("MediaRecorder", class {});
+    const { result, unmount } = renderHook(() => useAudioRecorder({
+      association: { sourceNoteId: null, sourceBundleId: null },
+      onImport: vi.fn().mockResolvedValue(true),
+    }));
+    let starting!: Promise<void>;
+    act(() => { starting = result.current.start(); });
+    expect(result.current.phase).toBe("requesting");
+    act(() => { result.current.stop(); });
+    await act(async () => {
+      grantAccess?.(stream);
+      await starting;
+    });
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(stoppedTrack).toHaveBeenCalledTimes(1);
+    expect(result.current.phase).toBe("idle");
+    unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("locks a retained recording while retry conversion is pending", async () => {
+    const stream = { getTracks: () => [{ stop: vi.fn() }] };
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn(async () => stream) },
+    });
+    class MockMediaRecorder extends EventTarget {
+      state = "inactive";
+      mimeType = "audio/webm";
+      start() { this.state = "recording"; }
+      stop() {
+        this.state = "inactive";
+        const data = new Event("dataavailable") as Event & { data: Blob };
+        Object.defineProperty(data, "data", { value: new Blob(["recorded"]) });
+        this.dispatchEvent(data);
+        this.dispatchEvent(new Event("stop"));
+      }
+    }
+    vi.stubGlobal("MediaRecorder", MockMediaRecorder);
+    const audio = {
+      numberOfChannels: 1,
+      length: 1,
+      sampleRate: 16_000,
+      getChannelData: () => new Float32Array([0.25]),
+    } as unknown as AudioBuffer;
+    let resolveDecode: ((buffer: AudioBuffer) => void) | undefined;
+    let decodeCount = 0;
+    class MockAudioContext {
+      decodeAudioData = vi.fn(() => {
+        decodeCount += 1;
+        if (decodeCount === 1) return Promise.reject(new Error("decoder failed once"));
+        return new Promise<AudioBuffer>((resolve) => { resolveDecode = resolve; });
+      });
+      close = vi.fn(async () => undefined);
+    }
+    vi.stubGlobal("AudioContext", MockAudioContext);
+    const onImport = vi.fn().mockResolvedValue(true);
+    const { result, unmount } = renderHook(() => useAudioRecorder({
+      association: { sourceNoteId: null, sourceBundleId: null },
+      onImport,
+    }));
+    await act(async () => { await result.current.start(); });
+    await act(async () => { result.current.stop(); });
+    await waitFor(() => expect(result.current.phase).toBe("ready"));
+
+    let retrying!: Promise<void>;
+    act(() => { retrying = result.current.retry(); });
+    expect(result.current.phase).toBe("processing");
+    act(() => {
+      result.current.discard();
+      void result.current.start();
+    });
+    expect(result.current.phase).toBe("processing");
+    expect(onImport).not.toHaveBeenCalled();
+    await waitFor(() => expect(resolveDecode).toBeDefined());
+    await act(async () => {
+      resolveDecode?.(audio);
+      await retrying;
+    });
+    expect(onImport).toHaveBeenCalledTimes(1);
+    expect(result.current.phase).toBe("idle");
+    unmount();
+    vi.unstubAllGlobals();
   });
 
   it("regenerates from the filed note's edited transcript and updates only its summary", async () => {

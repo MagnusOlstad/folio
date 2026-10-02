@@ -7,6 +7,7 @@ import test from 'node:test'
 import express from 'express'
 import { createTranscriptionStorage } from '../server/transcription/storage.js'
 import { createTranscriptionService, TRANSCRIPTION_MODEL } from '../server/transcription/service.js'
+import { createMlxService } from '../server/mlx/service.js'
 import { safeAudioFilename, safeTranscriptionId, splitTranscript } from '../server/transcription/model.js'
 import { registerRoutes } from '../server/transcription/routes.js'
 
@@ -121,6 +122,95 @@ test('Whisper status requires its model-specific snapshot and transcribes from i
   assert.equal(completed.result.transcript, 'The meeting starts at ten.')
   assert.equal((await runtime.transcriptionStorage.readManifest(session.id)).sourceBundleId, 'bundle-a')
   await service.close()
+})
+
+test('bundle-local transcription status reflects the shared Whisper installation', async (t) => {
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
+  const originalArch = Object.getOwnPropertyDescriptor(process, 'arch')
+  const originalRelease = os.release
+  Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'darwin' })
+  Object.defineProperty(process, 'arch', { ...originalArch, value: 'arm64' })
+  os.release = () => '23.0.0'
+  const { root, runtime } = await fixture(t)
+  const helper = path.resolve('test/fixtures/fake-mlx-helper.js')
+  const mlxService = createMlxService({ projectRoot: root, modelRoot: runtime.modelRoot, mlxHelperPath: helper })
+  const logPath = path.join(root, 'helper.jsonl')
+  const controlPath = path.join(root, 'control.json')
+  const previousLog = process.env.FOLIO_MLX_FIXTURE_LOG
+  const previousControl = process.env.FOLIO_MLX_FIXTURE_CONTROL
+  process.env.FOLIO_MLX_FIXTURE_LOG = logPath
+  process.env.FOLIO_MLX_FIXTURE_CONTROL = controlPath
+  await fs.writeFile(controlPath, '{}')
+  runtime.mlxService = mlxService
+  let finishInstall
+  const installGate = new Promise((resolve) => { finishInstall = resolve })
+  runtime.transcriptionInstaller = async ({ onEvent }) => {
+    onEvent({ downloadedBytes: 75, totalBytes: 100 })
+    await installGate
+    return installSnapshot(runtime)
+  }
+  const first = createTranscriptionService(runtime)
+  const secondRuntime = {
+    ...runtime,
+    transcriptionsRoot: path.join(root, 'other-bundle-transcriptions'),
+    transcriptionStorage: createTranscriptionStorage({ ...runtime, transcriptionsRoot: path.join(root, 'other-bundle-transcriptions') }),
+  }
+  const second = createTranscriptionService(secondRuntime)
+  try {
+    assert.equal((await second.status()).modelState, 'missing')
+    const installation = first.install()
+    let sharedProgress
+    const installDeadline = Date.now() + 2_000
+    while (Date.now() < installDeadline) {
+      sharedProgress = await second.status()
+      if (sharedProgress.installing) break
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    assert.equal(sharedProgress?.modelState, 'downloading')
+    assert.equal(sharedProgress?.downloadedBytes, 75)
+    assert.equal(sharedProgress?.downloadPercent, 75)
+    finishInstall()
+    await installation
+    const shared = await second.status()
+    assert.equal(shared.modelState, 'ready')
+    assert.equal(shared.canTranscribe, true)
+    assert.equal(shared.installing, false)
+
+    await mlxService.install('gemma4')
+    await fs.writeFile(controlPath, JSON.stringify({ operationDelayMs: 10_000 }))
+    const session = await first.createFileSession({ fileName: 'meeting.wav' })
+    const summary = first.summarize(session.id, 'The meeting starts at ten and ends at noon.')
+    const summaryResult = assert.rejects(summary, /Summary cancelled/)
+    const deadline = Date.now() + 2_000
+    let requestStarted = false
+    while (Date.now() < deadline) {
+      try {
+        if ((await fs.readFile(logPath, 'utf8')).includes('"operation":"generate"')) {
+          requestStarted = true
+          break
+        }
+      } catch { /* first helper request has not been logged yet */ }
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    assert.equal(requestStarted, true)
+    let shutdownTimer
+    const shutdownDeadline = new Promise((_, reject) => {
+      shutdownTimer = setTimeout(() => reject(new Error('MLX shutdown waited for an active summary.')), 1_500)
+    })
+    try { await Promise.race([mlxService.close(), shutdownDeadline]) }
+    finally { clearTimeout(shutdownTimer) }
+    await summaryResult
+  } finally {
+    finishInstall()
+    await Promise.all([first.close(), second.close(), mlxService.close()])
+    if (previousLog === undefined) delete process.env.FOLIO_MLX_FIXTURE_LOG
+    else process.env.FOLIO_MLX_FIXTURE_LOG = previousLog
+    if (previousControl === undefined) delete process.env.FOLIO_MLX_FIXTURE_CONTROL
+    else process.env.FOLIO_MLX_FIXTURE_CONTROL = previousControl
+    Object.defineProperty(process, 'platform', originalPlatform)
+    Object.defineProperty(process, 'arch', originalArch)
+    os.release = originalRelease
+  }
 })
 
 test('cancelling a transcription aborts its helper and retains the source audio', async (t) => {

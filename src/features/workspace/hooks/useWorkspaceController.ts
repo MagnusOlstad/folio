@@ -114,7 +114,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
     persistenceEnabled,
   });
   const layout = useWorkspaceLayout(initialWorkspaceState?.splitPosition);
-  const models = useWorkspaceModels(setMessage);
+  const models = useWorkspaceModels(setMessage, bundleSetup.ready && bundleSetup.bundles.length > 0);
   const tabs = useWorkspaceTabs({
     documents: documents.documents,
     drafts: documents.drafts,
@@ -422,18 +422,17 @@ export function useWorkspaceController(): WorkspaceShellProps {
       }));
     }
     try {
-      const [notes, files, directories, drafts, status] = await Promise.all([
+      const [notes, files, directories, drafts] = await Promise.all([
         apiForBundle<Note[]>(bundleId, "/api/notes"),
         apiForBundle<BundleFile[]>(bundleId, "/api/files"),
         apiForBundle<BundleDirectory[]>(bundleId, "/api/directories"),
         apiForBundle<import("../../../domain/types.ts").StoredDraft[]>(bundleId, "/api/drafts"),
-        apiForBundle<import("../../../domain/types.ts").MlxStatus>(bundleId, "/api/mlx/status"),
+        models.refreshMlxStatus(),
       ]);
       if (revision !== bundleSwitchRevisionRef.current) return;
       explorer.setNotes(notes);
       explorer.setFiles(files);
       explorer.setDirectories(directories);
-      models.setMlxStatus(status);
       explorer.setExpandedDirectories(expandedPathsForFiles(files));
       {
       const nextDocuments = Object.fromEntries(drafts.map((draft) => [draft.id, {
@@ -559,6 +558,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
 
   useWorkspaceBootstrap({
     setMlxStatus: models.setMlxStatus,
+    refreshMlxStatus: models.refreshMlxStatus,
     setFilesLoading: explorer.setFilesLoading,
     setMessage,
     setNotes: explorer.setNotes,
@@ -655,6 +655,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
       versionInfo: models.versionInfo,
       mlxStatus: models.mlxStatus,
       mlxActionModel: models.mlxActionModel,
+      mlxAction: models.mlxAction,
+      modelError: models.modelError,
       onInstallMlxModel: models.installMlxModel,
       onToggleMlxModel: models.toggleMlxModel,
       onOpenSettings: (category) => openSettings(category),

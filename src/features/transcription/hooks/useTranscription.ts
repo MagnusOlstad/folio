@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, apiForBundle } from '../../../lib/api.ts'
+import { useAudioRecorder, type RecordingPhase } from './useAudioRecorder.ts'
+import type { RecordingAssociation } from '../model/recording.ts'
 import {
   mergeTranscriptionDraft,
   replaceMarkdownSection,
@@ -17,10 +19,15 @@ export type TranscriptionDockModel = {
   status: TranscriptionStatus | null
   progress: string
   error: string
+  recording: { phase: RecordingPhase; duration: string; error: string; saving: boolean }
 }
 
 export type TranscriptionDockActions = {
-  importFile: (file: File) => void
+  importFile: (file: File, association?: RecordingAssociation) => Promise<boolean>
+  startRecording: () => Promise<void>
+  stopRecording: () => void
+  discardRecording: () => void
+  retryRecording: () => Promise<void>
   installModel: () => void
   transcribe: (session: TranscriptionSession) => void
   cancel: (session: TranscriptionSession) => void
@@ -98,6 +105,10 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
   const activeBundle = useRef(sourceBundleId)
   const busyRef = useRef(false)
   const draftsRef = useRef(drafts)
+  const recorder = useAudioRecorder({
+    association: { sourceNoteId, sourceBundleId },
+    onImport: importFile,
+  })
 
   useLayoutEffect(() => { activeBundle.current = sourceBundleId }, [sourceBundleId])
   useLayoutEffect(() => { draftsRef.current = drafts }, [drafts])
@@ -144,30 +155,31 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
     }
   }, [sourceBundleId, activeSession?.sourceBundleId])
 
-  async function importFile(file: File) {
-    if (busyRef.current) return
+  async function importFile(file: File, association?: RecordingAssociation): Promise<boolean> {
+    if (busyRef.current) return false
     busyRef.current = true
     setError('')
+    const importNoteId = association ? association.sourceNoteId : sourceNoteId
+    const importBundle = association ? association.sourceBundleId : sourceBundleId
     if (!SUPPORTED_AUDIO.test(file.name)) {
       setError('Choose an AAC, AIFF, FLAC, M4A, MP3, or WAV audio file.')
       setPhase('error')
       busyRef.current = false
-      return
+      return false
     }
     if (file.size <= 0 || file.size > MAX_AUDIO_BYTES) {
       setError('Audio files must be greater than 0 bytes and 500 MB or smaller.')
       setPhase('error')
       busyRef.current = false
-      return
+      return false
     }
-    const importBundle = sourceBundleId
     setPhase('importing')
     setProgress(`Saving ${file.name} on this device…`)
     try {
       const durationMs = await audioDuration(file)
       const created = await apiForBundle<SessionResponse>(importBundle, '/api/transcriptions', {
         method: 'POST',
-        body: JSON.stringify({ fileName: file.name, durationMs, sourceNoteId, sourceBundleId: importBundle }),
+        body: JSON.stringify({ fileName: file.name, durationMs, sourceNoteId: importNoteId, sourceBundleId: importBundle }),
       })
       await apiForBundle(importBundle, `/api/transcriptions/${encodeURIComponent(created.session.id)}/audio`, {
         method: 'PUT',
@@ -182,10 +194,12 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
       await refresh()
       setPhase('idle')
       setProgress('')
+      return true
     } catch (uploadError) {
       setError(errorMessage(uploadError, 'Could not save the audio file.'))
       setPhase('error')
       setProgress('')
+      return false
     } finally { busyRef.current = false }
   }
 
@@ -377,9 +391,21 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
     }
   }
 
-  const model: TranscriptionDockModel = { phase, activeSession, pending, status, progress, error }
+  const model: TranscriptionDockModel = {
+    phase,
+    activeSession,
+    pending,
+    status,
+    progress,
+    error,
+    recording: { phase: recorder.phase, duration: recorder.duration, error: recorder.error, saving: recorder.saving },
+  }
   const actions: TranscriptionDockActions = {
-    importFile: (file) => void importFile(file),
+    importFile: (file, association) => importFile(file, association),
+    startRecording: recorder.start,
+    stopRecording: recorder.stop,
+    discardRecording: recorder.discard,
+    retryRecording: recorder.retry,
     installModel: () => void installModel(),
     transcribe: (session) => void transcribe(session),
     cancel: (session) => void cancel(session),

@@ -618,7 +618,7 @@
   gap: 10px;
 }
 .model-settings-actions button,
-.model-settings-embedding > button {
+.model-settings-auxiliary > button {
   padding: 6px 9px;
   border: 1px solid var(--line);
   border-radius: 5px;
@@ -629,7 +629,7 @@
   font-size: 10px;
 }
 .model-settings-actions button:disabled,
-.model-settings-embedding > button:disabled {
+.model-settings-auxiliary > button:disabled {
   opacity: .5;
   cursor: default;
 }

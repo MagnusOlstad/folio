@@ -37,6 +37,22 @@ function renderSettings(overrides: Partial<ModelSettingsControls> = {}) {
 }
 
 describe("model settings", () => {
+  it("administers Whisper downloads and removal without offering a generation selection", () => {
+    const whisper = { id: "whisper", name: "Whisper", purpose: "transcription", downloadSizeBytes: 1_610_000_000, downloadSizeIsEstimate: true, selected: false, installed: true, loaded: false, memory: null } as const;
+    const actions = renderSettings({ status: { ...status, models: [...status.models, whisper] } });
+    expect(screen.queryByRole("radio", { name: /Whisper/ })).not.toBeInTheDocument();
+    const row = screen.getByText("Whisper").closest(".model-settings-row") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "Remove" }));
+    expect(actions.remove).toHaveBeenCalledWith("whisper");
+  });
+
+  it("reports Whisper download progress and prevents duplicate downloads", () => {
+    renderSettings({ status: { ...status, installing: ["whisper"], downloads: [{ id: "whisper", progress: { downloadedBytes: 805_000_000, totalBytes: 1_610_000_000, percent: 50, phase: "downloading" } }] } });
+    expect(screen.getByRole("progressbar", { name: "Downloading Whisper" })).toHaveAttribute("value", "50");
+    const row = screen.getByText("Whisper").closest(".model-settings-row") as HTMLElement;
+    expect(within(row).getByRole("button", { name: "Downloading…" })).toBeDisabled();
+  });
+
   it("selects one generation model, keeps EmbeddingGemma fixed, and reports byte progress", () => {
     const actions = renderSettings();
     expect(screen.getByRole("radio", { name: /Gemma 4 E4B/ })).toBeChecked();

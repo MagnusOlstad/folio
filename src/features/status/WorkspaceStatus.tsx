@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import type { DesktopUpdateState, MlxModelId, MlxStatus, VersionInfo } from "../../domain/types.ts";
+import { orderedModelCatalog, formatModelBytes } from "../workspace/model/model-catalog.ts";
 import type { SettingsCategory } from "../settings/model/settings-category.ts";
 
 export type WorkspaceStatusProps = {
   mlxStatus: MlxStatus | null;
   mlxActionModel: MlxModelId | null;
+  mlxAction?: string | null;
+  modelError?: string;
   onInstallMlxModel: (id: MlxModelId) => void;
   onToggleMlxModel: (id: MlxModelId, loaded: boolean) => void;
   onOpenSettings?: (category?: SettingsCategory) => void;
@@ -84,26 +87,11 @@ export function FolioBrand({ versionInfo }: { versionInfo: VersionInfo | null })
   );
 }
 
-const modelNames: Record<MlxModelId, string> = {
-  qwen35: "Qwen 3.5 4B",
-  llama32: "Llama 3.2 3B Instruct",
-  gemma4: "Gemma 4 E4B",
-  embeddinggemma: "EmbeddingGemma",
-};
-
-function formatBytes(bytes: number) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "kB", "MB", "GB", "TB"];
-  const power = Math.min(Math.floor(Math.log10(bytes) / 3), units.length - 1);
-  const size = bytes / 1000 ** power;
-  const digits = power === 0 || size >= 100 ? 0 : power >= 3 ? 2 : 1;
-  return `${size.toFixed(digits)} ${units[power]}`;
-}
-
 export function MlxModelStatusPanel({
   mlxStatus,
   mlxActionModel,
-  onInstallMlxModel,
+  mlxAction,
+  modelError,
   onToggleMlxModel,
   onOpenSettings,
 }: WorkspaceStatusProps) {
@@ -112,101 +100,76 @@ export function MlxModelStatusPanel({
     if (!mlxStatus) return;
     try {
       if (window.localStorage.getItem("folio:model-setup-prompt-seen") === "1") return;
-      const generation = mlxStatus.models.filter((model) => model.purpose === "generation");
-      const selectedInstalled = generation.some((model) => model.id === mlxStatus.selectedGenerationModel && model.installed);
+      const selectedInstalled = mlxStatus.models.some((model) => model.id === mlxStatus.selectedGenerationModel && model.installed);
       window.localStorage.setItem("folio:model-setup-prompt-seen", "1");
       setShowFirstOpenSettings(!selectedInstalled);
     } catch {
       setShowFirstOpenSettings(!mlxStatus.models.some((model) => model.id === mlxStatus.selectedGenerationModel && model.installed));
     }
   }, [mlxStatus]);
-  const selectedGenerationId = mlxStatus?.selectedGenerationModel ?? "gemma4";
-  const selectedGenerationModel = mlxStatus?.models.find(
-    (model) => model.id === selectedGenerationId && model.purpose === "generation",
-  );
-  const displayedModels = [
-    {
-      id: selectedGenerationId,
-      name: selectedGenerationModel?.name ?? modelNames[selectedGenerationId],
-      purpose: "Generation",
-      model: selectedGenerationModel,
-    },
-    {
-      id: "embeddinggemma" as const,
-      name: modelNames.embeddinggemma,
-      purpose: "Embeddings",
-      model: mlxStatus?.models.find((model) => model.id === "embeddinggemma"),
-    },
-  ];
-  const stateText = !mlxStatus
-    ? "Checking"
-    : mlxStatus.available
-      ? "Available"
-      : "Unavailable";
+  const available = Boolean(mlxStatus?.available && mlxStatus.helperAvailable);
+  const stateText = !mlxStatus ? "Checking" : available ? "Available" : "Unavailable";
   return (
-    <section className="mlx-status" aria-label="MLX model management" aria-live="polite">
-      <div className={`model-status ${mlxStatus?.available ? "online" : ""}`}>
-        <span className="status-dot" />
-        <span>MLX {stateText.toLowerCase()}</span>
+    <section className="mlx-status" aria-label="MLX model management">
+      <div className="model-status-header">
+        <div className={`model-status ${available ? "online" : ""}`}>
+          <span className="status-dot" aria-hidden="true" />
+          <span>MLX {stateText.toLowerCase()}</span>
+        </div>
+        {onOpenSettings ? <button className="model-manage-link" type="button" onClick={() => onOpenSettings("models")}>Manage</button> : null}
       </div>
       {showFirstOpenSettings && onOpenSettings ? (
         <button className="mlx-model-settings-link" type="button" onClick={() => { setShowFirstOpenSettings(false); onOpenSettings("models"); }}>Open model settings</button>
       ) : null}
-      <div className="mlx-model-list">
-        {displayedModels.map(({ id, name, purpose, model }) => {
-          const installing = Boolean(mlxStatus?.installing.includes(id)) || mlxActionModel === id;
-          const canAct = Boolean(mlxStatus?.available && mlxStatus.helperAvailable);
-          const buttonDisabled = !canAct || installing || mlxActionModel !== null;
-          const displayedName = model?.name || name;
-          const modelState = !mlxStatus
-            ? "Checking status"
-            : !model
-              ? "Status unavailable"
-              : model.loaded
-                ? "Running"
-                : model.installed
-                  ? "Stopped"
-                  : "Not installed";
+      <div className="mlx-model-list" role="group" aria-label="Models, active first" tabIndex={0}>
+        {orderedModelCatalog(mlxStatus, mlxActionModel, mlxAction).map((definition) => {
+          const { id } = definition;
+          const model = mlxStatus?.models.find((item) => item.id === id);
+          const download = mlxStatus?.downloads.find((item) => item.id === id)?.progress;
+          const installing = Boolean(mlxStatus?.installing.includes(id));
+          const acting = mlxActionModel === id;
+          const loading = Boolean(model?.loading || installing || acting);
+          const busy = Boolean(model?.busy || model?.requestCount);
+          const loaded = Boolean(model?.loaded && available);
+          const installed = Boolean(model?.installed);
+          const name = model?.name || definition.name;
+          const modelState = !mlxStatus ? "Checking status"
+            : loading ? download?.phase === "downloading" || (acting && mlxAction === "install") ? "Downloading" : acting && mlxAction === "unload" ? "Unloading" : acting && mlxAction === "remove" ? "Removing" : acting && mlxAction === "select" ? "Selecting" : "Loading"
+            : !available ? "Unavailable"
+            : busy ? "In use"
+            : loaded ? "Running"
+            : installed ? "Stopped" : "Not installed";
+          const actionLabel = installed && available ? `${loaded ? "Stop" : "Start"} ${name}` : `Manage ${name}`;
+          const disabled = installed && available ? loading || busy || mlxActionModel !== null : !onOpenSettings;
+          const memory = loaded ? model?.memory : null;
           return (
-            <div className="mlx-model" key={id}>
-              <div className="mlx-model-heading">
-                <strong>{displayedName}</strong>
-                <span>{purpose}</span>
-              </div>
-              <div className={`mlx-model-state${model?.loaded ? " online" : ""}`}>{modelState}</div>
-              {model && (
-                <div className="mlx-model-details">
-                  {model.installed ? "Installed" : `${model.downloadSizeIsEstimate ? "About " : ""}${formatBytes(model.downloadSizeBytes)} download`}
-                  {model.loaded && model.memory && (
-                    <span>Memory {formatBytes(model.memory.activeBytes)} active · {formatBytes(model.memory.cacheBytes)} allocator cache · {formatBytes(model.memory.peakResidentBytes)} peak process</span>
-                  )}
-                </div>
-              )}
-              {model?.installed ? (
-                <button
-                  className="mlx-model-action"
-                  type="button"
-                  onClick={() => onToggleMlxModel(id, model.loaded)}
-                  disabled={buttonDisabled}
-                  aria-label={`${model.loaded ? "Stop" : "Start"} ${displayedName}`}
-                >
-                  {installing ? "Working…" : model.loaded ? "Stop" : "Start"}
-                </button>
-              ) : (
-                <button
-                  className="mlx-model-action"
-                  type="button"
-                  onClick={() => onInstallMlxModel(id)}
-                  disabled={buttonDisabled || !model}
-                  aria-label={`Install ${displayedName}`}
-                >
-                  {installing ? "Installing…" : "Install"}
-                </button>
-              )}
-            </div>
+            <button
+              className={`mlx-model mlx-model-${id}${loaded ? " is-loaded" : ""}${!installed || !available ? " is-dormant" : ""}${loading || busy ? " is-working" : ""}`}
+              key={id}
+              type="button"
+              aria-label={actionLabel}
+              aria-pressed={installed && available ? loaded : undefined}
+              aria-describedby={`model-details-${id}`}
+              disabled={disabled}
+              title={busy ? "This model is processing requests. Wait until it is idle to stop it." : installed && available ? `${loaded ? "Unload from" : "Load into"} memory. Folio also loads installed models when needed.` : "Open Models settings to download or manage this model."}
+              onClick={() => installed && available ? onToggleMlxModel(id, loaded) : onOpenSettings?.("models")}
+            >
+              <span className="model-orbit" aria-hidden="true"><span className="model-blob" /><span className="model-blob-core" /></span>
+              <span className="mlx-model-heading"><strong title={name}>{definition.gridName ?? name}</strong><span>{definition.purpose}{model?.selected ? " · Selected" : ""}</span></span>
+              <span className={`mlx-model-state${loaded ? " online" : ""}`}>{modelState}{download ? ` ${download.percent}%` : ""}</span>
+              <span className="mlx-model-details" id={`model-details-${id}`}>
+                {memory ? <span title={`Memory ${formatModelBytes(memory.activeBytes)} active · ${formatModelBytes(memory.cacheBytes)} allocator cache · ${formatModelBytes(memory.peakResidentBytes)} peak process`}>{formatModelBytes(memory.activeBytes)} active memory</span>
+                  : busy ? <span>Processing locally</span>
+                  : installed ? <span>{!available ? "Manage in settings" : loaded ? "Ready on device" : "Click to load"}</span>
+                  : <span>{model?.downloadSizeIsEstimate ?? true ? "About " : ""}{formatModelBytes(model?.downloadSizeBytes ?? definition.bytes)} download</span>}
+                {busy ? <span>{model?.requestCount ? `${model.requestCount} active request${model.requestCount === 1 ? "" : "s"}` : "Request in progress"}</span> : null}
+              </span>
+            </button>
           );
         })}
       </div>
+      {modelError ? <p className="model-status-error" role="alert">{modelError}</p> : null}
+      <p className="model-status-hint">Active first. Click to load or release memory.</p>
     </section>
   );
 }

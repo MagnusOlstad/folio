@@ -60,14 +60,15 @@ test('opens a path-directed draft from a bundle directory context menu', async (
   }
 })
 
-test('shows controls for the selected local MLX model and fixed embedding model', async ({ page }) => {
+test('shows controls for all five supported local models', async ({ page }) => {
   const models = page.getByRole('region', { name: 'MLX model management' })
   await expect(models).toBeVisible()
   await expect(models.getByText(/Gemma 4/)).toBeVisible()
-  await expect(models.getByText(/Qwen 3.5/)).toHaveCount(0)
-  await expect(models.getByText(/Llama 3.2/)).toHaveCount(0)
+  await expect(models.getByText(/Qwen 3.5/)).toBeVisible()
+  await expect(models.getByText(/Llama 3.2/)).toBeVisible()
   await expect(models.getByText('EmbeddingGemma', { exact: true })).toBeVisible()
-  await expect(models.locator('.mlx-model-action')).toHaveCount(2)
+  await expect(models.getByText(/Whisper/)).toBeVisible()
+  await expect(models.locator('.mlx-model')).toHaveCount(5)
 })
 
 test('first-open model setup opens the real model settings controls', async ({ page }) => {

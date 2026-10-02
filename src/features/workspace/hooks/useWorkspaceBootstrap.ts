@@ -9,11 +9,12 @@ import type {
   VersionInfo,
 } from "../../../domain/types.ts";
 import type { BundleRegistryResponse } from "../../../domain/types.ts";
-import { api, apiWithRetry } from "../../../lib/api.ts";
+import { api } from "../../../lib/api.ts";
 import { expandedPathsForFiles } from "../../../lib/workspace.ts";
 
 type UseWorkspaceBootstrapOptions = {
-  setMlxStatus: Dispatch<SetStateAction<MlxStatus | null>>;
+  setMlxStatus: (status: MlxStatus | null) => void;
+  refreshMlxStatus: (retry?: boolean) => Promise<MlxStatus>;
   setFilesLoading: Dispatch<SetStateAction<boolean>>;
   setMessage: Dispatch<SetStateAction<string>>;
   setNotes: Dispatch<SetStateAction<Note[]>>;
@@ -57,9 +58,8 @@ export function useWorkspaceBootstrap(options: UseWorkspaceBootstrapOptions) {
           latest().onNoBundle?.();
           return;
         }
-        const currentStatus = await apiWithRetry<MlxStatus>("/api/mlx/status");
+        await latest().refreshMlxStatus(true);
         if (cancelled) return;
-        latest().setMlxStatus(currentStatus);
       } catch {
         if (cancelled) return;
         latest().setFilesLoading(false);
@@ -115,9 +115,6 @@ export function useWorkspaceBootstrap(options: UseWorkspaceBootstrapOptions) {
     void loadWorkspace();
 
     const refreshStatus = () => {
-      api<MlxStatus>("/api/mlx/status")
-        .then(latest().setMlxStatus)
-        .catch(() => latest().setMlxStatus(null));
       // Keep the existing status endpoint active: it reports semantic-index
       // coverage and queues missing embeddings only while EmbeddingGemma is
       // already loaded. This never triggers installation or model loading.

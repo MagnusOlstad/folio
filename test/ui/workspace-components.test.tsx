@@ -247,7 +247,7 @@ describe("workspace editor components", () => {
     }
   });
 
-  it("shows the selected generation model and EmbeddingGemma without automatically installing", () => {
+  it("shows every supported model without automatically installing", () => {
     const onHide = vi.fn();
     const props = {
       mlxStatus: null,
@@ -266,11 +266,11 @@ describe("workspace editor components", () => {
     expect(header).toContainElement(toggle);
     expect(header).toHaveClass("right-pane-header");
     expect(screen.getByText("Gemma 4 E4B")).toBeInTheDocument();
-    expect(screen.queryByText("Qwen 3.5 4B")).not.toBeInTheDocument();
-    expect(screen.queryByText("Llama 3.2 3B Instruct")).not.toBeInTheDocument();
+    expect(screen.getByText("Qwen 3.5 4B")).toBeInTheDocument();
+    expect(screen.getByText("Llama 3.2 3B")).toBeInTheDocument();
     expect(screen.getByText("EmbeddingGemma")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /^Install / })).toHaveLength(2);
-    expect(screen.getAllByRole("button", { name: /^Install / }).every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+    expect(screen.getAllByRole("button", { name: /^Manage / })).toHaveLength(5);
+    expect(screen.getAllByRole("button", { name: /^Manage / }).every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
     expect(props.onInstallMlxModel).not.toHaveBeenCalled();
     expect(screen.getByText("History timeline")).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "Workspace tools" })).toBeInTheDocument();
@@ -279,8 +279,9 @@ describe("workspace editor components", () => {
 
   });
 
-  it("offers explicit install controls for missing MLX models", () => {
+  it("opens model settings for missing MLX models", () => {
     const onInstallMlxModel = vi.fn();
+    const onOpenSettings = vi.fn();
     render(
       <WorkspaceRightPane
         mlxStatus={{
@@ -299,18 +300,21 @@ describe("workspace editor components", () => {
         }}
         mlxActionModel={null}
         onInstallMlxModel={onInstallMlxModel}
+        onOpenSettings={onOpenSettings}
         onToggleMlxModel={vi.fn()}
         onHide={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Install Gemma 4" }));
-    expect(onInstallMlxModel).toHaveBeenCalledWith("gemma4");
+    fireEvent.click(screen.getByRole("button", { name: "Manage Gemma 4" }));
+    expect(onOpenSettings).toHaveBeenCalledWith("models");
+    expect(onInstallMlxModel).not.toHaveBeenCalled();
     expect(screen.getByText("About 5.18 GB download")).toBeInTheDocument();
     expect(screen.getByText("About 212 MB download")).toBeInTheDocument();
   });
 
-  it("shows the generation model selected by status alongside the fixed embedding model", () => {
+  it("marks the selected generation model while keeping every model visible", () => {
     const onInstallMlxModel = vi.fn();
+    const onOpenSettings = vi.fn();
     render(
       <WorkspaceRightPane
         mlxStatus={{
@@ -329,17 +333,19 @@ describe("workspace editor components", () => {
         }}
         mlxActionModel={null}
         onInstallMlxModel={onInstallMlxModel}
+        onOpenSettings={onOpenSettings}
         onToggleMlxModel={vi.fn()}
         onHide={vi.fn()}
       />,
     );
 
     expect(screen.getByText("Qwen 3.5 4B")).toBeInTheDocument();
-    expect(screen.queryByText("Gemma 4 E4B")).not.toBeInTheDocument();
-    expect(screen.queryByText("Llama 3.2 3B Instruct")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /^Install / })).toHaveLength(2);
-    fireEvent.click(screen.getByRole("button", { name: "Install Qwen 3.5 4B" }));
-    expect(onInstallMlxModel).toHaveBeenCalledWith("qwen35");
+    expect(screen.getByText("Gemma 4 E4B")).toBeInTheDocument();
+    expect(screen.getByText("Llama 3.2 3B")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^Manage / })).toHaveLength(5);
+    fireEvent.click(screen.getByRole("button", { name: "Manage Qwen 3.5 4B" }));
+    expect(onOpenSettings).toHaveBeenCalledWith("models");
+    expect(onInstallMlxModel).not.toHaveBeenCalled();
   });
 
   it("links first-time setup to Settings only when the selected generation model is missing", async () => {
@@ -366,7 +372,7 @@ describe("workspace editor components", () => {
     );
     const settingsLink = await screen.findByRole("button", { name: "Open model settings" });
     expect(screen.getByText("MLX available")).toBeInTheDocument();
-    expect(screen.getAllByText("Not installed")).toHaveLength(2);
+    expect(screen.getAllByText("Not installed")).toHaveLength(5);
     expect(settingsLink.closest(".mlx-status")).not.toBeNull();
     expect(screen.queryByText(/helper|choose install|features load installed models/i)).not.toBeInTheDocument();
     fireEvent.click(settingsLink);
@@ -399,7 +405,7 @@ describe("workspace editor components", () => {
       />,
     );
     expect(screen.getByText("Running")).toBeInTheDocument();
-    expect(screen.getByText("Memory 1.07 GB active · 537 MB allocator cache · 2.15 GB peak process")).toBeInTheDocument();
+    expect(screen.getByText("1.07 GB active memory")).toHaveAttribute("title", "Memory 1.07 GB active · 537 MB allocator cache · 2.15 GB peak process");
     fireEvent.click(screen.getByRole("button", { name: "Stop Gemma 4" }));
     fireEvent.click(screen.getByRole("button", { name: "Start EmbeddingGemma" }));
     expect(onToggleMlxModel).toHaveBeenNthCalledWith(1, "gemma4", true);

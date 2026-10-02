@@ -154,7 +154,7 @@ export function createTranscriptionService(runtime) {
     && (runtime.architecture ?? process.arch) === 'arm64'
     && Number((runtime.osRelease?.() ?? os.release()).split('.')[0]) >= 23
 
-  async function status() {
+  async function localStatus() {
     let helperAvailable = false
     try { await fs.access(executable); helperAvailable = available } catch { /* native build has not run */ }
     const snapshot = await installedSnapshot(cacheRoot)
@@ -172,10 +172,33 @@ export function createTranscriptionService(runtime) {
       modelState: snapshot ? 'ready' : installing ? 'downloading' : 'missing',
       downloadedBytes,
       totalBytes: installProgress?.totalBytes || TRANSCRIPTION_MODEL.downloadSizeBytes,
-      downloadPercent: snapshot ? 100 : installing ? Math.min(99, Math.floor(downloadedBytes / TRANSCRIPTION_MODEL.downloadSizeBytes * 100)) : 0,
+      downloadPercent: snapshot ? 100 : installing ? Math.min(99, Math.floor(downloadedBytes / (installProgress?.totalBytes || TRANSCRIPTION_MODEL.downloadSizeBytes) * 100)) : 0,
       canInstall: available && helperAvailable,
       canTranscribe: available && helperAvailable && Boolean(snapshot),
       installing: Boolean(installing),
+    }
+  }
+
+  async function status() {
+    const local = await localStatus()
+    if (!runtime.mlxService?.status) return local
+    const shared = await runtime.mlxService.status()
+    const whisper = shared.models?.find((model) => model.id === 'whisper')
+    const progress = shared.downloads?.find((download) => download.id === 'whisper')?.progress
+    const installed = whisper?.installed ?? (local.modelState === 'ready')
+    const isInstalling = Boolean(progress)
+    const downloadedBytes = progress?.downloadedBytes ?? local.downloadedBytes
+    const totalBytes = progress?.totalBytes ?? local.totalBytes
+    return {
+      ...local,
+      helperAvailable: shared.helperAvailable,
+      modelState: installed ? 'ready' : isInstalling ? 'downloading' : 'missing',
+      downloadedBytes,
+      totalBytes,
+      downloadPercent: progress?.percent ?? local.downloadPercent,
+      canInstall: local.available && shared.helperAvailable,
+      canTranscribe: local.available && shared.helperAvailable && installed,
+      installing: isInstalling,
     }
   }
 
@@ -186,7 +209,7 @@ export function createTranscriptionService(runtime) {
     return args
   }
 
-  async function install() {
+  async function installRaw() {
     if (!available) throw Object.assign(new Error('Local Whisper transcription requires Folio on an Apple Silicon Mac running macOS 14 or later.'), { status: 503 })
     if (installPromise) return installPromise
     installProgress = null
@@ -208,6 +231,12 @@ export function createTranscriptionService(runtime) {
     return installPromise
   }
 
+  async function install() {
+    if (!runtime.mlxService?.install) return installRaw()
+    await runtime.mlxService.install('whisper')
+    return status()
+  }
+
   async function transcribe(id) {
     return serial(async () => {
       const session = await runtime.transcriptionStorage.readManifest(id)
@@ -226,11 +255,34 @@ export function createTranscriptionService(runtime) {
       await runtime.transcriptionStorage.writeManifest({ ...session, state: 'transcribing', error: null })
       try {
         const request = { id: randomUUID(), operation: 'transcribe', audioPath: runtime.transcriptionStorage.recordingPath(session) }
-        const runner = runtime.transcriptionRunner || runHelper
-        const response = await runner({ executable, args: taskArgs('transcribe', snapshot), cacheRoot, request, signal: controller.signal,
-          onEvent: (event) => { if (event.event === 'ready') active.get(id) && (active.get(id).progress = 'Transcribing audio locally…') },
-          timeoutMs: 6 * 60 * 60_000,
-        })
+        let response
+        if (runtime.transcriptionRunner) {
+          const runner = runtime.transcriptionRunner
+          const runTranscription = () => runner({ executable, args: taskArgs('transcribe', snapshot), cacheRoot, request, signal: controller.signal,
+            onEvent: (event) => {
+              if (event.event !== 'ready') return
+              const current = active.get(id)
+              if (current) current.progress = 'Transcribing audio locally…'
+            },
+            timeoutMs: 6 * 60 * 60_000,
+          })
+          response = runtime.mlxService?.withModelActivity
+            ? await runtime.mlxService.withModelActivity('whisper', runTranscription)
+            : await runTranscription()
+        } else if (runtime.mlxService?.transcribe) {
+          active.get(id).progress = 'Loading local Whisper model…'
+          response = await runtime.mlxService.transcribe(runtime.transcriptionStorage.recordingPath(session), { signal: controller.signal })
+          active.get(id).progress = 'Transcribing audio locally…'
+        } else {
+          response = await runHelper({ executable, args: taskArgs('transcribe', snapshot), cacheRoot, request, signal: controller.signal,
+            onEvent: (event) => {
+              if (event.event !== 'ready') return
+              const current = active.get(id)
+              if (current) current.progress = 'Transcribing audio locally…'
+            },
+            timeoutMs: 6 * 60 * 60_000,
+          })
+        }
         if (typeof response.text !== 'string' || !response.text.trim()) throw new Error('Whisper did not recognize speech in this recording. Check that it contains clear speech, then retry.')
         const result = { summary: '', transcript: response.text.trim(), markdown: markdownFromResult({ summary: '', transcript: response.text }, response.text), generatedAt: new Date().toISOString() }
         await runtime.transcriptionStorage.writeResult(id, result)
@@ -360,6 +412,34 @@ export function createTranscriptionService(runtime) {
     for (const operation of summaries) operation.controller.abort()
     await Promise.allSettled([installPromise, ...jobs.map((job) => job.finished), ...summaries.map((job) => job.finished)].filter(Boolean))
   }
+
+  runtime.mlxService?.registerExternalModel?.('whisper', {
+    snapshot: () => installedSnapshot(cacheRoot),
+    status: async () => {
+      const current = await localStatus()
+      return {
+        installed: current.modelState === 'ready',
+        loading: current.installing,
+        progress: current.installing ? {
+          downloadedBytes: current.downloadedBytes,
+          totalBytes: current.totalBytes,
+          percent: current.downloadPercent,
+          phase: current.modelState === 'ready' ? 'loading' : 'downloading',
+        } : null,
+      }
+    },
+    install: async () => {
+      await installRaw()
+      return runtime.mlxService.status()
+    },
+    remove: async () => {
+      if (installPromise || active.size) throw Object.assign(new Error('Wait for Whisper activity to finish before removing it.'), { statusCode: 409 })
+      const repositoryRoot = path.join(cacheRoot, 'models--mlx-community--whisper-large-v3-turbo')
+      await fs.rm(repositoryRoot, { recursive: true, force: true })
+      return runtime.mlxService.status()
+    },
+    close,
+  })
 
   return {
     status,

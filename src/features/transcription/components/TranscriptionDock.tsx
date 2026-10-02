@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
 import type { TranscriptionDockActions, TranscriptionDockModel } from '../hooks/useTranscription.ts'
 import type { TranscriptionSession } from '../model/types.ts'
@@ -27,13 +27,27 @@ function importedDate(session: TranscriptionSession) {
 export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
+  const recorder = model.recording
+  const recordingPhaseRef = useRef(recorder.phase)
+  const stopRecordingRef = useRef(actions.stopRecording)
   const busy = model.phase === 'importing' || model.phase === 'downloading' || model.phase === 'transcribing' || model.phase === 'summarizing' || model.phase === 'cancelling-summary'
+  const controlsBusy = busy || recorder.phase !== 'idle'
   const status = model.status
   const canTranscribe = status?.canTranscribe === true
+
+  useEffect(() => {
+    recordingPhaseRef.current = recorder.phase
+    stopRecordingRef.current = actions.stopRecording
+  }, [actions.stopRecording, recorder.phase])
+
+  useEffect(() => () => {
+    if (recordingPhaseRef.current === 'recording' || recordingPhaseRef.current === 'requesting') stopRecordingRef.current()
+  }, [])
 
   function onDrop(event: DragEvent<HTMLElement>) {
     event.preventDefault()
     setDragging(false)
+    if (controlsBusy) return
     const file = event.dataTransfer.files.item(0)
     if (file) actions.importFile(file)
   }
@@ -50,7 +64,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
         <span className="transcription-audio-icon" aria-hidden="true">♫</span>
         <strong>Transcribe an audio file</strong>
         <span>Drop it here or choose a file. Audio stays on this device.</span>
-        <button type="button" className="transcription-primary" onClick={() => inputRef.current?.click()} disabled={busy}>
+        <button type="button" className="transcription-primary" onClick={() => inputRef.current?.click()} disabled={controlsBusy}>
           Choose audio
         </button>
         <input
@@ -62,9 +76,43 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
           onChange={(event) => {
             const file = event.currentTarget.files?.item(0)
             event.currentTarget.value = ''
-            if (file) actions.importFile(file)
+            if (file && !controlsBusy) actions.importFile(file)
           }}
         />
+      </div>
+
+      <div className={`transcription-recorder${recorder.phase === 'recording' ? ' is-recording' : ''}`}>
+        <div className="transcription-recorder-heading">
+          <span className="transcription-recorder-mark" aria-hidden="true">●</span>
+          <div>
+            <strong>Record from microphone</strong>
+            <small>Saved locally as WAV, ready for transcription</small>
+          </div>
+          {recorder.phase === 'recording' && <span className="transcription-recorder-timer" role="timer">{recorder.duration}</span>}
+          {recorder.phase === 'processing' && <span className="transcription-recorder-timer" role="status">Preparing…</span>}
+        </div>
+        <div className="transcription-recorder-actions">
+          {recorder.phase === 'idle' && (
+            <button type="button" className="transcription-record-button" onClick={() => void actions.startRecording()} disabled={busy}>
+              <span aria-hidden="true">●</span> Start recording
+            </button>
+          )}
+          {recorder.phase === 'requesting' && <span className="transcription-recorder-hint" role="status">Waiting for microphone permission…</span>}
+          {recorder.phase === 'recording' && <>
+            <span className="transcription-recording-activity" aria-hidden="true"><i /><i /><i /><i /><i /></span>
+            <button type="button" className="transcription-record-button is-stop" onClick={actions.stopRecording}>Stop recording</button>
+            <button type="button" className="transcription-recorder-quiet" onClick={actions.discardRecording}>Discard</button>
+          </>}
+          {recorder.phase === 'processing' && <span className="transcription-recorder-hint" role="status">Converting the recording on this device…</span>}
+          {recorder.phase === 'ready' && <>
+            <span className="transcription-recorder-hint">Recording ready · {recorder.duration}</span>
+            <button type="button" className="transcription-record-button" onClick={() => void actions.retryRecording()} disabled={recorder.saving || busy}>
+              {recorder.saving ? 'Saving…' : 'Retry recording'}
+            </button>
+            <button type="button" className="transcription-recorder-quiet" onClick={actions.discardRecording} disabled={recorder.saving}>Discard</button>
+          </>}
+        </div>
+        {recorder.error && <p className="transcription-recorder-error" role="alert">{recorder.error}</p>}
       </div>
 
       <div className="transcription-model-status" role="status" aria-live="polite">
@@ -77,7 +125,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
         {status?.modelState === 'missing' && status.canInstall && (
           <>
             <p>Download mlx-community/whisper-large-v3-turbo (about 1.6 GB). The model runs locally.</p>
-            <button type="button" className="transcription-secondary" onClick={actions.installModel} disabled={busy}>Download model</button>
+            <button type="button" className="transcription-secondary" onClick={actions.installModel} disabled={controlsBusy}>Download model</button>
           </>
         )}
         {status?.modelState === 'downloading' && (
@@ -111,11 +159,11 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
               <div className="transcription-item-actions">
                 {session.state === 'ready' ? (
                   <>
-                    <button type="button" onClick={() => actions.openTranscript(session)}>Open note</button>
-                    <button type="button" onClick={() => actions.regenerateSummary(session)} disabled={busy}>Regenerate summary</button>
+                    <button type="button" onClick={() => actions.openTranscript(session)} disabled={controlsBusy}>Open note</button>
+                    <button type="button" onClick={() => actions.regenerateSummary(session)} disabled={controlsBusy}>Regenerate summary</button>
                   </>
                 ) : (
-                  <button type="button" onClick={() => actions.transcribe(session)} disabled={!canTranscribe || busy || processing}>
+                  <button type="button" onClick={() => actions.transcribe(session)} disabled={!canTranscribe || controlsBusy || processing}>
                     {session.state === 'failed' ? 'Retry' : 'Transcribe'}
                   </button>
                 )}
