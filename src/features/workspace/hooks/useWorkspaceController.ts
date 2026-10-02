@@ -150,6 +150,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       },
       getDraftContent: (id) => documents.draftsRef.current[id] ?? documents.documentsRef.current[id]?.content,
       getDraftDocument: (id) => documents.documentsRef.current[id],
+      isDraftOpen: (id) => tabs.groups.some((group) => group.tabs.includes(id)),
       updateDraftContent: (id, content) => {
         const document = documents.documentsRef.current[id];
         if (document) documents.changeDraftContent(document, content);

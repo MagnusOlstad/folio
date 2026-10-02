@@ -348,8 +348,6 @@ export function createTranscriptionService(runtime) {
       if (!content) throw Object.assign(new Error('Add transcript text before generating a summary.'), { status: 400 })
       if (content.length > 250_000) throw Object.assign(new Error('The transcript is too long to summarize safely. Shorten it and try again.'), { status: 413 })
       const previous = await runtime.transcriptionStorage.readResult(id)
-      const saved = { ...(previous || {}), transcript: content, markdown: markdownFromResult({ summary: previous?.summary || '', transcript: content }, content), updatedAt: new Date().toISOString() }
-      await runtime.transcriptionStorage.writeResult(id, saved)
       const pieces = splitTranscript(content, 10_000)
       const summaries = []
       for (const piece of pieces) {
@@ -357,7 +355,7 @@ export function createTranscriptionService(runtime) {
           { role: 'system', content: 'Write a concise factual summary of the supplied transcript in Markdown bullets. Keep names, numbers, dates, decisions, and uncertainty accurate. Do not infer facts that are not stated.' },
           { role: 'user', content: `<transcript>\n${piece}\n</transcript>` },
         ], { maxTokens: 384, temperature: 0 })
-        if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. The edited transcript is saved and the previous summary was kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
+        if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. Your draft and original transcript were kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
         const summary = String(generated.text || '').trim()
         if (!summary) throw new Error('The selected local language model returned an empty summary.')
         summaries.push(summary)
@@ -377,17 +375,16 @@ export function createTranscriptionService(runtime) {
             { role: 'system', content: 'Combine these notes into a concise factual summary in Markdown bullets. Preserve names, dates, decisions, and uncertainty. Do not add facts.' },
             { role: 'user', content: batchContent },
           ], { maxTokens: 384, temperature: 0 })
-          if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. The edited transcript is saved and the previous summary was kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
+          if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. Your draft and original transcript were kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
           finalPieces.push(String(generated.text || '').trim())
         }
       }
       const summary = finalPieces[0] || ''
       if (!summary) throw new Error('The selected local language model returned an empty summary.')
-      const result = { ...saved, summary, transcript: content, markdown: markdownFromResult({ summary, transcript: content }, content), summaryGeneratedAt: new Date().toISOString() }
-      await runtime.transcriptionStorage.writeResult(id, result)
+      const result = { ...(previous || {}), summary, transcript: content, markdown: markdownFromResult({ summary, transcript: content }, content), summaryGeneratedAt: new Date().toISOString() }
       return result
     } catch (error) {
-      if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. The edited transcript is saved and the previous summary was kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
+      if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. Your draft and original transcript were kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
       if (error?.status === 400 || error?.status === 413) throw error
       const detail = error instanceof Error ? error.message : 'Unknown local summary error.'
       throw Object.assign(new Error(`Could not generate a local summary. Install and start a text generation model in Settings, then retry. ${detail}`), { status: 503 })

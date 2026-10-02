@@ -45,6 +45,7 @@ export type TranscriptionDraftAdapter = {
   createDraft: (content?: string) => string
   getDraftContent: (id: string) => string | undefined
   getDraftDocument: (id: string) => ViewerDocument | undefined
+  isDraftOpen?: (id: string) => boolean
   updateDraftContent: (id: string, content: string) => void
   openDraft: (id: string) => void
 }

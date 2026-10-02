@@ -326,120 +326,117 @@ describe("transcription UI", () => {
     vi.unstubAllGlobals();
   });
 
-  it("regenerates from the filed note's edited transcript and updates only its summary", async () => {
-    const note = {
-      id: "notes/meeting.md",
-      content: "# meeting transcript\n\n## Summary\n\nOld summary.\n\n## Transcript\n\nEdited transcript with corrected date.\n",
-    };
-    const updatedContents: string[] = [];
-    const operationOrder: string[] = [];
-    apiMock.mockImplementation(async (url: string) => {
-      if (url === "/api/transcriptions/status") return { ...status, modelState: "ready", canTranscribe: true };
-      if (url === "/api/transcriptions?pending=1") return [session];
-      throw new Error(`Unexpected API request: ${url}`);
-    });
-    apiForBundleMock.mockImplementation(async (_bundleId: string | null, url: string, options?: RequestInit) => {
-      if (url === "/api/note?id=notes%2Fmeeting.md" && options?.method === "PATCH") {
-        operationOrder.push("persist");
-        return { content: String(JSON.parse(String(options.body)).content) };
-      }
-      if (url.endsWith("/summarize")) {
-        operationOrder.push("summarize");
-        expect(JSON.parse(String(options?.body)).transcript).toBe("Edited transcript with corrected date.");
-        return { result: { summary: "Updated local summary.", transcript: "Edited transcript with corrected date." } };
-      }
-      throw new Error(`Unexpected API request: ${url}`);
-    });
+  it("opens a fresh raw transcript draft after the previous draft was filed", async () => {
+    const rawResult = { summary: "Raw summary.", transcript: "Original recording transcript." };
+    const contentById = new Map<string, string>();
+    const createdIds: string[] = [];
+    apiForBundleMock.mockResolvedValue({ session, result: rawResult });
     const drafts = {
-      createDraft: vi.fn(() => note.id),
-      getDraftContent: vi.fn(() => note.content),
-      getDraftDocument: vi.fn(() => note),
-      updateDraftContent: vi.fn((_id: string, content: string) => { note.content = content; updatedContents.push(content); }),
+      createDraft: vi.fn((content = "") => {
+        const id = "untitled:draft-" + (createdIds.length + 1);
+        createdIds.push(id);
+        contentById.set(id, content);
+        return id;
+      }),
+      getDraftContent: vi.fn((id: string) => contentById.get(id)),
+      getDraftDocument: vi.fn(() => undefined),
+      isDraftOpen: vi.fn(() => true),
+      updateDraftContent: vi.fn(),
       openDraft: vi.fn(),
     };
     const { result } = renderHook(() => useTranscription({
-      drafts,
-      setMessage: vi.fn(),
-      sourceNoteId: "notes/source.md",
-      sourceBundleId: "bundle-a",
+      drafts, setMessage: vi.fn(), sourceNoteId: null, sourceBundleId: "bundle-a",
     }));
-    await act(async () => { result.current.actions.regenerateSummary(session); });
-    await waitFor(() => expect(updatedContents).toHaveLength(1));
-    expect(note.content).toContain("## Summary\n\nUpdated local summary.");
-    expect(note.content).toContain("## Transcript\n\nEdited transcript with corrected date.");
-    expect(operationOrder).toEqual(["persist", "summarize", "persist"]);
-    expect(drafts.openDraft).toHaveBeenCalledWith("notes/meeting.md");
+
+    await act(async () => { await result.current.actions.openTranscript(session); });
+    expect(contentById.get("untitled:draft-1")).toContain("Original recording transcript.");
+    act(() => { result.current.draftFiled("untitled:draft-1", "notes/meeting.md", "bundle-a"); });
+    await act(async () => { await result.current.actions.openTranscript({ ...session, draftId: "notes/meeting.md" }); });
+
+    expect(createdIds).toEqual(["untitled:draft-1", "untitled:draft-2"]);
+    expect(contentById.get("untitled:draft-2")).toContain("Original recording transcript.");
+    expect(drafts.openDraft).toHaveBeenLastCalledWith("untitled:draft-2");
+    expect(apiForBundleMock.mock.calls.some(([, , options]) => options?.method === "POST")).toBe(false);
   });
 
-  it("preserves transcript edits made during summary generation and the final note save", async () => {
-    let noteContent = "# Meeting\n\n## Summary\n\nOld summary.\n\n## Transcript\n\nOriginal transcript.\n";
-    const updatedContents: string[] = [];
-    const makeDraftAdapter = () => {
-      const snapshot = noteContent;
-      return {
-        createDraft: vi.fn(() => session.draftId!),
-        getDraftContent: vi.fn(() => snapshot),
-        getDraftDocument: vi.fn(() => ({ content: snapshot })),
-        updateDraftContent: vi.fn((_id: string, content: string) => { updatedContents.push(content); }),
-        openDraft: vi.fn(),
-      };
-    };
-    let drafts = makeDraftAdapter();
-    let resolveSummary: ((value: unknown) => void) | undefined;
-    let resolveFinalPatch: ((value: unknown) => void) | undefined;
+  it("summarizes edited draft text without changing a filed note or the raw session", async () => {
+    const raw = { summary: "Original summary.", transcript: "Original transcript." };
+    const initialDraft = "# Meeting\n\n## Summary\n\nOriginal summary.\n\n## Transcript\n\nEdited draft transcript.\n";
+    const draftsById = new Map<string, string>();
+    const openIds = new Set<string>();
+    let draftNumber = 0;
+    let finishSummary: ((value: unknown) => void) | undefined;
     let announceSummary: (() => void) | undefined;
-    let announceFinalPatch: (() => void) | undefined;
     const summaryStarted = new Promise<void>((resolve) => { announceSummary = resolve; });
-    const finalPatchStarted = new Promise<void>((resolve) => { announceFinalPatch = resolve; });
-    let patchCount = 0;
-    let finalPatchContent = "";
-    apiMock.mockImplementation((url: string) => {
-      if (url === "/api/transcriptions/status") return { ...status, modelState: "ready", canTranscribe: true };
-      if (url === "/api/transcriptions?pending=1") return [session];
-      throw new Error(`Unexpected API request: ${url}`);
-    });
-    apiForBundleMock.mockImplementation((_bundleId: string | null, url: string, options?: RequestInit) => {
-      if (url === "/api/note?id=notes%2Fmeeting.md" && options?.method === "PATCH") {
-        patchCount += 1;
-        const content = String(JSON.parse(String(options.body)).content);
-        if (patchCount === 1) return Promise.resolve({ content });
-        finalPatchContent = content;
-        announceFinalPatch?.();
-        return new Promise((resolve) => { resolveFinalPatch = resolve; });
-      }
+    apiForBundleMock.mockImplementation((_bundleId: string | null, url: string) => {
       if (url.endsWith("/summarize")) {
-        announceSummary?.();
-        return new Promise((resolve) => { resolveSummary = resolve; });
+        return new Promise((resolve) => { finishSummary = resolve; announceSummary?.(); });
       }
-      throw new Error(`Unexpected bundle API request: ${url}`);
+      if (/\/api\/transcriptions\/[^/]+$/.test(url)) return Promise.resolve({ session: { ...session, draftId: "notes/meeting.md" }, result: raw });
+      throw new Error("Unexpected API request: " + url);
     });
-    const { result, rerender } = renderHook(
-      ({ adapter }: { adapter: ReturnType<typeof makeDraftAdapter> }) => useTranscription({
-        drafts: adapter,
-        setMessage: vi.fn(),
-        sourceNoteId: null,
-        sourceBundleId: "bundle-a",
+    const drafts = {
+      createDraft: vi.fn((content = "") => {
+        draftNumber += 1;
+        const id = `untitled:active-draft-${draftNumber}`;
+        draftsById.set(id, content || initialDraft);
+        openIds.add(id);
+        return id;
       }),
-      { initialProps: { adapter: drafts } },
-    );
-    act(() => { result.current.actions.regenerateSummary(session); });
+      getDraftContent: vi.fn((id: string) => draftsById.get(id)),
+      getDraftDocument: vi.fn((id: string) => {
+        const content = draftsById.get(id);
+        return content === undefined ? undefined : { content } as never;
+      }),
+      isDraftOpen: vi.fn((id: string) => openIds.has(id)),
+      updateDraftContent: vi.fn((id: string, content: string) => { draftsById.set(id, content); }),
+      openDraft: vi.fn((id: string) => { openIds.add(id); }),
+    };
+    const { result } = renderHook(() => useTranscription({
+      drafts, setMessage: vi.fn(), sourceNoteId: null, sourceBundleId: "bundle-a",
+    }));
+
+    await act(async () => { await result.current.actions.openTranscript(session); });
+    const draftId = "untitled:active-draft-1";
+    draftsById.set(draftId, initialDraft);
+    act(() => { result.current.actions.regenerateSummary({ ...session, draftId: "notes/meeting.md" }); });
     await summaryStarted;
+    result.current.draftFiled(draftId, "notes/meeting.md", "bundle-a");
+    openIds.delete(draftId);
+    await act(async () => { finishSummary?.({ result: { summary: "Derived summary.", transcript: "Edited draft transcript." } }); });
 
-    noteContent = "# Meeting\n\n## Summary\n\nOld summary.\n\n## Transcript\n\nEdited while summary was generating.\n";
-    drafts = makeDraftAdapter();
-    rerender({ adapter: drafts });
-    await act(async () => { resolveSummary?.({ result: { summary: "Fresh summary.", transcript: "Original transcript." } }); });
-    await finalPatchStarted;
-    expect(finalPatchContent).toContain("Edited while summary was generating.");
+    expect(draftsById.get(draftId)).toBe(initialDraft);
+    expect([...draftsById.entries()].some(([id, content]) => id !== draftId && content.includes("Derived summary."))).toBe(true);
+    expect(apiForBundleMock.mock.calls.some(([, , options]) => options?.method === "PATCH")).toBe(false);
+  });
 
-    noteContent = "# Meeting\n\n## Summary\n\nOld summary.\n\n## Transcript\n\nEdited while final save was pending.\n";
-    drafts = makeDraftAdapter();
-    rerender({ adapter: drafts });
-    await act(async () => { resolveFinalPatch?.({ content: finalPatchContent }); });
-    await waitFor(() => expect(updatedContents).toHaveLength(1));
-    expect(updatedContents[0]).toContain("## Summary\n\nFresh summary.");
-    expect(updatedContents[0]).toContain("## Transcript\n\nEdited while final save was pending.");
-    expect(drafts.openDraft).toHaveBeenCalledWith("notes/meeting.md");
+  it("keeps an edited draft intact when summary generation fails", async () => {
+    const raw = { summary: "Raw summary.", transcript: "Original transcript." };
+    const content = new Map<string, string>();
+    apiForBundleMock.mockImplementation((_bundleId: string | null, url: string) => {
+      if (/\/api\/transcriptions\/[^/]+$/.test(url)) return Promise.resolve({ session, result: raw });
+      if (url.endsWith("/summarize")) return Promise.reject(new Error("Local model unavailable."));
+      throw new Error("Unexpected API request: " + url);
+    });
+    const drafts = {
+      createDraft: vi.fn((initial = "") => { content.set("untitled:summary-draft", initial); return "untitled:summary-draft"; }),
+      getDraftContent: vi.fn((id: string) => content.get(id)),
+      getDraftDocument: vi.fn(() => undefined),
+      isDraftOpen: vi.fn(() => true),
+      updateDraftContent: vi.fn(),
+      openDraft: vi.fn(),
+    };
+    const { result } = renderHook(() => useTranscription({
+      drafts, setMessage: vi.fn(), sourceNoteId: null, sourceBundleId: "bundle-a",
+    }));
+    await act(async () => { await result.current.actions.openTranscript(session); });
+    const edited = (content.get("untitled:summary-draft") || "").replace("Original transcript.", "Edited draft transcript.");
+    content.set("untitled:summary-draft", edited);
+    await act(async () => { await result.current.actions.regenerateSummary(session); });
+    expect(content.get("untitled:summary-draft")).toBe(edited);
+    expect(drafts.updateDraftContent).not.toHaveBeenCalled();
+    expect(raw.transcript).toBe("Original transcript.");
+    expect(result.current.model.error).toBe("Local model unavailable.");
   });
 
   it("does not open a completed transcript in a different bundle", async () => {
@@ -483,25 +480,21 @@ describe("transcription UI", () => {
     expect(drafts.openDraft).not.toHaveBeenCalled();
   });
 
-  it("rechecks the bundle after loading a filed note completes", async () => {
-    let resolveNote: ((value: unknown) => void) | undefined;
-    let announceNoteRead: (() => void) | undefined;
-    const noteReadStarted = new Promise<void>((resolve) => { announceNoteRead = resolve; });
-    apiForBundleMock.mockImplementation((_: string | null, url: string) => {
-      if (url.endsWith("/process")) return Promise.resolve({
-        session: { ...session, sourceBundleId: "bundle-a" },
-        result: { summary: "", transcript: "Recovered transcript." },
+  it("does not open a draft when the bundle changes while raw transcript loads", async () => {
+    let resolveSession: ((value: unknown) => void) | undefined;
+    let announceLoad: (() => void) | undefined;
+    const loadStarted = new Promise<void>((resolve) => { announceLoad = resolve; });
+    apiForBundleMock.mockImplementation((_bundleId: string | null, url: string) => {
+      if (/\/api\/transcriptions\/[^/]+$/.test(url)) return new Promise((resolve) => {
+        resolveSession = resolve;
+        announceLoad?.();
       });
-      if (url === "/api/note?id=notes%2Fmeeting.md") return new Promise((resolve) => {
-        resolveNote = resolve;
-        announceNoteRead?.();
-      });
-      throw new Error(`Unexpected bundle API request: ${url}`);
+      throw new Error("Unexpected bundle API request: " + url);
     });
     apiMock.mockImplementation((url: string) => {
       if (url === "/api/transcriptions/status") return { ...status, modelState: "ready", canTranscribe: true };
       if (url === "/api/transcriptions?pending=1") return [];
-      throw new Error(`Unexpected API request: ${url}`);
+      throw new Error("Unexpected API request: " + url);
     });
     const drafts = {
       createDraft: vi.fn(() => "untitled:new"),
@@ -513,18 +506,15 @@ describe("transcription UI", () => {
     const setMessage = vi.fn();
     const { result, rerender } = renderHook(
       ({ bundleId }: { bundleId: string }) => useTranscription({
-        drafts,
-        setMessage,
-        sourceNoteId: null,
-        sourceBundleId: bundleId,
+        drafts, setMessage, sourceNoteId: null, sourceBundleId: bundleId,
       }),
       { initialProps: { bundleId: "bundle-a" } },
     );
-    act(() => { result.current.actions.transcribe({ ...session, draftId: null, sourceBundleId: "bundle-a", state: "recorded" }); });
-    await noteReadStarted;
+    act(() => { result.current.actions.openTranscript(session); });
+    await loadStarted;
     rerender({ bundleId: "bundle-b" });
-    await act(async () => { resolveNote?.({ content: "# Existing filed transcript" }); });
-    await waitFor(() => expect(setMessage).toHaveBeenCalledWith("Transcription finished. Switch back to the source workspace to open its Markdown note."));
+    await act(async () => { resolveSession?.({ session, result: { summary: "Raw summary", transcript: "Raw transcript" } }); });
+    expect(setMessage).toHaveBeenCalledWith("Transcription finished. Switch back to the source workspace to open its Markdown note.");
     expect(drafts.createDraft).not.toHaveBeenCalled();
     expect(drafts.openDraft).not.toHaveBeenCalled();
   });
@@ -595,10 +585,10 @@ describe("transcription UI", () => {
       phase: "summarizing",
       activeSession: session,
       pending: [session],
-      progress: "Generating a summary with the selected local text model…",
+      progress: "Summarizing the editable draft with the selected local text model…",
     })} actions={dockActions} />);
     fireEvent.click(screen.getByRole("button", { name: "Cancel summary" }));
     expect(dockActions.cancel).toHaveBeenCalledWith(session);
-    expect(screen.getByText(/previous summary kept/i)).toBeInTheDocument();
+    expect(screen.getByText(/your draft and original transcript stay unchanged/i)).toBeInTheDocument();
   });
 });

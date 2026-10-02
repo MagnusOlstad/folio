@@ -47,6 +47,7 @@ type Options = {
 type SessionResponse = { session: TranscriptionSession }
 type SessionListResponse = TranscriptionSession[]
 type SummaryResponse = { result: { summary: string; transcript: string } }
+type SessionDraft = { draftId: string; bundleId: string | null }
 
 const SUPPORTED_AUDIO = /\.(aac|aiff|flac|m4a|mp3|wav)$/i
 const MAX_AUDIO_BYTES = 500 * 1024 * 1024
@@ -109,6 +110,7 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
   const busyRef = useRef(false)
   const deletingRef = useRef<string | null>(null)
   const deletedSessionIds = useRef(new Set<string>())
+  const sessionDrafts = useRef(new Map<string, SessionDraft>())
   const draftsRef = useRef(drafts)
   const recorder = useAudioRecorder({
     association: { sourceNoteId, sourceBundleId },
@@ -118,19 +120,10 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
   useLayoutEffect(() => { activeBundle.current = sourceBundleId }, [sourceBundleId])
   useLayoutEffect(() => { draftsRef.current = drafts }, [drafts])
 
-  function draftFiled(oldId: string, newId: string, bundleId: string) {
-    if (activeBundle.current === bundleId) {
-      setPending((sessions) => sessions.map((session) => session.draftId === oldId && session.sourceBundleId === bundleId
-        ? { ...session, draftId: newId }
-        : session))
-      setActiveSession((session) => session?.draftId === oldId && session.sourceBundleId === bundleId
-        ? { ...session, draftId: newId }
-        : session)
+  function draftFiled(oldId: string, _newId: string, bundleId: string) {
+    for (const [sessionId, draft] of sessionDrafts.current) {
+      if (draft.draftId === oldId && draft.bundleId === bundleId) sessionDrafts.current.delete(sessionId)
     }
-    void apiForBundle(bundleId, '/api/transcriptions/draft-remap', {
-      method: 'POST',
-      body: JSON.stringify({ oldId, newId, bundleId }),
-    }).catch(() => undefined)
   }
 
   async function refresh() {
@@ -227,41 +220,17 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
     } finally { busyRef.current = false }
   }
 
-  async function writeTranscriptNote(session: TranscriptionSession, result: TranscriptionProcessResponse['result']) {
+  function openTranscriptDraft(session: TranscriptionSession, result: TranscriptionProcessResponse['result']) {
     const bundleId = session.sourceBundleId ?? null
     if (activeBundle.current !== bundleId) {
       setMessage('Transcription finished. Switch back to the source workspace to open its Markdown note.')
-      await refresh()
-      return
+      return null
     }
-    const knownDraft = session.draftId
-    const existing = knownDraft ? drafts.getDraftDocument(knownDraft) : undefined
-    if (knownDraft && !existing && !knownDraft.startsWith('untitled:')) {
-      try {
-        await apiForBundle(bundleId, `/api/note?id=${encodeURIComponent(knownDraft)}`)
-        if (activeBundle.current !== bundleId) {
-          setMessage('Transcription finished. Switch back to the source workspace to open its Markdown note.')
-          await refresh()
-          return
-        }
-        drafts.openDraft(knownDraft)
-        setMessage('The saved Markdown transcript note is open.')
-        return
-      } catch (error) {
-        throw new Error(errorMessage(error, 'Could not open the saved transcript note.'))
-      }
-    }
-    const draftId = existing ? knownDraft! : drafts.createDraft(mergeTranscriptionDraft(session, result))
-    const content = existing ? (drafts.getDraftContent(draftId) ?? existing.content) : mergeTranscriptionDraft(session, result)
-    if (existing) drafts.updateDraftContent(draftId, content)
-    drafts.openDraft(draftId)
-    try {
-      await apiForBundle(bundleId, `/api/transcriptions/${encodeURIComponent(session.id)}/draft`, {
-        method: 'POST',
-        body: JSON.stringify({ draftId }),
-      })
-    } catch { /* the transcript remains safe in the workspace draft even if its session link cannot be stored */ }
-    setMessage('Editable Markdown transcript opened in a new draft.')
+    const draftId = draftsRef.current.createDraft(mergeTranscriptionDraft(session, result))
+    sessionDrafts.current.set(session.id, { draftId, bundleId })
+    draftsRef.current.openDraft(draftId)
+    setMessage('Transcript opened in a new editable draft.')
+    return draftId
   }
 
   async function transcribe(session: TranscriptionSession) {
@@ -274,7 +243,7 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
     setProgress('Transcribing audio with local Whisper…')
     try {
       const response = await apiForBundle<TranscriptionProcessResponse>(taskBundle, `/api/transcriptions/${encodeURIComponent(session.id)}/process`, { method: 'POST' })
-      await writeTranscriptNote({ ...response.session, sourceBundleId: taskBundle }, response.result)
+      openTranscriptDraft({ ...response.session, sourceBundleId: taskBundle }, response.result)
       await refresh()
       setPhase('idle')
       setProgress('')
@@ -294,12 +263,12 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
       try {
         const response = await apiForBundle<{ cancelled: boolean }>(session.sourceBundleId ?? null, `/api/transcriptions/${encodeURIComponent(session.id)}/summarize/cancel`, { method: 'POST' })
         setMessage(response.cancelled
-          ? 'Summary cancelled. The edited transcript is saved and the previous summary was kept.'
+          ? 'Summary cancelled. Your draft and original transcript were kept.'
           : 'Summary generation had already finished.')
       } catch (cancelError) {
         setError(errorMessage(cancelError, 'Could not cancel summary generation.'))
         setPhase('summarizing')
-        setProgress('Generating a summary with the selected local text model…')
+        setProgress('Summarizing the editable draft with the selected local text model…')
       }
       await refresh()
       return
@@ -317,7 +286,7 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
     try {
       const response = await apiForBundle<TranscriptionProcessResponse>(session.sourceBundleId ?? null, `/api/transcriptions/${encodeURIComponent(session.id)}`)
       if (!response.result) throw new Error('No transcript has been saved for this audio yet. Transcribe it first.')
-      await writeTranscriptNote(session, response.result)
+      openTranscriptDraft(session, response.result)
     } catch (openError) { setError(errorMessage(openError, 'Could not open the transcript note.')); setPhase('error') }
   }
 
@@ -330,6 +299,7 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
     try {
       await apiForBundle<{ deleted: boolean }>(session.sourceBundleId ?? null,
         `/api/transcriptions/${encodeURIComponent(session.id)}`, { method: 'DELETE' })
+      sessionDrafts.current.delete(session.id)
       deletedSessionIds.current.add(session.id)
       setPending((sessions) => sessions.filter((item) => item.id !== session.id))
       if (activeSession?.id === session.id) {
@@ -351,56 +321,57 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
 
   async function regenerateSummary(session: TranscriptionSession) {
     if (busyRef.current || deletingRef.current === session.id) return
-    const draftId = session.draftId
     const taskBundle = session.sourceBundleId ?? null
     if (activeBundle.current !== taskBundle) return
     busyRef.current = true
     setError('')
     setActiveSession(session)
     setPhase('summarizing')
-    setProgress('Generating a summary with the selected local text model…')
+    setProgress('Summarizing the editable draft with the selected local text model…')
     try {
-      let content = draftId ? draftsRef.current.getDraftContent(draftId) : undefined
-      let baseContent = draftId ? draftsRef.current.getDraftDocument(draftId)?.content : undefined
-      if (content === undefined && draftId && !draftId.startsWith('untitled:')) {
-        const note = await apiForBundle<{ content?: string }>(taskBundle, `/api/note?id=${encodeURIComponent(draftId)}`)
+      let draft = sessionDrafts.current.get(session.id)
+      if (draft && (draft.bundleId !== taskBundle || !draft.draftId.startsWith('untitled:')
+        || draftsRef.current.isDraftOpen?.(draft.draftId) === false)) {
+        sessionDrafts.current.delete(session.id)
+        draft = undefined
+      }
+      let current = draft ? (draftsRef.current.getDraftContent(draft.draftId)
+        ?? draftsRef.current.getDraftDocument(draft.draftId)?.content) : undefined
+      if (!draft || current === undefined) {
+        const stored = await apiForBundle<TranscriptionProcessResponse>(taskBundle, `/api/transcriptions/${encodeURIComponent(session.id)}`)
         if (activeBundle.current !== taskBundle) return
-        content = note.content
-        baseContent = note.content
+        if (!stored.result) throw new Error('No transcript has been saved for this audio yet. Transcribe it first.')
+        current = mergeTranscriptionDraft(session, stored.result)
+        const draftId = draftsRef.current.createDraft(current)
+        draft = { draftId, bundleId: taskBundle }
+        sessionDrafts.current.set(session.id, draft)
+        draftsRef.current.openDraft(draftId)
+      } else {
+        draftsRef.current.openDraft(draft.draftId)
       }
-      const stored = content === undefined
-        ? await apiForBundle<TranscriptionProcessResponse>(taskBundle, `/api/transcriptions/${encodeURIComponent(session.id)}`)
-        : null
-      const current = content ?? (stored?.result ? mergeTranscriptionDraft(session, stored.result) : '')
       const transcript = transcriptSection(current)
-      if (!transcript) throw new Error('The transcript section is empty. Add transcript text to the Markdown note before generating a summary.')
-      if (draftId && !draftId.startsWith('untitled:')) {
-        await apiForBundle(taskBundle, `/api/note?id=${encodeURIComponent(draftId)}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ content: current, baseContent: baseContent ?? current, refreshEmbeddings: false }),
-        })
-      }
+      if (!transcript) throw new Error('The transcript section is empty. Add transcript text to the draft before generating a summary.')
       const response = await apiForBundle<SummaryResponse>(taskBundle, `/api/transcriptions/${encodeURIComponent(session.id)}/summarize`, {
         method: 'POST',
         body: JSON.stringify({ transcript }),
       })
       if (activeBundle.current !== taskBundle) return
-      const latestContent = draftId ? draftsRef.current.getDraftContent(draftId) : undefined
-      const nextContent = replaceMarkdownSection(latestContent ?? current, 'Summary', response.result.summary)
-      if (draftId && !draftId.startsWith('untitled:')) {
-        await apiForBundle(taskBundle, `/api/note?id=${encodeURIComponent(draftId)}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ content: nextContent, baseContent: current, refreshEmbeddings: false }),
-        })
-        if (activeBundle.current !== taskBundle) return
+      const associated = sessionDrafts.current.get(session.id)
+      const draftIsCurrent = associated?.draftId === draft.draftId && associated.bundleId === taskBundle
+        && draft.draftId.startsWith('untitled:') && draftsRef.current.isDraftOpen?.(draft.draftId) !== false
+      const latestContent = draftIsCurrent
+        ? (draftsRef.current.getDraftContent(draft.draftId) ?? current)
+        : current
+      const finalContent = replaceMarkdownSection(latestContent, 'Summary', response.result.summary)
+      if (draftIsCurrent) {
+        draftsRef.current.updateDraftContent(draft.draftId, finalContent)
+        draftsRef.current.openDraft(draft.draftId)
+      } else {
+        const newDraftId = draftsRef.current.createDraft(finalContent)
+        sessionDrafts.current.set(session.id, { draftId: newDraftId, bundleId: taskBundle })
+        draftsRef.current.openDraft(newDraftId)
       }
-      const contentAfterSave = draftId ? draftsRef.current.getDraftContent(draftId) : undefined
-      const finalContent = replaceMarkdownSection(contentAfterSave ?? nextContent, 'Summary', response.result.summary)
-      if (draftId && contentAfterSave !== undefined && activeBundle.current === taskBundle) {
-        draftsRef.current.updateDraftContent(draftId, finalContent)
-        draftsRef.current.openDraft(draftId)
-      }
-      if (activeBundle.current === taskBundle) setMessage('Local summary regenerated from the edited transcript.')
+      if (activeBundle.current === taskBundle) setMessage('Local summary added to an editable draft.')
       await refresh()
       setPhase('idle')
       setProgress('')
@@ -408,7 +379,7 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
       const message = errorMessage(summaryError, 'Could not generate the local summary.')
       if (message.startsWith('Summary cancelled.')) {
         setError('')
-        setMessage(message)
+        setMessage('Summary cancelled. Your draft and original transcript were kept.')
         setPhase('idle')
       } else {
         setError(message)

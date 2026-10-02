@@ -161,7 +161,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
       </div>
 
       {model.progress && <p className="transcription-progress" role="status">{model.progress}</p>}
-      {(model.phase === 'summarizing' || model.phase === 'cancelling-summary') && <p className="transcription-empty">Cancel waits for the current local model request to finish; its result will be discarded and the previous summary kept.</p>}
+      {(model.phase === 'summarizing' || model.phase === 'cancelling-summary') && <p className="transcription-empty">Cancel waits for the current local model request; your draft and original transcript stay unchanged.</p>}
       {model.error && <p className="transcription-error" role="alert">{model.error}</p>}
 
       <div className="transcription-pending">
@@ -185,8 +185,8 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
               <div className="transcription-item-actions">
                 {session.state === 'ready' ? (
                   <>
-                    <button type="button" onClick={() => actions.openTranscript(session)} disabled={controlsBusy}>Open note</button>
-                    <button type="button" onClick={() => actions.regenerateSummary(session)} disabled={controlsBusy}>Regenerate summary</button>
+                    <button type="button" onClick={() => actions.openTranscript(session)} disabled={controlsBusy}>Open draft</button>
+                    <button type="button" onClick={() => actions.regenerateSummary(session)} disabled={controlsBusy}>Summarize draft</button>
                   </>
                 ) : (
                   <button type="button" onClick={() => actions.transcribe(session)} disabled={!canTranscribe || controlsBusy || processing}>

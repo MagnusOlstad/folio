@@ -336,20 +336,35 @@ test('filed transcript association follows the note ID within its source bundle'
   await service.close()
 })
 
-test('summary failure keeps edited transcript in local session storage', async (t) => {
+test('summary failure leaves the raw session result unchanged', async (t) => {
   const { runtime } = await fixture(t)
   runtime.mlxService = { generate: async () => { throw new Error('no local text model') } }
   const service = createTranscriptionService(runtime)
   const session = await runtime.transcriptionStorage.createSession({ source: 'file', fileName: 'meeting.wav' })
-  await runtime.transcriptionStorage.writeResult(session.id, { summary: 'Old summary', transcript: 'Old transcript' })
+  const raw = { summary: 'Original summary', transcript: 'Original transcript' }
+  await runtime.transcriptionStorage.writeResult(session.id, raw)
   await assert.rejects(service.summarize(session.id, 'Edited transcript with a corrected date.'), /Install and start a text generation model/)
-  const saved = await runtime.transcriptionStorage.readResult(session.id)
-  assert.equal(saved.transcript, 'Edited transcript with a corrected date.')
-  assert.match(saved.markdown, /Edited transcript with a corrected date\./)
+  assert.deepEqual(await runtime.transcriptionStorage.readResult(session.id), raw)
   await service.close()
 })
 
-test('cancelling summary generation retains the edited transcript and previous summary', async (t) => {
+test('summary generation returns a derived result without changing the raw session result', async (t) => {
+  const { runtime } = await fixture(t)
+  runtime.mlxService = { generate: async () => ({ text: 'Derived summary.' }) }
+  const service = createTranscriptionService(runtime)
+  const session = await runtime.transcriptionStorage.createSession({ fileName: 'meeting.wav' })
+  const raw = { summary: 'Original summary.', transcript: 'Original transcript.' }
+  await runtime.transcriptionStorage.writeResult(session.id, raw)
+
+  const derived = await service.summarize(session.id, 'Edited draft transcript.')
+
+  assert.equal(derived.summary, 'Derived summary.')
+  assert.equal(derived.transcript, 'Edited draft transcript.')
+  assert.deepEqual(await runtime.transcriptionStorage.readResult(session.id), raw)
+  await service.close()
+})
+
+test('cancelling summary generation retains the draft text and original session result', async (t) => {
   const { runtime } = await fixture(t)
   let announceStarted
   let finishGeneration
@@ -357,16 +372,15 @@ test('cancelling summary generation retains the edited transcript and previous s
   runtime.mlxService = { generate: () => new Promise((resolve) => { finishGeneration = resolve; announceStarted() }) }
   const service = createTranscriptionService(runtime)
   const session = await runtime.transcriptionStorage.createSession({ fileName: 'meeting.wav' })
-  await runtime.transcriptionStorage.writeResult(session.id, { summary: 'Previous summary.', transcript: 'Previous transcript.' })
+  const raw = { summary: 'Previous summary.', transcript: 'Previous transcript.' }
+  await runtime.transcriptionStorage.writeResult(session.id, raw)
   const summarizing = service.summarize(session.id, 'Edited transcript, preserved even if cancelled.')
   await started
   const cancelling = service.cancelSummary(session.id)
   finishGeneration({ text: 'This result must be discarded.' })
   await assert.rejects(summarizing, /Summary cancelled/)
   assert.equal(await cancelling, true)
-  const saved = await runtime.transcriptionStorage.readResult(session.id)
-  assert.equal(saved.summary, 'Previous summary.')
-  assert.equal(saved.transcript, 'Edited transcript, preserved even if cancelled.')
+  assert.deepEqual(await runtime.transcriptionStorage.readResult(session.id), raw)
   await service.close()
 })
 

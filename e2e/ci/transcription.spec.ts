@@ -6,7 +6,13 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   let filedNoteId = ''
   let sourceBundleId = ''
   const processedSessionIds = new Set<string>()
+  const rawResults = new Map<string, { summary: string; transcript: string }>()
   await page.addInitScript(() => localStorage.setItem('folio:model-setup-prompt-seen', '1'))
+  page.on('response', async (response) => {
+    if (new URL(response.url()).pathname !== '/api/notes' || response.request().method() !== 'POST') return
+    const payload = await response.json()
+    filedNoteId = payload.note?.id || ''
+  })
   await page.route('**/api/transcriptions/status', (route) => route.fulfill({ json: {
     model: 'mlx-community/whisper-large-v3-turbo', revision: 'test-revision',
     available: true, helperAvailable: true, modelState: installed ? 'ready' : 'missing',
@@ -25,22 +31,31 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   await page.route('**/api/transcriptions/*/process', async (route) => {
     const id = new URL(route.request().url()).pathname.split('/').at(-2)
     if (id) processedSessionIds.add(id)
+    const result = { summary: '', transcript: 'The project review is next Tuesday at noon.' }
+    if (id) rawResults.set(id, result)
     const sessionResponse = await request.get(`/api/transcriptions/${id}`)
     const { session } = await sessionResponse.json()
     sourceBundleId = session.sourceBundleId
-    await route.fulfill({ json: { session: { ...session, state: 'ready' }, result: {
-      summary: '', transcript: 'The project review is next Tuesday at noon.',
-    } } })
+    await route.fulfill({ json: { session: { ...session, state: 'ready' }, result } })
   })
   await page.route('**/api/transcriptions/*/summarize', async (route) => {
     summarizedTranscript = JSON.parse(route.request().postData() || '{}').transcript
-    const id = new URL(route.request().url()).pathname.split('/').at(-2)
-    const sessionResponse = await request.get(`/api/transcriptions/${id}`)
-    filedNoteId = (await sessionResponse.json()).session.draftId
     await route.fulfill({ json: { result: {
       summary: '- The project review is Wednesday at noon.',
       transcript: summarizedTranscript,
     } } })
+  })
+  await page.route('**/api/transcriptions/*', async (route) => {
+    const url = new URL(route.request().url())
+    if (route.request().method() !== 'GET' || url.pathname.endsWith('/status') || url.pathname.endsWith('/process')) {
+      await route.fallback()
+      return
+    }
+    const id = url.pathname.split('/').at(-1) || ''
+    const raw = rawResults.get(id)
+    if (!raw) { await route.fallback(); return }
+    const response = await route.fetch()
+    await route.fulfill({ response, json: { ...(await response.json()), result: raw } })
   })
 
   await page.goto('/')
@@ -57,7 +72,7 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   })
   const imported = page.locator('.transcription-item').filter({ hasText: 'project-review.wav' })
   await expect(imported).toBeVisible()
-  await imported.getByRole('button', { name: 'Transcribe' }).click()
+  await imported.getByRole('button', { name: 'Transcribe' }).first().click()
   const draftEditor = page.getByLabel('Write a new note')
   await expect(draftEditor).toBeVisible()
   await expect(draftEditor).toContainText('Source audio: project-review.wav')
@@ -67,31 +82,35 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   const confirmation = page.getByRole('dialog', { name: 'Filing confirmation' })
   await expect(confirmation).toBeVisible()
   await confirmation.getByRole('button', { name: 'Accept' }).click()
-  await expect.poll(async () => {
-    const sessions = await (await request.get('/api/transcriptions?pending=1')).json()
-    return sessions.find((session: { fileName: string }) => session.fileName === 'project-review.wav')?.draftId || ''
-  }).toMatch(/^(?!untitled:).+/)
+  await expect.poll(() => filedNoteId).toMatch(/^(?!untitled:).+/)
+  const filedNoteResponse = await request.get(`/api/note?id=${encodeURIComponent(filedNoteId)}`, {
+    headers: { 'x-folio-bundle': sourceBundleId },
+  })
+  const filedNoteBeforeSummary = (await filedNoteResponse.json()).content
 
   await page.getByRole('tab', { name: 'Transcription' }).click()
   const filed = page.locator('.transcription-item').filter({ hasText: 'project-review.wav' })
-  await expect(filed.getByRole('button', { name: 'Regenerate summary' })).toBeVisible()
-  await filed.getByRole('button', { name: 'Regenerate summary' }).click()
-  await expect.poll(() => summarizedTranscript).toBe('Corrected: the project review is Wednesday at noon.')
-  await expect.poll(async () => {
-    if (!filedNoteId) return ''
-    const response = await request.get(`/api/note?id=${encodeURIComponent(filedNoteId)}`, {
-      headers: { 'x-folio-bundle': sourceBundleId },
-    })
-    if (!response.ok()) return ''
-    return (await response.json()).content
-  }).toContain('- The project review is Wednesday at noon.')
-  await expect.poll(async () => {
-    const response = await request.get(`/api/note?id=${encodeURIComponent(filedNoteId)}`, {
-      headers: { 'x-folio-bundle': sourceBundleId },
-    })
-    if (!response.ok()) return ''
-    return (await response.json()).content
-  }).toContain('Corrected: the project review is Wednesday at noon.')
+  await filed.getByRole('button', { name: 'Open draft' }).click()
+  const summaryDraft = page.getByLabel('Write a new note')
+  await expect(summaryDraft).toContainText('The project review is next Tuesday at noon.')
+  await summaryDraft.fill('# project-review transcript\n\n## Summary\n\nGenerate a summary from this transcript.\n\n## Transcript\n\nEdited only in the new draft.\n')
+  await page.getByRole('tab', { name: 'Transcription' }).click()
+  await filed.getByRole('button', { name: 'Summarize draft' }).click()
+  await expect.poll(() => summarizedTranscript).toBe('Edited only in the new draft.')
+  await expect(summaryDraft).toContainText('The project review is Wednesday at noon.')
+  await expect(summaryDraft).toContainText('Edited only in the new draft.')
+  const filedNoteAfterSummary = await request.get(`/api/note?id=${encodeURIComponent(filedNoteId)}`, {
+    headers: { 'x-folio-bundle': sourceBundleId },
+  })
+  expect((await filedNoteAfterSummary.json()).content).toBe(filedNoteBeforeSummary)
+  const rawSessionId = Array.from(processedSessionIds)[0]
+  expect(rawSessionId).toBeDefined()
+  if (!rawSessionId) throw new Error('The transcription session was not recorded.')
+  const rawSession = await page.evaluate(async (id) => {
+    const response = await fetch(`/api/transcriptions/${id}`)
+    return await response.json() as { result: { transcript: string } }
+  }, rawSessionId)
+  expect(rawSession.result.transcript).toBe('The project review is next Tuesday at noon.')
 
   await filed.getByRole('button', { name: 'Delete' }).click()
   await expect(filed.getByText(/Any opened or saved Markdown note will be kept/)).toBeVisible()
@@ -107,5 +126,5 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
       headers: { 'x-folio-bundle': sourceBundleId },
     })
     return response.ok() ? (await response.json()).content : ''
-  }).toContain('- The project review is Wednesday at noon.')
+  }).toBe(filedNoteBeforeSummary)
 })
