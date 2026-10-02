@@ -172,7 +172,7 @@ button.update-badge {
 .workspace-right-pane {
   position: relative;
   display: grid;
-  grid-template-rows: var(--workspace-topbar-height) 38px minmax(0, 1fr) auto;
+  grid-template-rows: var(--workspace-topbar-height) 39px minmax(0, 1fr) auto;
   border-left: 1px solid rgba(var(--line-rgb), 0.55);
   background: var(--surface-deep);
 }
@@ -193,27 +193,8 @@ button.update-badge {
   overflow: auto;
 }
 
-.right-pane-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--line);
-}
-
-.right-pane-tabs button {
-  flex: 1;
-  border: 0;
-  border-radius: 4px;
-  padding: 5px 7px;
-  color: var(--muted);
-  background: transparent;
-  font: 11px/1.2 ui-sans-serif, system-ui, sans-serif;
-  cursor: pointer;
-}
-
-.right-pane-tabs button[aria-selected="true"] {
-  color: var(--text);
-  background: var(--surface);
+.sidebar-tabs.right-pane-tabs {
+  grid-template-columns: repeat(2, 1fr);
 }
 
 .right-pane-tabs button:focus-visible,
@@ -232,24 +213,48 @@ button.update-badge {
   font: 12px/1.45 ui-sans-serif, system-ui, sans-serif;
 }
 
-.transcription-dropzone {
+.transcription-input-card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 7px;
-  padding: 18px 12px;
+  gap: 10px;
+  padding: 14px 12px;
   border: 1px dashed var(--line);
   border-radius: 7px;
   text-align: center;
   color: var(--muted);
+  background: var(--paper);
 }
 
-.transcription-dropzone.is-dragging {
+.transcription-input-card.is-dragging {
   border-color: var(--acid);
   background: rgba(var(--acid-rgb), 0.08);
 }
 
-.transcription-dropzone strong,
+.transcription-input-card.is-recording { border-color: rgba(var(--acid-rgb), 0.75); }
+
+.transcription-input-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink);
+}
+
+.transcription-input-help {
+  margin: 0;
+  color: var(--muted);
+}
+
+.transcription-input-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.transcription-input-actions button { min-height: 30px; }
+
 .transcription-item-heading strong {
   color: var(--text);
 }

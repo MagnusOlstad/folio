@@ -5,9 +5,15 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   let summarizedTranscript = ''
   let filedNoteId = ''
   let sourceBundleId = ''
+  let importBody: Record<string, unknown> | null = null
   const processedSessionIds = new Set<string>()
   const rawResults = new Map<string, { summary: string; transcript: string }>()
   await page.addInitScript(() => localStorage.setItem('folio:model-setup-prompt-seen', '1'))
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/transcriptions' && request.method() === 'POST') {
+      importBody = request.postDataJSON() as Record<string, unknown>
+    }
+  })
   page.on('response', async (response) => {
     if (new URL(response.url()).pathname !== '/api/notes' || response.request().method() !== 'POST') return
     const payload = await response.json()
@@ -60,6 +66,7 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
 
   await page.goto('/')
   await expect(page.getByRole('button', { name: 'Todo List', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Todo List', exact: true }).click()
   await page.getByRole('tab', { name: 'Transcription' }).click()
   await expect(page.getByText(/Download mlx-community\/whisper-large-v3-turbo/)).toBeVisible()
   await page.getByRole('button', { name: 'Download model' }).click()
@@ -72,11 +79,25 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   })
   const imported = page.locator('.transcription-item').filter({ hasText: 'project-review.wav' })
   await expect(imported).toBeVisible()
+  await expect.poll(() => importBody).not.toBeNull()
+  expect(importBody).not.toHaveProperty('sourceNoteId')
+  const tabsBeforeTranscribe = await page.locator('.editor-tab').count()
   await imported.getByRole('button', { name: 'Transcribe' }).first().click()
   const draftEditor = page.getByLabel('Write a new note')
   await expect(draftEditor).toBeVisible()
   await expect(draftEditor).toContainText('Source audio: project-review.wav')
-  const transcriptNote = '# project-review transcript\n\n- Source audio: project-review.wav\n- Imported: today\n- Duration: Unknown\n- Source note: Not linked to a source note\n\n## Summary\n\nGenerate a summary from this transcript.\n\n## Transcript\n\nCorrected: the project review is Wednesday at noon.\n'
+  await expect(page.locator('.editor-tab')).toHaveCount(tabsBeforeTranscribe + 1)
+  const countLocalDraftsContaining = (text: string) => page.evaluate(({ bundleId, needle }) => {
+    const stored = localStorage.getItem(`folio:drafts:v2:${bundleId}`)
+    if (!stored) return 0
+    const parsed: unknown = JSON.parse(stored)
+    if (!Array.isArray(parsed)) return 0
+    return parsed.filter((entry): entry is { id: string; content: string } => Boolean(entry)
+      && typeof entry === 'object' && typeof entry.id === 'string' && typeof entry.content === 'string')
+      .filter((entry) => entry.id.startsWith('untitled:') && entry.content.includes(needle)).length
+  }, { bundleId: sourceBundleId, needle: text })
+  await expect.poll(() => countLocalDraftsContaining('The project review is next Tuesday at noon.')).toBe(1)
+  const transcriptNote = '# project-review transcript\n\n- Source audio: project-review.wav\n- Imported: today\n- Duration: Unknown\n\n## Summary\n\nGenerate a summary from this transcript.\n\n## Transcript\n\nCorrected: the project review is Wednesday at noon.\n'
   await draftEditor.fill(transcriptNote)
   await page.getByRole('button', { name: 'File note' }).click()
   const confirmation = page.getByRole('dialog', { name: 'Filing confirmation' })
@@ -90,9 +111,12 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
 
   await page.getByRole('tab', { name: 'Transcription' }).click()
   const filed = page.locator('.transcription-item').filter({ hasText: 'project-review.wav' })
+  const tabsBeforeOpen = await page.locator('.editor-tab').count()
   await filed.getByRole('button', { name: 'Open draft' }).click()
+  await expect(page.locator('.editor-tab')).toHaveCount(tabsBeforeOpen + 1)
   const summaryDraft = page.getByLabel('Write a new note')
   await expect(summaryDraft).toContainText('The project review is next Tuesday at noon.')
+  await expect.poll(() => countLocalDraftsContaining('The project review is next Tuesday at noon.')).toBe(1)
   await summaryDraft.fill('# project-review transcript\n\n## Summary\n\nGenerate a summary from this transcript.\n\n## Transcript\n\nEdited only in the new draft.\n')
   await page.getByRole('tab', { name: 'Transcription' }).click()
   await filed.getByRole('button', { name: 'Summarize draft' }).click()

@@ -24,6 +24,7 @@ test('records microphone audio, converts it to WAV, and saves it through local i
 
   const sessionState: { value: Record<string, unknown> | null } = { value: null }
   const uploadState: { value: { contentType: string | undefined; bytes: Buffer } | null } = { value: null }
+  let creationBody: Record<string, unknown> | null = null
   await page.route('**/api/transcriptions/status', (route) => route.fulfill({ json: {
     model: 'mlx-community/whisper-large-v3-turbo', revision: 'test-revision',
     available: true, helperAvailable: true, modelState: 'ready', downloadedBytes: 1_610_000_000,
@@ -32,10 +33,11 @@ test('records microphone audio, converts it to WAV, and saves it through local i
   await page.route('**/api/transcriptions?pending=1', (route) => route.fulfill({ json: sessionState.value ? [sessionState.value] : [] }))
   await page.route('**/api/transcriptions', async (route) => {
     const body = route.request().postDataJSON() as Record<string, unknown>
+    creationBody = body
     sessionState.value = {
       id: '33333333-3333-4333-8333-333333333333', state: 'recorded', draftId: null,
       durationMs: body.durationMs, error: null, createdAt: new Date().toISOString(),
-      fileName: body.fileName, source: 'file', sourceNoteId: body.sourceNoteId, sourceBundleId: body.sourceBundleId,
+      fileName: body.fileName, source: 'file', sourceBundleId: body.sourceBundleId,
     }
     await route.fulfill({ json: { session: sessionState.value } })
   })
@@ -45,6 +47,7 @@ test('records microphone audio, converts it to WAV, and saves it through local i
   })
 
   await page.goto(baseURL!)
+  await page.getByRole('button', { name: 'Todo List', exact: true }).click()
   await page.getByRole('tab', { name: 'Transcription' }).click()
   await page.getByRole('button', { name: 'Start recording' }).click()
   await expect(page.getByRole('button', { name: 'Stop recording' })).toBeVisible()
@@ -57,4 +60,5 @@ test('records microphone audio, converts it to WAV, and saves it through local i
   expect(upload.bytes.subarray(0, 4).toString('ascii')).toBe('RIFF')
   expect(upload.bytes.subarray(8, 12).toString('ascii')).toBe('WAVE')
   expect(sessionState.value?.fileName).toMatch(/^Recording .*\.wav$/)
+  expect(creationBody).not.toHaveProperty('sourceNoteId')
 })

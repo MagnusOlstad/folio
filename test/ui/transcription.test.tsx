@@ -76,10 +76,13 @@ describe("transcription UI", () => {
       summary: "A short summary.",
       transcript: "Hello from the transcript.",
     })).toContain("- Source audio: meeting.wav\n- Imported:");
-    expect(mergeTranscriptionDraft(session, {
+    expect(mergeTranscriptionDraft({ ...session, sourceNoteId: "notes/open.md" }, {
       summary: "A short summary.",
       transcript: "Hello from the transcript.",
     })).toContain("## Transcript\n\nHello from the transcript.");
+    expect(mergeTranscriptionDraft({ ...session, sourceNoteId: "notes/open.md" }, {
+      summary: "A short summary.", transcript: "Hello from the transcript.",
+    })).not.toContain("Source note:");
   });
 
   it("supports choosing and dropping local audio and explains missing model setup", () => {
@@ -90,10 +93,13 @@ describe("transcription UI", () => {
     expect(screen.getByText(/mlx-community\/whisper-large-v3-turbo/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Download model" })).toBeEnabled();
     const file = new File(["local audio"], "meeting.wav", { type: "audio/wav" });
-    fireEvent.drop(container.querySelector(".transcription-dropzone")!, { dataTransfer: { files: { length: 1, item: () => file } } });
+    fireEvent.drop(container.querySelector(".transcription-input-card")!, { dataTransfer: { files: { length: 1, item: () => file } } });
     expect(dockActions.importFile).toHaveBeenCalledWith(file);
     expect(screen.getByText("meeting.wav")).toBeInTheDocument();
     expect(screen.getByText(/Duration unavailable|1:01/)).toBeInTheDocument();
+    expect(screen.getByText("Record, choose, or drop an audio file. Audio stays on this device.")).toBeInTheDocument();
+    expect(container.querySelectorAll(".transcription-input-card")).toHaveLength(1);
+    expect(container.querySelector(".transcription-recorder")).toBeNull();
   });
 
   it("confirms deletion inline and keeps the opened Markdown note", async () => {
@@ -137,7 +143,7 @@ describe("transcription UI", () => {
       openDraft: vi.fn(),
     };
     const { result } = renderHook(() => useTranscription({
-      drafts, setMessage, sourceNoteId: null, sourceBundleId: "bundle-a",
+      drafts, setMessage, sourceBundleId: "bundle-a",
     }));
     await waitFor(() => expect(resolveSessions).toBeDefined());
     await act(async () => { await result.current.actions.deleteSession(session); });
@@ -163,7 +169,7 @@ describe("transcription UI", () => {
       openDraft: vi.fn(),
     };
     const { result } = renderHook(() => useTranscription({
-      drafts, setMessage: vi.fn(), sourceNoteId: null, sourceBundleId: "bundle-a",
+      drafts, setMessage: vi.fn(), sourceBundleId: "bundle-a",
     }));
     await waitFor(() => expect(result.current.model.pending).toEqual([session]));
     await act(async () => { await result.current.actions.deleteSession(session); });
@@ -174,7 +180,7 @@ describe("transcription UI", () => {
     expect(apiForBundleMock).toHaveBeenCalledTimes(2);
   });
 
-  it("records to WAV, retains failed saves for retry, and keeps the starting note association", async () => {
+  it("records to WAV, retains failed saves for retry, and keeps the starting workspace association", async () => {
     const stoppedTracks = vi.fn();
     const stream = { getTracks: () => [{ stop: stoppedTracks }] };
     const getUserMedia = vi.fn(async () => stream);
@@ -207,21 +213,21 @@ describe("transcription UI", () => {
     vi.stubGlobal("AudioContext", MockAudioContext);
     const importFile = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     const options = {
-      association: { sourceNoteId: "notes/source.md", sourceBundleId: "bundle-a" },
+      association: { sourceBundleId: "bundle-a" },
       onImport: importFile,
     };
     const { result, rerender, unmount } = renderHook((props: typeof options) => useAudioRecorder(props), { initialProps: options });
     await act(async () => { await Promise.all([result.current.start(), result.current.start()]); });
     expect(getUserMedia).toHaveBeenCalledTimes(1);
     expect(result.current.phase).toBe("recording");
-    rerender({ ...options, association: { sourceNoteId: "notes/other.md", sourceBundleId: "bundle-b" } });
+    rerender({ ...options, association: { sourceBundleId: "bundle-b" } });
     await act(async () => { result.current.stop(); });
     await waitFor(() => expect(importFile).toHaveBeenCalledTimes(1));
     const firstFile = importFile.mock.calls[0]?.[0] as File;
     expect(firstFile.name).toMatch(/\.wav$/);
     expect(firstFile.type).toBe("audio/wav");
     expect(new TextDecoder().decode(await firstFile.slice(0, 4).arrayBuffer())).toBe("RIFF");
-    expect(importFile.mock.calls[0]?.[1]).toEqual({ sourceNoteId: "notes/source.md", sourceBundleId: "bundle-a" });
+    expect(importFile.mock.calls[0]?.[1]).toEqual({ sourceBundleId: "bundle-a" });
     expect(result.current.phase).toBe("ready");
     await act(async () => { await result.current.retry(); });
     expect(importFile).toHaveBeenCalledTimes(2);
@@ -235,6 +241,26 @@ describe("transcription UI", () => {
     vi.unstubAllGlobals();
   });
 
+  it("uploads audio without associating it with the open note", async () => {
+    apiForBundleMock.mockResolvedValueOnce({ session }).mockResolvedValueOnce({ saved: true });
+    const drafts = {
+      createDraft: vi.fn(() => "untitled:new"),
+      getDraftContent: vi.fn(() => undefined),
+      getDraftDocument: vi.fn(() => undefined),
+      updateDraftContent: vi.fn(),
+      openDraft: vi.fn(),
+    };
+    const { result } = renderHook(() => useTranscription({
+      drafts, setMessage: vi.fn(), sourceBundleId: "bundle-a",
+    }));
+    const file = new File(["local audio"], "meeting.wav", { type: "audio/wav" });
+    await act(async () => { await result.current.actions.importFile(file); });
+    const createCall = apiForBundleMock.mock.calls[0];
+    expect(createCall?.[0]).toBe("bundle-a");
+    expect(JSON.parse(createCall?.[2]?.body as string)).toEqual({ fileName: "meeting.wav", durationMs: null, sourceBundleId: "bundle-a" });
+    expect(JSON.parse(createCall?.[2]?.body as string)).not.toHaveProperty("sourceNoteId");
+  });
+
   it("stops tracks when the dock navigates away during a pending permission request", async () => {
     let grantAccess: ((stream: MediaStream) => void) | undefined;
     const stoppedTrack = vi.fn();
@@ -243,7 +269,7 @@ describe("transcription UI", () => {
     Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia } });
     vi.stubGlobal("MediaRecorder", class {});
     const { result, unmount } = renderHook(() => useAudioRecorder({
-      association: { sourceNoteId: null, sourceBundleId: null },
+      association: { sourceBundleId: null },
       onImport: vi.fn().mockResolvedValue(true),
     }));
     let starting!: Promise<void>;
@@ -299,7 +325,7 @@ describe("transcription UI", () => {
     vi.stubGlobal("AudioContext", MockAudioContext);
     const onImport = vi.fn().mockResolvedValue(true);
     const { result, unmount } = renderHook(() => useAudioRecorder({
-      association: { sourceNoteId: null, sourceBundleId: null },
+      association: { sourceBundleId: null },
       onImport,
     }));
     await act(async () => { await result.current.start(); });
@@ -345,7 +371,7 @@ describe("transcription UI", () => {
       openDraft: vi.fn(),
     };
     const { result } = renderHook(() => useTranscription({
-      drafts, setMessage: vi.fn(), sourceNoteId: null, sourceBundleId: "bundle-a",
+      drafts, setMessage: vi.fn(), sourceBundleId: "bundle-a",
     }));
 
     await act(async () => { await result.current.actions.openTranscript(session); });
@@ -355,7 +381,7 @@ describe("transcription UI", () => {
 
     expect(createdIds).toEqual(["untitled:draft-1", "untitled:draft-2"]);
     expect(contentById.get("untitled:draft-2")).toContain("Original recording transcript.");
-    expect(drafts.openDraft).toHaveBeenLastCalledWith("untitled:draft-2");
+    expect(drafts.openDraft).not.toHaveBeenCalled();
     expect(apiForBundleMock.mock.calls.some(([, , options]) => options?.method === "POST")).toBe(false);
   });
 
@@ -393,7 +419,7 @@ describe("transcription UI", () => {
       openDraft: vi.fn((id: string) => { openIds.add(id); }),
     };
     const { result } = renderHook(() => useTranscription({
-      drafts, setMessage: vi.fn(), sourceNoteId: null, sourceBundleId: "bundle-a",
+      drafts, setMessage: vi.fn(), sourceBundleId: "bundle-a",
     }));
 
     await act(async () => { await result.current.actions.openTranscript(session); });
@@ -407,6 +433,9 @@ describe("transcription UI", () => {
 
     expect(draftsById.get(draftId)).toBe(initialDraft);
     expect([...draftsById.entries()].some(([id, content]) => id !== draftId && content.includes("Derived summary."))).toBe(true);
+    expect(draftNumber).toBe(2);
+    expect(drafts.openDraft).toHaveBeenCalledTimes(1);
+    expect(drafts.openDraft).toHaveBeenCalledWith(draftId);
     expect(apiForBundleMock.mock.calls.some(([, , options]) => options?.method === "PATCH")).toBe(false);
   });
 
@@ -427,7 +456,7 @@ describe("transcription UI", () => {
       openDraft: vi.fn(),
     };
     const { result } = renderHook(() => useTranscription({
-      drafts, setMessage: vi.fn(), sourceNoteId: null, sourceBundleId: "bundle-a",
+      drafts, setMessage: vi.fn(), sourceBundleId: "bundle-a",
     }));
     await act(async () => { await result.current.actions.openTranscript(session); });
     const edited = (content.get("untitled:summary-draft") || "").replace("Original transcript.", "Edited draft transcript.");
@@ -464,7 +493,6 @@ describe("transcription UI", () => {
       ({ bundleId }: { bundleId: string }) => useTranscription({
         drafts,
         setMessage,
-        sourceNoteId: null,
         sourceBundleId: bundleId,
       }),
       { initialProps: { bundleId: "bundle-a" } },
@@ -506,7 +534,7 @@ describe("transcription UI", () => {
     const setMessage = vi.fn();
     const { result, rerender } = renderHook(
       ({ bundleId }: { bundleId: string }) => useTranscription({
-        drafts, setMessage, sourceNoteId: null, sourceBundleId: bundleId,
+        drafts, setMessage, sourceBundleId: bundleId,
       }),
       { initialProps: { bundleId: "bundle-a" } },
     );
@@ -549,7 +577,6 @@ describe("transcription UI", () => {
       ({ bundleId }: { bundleId: string }) => useTranscription({
         drafts,
         setMessage: vi.fn(),
-        sourceNoteId: null,
         sourceBundleId: bundleId,
       }),
       { initialProps: { bundleId: "bundle-a" } },

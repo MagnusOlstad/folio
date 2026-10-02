@@ -2,20 +2,17 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 10px;
-  border: 1px solid rgba(var(--line-rgb), 0.75);
-  border-radius: 6px;
-  background: var(--paper);
-}
-
-.transcription-recorder.is-recording {
-  border-color: rgba(var(--acid-rgb), 0.75);
+  width: 100%;
+  padding-top: 10px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.75);
+  text-align: left;
 }
 
 .transcription-recorder-heading,
 .transcription-recorder-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
 }
@@ -79,7 +76,7 @@
 }
 
 .transcription-recorder-hint {
-  flex: 1;
+  flex: 1 1 120px;
 }
 
 .transcription-recording-activity {

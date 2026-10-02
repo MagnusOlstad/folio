@@ -40,7 +40,6 @@ export type TranscriptionDockActions = {
 type Options = {
   drafts: TranscriptionDraftAdapter
   setMessage: (message: string) => void
-  sourceNoteId: string | null
   sourceBundleId: string | null
 }
 
@@ -98,7 +97,7 @@ async function audioDuration(file: File): Promise<number | null> {
   } catch { URL.revokeObjectURL(url); return null }
 }
 
-export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundleId }: Options) {
+export function useTranscription({ drafts, setMessage, sourceBundleId }: Options) {
   const [phase, setPhase] = useState<TranscriptionPhase>('idle')
   const [activeSession, setActiveSession] = useState<TranscriptionSession | null>(null)
   const [pending, setPending] = useState<TranscriptionSession[]>([])
@@ -113,7 +112,7 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
   const sessionDrafts = useRef(new Map<string, SessionDraft>())
   const draftsRef = useRef(drafts)
   const recorder = useAudioRecorder({
-    association: { sourceNoteId, sourceBundleId },
+    association: { sourceBundleId },
     onImport: importFile,
   })
 
@@ -157,7 +156,6 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
     if (busyRef.current) return false
     busyRef.current = true
     setError('')
-    const importNoteId = association ? association.sourceNoteId : sourceNoteId
     const importBundle = association ? association.sourceBundleId : sourceBundleId
     if (!SUPPORTED_AUDIO.test(file.name)) {
       setError('Choose an AAC, AIFF, FLAC, M4A, MP3, or WAV audio file.')
@@ -177,7 +175,7 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
       const durationMs = await audioDuration(file)
       const created = await apiForBundle<SessionResponse>(importBundle, '/api/transcriptions', {
         method: 'POST',
-        body: JSON.stringify({ fileName: file.name, durationMs, sourceNoteId: importNoteId, sourceBundleId: importBundle }),
+        body: JSON.stringify({ fileName: file.name, durationMs, sourceBundleId: importBundle }),
       })
       await apiForBundle(importBundle, `/api/transcriptions/${encodeURIComponent(created.session.id)}/audio`, {
         method: 'PUT',
@@ -228,7 +226,6 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
     }
     const draftId = draftsRef.current.createDraft(mergeTranscriptionDraft(session, result))
     sessionDrafts.current.set(session.id, { draftId, bundleId })
-    draftsRef.current.openDraft(draftId)
     setMessage('Transcript opened in a new editable draft.')
     return draftId
   }
@@ -345,7 +342,6 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
         const draftId = draftsRef.current.createDraft(current)
         draft = { draftId, bundleId: taskBundle }
         sessionDrafts.current.set(session.id, draft)
-        draftsRef.current.openDraft(draftId)
       } else {
         draftsRef.current.openDraft(draft.draftId)
       }
@@ -369,7 +365,6 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
       } else {
         const newDraftId = draftsRef.current.createDraft(finalContent)
         sessionDrafts.current.set(session.id, { draftId: newDraftId, bundleId: taskBundle })
-        draftsRef.current.openDraft(newDraftId)
       }
       if (activeBundle.current === taskBundle) setMessage('Local summary added to an editable draft.')
       await refresh()

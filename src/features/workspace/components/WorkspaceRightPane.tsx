@@ -29,9 +29,9 @@ export function WorkspaceRightPane({ onHide, historyContent, transcription, ...p
           </svg>
         </button>
       </header>
-      <div className="right-pane-tabs" role="tablist" aria-label="Workspace tools">
-        <button type="button" role="tab" aria-selected={activeTab === "history"} onClick={() => setActiveTab("history")}>History</button>
-        <button type="button" role="tab" aria-selected={activeTab === "transcription"} onClick={() => setActiveTab("transcription")}>Transcription</button>
+      <div className="sidebar-tabs right-pane-tabs" role="tablist" aria-label="Workspace tools">
+        <button type="button" role="tab" className={activeTab === "history" ? "active" : ""} aria-selected={activeTab === "history"} onClick={() => setActiveTab("history")}>History</button>
+        <button type="button" role="tab" className={activeTab === "transcription" ? "active" : ""} aria-selected={activeTab === "transcription"} onClick={() => setActiveTab("transcription")}>Transcription</button>
       </div>
       <div className="right-pane-content" role="tabpanel" aria-label={activeTab === "history" ? "History" : "Transcription"}>
         {activeTab === "history" ? historyContent : <TranscriptionDock {...transcription} />}

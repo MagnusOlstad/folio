@@ -42,6 +42,7 @@ export type TranscriptionStatus = {
 }
 
 export type TranscriptionDraftAdapter = {
+  /** Creates and activates a fresh untitled draft. */
   createDraft: (content?: string) => string
   getDraftContent: (id: string) => string | undefined
   getDraftDocument: (id: string) => ViewerDocument | undefined
@@ -52,7 +53,6 @@ export type TranscriptionDraftAdapter = {
 
 export function mergeTranscriptionDraft(session: TranscriptionSession, result: TranscriptionResult) {
   const name = String(session.fileName || 'Audio recording').replace(/[\r\n]/g, ' ')
-  const source = session.sourceNoteId ? `[[${session.sourceNoteId.replace(/[\r\n\]]/g, '')}]]` : 'Not linked to a source note'
   const totalSeconds = Math.floor((session.durationMs ?? 0) / 1000)
   const duration = `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')}`
   const sections = [
@@ -61,7 +61,6 @@ export function mergeTranscriptionDraft(session: TranscriptionSession, result: T
     `- Source audio: ${name}`,
     `- Imported: ${session.createdAt ? new Date(session.createdAt).toLocaleString() : 'Unknown'}`,
     `- Duration: ${session.durationMs === null ? 'Unknown' : duration}`,
-    `- Source note: ${source}`,
     '',
     '## Summary',
     '',

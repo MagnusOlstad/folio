@@ -79,18 +79,25 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
   return (
     <section className="transcription-dock" aria-label="Local transcription">
       <div
-        className={`transcription-dropzone${dragging ? ' is-dragging' : ''}`}
+        className={`transcription-input-card${dragging ? ' is-dragging' : ''}${recorder.phase === 'recording' ? ' is-recording' : ''}`}
         onDragEnter={(event) => { event.preventDefault(); setDragging(true) }}
         onDragOver={(event) => event.preventDefault()}
         onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false) }}
         onDrop={onDrop}
       >
-        <span className="transcription-audio-icon" aria-hidden="true">♫</span>
-        <strong>Transcribe an audio file</strong>
-        <span>Drop it here or choose a file. Audio stays on this device.</span>
-        <button type="button" className="transcription-primary" onClick={() => inputRef.current?.click()} disabled={controlsBusy}>
-          Choose audio
-        </button>
+        <div className="transcription-input-heading">
+          <span className="transcription-audio-icon" aria-hidden="true">♫</span>
+          <strong>Add audio</strong>
+        </div>
+        <p className="transcription-input-help">Record, choose, or drop an audio file. Audio stays on this device.</p>
+        <div className="transcription-input-actions">
+          {recorder.phase === 'idle' && <button type="button" className="transcription-record-button" onClick={() => void actions.startRecording()} disabled={controlsBusy}>
+            <span aria-hidden="true">●</span> Start recording
+          </button>}
+          <button type="button" className="transcription-primary" onClick={() => inputRef.current?.click()} disabled={controlsBusy}>
+            Choose audio
+          </button>
+        </div>
         <input
           ref={inputRef}
           type="file"
@@ -103,40 +110,34 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
             if (file && !controlsBusy) actions.importFile(file)
           }}
         />
-      </div>
-
-      <div className={`transcription-recorder${recorder.phase === 'recording' ? ' is-recording' : ''}`}>
-        <div className="transcription-recorder-heading">
-          <span className="transcription-recorder-mark" aria-hidden="true">●</span>
-          <div>
-            <strong>Record from microphone</strong>
-            <small>Saved locally as WAV, ready for transcription</small>
-          </div>
+        {(recorder.phase !== 'idle' || recorder.error) && <div className="transcription-recorder">
+          <div className="transcription-recorder-heading">
+            <span className="transcription-recorder-mark" aria-hidden="true">●</span>
+            <div>
+              <strong>{recorder.phase === 'recording' ? 'Recording from microphone' : 'Microphone recording'}</strong>
+              <small>Saved locally as WAV, ready for transcription</small>
+            </div>
           {recorder.phase === 'recording' && <span className="transcription-recorder-timer" role="timer">{recorder.duration}</span>}
           {recorder.phase === 'processing' && <span className="transcription-recorder-timer" role="status">Preparing…</span>}
-        </div>
-        <div className="transcription-recorder-actions">
-          {recorder.phase === 'idle' && (
-            <button type="button" className="transcription-record-button" onClick={() => void actions.startRecording()} disabled={busy}>
-              <span aria-hidden="true">●</span> Start recording
-            </button>
-          )}
-          {recorder.phase === 'requesting' && <span className="transcription-recorder-hint" role="status">Waiting for microphone permission…</span>}
-          {recorder.phase === 'recording' && <>
-            <span className="transcription-recording-activity" aria-hidden="true"><i /><i /><i /><i /><i /></span>
-            <button type="button" className="transcription-record-button is-stop" onClick={actions.stopRecording}>Stop recording</button>
-            <button type="button" className="transcription-recorder-quiet" onClick={actions.discardRecording}>Discard</button>
-          </>}
-          {recorder.phase === 'processing' && <span className="transcription-recorder-hint" role="status">Converting the recording on this device…</span>}
-          {recorder.phase === 'ready' && <>
-            <span className="transcription-recorder-hint">Recording ready · {recorder.duration}</span>
-            <button type="button" className="transcription-record-button" onClick={() => void actions.retryRecording()} disabled={recorder.saving || busy}>
-              {recorder.saving ? 'Saving…' : 'Retry recording'}
-            </button>
-            <button type="button" className="transcription-recorder-quiet" onClick={actions.discardRecording} disabled={recorder.saving}>Discard</button>
-          </>}
-        </div>
-        {recorder.error && <p className="transcription-recorder-error" role="alert">{recorder.error}</p>}
+          </div>
+          <div className="transcription-recorder-actions">
+            {recorder.phase === 'requesting' && <span className="transcription-recorder-hint" role="status">Waiting for microphone permission…</span>}
+            {recorder.phase === 'recording' && <>
+              <span className="transcription-recording-activity" aria-hidden="true"><i /><i /><i /><i /><i /></span>
+              <button type="button" className="transcription-record-button is-stop" onClick={actions.stopRecording}>Stop recording</button>
+              <button type="button" className="transcription-recorder-quiet" onClick={actions.discardRecording}>Discard</button>
+            </>}
+            {recorder.phase === 'processing' && <span className="transcription-recorder-hint" role="status">Converting the recording on this device…</span>}
+            {recorder.phase === 'ready' && <>
+              <span className="transcription-recorder-hint">Recording ready · {recorder.duration}</span>
+              <button type="button" className="transcription-record-button" onClick={() => void actions.retryRecording()} disabled={recorder.saving || busy}>
+                {recorder.saving ? 'Saving…' : 'Retry recording'}
+              </button>
+              <button type="button" className="transcription-recorder-quiet" onClick={actions.discardRecording} disabled={recorder.saving}>Discard</button>
+            </>}
+          </div>
+          {recorder.error && <p className="transcription-recorder-error" role="alert">{recorder.error}</p>}
+        </div>}
       </div>
 
       <div className="transcription-model-status" role="status" aria-live="polite">

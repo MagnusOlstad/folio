@@ -163,11 +163,6 @@ export function useWorkspaceController(): WorkspaceShellProps {
       },
     },
     setMessage,
-    sourceNoteId: (() => {
-      const activeGroup = tabs.groups.find((group) => group.id === tabs.activeGroupId);
-      const activeId = activeGroup?.activeId ?? null;
-      return activeId && !isUntitledId(activeId) ? activeId : null;
-    })(),
     sourceBundleId: persistenceBundleId,
   });
   transcriptionDraftFiledRef.current = (oldId, newId, bundleId) =>

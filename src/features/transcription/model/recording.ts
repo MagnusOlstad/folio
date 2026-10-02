@@ -1,6 +1,6 @@
 const MAX_WAV_BYTES = 500 * 1024 * 1024
 
-export type RecordingAssociation = { sourceNoteId: string | null; sourceBundleId: string | null }
+export type RecordingAssociation = { sourceBundleId: string | null }
 
 /** Encode decoded microphone audio as a browser-independent, 16-bit PCM WAV. */
 export function encodeAudioBufferAsWav(audio: AudioBuffer): Blob {
