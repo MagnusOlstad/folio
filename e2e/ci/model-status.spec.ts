@@ -13,7 +13,7 @@ const modelStatus = (): MlxStatus => ({
   ],
 })
 
-test('toggles installed model blobs, follows automatic switches, and opens missing model settings', async ({ page }) => {
+test('toggles installed model blobs, follows automatic switches, and opens missing model settings', async ({ page }, testInfo) => {
   let status = modelStatus()
   const mutations: string[] = []
   await page.addInitScript(() => {
@@ -45,8 +45,12 @@ test('toggles installed model blobs, follows automatic switches, and opens missi
   const historySize = await page.locator('.right-pane-content').boundingBox()
   expect(historySize?.height).toBeGreaterThan(400)
   await expect(panel.getByRole('button', { name: 'Stop Gemma 4 E4B' })).toHaveAttribute('aria-pressed', 'true')
-  await panel.screenshot({ path: '/private/tmp/folio-model-grid-dark.png' })
-  await page.screenshot({ path: '/private/tmp/folio-model-workspace-dark.png' })
+  const darkGridScreenshot = testInfo.outputPath('folio-model-grid-dark.png')
+  await panel.screenshot({ path: darkGridScreenshot })
+  await testInfo.attach('model-grid-dark', { path: darkGridScreenshot, contentType: 'image/png' })
+  const darkWorkspaceScreenshot = testInfo.outputPath('folio-model-workspace-dark.png')
+  await page.screenshot({ path: darkWorkspaceScreenshot })
+  await testInfo.attach('model-workspace-dark', { path: darkWorkspaceScreenshot, contentType: 'image/png' })
   await panel.getByRole('button', { name: 'Stop Gemma 4 E4B' }).click()
   await expect(panel.getByRole('button', { name: 'Start Gemma 4 E4B' })).toBeEnabled()
   await panel.getByRole('button', { name: 'Start Whisper' }).focus()
@@ -80,8 +84,12 @@ test('toggles installed model blobs, follows automatic switches, and opens missi
   const narrowGrid = await grid.evaluate((element) => ({ height: element.clientHeight, content: element.scrollHeight }))
   expect(narrowGrid.height).toBeLessThanOrEqual(240)
   expect(narrowGrid.content).toBeGreaterThan(narrowGrid.height)
-  await panel.screenshot({ path: '/private/tmp/folio-model-grid-light-narrow.png' })
-  await page.screenshot({ path: '/private/tmp/folio-model-workspace-light-narrow.png' })
+  const lightNarrowGridScreenshot = testInfo.outputPath('folio-model-grid-light-narrow.png')
+  await panel.screenshot({ path: lightNarrowGridScreenshot })
+  await testInfo.attach('model-grid-light-narrow', { path: lightNarrowGridScreenshot, contentType: 'image/png' })
+  const lightNarrowWorkspaceScreenshot = testInfo.outputPath('folio-model-workspace-light-narrow.png')
+  await page.screenshot({ path: lightNarrowWorkspaceScreenshot })
+  await testInfo.attach('model-workspace-light-narrow', { path: lightNarrowWorkspaceScreenshot, contentType: 'image/png' })
   const bounds = await panel.evaluate((element) => ({ width: element.clientWidth, scroll: element.scrollWidth }))
   expect(bounds.scroll).toBeLessThanOrEqual(bounds.width)
 })
