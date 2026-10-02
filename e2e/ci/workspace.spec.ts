@@ -205,6 +205,42 @@ test('opens a seeded note and shows its content', async ({ page }) => {
   await expect(page.getByText('Add your first task')).toBeVisible()
 })
 
+test('shows the indexed last-edited date after a search result title', async ({ page, request }) => {
+  const title = `Search Date Regression ${Date.now().toString(36)}`
+  let createdId: string | null = null
+
+  try {
+    const createResponse = await request.post('/api/file/create', { data: { directory: '/', name: `${title}.md` } })
+    expect(createResponse.status()).toBe(201)
+    const created = await createResponse.json() as { id: string }
+    createdId = created.id
+
+    const searchResponse = await request.get(`/api/search?q=${encodeURIComponent(title)}`)
+    expect(searchResponse.ok()).toBeTruthy()
+    const searchResults = await searchResponse.json()
+    const searchResult = searchResults.find((result: { id: string }) => result.id === createdId)
+    expect(Number.isNaN(Date.parse(searchResult?.updatedAt))).toBe(false)
+
+    await page.getByRole('button', { name: 'search', exact: true }).click()
+    await page.getByRole('textbox', { name: 'Search your notes' }).fill(title)
+    await page.getByRole('button', { name: 'Go', exact: true }).click()
+
+    const result = page.locator('.sidebar-result').filter({ hasText: title })
+    const date = result.locator('time')
+    await expect(date).toBeVisible()
+    await expect(date).toHaveAttribute('datetime', searchResult.updatedAt)
+    const formattedDate = await page.evaluate((value: string) => new Intl.DateTimeFormat(undefined, {
+      month: 'short', day: 'numeric', year: 'numeric',
+    }).format(new Date(value)), searchResult.updatedAt)
+    await expect(date).toHaveText(formattedDate)
+  } finally {
+    if (createdId) {
+      const cleanupResponse = await request.delete(`/api/note?id=${encodeURIComponent(createdId)}`)
+      expect(cleanupResponse.ok()).toBeTruthy()
+    }
+  }
+})
+
 test('creates a new local draft note from the editor', async ({ page }) => {
   await page.getByTitle('New note (Cmd+T)').click()
   const editor = page.getByLabel('Write a new note')

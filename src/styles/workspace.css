@@ -438,11 +438,25 @@
 }
 
 .sidebar-result strong {
-  display: block;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.sidebar-result strong > span {
+  min-width: 0;
   overflow: hidden;
   color: var(--ink);
   font: 400 18px 'Iowan Old Style', Baskerville, Georgia, serif;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-result strong time {
+  flex: none;
+  color: var(--muted);
+  font: 400 10px sans-serif;
   white-space: nowrap;
 }
 

@@ -238,6 +238,7 @@ function indexedRecordsFromDocuments(documents, previousRecords) {
         )),
         content,
         createdAt: document.parsed.generatedAt || document.fileStat.birthtime.toISOString(),
+        updatedAt: document.fileStat.mtime.toISOString(),
         classifiedByModel: !String(document.parsed.frontmatter.generated?.by || '').startsWith('human:'),
         filedBy: document.parsed.filedBy,
         filedAt: document.parsed.filedAt,
