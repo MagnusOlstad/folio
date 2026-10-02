@@ -60,14 +60,16 @@ test('opens a path-directed draft from a bundle directory context menu', async (
   }
 })
 
-test('shows controls for the selected local MLX model and fixed embedding model', async ({ page }) => {
+test('shows controls for all six supported local models', async ({ page }) => {
   const models = page.getByRole('region', { name: 'MLX model management' })
   await expect(models).toBeVisible()
   await expect(models.getByText(/Gemma 4/)).toBeVisible()
-  await expect(models.getByText(/Qwen 3.5/)).toHaveCount(0)
-  await expect(models.getByText(/Llama 3.2/)).toHaveCount(0)
+  await expect(models.getByText(/Qwen 3.5/)).toBeVisible()
+  await expect(models.getByText(/Llama 3.2/)).toBeVisible()
   await expect(models.getByText('EmbeddingGemma', { exact: true })).toBeVisible()
-  await expect(models.locator('.mlx-model-action')).toHaveCount(2)
+  await expect(models.getByRole('button', { name: /Whisper Large v3 Turbo/ })).toBeVisible()
+  await expect(models.getByRole('button', { name: /Whisper Large v3$/ })).toBeVisible()
+  await expect(models.locator('.mlx-model')).toHaveCount(6)
 })
 
 test('first-open model setup opens the real model settings controls', async ({ page }) => {
@@ -80,6 +82,8 @@ test('first-open model setup opens the real model settings controls', async ({ p
   await expect(models.getByRole('radio', { name: /Qwen 3\.5 4B/ })).toBeVisible()
   await expect(models.getByRole('radio', { name: /Llama 3\.2 3B Instruct/ })).toBeVisible()
   await expect(models.getByRole('radio', { name: /Gemma 4/ })).toBeVisible()
+  await expect(models.getByRole('radio', { name: /Whisper Large v3 Turbo/ })).toBeVisible()
+  await expect(models.getByRole('radio', { name: /Whisper Large v3.*3\.1 GB/ })).toBeVisible()
   await expect(models.getByText('EmbeddingGemma', { exact: true })).toBeVisible()
   await expect(models.getByRole('radio', { name: /EmbeddingGemma/ })).toHaveCount(0)
   await expect(models.getByRole('button', { name: 'Download' }).first()).toBeDisabled()
@@ -174,11 +178,20 @@ test('downloads all attached bundle backups from settings', async ({ page }) => 
 
 test('keeps a new bundle draft isolated across legacy bundle switches', async ({ page }) => {
   const bundleName = `E2E isolation ${Date.now()}`
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  const noteEditor = page.getByRole('textbox', { name: 'Edit Start Here' })
+  await noteEditor.fill('# Start Here\n\nEdited before creating another bundle')
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Settings' }).click()
   const settings = page.getByRole('dialog', { name: 'Settings' })
   await settings.getByRole('button', { name: 'Create bundle or import Obsidian vault' }).click()
   await settings.getByRole('textbox', { name: 'Name' }).fill(bundleName)
+  const checkpoint = page.waitForResponse(response => {
+    const url = new URL(response.url())
+    return url.pathname.endsWith('/checkpoint') && response.request().method() === 'POST'
+  })
   await settings.getByRole('button', { name: 'Create bundle' }).click()
+  expect((await checkpoint).ok()).toBeTruthy()
   await expect(settings.getByRole('listitem').filter({ hasText: bundleName })).toBeVisible()
   await settings.getByRole('button', { name: 'Close' }).click()
 

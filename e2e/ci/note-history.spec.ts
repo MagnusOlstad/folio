@@ -446,6 +446,48 @@ test('a successful live checkpoint appears without moving the timeline away from
   await expect.poll(() => timeline.evaluate(node => node.scrollTop)).toBe(24)
 })
 
+test('checkpoints an edited note immediately when navigating to another note', async ({ page }) => {
+  let checkpointRequests = 0
+  page.on('request', request => {
+    if (new URL(request.url()).pathname.endsWith('/checkpoint') && request.method() === 'POST') checkpointRequests += 1
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  const timeline = page.getByRole('navigation', { name: 'Note timeline' })
+  await expect(timeline.getByRole('button', { name: 'Present' })).toBeVisible()
+  const startHereHistoryUrl = new URL('/api/note/history?id=%2Fgetting-started%2Fstart-here.md', page.url()).toString()
+  const baselineResponse = await page.request.get(startHereHistoryUrl)
+  expect(baselineResponse.ok()).toBeTruthy()
+  const baseline = await baselineResponse.json() as { entries: Array<{ revision: string }> }
+
+  // Leaving a clean note should not create a Git checkpoint.
+  await page.getByRole('button', { name: 'Todo List', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: 'Edit Todo List' })).toBeVisible()
+  const noCheckpoint = page.waitForTimeout(50)
+  await noCheckpoint
+  expect(checkpointRequests).toBe(0)
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  const editor = page.getByRole('textbox', { name: 'Edit Start Here' })
+  await editor.fill('# Start Here\n\nChanged before switching notes')
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible()
+
+  const checkpointResponse = page.waitForResponse(response => {
+    const url = new URL(response.url())
+    return url.pathname.endsWith('/checkpoint') && response.request().method() === 'POST'
+  })
+  await page.getByRole('button', { name: 'Todo List', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: 'Edit Todo List' })).toBeVisible()
+  expect((await checkpointResponse).ok()).toBeTruthy()
+  expect(checkpointRequests).toBe(1)
+
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  await expect(timeline.getByRole('button', { name: 'Present' })).toBeVisible()
+  const updatedResponse = await page.request.get(startHereHistoryUrl)
+  expect(updatedResponse.ok()).toBeTruthy()
+  const updated = await updatedResponse.json() as { entries: Array<{ revision: string }> }
+  expect(updated.entries.length).toBeGreaterThan(baseline.entries.length)
+})
+
 test('the sticky timeline date follows the day at the top while scrolling', async ({ page }) => {
   const revisions = Array.from({ length: 24 }, (_, index) => ({
     revision: `sticky-${index}`,

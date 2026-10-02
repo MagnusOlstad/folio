@@ -28,6 +28,7 @@ import {
 import { loadWorkspaceSessionState, parseWorkspaceSessionState, reconcileWorkspaceSessionState } from "../model/workspace-state.ts";
 import { readStorageItem, writeStorageItem } from "../../../lib/storage.ts";
 import { useBundleSetup } from "../../settings/hooks/useBundleSetup.ts";
+import { useTranscription } from "../../transcription/hooks/useTranscription.ts";
 
 function draftTitle(content: string) {
   const firstLine = content
@@ -113,7 +114,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
     persistenceEnabled,
   });
   const layout = useWorkspaceLayout(initialWorkspaceState?.splitPosition);
-  const models = useWorkspaceModels(setMessage);
+  const models = useWorkspaceModels(setMessage, bundleSetup.ready && bundleSetup.bundles.length > 0);
   const tabs = useWorkspaceTabs({
     documents: documents.documents,
     drafts: documents.drafts,
@@ -126,6 +127,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
     initialState: initialWorkspaceState,
   });
   const observeAggregateContentRef = useRef<(documentId: string, content: string, rebasedContent?: string) => void>(() => {});
+  const openTranscriptionNoteRef = useRef<(documentId: string) => void>(() => {});
+  const transcriptionDraftFiledRef = useRef<(oldId: string, newId: string, bundleId: string) => void>(() => {});
   const mutations = useWorkspaceDocumentMutations({
     bundleId: persistenceBundleId,
     documents,
@@ -137,7 +140,33 @@ export function useWorkspaceController(): WorkspaceShellProps {
     replaceDiscoveryDocument: explorer.discovery.replaceDocument,
     observeAggregateContent: (documentId, content, rebasedContent) =>
       observeAggregateContentRef.current(documentId, content, rebasedContent),
+    onDraftFiled: (oldId, newId, bundleId) => transcriptionDraftFiledRef.current(oldId, newId, bundleId),
   });
+  const transcription = useTranscription({
+    drafts: {
+      createDraft: (content = "") => {
+        setEditorFocusRequest(null);
+        return tabs.createNewTab(undefined, content);
+      },
+      getDraftContent: (id) => documents.draftsRef.current[id] ?? documents.documentsRef.current[id]?.content,
+      getDraftDocument: (id) => documents.documentsRef.current[id],
+      isDraftOpen: (id) => tabs.groups.some((group) => group.tabs.includes(id)),
+      updateDraftContent: (id, content) => {
+        const document = documents.documentsRef.current[id];
+        if (document) documents.changeDraftContent(document, content);
+        else documents.setDrafts((current) => ({ ...current, [id]: content }));
+      },
+      openDraft: (id) => {
+        setEditorFocusRequest(null);
+        if (isUntitledId(id)) tabs.openLocalDraft(id);
+        else openTranscriptionNoteRef.current(id);
+      },
+    },
+    setMessage,
+    sourceBundleId: persistenceBundleId,
+  });
+  transcriptionDraftFiledRef.current = (oldId, newId, bundleId) =>
+    transcription.draftFiled(oldId, newId, bundleId);
   const autosave = useFiledDocumentAutosave({
     save: async (documentId, content, baseContent) => {
       const document = documents.documentsRef.current[documentId];
@@ -198,7 +227,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       deletingNoteId: documents.deletingNoteId,
     };
   }, [documents.deletingNoteId, explorer.movingFileId, persistenceBundleId]);
-  const checkpointEditedNote = useNoteHistoryCheckpoint({
+  const { markEdited: checkpointEditedNote, checkpointPending, checkpointScope } = useNoteHistoryCheckpoint({
     checkpoint: async (documentId, scopeId) => {
       if (checkpointContextRef.current.bundleId !== scopeId) return false;
       const bundleId = scopeId;
@@ -228,6 +257,20 @@ export function useWorkspaceController(): WorkspaceShellProps {
       setMessage(error instanceof Error ? error.message : "Could not save a note history checkpoint.");
     },
   });
+
+  const previousActiveDocumentRef = useRef<{ documentId: string | null; scopeId: string }>({
+    documentId: null,
+    scopeId: persistenceBundleId,
+  });
+  useEffect(() => {
+    const activeGroup = tabs.groups.find((group) => group.id === tabs.activeGroupId);
+    const documentId = activeGroup?.activeId ?? null;
+    const previous = previousActiveDocumentRef.current;
+    if (previous.documentId && previous.documentId !== documentId && previous.scopeId === persistenceBundleId && !isUntitledId(previous.documentId)) {
+      void checkpointPending(previous.documentId, previous.scopeId);
+    }
+    previousActiveDocumentRef.current = { documentId, scopeId: persistenceBundleId };
+  }, [checkpointPending, persistenceBundleId, tabs.activeGroupId, tabs.groups]);
 
   function markEmbeddingDirty(documentId: string) {
     embeddingRevisionsRef.current.set(
@@ -325,6 +368,9 @@ export function useWorkspaceController(): WorkspaceShellProps {
     setMessage,
     removeDiscoveryDocument: explorer.discovery.removeDocument,
   });
+  openTranscriptionNoteRef.current = (documentId) => {
+    void navigation.openDocument(documentId, 'note');
+  };
 
   const session = useWorkspaceSessionPersistence({
     initialState: initialWorkspaceState,
@@ -372,18 +418,17 @@ export function useWorkspaceController(): WorkspaceShellProps {
       }));
     }
     try {
-      const [notes, files, directories, drafts, status] = await Promise.all([
+      const [notes, files, directories, drafts] = await Promise.all([
         apiForBundle<Note[]>(bundleId, "/api/notes"),
         apiForBundle<BundleFile[]>(bundleId, "/api/files"),
         apiForBundle<BundleDirectory[]>(bundleId, "/api/directories"),
         apiForBundle<import("../../../domain/types.ts").StoredDraft[]>(bundleId, "/api/drafts"),
-        apiForBundle<import("../../../domain/types.ts").MlxStatus>(bundleId, "/api/mlx/status"),
+        models.refreshMlxStatus(),
       ]);
       if (revision !== bundleSwitchRevisionRef.current) return;
       explorer.setNotes(notes);
       explorer.setFiles(files);
       explorer.setDirectories(directories);
-      models.setMlxStatus(status);
       explorer.setExpandedDirectories(expandedPathsForFiles(files));
       {
       const nextDocuments = Object.fromEntries(drafts.map((draft) => [draft.id, {
@@ -445,7 +490,10 @@ export function useWorkspaceController(): WorkspaceShellProps {
 
   function selectBundle(bundleId: string) {
     void Promise.all([finalizeAllFiledDocuments(), documents.flushDrafts()])
-      .then(() => bundleSetup.selectBundle(bundleId))
+      .then(async () => {
+        if (!await checkpointScope(persistenceBundleId)) throw new Error("Could not save note history before switching bundles.");
+        await bundleSetup.selectBundle(bundleId);
+      })
       .catch((error) => {
         setMessage(error instanceof Error ? error.message : "Could not save the current bundle before switching.");
       });
@@ -464,10 +512,12 @@ export function useWorkspaceController(): WorkspaceShellProps {
   }, [documents, explorer, tabs]);
   async function setupBundle(input: Parameters<typeof bundleSetup.setupBundle>[0]) {
     await Promise.all([finalizeAllFiledDocuments(), documents.flushDrafts()]);
+    if (!await checkpointScope(persistenceBundleId)) throw new Error("Could not save note history before creating a bundle.");
     return bundleSetup.setupBundle(input);
   }
   async function detachBundle(bundleId: string) {
     await Promise.all([finalizeAllFiledDocuments(), documents.flushDrafts()]);
+    if (!await checkpointScope(persistenceBundleId)) throw new Error("Could not save note history before removing a bundle.");
     await bundleSetup.detachBundle(bundleId);
     if (bundleSetup.activeBundleId === bundleId && bundleSetup.bundles.length === 1)
       clearEmptyWorkspace();
@@ -504,6 +554,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
 
   useWorkspaceBootstrap({
     setMlxStatus: models.setMlxStatus,
+    refreshMlxStatus: models.refreshMlxStatus,
     setFilesLoading: explorer.setFilesLoading,
     setMessage,
     setNotes: explorer.setNotes,
@@ -593,12 +644,15 @@ export function useWorkspaceController(): WorkspaceShellProps {
 
   return {
     exportPreview: noteExport.preview,
+    transcription: { model: transcription.model, actions: transcription.actions },
     historyCheckpoint,
     historyScopeId: persistenceBundleId,
     app: {
       versionInfo: models.versionInfo,
       mlxStatus: models.mlxStatus,
       mlxActionModel: models.mlxActionModel,
+      mlxAction: models.mlxAction,
+      modelError: models.modelError,
       onInstallMlxModel: models.installMlxModel,
       onToggleMlxModel: models.toggleMlxModel,
       onOpenSettings: (category) => openSettings(category),
@@ -618,6 +672,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
         install: models.installMlxModel,
         remove: models.removeMlxModel,
         select: models.selectGenerationModel,
+        selectTranscription: models.selectTranscriptionModel,
       },
       onClose: themeSettings.closeSettings,
     },

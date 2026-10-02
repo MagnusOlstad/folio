@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 
 
@@ -21,10 +22,17 @@ def main() -> None:
 
     upstream_mlx = upstream / "mlx-swift"
     upstream_lm = upstream / "mlx-swift-lm"
+    upstream_audio = upstream / "mlx-audio-swift"
     framework = cache / "release" / "Cmlx.xcframework"
-    for source in (upstream_mlx, upstream_lm):
+    for source in (upstream_mlx, upstream_lm, upstream_audio):
         if not (source / "Package.swift").is_file():
             raise SystemExit(f"required pinned package source is missing: {source}")
+    if (upstream_audio / ".git").is_dir():
+        revision = subprocess.check_output(
+            ["git", "-C", str(upstream_audio), "rev-parse", "HEAD"], text=True
+        ).strip()
+        if revision != "8d86630ade569728aaea3dc1a29fc44e2efa719b":
+            raise SystemExit("mlx-audio-swift is not at the required pinned revision")
     if not (framework / "Info.plist").is_file():
         raise SystemExit(f"official Cmlx binary framework is missing: {framework}")
     mlx_source_manifest = (upstream_mlx / "Package.swift").read_text()
@@ -40,6 +48,7 @@ def main() -> None:
 
     copy_tree(upstream / "mlx-swift", local / "mlx-swift")
     copy_tree(upstream / "mlx-swift-lm", local / "mlx-swift-lm")
+    copy_tree(upstream / "mlx-audio-swift", local / "mlx-audio-swift")
     (local / "mlx-swift" / "Cmlx.xcframework").symlink_to(
         framework, target_is_directory=True
     )
@@ -55,6 +64,30 @@ def main() -> None:
     text = lm_manifest.read_text()
     lm_manifest.write_text(text.replace(remote_mlx_dependency, '.package(path: "../mlx-swift")'))
 
+    audio_manifest = local / "mlx-audio-swift" / "Package.swift"
+    text = audio_manifest.read_text()
+    audio_dependencies = {
+        '.package(url: "https://github.com/ml-explore/mlx-swift.git", .upToNextMajor(from: "0.30.6"))':
+            '.package(path: "../mlx-swift")',
+        '.package(url: "https://github.com/ml-explore/mlx-swift-lm.git", .upToNextMajor(from: "3.31.3"))':
+            '.package(path: "../mlx-swift-lm")',
+    }
+    for original, replacement in audio_dependencies.items():
+        if original not in text:
+            raise SystemExit(f"Pinned mlx-audio-swift manifest changed; expected {original}")
+        text = text.replace(original, replacement)
+    audio_manifest.write_text(text)
+
+    whisper_patch = experiment / "Patches" / "whisper-language-detection-pinned-8d86630.patch"
+    if not whisper_patch.is_file():
+        raise SystemExit(f"pinned Whisper language detection patch is missing: {whisper_patch}")
+    with whisper_patch.open("rb") as patch_file:
+        subprocess.run(
+            ["patch", "--forward", "-p1", "-d", str(local / "mlx-audio-swift")],
+            stdin=patch_file,
+            check=True,
+        )
+
     build.mkdir(parents=True, exist_ok=True)
     (build / "Sources").mkdir(exist_ok=True)
     copy_tree(experiment / "Sources", build / "Sources")
@@ -64,6 +97,8 @@ def main() -> None:
             '.package(path: "../local-packages/mlx-swift-lm")',
         '.package(url: "https://github.com/ml-explore/mlx-swift", exact: "0.31.3")':
             '.package(path: "../local-packages/mlx-swift")',
+        '.package(url: "https://github.com/Blaizzy/mlx-audio-swift.git", revision: "8d86630ade569728aaea3dc1a29fc44e2efa719b")':
+            '.package(path: "../local-packages/mlx-audio-swift")',
     }
     for original, replacement in replacements.items():
         if original not in manifest:

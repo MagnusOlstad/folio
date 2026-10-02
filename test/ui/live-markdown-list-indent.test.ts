@@ -117,4 +117,10 @@ describe("numbered list editing", () => {
       "10. tenth\n11. next",
     );
   });
+
+  it("restarts nested alphabetical subpoints for each parent item", () => {
+    expect(normalizeLiveMarkdownOrderedLists(
+      "1. first\n  1. first subpoint\n  2. second subpoint\n2. second\n  4. first subpoint under second",
+    )).toBe("1. first\n  1. first subpoint\n  2. second subpoint\n2. second\n  1. first subpoint under second");
+  });
 });

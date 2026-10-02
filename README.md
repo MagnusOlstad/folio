@@ -25,6 +25,7 @@ Folio is a local-first personal notetaker with one Markdown capture field. It pr
 - Settings organized into Bundles, Models, Appearance, and Backup. Choose, download, and remove Qwen 3.5 4B 4-bit, Llama 3.2 3B Instruct 4-bit, or Gemma 4 for generation; EmbeddingGemma remains the fixed embedding model. Downloads show cache progress and can be retried.
 - Lifecycle controls for `draft`, `stable`, `deprecated`, and `stale_after`, with stale and deprecated concepts ranked lower in retrieval.
 - Local filesystem storage. No cloud service or account is required.
+- Import AAC, AIFF, FLAC, M4A, MP3, and WAV files from the Transcription tab in the right pane. Folio downloads pinned `mlx-community/whisper-large-v3-turbo` weights on request, transcribes locally on Apple Silicon, and opens an editable Markdown note with the source filename, import time, duration, and source-note link. Regenerate its concise summary with the selected local text model.
 
 ## Keyboard shortcuts
 
@@ -52,7 +53,7 @@ the desktop app.
 
 ## Prerequisites
 
-You need Node.js 22 or newer for development. MLX inference requires macOS 14 or newer on Apple Silicon. The desktop release bundles Folio's Swift MLX helper and framework; model files remain separate and are downloaded from Settings. Qwen 3.5 4B 4-bit is about 3.06 GB, Llama 3.2 3B Instruct 4-bit is about 1.81 GB, Gemma 4 E4B is about 5.18 GB, and EmbeddingGemma is about 212 MB. These are repository-size estimates; the actual download depends on files already cached by Hugging Face.
+You need Node.js 22 or newer for development. MLX inference requires macOS 14 or newer on Apple Silicon. The desktop release bundles Folio's Swift MLX helper and framework; model files remain separate and are downloaded only when requested. Generation models are installed from Settings. Whisper large-v3-turbo is about 1.61 GB and can be installed from the Transcription tab in the right pane. Qwen 3.5 4B 4-bit is about 3.06 GB, Llama 3.2 3B Instruct 4-bit is about 1.81 GB, Gemma 4 E4B is about 5.18 GB, and EmbeddingGemma is about 212 MB. These are repository-size estimates; the actual download depends on files already cached by Hugging Face.
 
 ## One-time setup
 

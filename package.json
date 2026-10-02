@@ -89,6 +89,9 @@
     "mac": {
       "category": "public.app-category.productivity",
       "minimumSystemVersion": "14.0",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Folio uses your microphone to record audio for local transcription."
+      },
       "icon": "build/icon.icns",
       "hardenedRuntime": true,
       "notarize": true,

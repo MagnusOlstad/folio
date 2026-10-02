@@ -155,7 +155,8 @@ export type DesktopUpdateState = {
   percent: number | null;
   error: string | null;
 };
-export type MlxModelId = "gemma4" | "qwen35" | "llama32" | "embeddinggemma";
+export type MlxModelId = "gemma4" | "qwen35" | "llama32" | "embeddinggemma" | "whisper" | "whisperlarge";
+export type MlxTranscriptionModelId = "whisper" | "whisperlarge";
 export const MLX_GENERATION_MODEL = { id: "gemma4", name: "Gemma 4 E4B" } as const satisfies {
   id: MlxModelId;
   name: string;
@@ -163,12 +164,15 @@ export const MLX_GENERATION_MODEL = { id: "gemma4", name: "Gemma 4 E4B" } as con
 export type MlxModelStatus = {
   id: MlxModelId;
   name: string;
-  purpose: "generation" | "embeddings";
+  purpose: "generation" | "embeddings" | "transcription";
   downloadSizeBytes: number;
   downloadSizeIsEstimate: boolean;
   selected: boolean;
   installed: boolean;
   loaded: boolean;
+  loading?: boolean;
+  busy?: boolean;
+  requestCount?: number;
   memory: { activeBytes: number; cacheBytes: number; peakResidentBytes: number } | null;
 };
 export type MlxDownloadProgress = {
@@ -181,8 +185,10 @@ export type MlxStatus = {
   available: boolean;
   helperAvailable: boolean;
   keepAliveMs: number;
-  installing: string[];
+  activeModel?: MlxModelId | null;
+  installing: MlxModelId[];
   selectedGenerationModel: MlxModelId;
+  selectedTranscriptionModel?: MlxTranscriptionModelId;
   downloads: { id: MlxModelId; progress: MlxDownloadProgress | null }[];
   models: MlxModelStatus[];
 };

@@ -296,6 +296,7 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
     const allRuntimes = new Set([defaultRuntime, pendingRuntime, ...runtimes.values()])
     await Promise.allSettled([
       ...Array.from(allRuntimes, (runtime) => runtime.history?.close?.()),
+      ...Array.from(allRuntimes, (runtime) => runtime.transcriptionService?.close?.()),
       defaultRuntime.mlxService?.close?.(),
     ])
   }

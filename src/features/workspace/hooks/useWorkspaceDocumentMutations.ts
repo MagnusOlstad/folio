@@ -39,6 +39,7 @@ type UseWorkspaceDocumentMutationsOptions = {
   clearDiscovery: () => void;
   replaceDiscoveryDocument: (oldId: string, updated: NoteDetail) => void;
   observeAggregateContent: (documentId: string, content: string, rebasedContent?: string) => void;
+  onDraftFiled?: (oldId: string, newId: string, bundleId: string) => void;
 };
 
 type FiledDraftResult = {
@@ -68,6 +69,7 @@ export function useWorkspaceDocumentMutations({
   clearDiscovery,
   replaceDiscoveryDocument,
   observeAggregateContent,
+  onDraftFiled,
 }: UseWorkspaceDocumentMutationsOptions) {
   const saveFailures = useRef(new Map<string, string>());
   const contentSaveSnapshots = useRef(new Map<string, string>());
@@ -459,6 +461,7 @@ export function useWorkspaceDocumentMutations({
             delete next[id];
             return next;
           });
+          onDraftFiled?.(id, updated.id, bundleId);
           setGroups((current) =>
             current.map((group) => {
               const tabs = group.tabs

@@ -53,6 +53,41 @@ test('classification prompt keeps body, steering, and date context separate and 
   assert.match(messages[0].content, /at most 180 characters/)
 })
 
+test('Llama filing prompt asks for populated metadata rather than a JSON Schema', () => {
+  const messages = buildClassificationMessages({
+    schema: { type: 'object', properties: { concept: { type: 'object' } } },
+    filingGuide: '- No existing filing options yet.',
+    tagGuide: '- No relevant existing tag candidates found.',
+    content: 'A short note about a project.',
+    modelId: 'llama32',
+  })
+
+  assert.match(messages[0].content, /not an answer template/)
+  assert.match(messages[0].content, /never return field definitions/i)
+  assert.match(messages[0].content, /exactly these keys: kind, path, title, type, description, and tags/)
+  assert.match(messages[0].content, /only keys must be kind, path, title, type, description, and tags; do not add date/)
+  assert.match(messages[0].content, /Example shape only; replace every value/)
+  assert.match(messages[0].content, /"concept":\{"kind":"note"/)
+})
+
+test('classification keeps the selected Llama model aligned with its output guidance', async () => {
+  const runtime = createRuntime({ FOLIO_DATA_ROOT: '/tmp/folio-classification-llama-prompt-test' })
+  let generated
+  runtime.mlxService.selectedGenerationModel = async () => 'llama32'
+  runtime.mlxService.generate = async (messages, options) => {
+    generated = { messages, options }
+    return { text: JSON.stringify(validOutput), modelId: options.modelId }
+  }
+  try {
+    const result = await runtime.classify('A note about the Orion project.', [])
+    assert.equal(result.modelId, 'llama32')
+    assert.equal(generated.options.modelId, 'llama32')
+    assert.match(generated.messages[0].content, /not an answer template/)
+  } finally {
+    await runtime.mlxService.close()
+  }
+})
+
 test('classification retries invalid metadata once using the native two-message protocol', async () => {
   const runtime = createRuntime({ FOLIO_DATA_ROOT: '/tmp/folio-classification-output-test' })
   const generated = []

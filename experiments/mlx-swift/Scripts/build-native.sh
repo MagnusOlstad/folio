@@ -41,6 +41,7 @@ done
 
 MLX_SWIFT_VERSION=0.31.3
 MLX_SWIFT_LM_VERSION=3.31.3
+MLX_AUDIO_SWIFT_REVISION=8d86630ade569728aaea3dc1a29fc44e2efa719b
 CMLX_URL="https://github.com/ml-explore/mlx-swift/releases/download/$MLX_SWIFT_VERSION/Cmlx.xcframework.zip"
 # SHA-256 of the official 0.31.3 release archive.
 CMLX_SHA256=e0fa04cb5bb2da239691c62c441b1742ff53d701267ba0612bfc8a6b81396d61
@@ -119,11 +120,31 @@ clone_tag() {
         || die "$repository did not check out the requested $version tag"
 }
 
+clone_revision() {
+    local repository="$1"
+    local revision="$2"
+    local destination="$3"
+    local url="https://github.com/$repository.git"
+
+    if [[ -d "$destination/.git" && "$(git -C "$destination" rev-parse HEAD 2>/dev/null || true)" == "$revision" ]]; then
+        return
+    fi
+    if [[ -e "$destination" ]]; then
+        rm -rf "$destination"
+    fi
+
+    git clone --filter=blob:none "$url" "$destination"
+    git -C "$destination" checkout --detach "$revision"
+    [[ "$(git -C "$destination" rev-parse HEAD)" == "$revision" ]] \
+        || die "$repository did not check out the requested revision"
+}
+
 if (( STAGE_ONLY == 0 )); then
 mkdir -p "$UPSTREAM_DIR" "$RELEASE_DIR" "$LOCAL_PACKAGES_DIR" "$BUILD_DIR"
 
 clone_tag ml-explore/mlx-swift "$MLX_SWIFT_VERSION" "$UPSTREAM_DIR/mlx-swift"
 clone_tag ml-explore/mlx-swift-lm "$MLX_SWIFT_LM_VERSION" "$UPSTREAM_DIR/mlx-swift-lm"
+clone_revision Blaizzy/mlx-audio-swift "$MLX_AUDIO_SWIFT_REVISION" "$UPSTREAM_DIR/mlx-audio-swift"
 
 ARCHIVE="$CACHE_DIR/Cmlx.xcframework.zip"
 if [[ -f "$ARCHIVE" ]]; then

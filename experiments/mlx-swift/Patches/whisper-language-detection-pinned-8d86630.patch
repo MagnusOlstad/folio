@@ -1,0 +1,54 @@
+--- a/Sources/MLXAudioSTT/Models/Whisper/WhisperModel.swift
++++ b/Sources/MLXAudioSTT/Models/Whisper/WhisperModel.swift
+@@ -194,9 +194,11 @@
+         let features = WhisperAudio.encoderFeatures(audio: audio, nMels: config.numMelBins)
+         let encoderHidden = model.encoder(features)
+ 
++        let language = generationParameters.language
++            ?? detectLanguage(encoderHidden: encoderHidden, tokenizer: tokenizer)
+         var caches = (0..<config.decoderLayers).map { _ in WhisperLayerCache() }
+         let promptIds = tokenizer.buildPromptTokens(
+-            language: generationParameters.language,
++            language: language,
+             task: "transcribe"
+         )
+ 
+@@ -269,18 +271,31 @@
+         }
+ 
+         let text = tokenizer.decode(tokens: generated)
+-        // The language token sits at prompt index 1 for multilingual models.
+-        var language: String? = nil
+-        if tokenizer.isMultilingual, promptIds.count > 1 {
+-            let langTokenId = promptIds[1]
+-            for (code, id) in tokenizer.languageToId where id == langTokenId {
+-                language = code
+-                break
+-            }
+-        }
+         return (text, promptIds.count, generated.count, language)
+     }
+ 
++    private func detectLanguage(encoderHidden: MLXArray, tokenizer: WhisperTokenizer) -> String? {
++        guard tokenizer.isMultilingual, !tokenizer.languageToId.isEmpty else { return nil }
++        var caches = (0..<config.decoderLayers).map { _ in WhisperLayerCache() }
++        let startToken = MLXArray([Int32(tokenizer.startOfTranscriptId)]).expandedDimensions(axis: 0)
++        let hidden = model.decoder(
++            tokens: startToken,
++            startPosition: 0,
++            encoderHidden: encoderHidden,
++            caches: &caches
++        )
++        let logits = model.decoder.projectToVocab(hidden[0, -1])
++        eval(logits)
++
++        var languageMask = [Float](repeating: -1e9, count: logits.dim(-1))
++        for tokenID in tokenizer.languageToId.values where tokenID >= 0 && tokenID < languageMask.count {
++            languageMask[tokenID] = 0
++        }
++        let languageTokenID = (logits + MLXArray(languageMask).asType(logits.dtype))
++            .argMax(axis: -1).item(Int.self)
++        return tokenizer.languageToId.first(where: { $0.value == languageTokenID })?.key
++    }
++
+     private func sample(_ logits: MLXArray, temperature: Float) -> Int {

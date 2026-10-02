@@ -34,11 +34,16 @@ async function ensureSnapshot() {
   const directory = path.join(cacheRoot, `models--${model.replaceAll('/', '--')}`, 'snapshots', revision)
   await fs.mkdir(directory, { recursive: true })
   await Promise.all([
-    fs.writeFile(path.join(directory, 'config.json'), JSON.stringify({ model_type: task === 'generation' ? 'gemma4' : 'embeddinggemma' })),
+    fs.writeFile(path.join(directory, 'config.json'), JSON.stringify({ model_type: task === 'generation' ? 'gemma4' : task === 'transcription' ? 'whisper' : 'embeddinggemma', n_vocab: 51866 })),
     fs.writeFile(path.join(directory, 'tokenizer.json'), '{}'),
     fs.writeFile(path.join(directory, 'tokenizer_config.json'), '{}'),
     fs.writeFile(path.join(directory, 'model.safetensors'), 'fake model weights'),
   ])
+  if (task === 'transcription') {
+    await fs.rename(path.join(directory, 'model.safetensors'), path.join(directory, 'weights.safetensors'))
+    await Promise.all(['special_tokens_map.json', 'added_tokens.json', 'vocab.json', 'merges.txt', 'normalizer.json']
+      .map((name) => fs.writeFile(path.join(directory, name), '{}')))
+  }
 }
 
 function classify(content) {
@@ -87,11 +92,18 @@ async function embed(input) {
 }
 
 await ensureSnapshot()
-await appendLog({ event: 'ready', task, model, revision, modelDirectory, memory })
+await appendLog({ event: 'ready', task, model, pid: process.pid, revision, modelDirectory, memory })
 const startupControl = await readControl()
 if (startupControl.exitBeforeReady) {
   process.stderr.write('fixture exited before readiness\n')
   process.exit(Number(startupControl.exitBeforeReady) || 23)
+}
+if (startupControl.downloadProgress) {
+  process.stdout.write(`${JSON.stringify({
+    event: 'download-progress',
+    downloadedBytes: startupControl.downloadProgress.downloadedBytes,
+    totalBytes: startupControl.downloadProgress.totalBytes,
+  })}\n`)
 }
 if (startupControl.readyDelayMs) await new Promise((resolve) => setTimeout(resolve, startupControl.readyDelayMs))
 if (process.env.FOLIO_MLX_FIXTURE_INVALID_JSON === '1') process.stdout.write('not-json\n')
@@ -122,6 +134,7 @@ for await (const line of lines) {
     else if (request.operation === 'generate' && control.failGenerate) response = { id: request.id, error: 'fixture generation error', memory }
     else if (request.operation === 'generate') response = { id: request.id, text: await generate(request.messages), memory }
     else if (request.operation === 'embed') response = { id: request.id, embeddings: await embed(request.input), memory }
+    else if (request.operation === 'transcribe') response = { id: request.id, text: 'Fixture transcription.', memory }
     else response = { id: request.id, error: `unknown operation: ${request.operation}`, memory }
     await appendLog({ event: 'response', operation: request.operation, error: response.error, memory: response.memory })
     process.stdout.write(`${JSON.stringify(response)}\n`)

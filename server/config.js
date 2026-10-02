@@ -33,6 +33,7 @@ export function createConfig(env = process.env) {
     importsRoot: env.FOLIO_IMPORTS_ROOT || path.join(dataRoot, 'imports'),
     indexPath: env.FOLIO_INDEX_PATH || path.join(dataRoot, 'search-index.json'),
     modelRoot: env.FOLIO_MODEL_ROOT || path.join(dataRoot, 'models'),
+    transcriptionsRoot: env.FOLIO_TRANSCRIPTIONS_ROOT || path.join(dataRoot, 'transcriptions'),
     mlxHelperPath: env.FOLIO_MLX_HELPER || null,
     distRoot: env.FOLIO_DIST_ROOT || path.join(projectRoot, 'dist'),
     classifierModel,

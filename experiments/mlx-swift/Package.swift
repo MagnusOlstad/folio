@@ -9,6 +9,7 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift", exact: "0.31.3"),
         .package(url: "https://github.com/huggingface/swift-huggingface", exact: "0.9.0"),
         .package(url: "https://github.com/huggingface/swift-transformers", exact: "1.3.0"),
+        .package(url: "https://github.com/Blaizzy/mlx-audio-swift.git", revision: "8d86630ade569728aaea3dc1a29fc44e2efa719b"),
     ],
     targets: [
         .executableTarget(
@@ -21,6 +22,8 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "HuggingFace", package: "swift-huggingface"),
                 .product(name: "Tokenizers", package: "swift-transformers"),
+                .product(name: "MLXAudioCore", package: "mlx-audio-swift"),
+                .product(name: "MLXAudioSTT", package: "mlx-audio-swift"),
             ]
         ),
     ]

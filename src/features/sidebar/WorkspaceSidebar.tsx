@@ -125,6 +125,11 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                 onChange={(event) => setSearchQuery(event.target.value)}
                 placeholder="Search by meaning"
                 aria-label="Search your notes"
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+                  event.preventDefault();
+                  void searchNotes();
+                }}
               />
               <button
                 type="submit"

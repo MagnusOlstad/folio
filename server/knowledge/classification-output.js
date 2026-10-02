@@ -58,7 +58,14 @@ export function parseClassificationOutput(text) {
   return { concept }
 }
 
-export function buildClassificationMessages({ schema, filingGuide, tagGuide, content, steering = '', dateContext = '' }) {
+export function buildClassificationMessages({ schema, filingGuide, tagGuide, content, steering = '', dateContext = '', modelId = '' }) {
+  const modelSpecificOutputGuidance = modelId === 'llama32'
+    ? [
+      'The output rules are validation requirements, not an answer template. Never return field definitions, constraints, or schema keywords such as properties, required, enum, additionalProperties, or a top-level type of object.',
+      'Return exactly one JSON object with the single top-level key concept. Its only keys must be kind, path, title, type, description, and tags; do not add date, metadata, or any other key. Use one to five lowercase path components of at most 80 characters, a title of at most 100 characters, a type of at most 80 characters, a description of at most 240 characters, and zero to six lowercase tags of at most 60 characters.',
+      'Return one populated instance with real metadata values. Example shape only; replace every value with metadata grounded in the note: {"concept":{"kind":"note","path":["topic"],"title":"A title","type":"Note","description":"One factual sentence.","tags":["topic"]}}.',
+    ]
+    : []
   return [
     {
       role: 'system',
@@ -84,7 +91,10 @@ export function buildClassificationMessages({ schema, filingGuide, tagGuide, con
         'path: one to five lowercase directory names from broad to specific. Do not include a filename, date, todo-list, or daily date.',
         'tags: zero to six distinct lowercase search terms grounded in the note, one or two words each. Prefer exact relevant candidates.',
         'Relative date context gives deterministic interpretations for words such as today and tomorrow. When useful, write the resolved date parenthetically in metadata (for example, tomorrow (2026-10-02)); leave the source note text untouched.',
-        `Return one JSON object matching this schema exactly, with no markdown or explanation: ${JSON.stringify(schema)}`,
+        modelId === 'llama32'
+          ? 'Return one JSON object with exactly one concept object. The concept must contain exactly these keys: kind, path, title, type, description, and tags. Add no other keys, markdown, or explanation.'
+          : `Return one JSON object matching this schema exactly, with no markdown or explanation: ${JSON.stringify(schema)}`,
+        ...modelSpecificOutputGuidance,
       ].join('\n'),
     },
     {
