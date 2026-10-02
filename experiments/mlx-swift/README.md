@@ -27,6 +27,11 @@ The two pinned model snapshots are:
   `475b9088d29754a3379866cf5aeb6b41acd313c2` for generation.
 - `mlx-community/embeddinggemma-300m-4bit` at
   `5d9ef074df3957afc5c77127f208fddbc3c54187` for semantic embeddings.
+- `mlx-community/whisper-large-v3-turbo` at
+  `a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb` for transcription. Its tokenizer
+  assets come from `openai/whisper-large-v3-turbo` at
+  `876622f22dcb70921aea42327501f41c5f7f3354` and are copied into the installed
+  MLX snapshot so runtime loading can stay offline.
 
 ## Build
 
@@ -39,8 +44,12 @@ npm run build:mlx
 The build fetches the pinned Swift sources and verified Cmlx framework into
 the ignored `.cache` directory, compiles the helper, then stages a relocatable
 app tree at `.cache/staged/Folio.app`. This builds the runtime only; it does
-not download either model. `npm run desktop` and the macOS packaging scripts
-run this build before launching or packaging Folio.
+not download either model. The build applies
+`Patches/whisper-language-detection-pinned-8d86630.patch` to the ignored audio
+package copy. It detects Whisper's language from the encoder output when no
+language is supplied, then includes the detected language token in the decoder
+prompt. `npm run desktop` and the macOS packaging scripts run this build before
+launching or packaging Folio.
 The package declares Swift tools version 6.1; this build has been validated with
 Swift 6.4. The preflight verifies that the selected SwiftPM launches and leaves
 manifest and compiler compatibility checks to SwiftPM itself.
@@ -61,16 +70,24 @@ DEVELOPER_DIR="/path/to/Xcode.app/Contents/Developer" npm run build:mlx
 
 ## Helper protocol
 
-The Node service starts one helper process per model with `--task generation`
-or `--task embedding`, plus the pinned repository and revision. When a verified
-local snapshot exists, it also passes `--model-directory`; this prevents model
-loading from silently resolving an unpinned or remote snapshot.
+The Node service starts one helper process per model with `--task generation`,
+`--task embedding`, or `--task transcription`, plus the pinned repository and
+revision. Transcription installation uses `--operation install`; it downloads
+the pinned weight and tokenizer snapshots under `HF_HUB_CACHE`, reports JSONL
+progress, and emits a ready event with the concrete installed directory. The
+transcription worker uses `--operation transcribe` and must receive that exact
+revision's `--model-directory`. It checks for `config.json`, `weights.safetensors`,
+`tokenizer.json`, `tokenizer_config.json`, `special_tokens_map.json`,
+`added_tokens.json`, `vocab.json`, `merges.txt`, and `normalizer.json` before
+loading locally.
 
 The helper reports a JSON `ready` event on stdout and then accepts one JSON
 object per stdin line. Generation requests provide a system and user message;
-embedding requests provide an array of non-empty strings. Each response carries
-the request id, generated text or embedding vectors, and allocator memory
-readings. `status` and `shutdown` operations support lifecycle management.
+embedding requests provide an array of non-empty strings; transcription
+requests provide a local `audioPath` to a mono 16 kHz audio file. Each response
+carries the request id, generated text, transcript, or embedding vectors, and
+allocator memory readings. `status` and `shutdown` operations support lifecycle
+management.
 Diagnostics go to stderr. A fresh generation session is released and MLX's
 allocator cache is cleared after every request, including failures; the model
 remains loaded until the service's keep-alive expires or the user stops it.

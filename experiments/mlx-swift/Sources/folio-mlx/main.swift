@@ -7,8 +7,10 @@ import MLXLLM
 import MLXLMCommon
 import HuggingFace
 import Tokenizers
+import MLXAudioCore
+import MLXAudioSTT
 
-private enum TaskKind: String { case generation, embedding }
+private enum TaskKind: String { case generation, embedding, transcription }
 
 private struct Message: Decodable {
     let role: String
@@ -23,6 +25,7 @@ private struct Request: Decodable {
     let maxTokens: Int?
     let temperature: Float?
     let noThinking: Bool?
+    let audioPath: String?
 }
 
 private struct MemoryStatus: Encodable {
@@ -45,6 +48,7 @@ private struct ReadyResponse: Encodable {
     let event = "ready"
     let model: String
     let task: String
+    let modelDirectory: String?
     let memory: MemoryStatus
 }
 
@@ -103,6 +107,89 @@ private func writeDownloadProgress(_ progress: Progress) {
                                       totalBytes: progress.totalUnitCount))
 }
 
+private let transcriptionModelID = "mlx-community/whisper-large-v3-turbo"
+private let transcriptionRevision = "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb"
+private let whisperTokenizerModelID = "openai/whisper-large-v3-turbo"
+private let whisperTokenizerRevision = "876622f22dcb70921aea42327501f41c5f7f3354"
+private let whisperTokenizerFiles = [
+    "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json",
+    "added_tokens.json", "vocab.json", "merges.txt", "normalizer.json",
+    "generation_config.json",
+]
+
+private func modelRepository(_ id: String) throws -> Repo.ID {
+    guard let repository = Repo.ID(rawValue: id) else {
+        throw NSError(domain: "FolioMLX", code: 20,
+                      userInfo: [NSLocalizedDescriptionKey: "invalid Hugging Face model id: \(id)"])
+    }
+    return repository
+}
+
+private func localHubCache() -> HubCache {
+    if let cachePath = ProcessInfo.processInfo.environment["HF_HUB_CACHE"], !cachePath.isEmpty {
+        return HubCache(cacheDirectory: URL(fileURLWithPath: cachePath, isDirectory: true))
+    }
+    return .default
+}
+
+private func isNonEmptyFile(_ url: URL) -> Bool {
+    let target = url.resolvingSymlinksInPath()
+    guard let values = try? target.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]) else { return false }
+    return values.isRegularFile == true && (values.fileSize ?? 0) > 0
+}
+
+private func validateWhisperSnapshot(_ directory: URL) throws {
+    let required = ["config.json", "weights.safetensors", "tokenizer.json", "tokenizer_config.json",
+                    "special_tokens_map.json", "added_tokens.json", "vocab.json", "merges.txt",
+                    "normalizer.json"]
+    let missing = required.filter { !isNonEmptyFile(directory.appendingPathComponent($0)) }
+    guard missing.isEmpty else {
+        throw NSError(domain: "FolioMLX", code: 21,
+                      userInfo: [NSLocalizedDescriptionKey:
+                        "The installed Whisper snapshot is incomplete; missing: \(missing.joined(separator: ", "))"])
+    }
+}
+
+private func installWhisperSnapshot(modelID: String, revision: String) async throws -> URL {
+    let cache = localHubCache()
+    let client = HubClient(cache: cache)
+    let modelRepo = try modelRepository(modelID)
+    guard modelID == transcriptionModelID, revision == transcriptionRevision else {
+        throw NSError(domain: "FolioMLX", code: 22,
+                      userInfo: [NSLocalizedDescriptionKey: "transcription installs require the pinned Whisper Turbo model and revision"])
+    }
+
+    let modelDirectory = try await client.downloadSnapshot(
+        of: modelRepo, revision: revision, matching: ["config.json", "weights.safetensors"],
+        progressHandler: { progress in writeDownloadProgress(progress) })
+    let expectedModelDirectory = try cache.snapshotPath(repo: modelRepo, kind: .model, commitHash: revision)
+    guard modelDirectory.standardizedFileURL == expectedModelDirectory.standardizedFileURL else {
+        throw NSError(domain: "FolioMLX", code: 24,
+                      userInfo: [NSLocalizedDescriptionKey: "HubClient returned an unexpected Whisper snapshot path"])
+    }
+
+    let tokenizerRepo = try modelRepository(whisperTokenizerModelID)
+    let tokenizerDirectory = try await client.downloadSnapshot(
+        of: tokenizerRepo,
+        revision: whisperTokenizerRevision,
+        matching: whisperTokenizerFiles,
+        progressHandler: { progress in writeDownloadProgress(progress) })
+
+    for name in whisperTokenizerFiles {
+        let source = tokenizerDirectory.appendingPathComponent(name)
+        let destination = modelDirectory.appendingPathComponent(name)
+        if !isNonEmptyFile(destination) {
+            guard isNonEmptyFile(source) else {
+                throw NSError(domain: "FolioMLX", code: 23,
+                              userInfo: [NSLocalizedDescriptionKey: "The pinned Whisper tokenizer snapshot is missing \(name)"])
+            }
+            try FileManager.default.copyItem(at: source.resolvingSymlinksInPath(), to: destination)
+        }
+    }
+    try validateWhisperSnapshot(modelDirectory)
+    return modelDirectory
+}
+
 private func memoryStatus() -> MemoryStatus {
     let memory = Memory.snapshot()
     var usage = rusage()
@@ -124,7 +211,10 @@ private struct FolioMLX {
         var task = TaskKind.generation
         var modelID = "mlx-community/gemma-4-e4b-it-4bit"
         var revision = "475b9088d29754a3379866cf5aeb6b41acd313c2"
+        var modelWasProvided = false
+        var revisionWasProvided = false
         var modelDirectory: URL?
+        var operation: String?
         var maxTokens = 512
         var temperature: Float = 0.1
         while !arguments.isEmpty {
@@ -133,11 +223,12 @@ private struct FolioMLX {
             let value = arguments.removeFirst()
             switch option {
             case "--task":
-                guard let parsed = TaskKind(rawValue: value) else { throw NSError(domain: "FolioMLX", code: 2, userInfo: [NSLocalizedDescriptionKey: "task must be generation or embedding"]) }
+                guard let parsed = TaskKind(rawValue: value) else { throw NSError(domain: "FolioMLX", code: 2, userInfo: [NSLocalizedDescriptionKey: "task must be generation, embedding, or transcription"]) }
                 task = parsed
-            case "--model": modelID = value
-            case "--revision": revision = value
+            case "--model": modelID = value; modelWasProvided = true
+            case "--revision": revision = value; revisionWasProvided = true
             case "--model-directory": modelDirectory = URL(fileURLWithPath: value, isDirectory: true)
+            case "--operation": operation = value
             case "--max-tokens":
                 guard let parsed = Int(value), parsed > 0 else { throw NSError(domain: "FolioMLX", code: 3, userInfo: [NSLocalizedDescriptionKey: "max tokens must be positive"]) }
                 maxTokens = parsed
@@ -148,10 +239,47 @@ private struct FolioMLX {
             }
         }
 
+        if task == .transcription {
+            if !modelWasProvided { modelID = transcriptionModelID }
+            if !revisionWasProvided { revision = transcriptionRevision }
+            guard modelID == transcriptionModelID, revision == transcriptionRevision else {
+                throw NSError(domain: "FolioMLX", code: 6,
+                              userInfo: [NSLocalizedDescriptionKey: "transcription supports only the pinned Whisper Turbo model and revision"])
+            }
+            guard operation == "install" || operation == "transcribe" else {
+                throw NSError(domain: "FolioMLX", code: 7,
+                              userInfo: [NSLocalizedDescriptionKey: "transcription requires --operation install or --operation transcribe"])
+            }
+            if operation == "transcribe", modelDirectory == nil {
+                throw NSError(domain: "FolioMLX", code: 8,
+                              userInfo: [NSLocalizedDescriptionKey: "transcription requires a fully installed local --model-directory"])
+            }
+            if operation == "transcribe", let modelDirectory {
+                let cache = localHubCache()
+                let repository = try modelRepository(modelID)
+                let expected = try cache.snapshotPath(repo: repository, kind: .model, commitHash: revision)
+                guard modelDirectory.standardizedFileURL == expected.standardizedFileURL else {
+                    throw NSError(domain: "FolioMLX", code: 25,
+                                  userInfo: [NSLocalizedDescriptionKey: "transcription must load from the pinned HF_HUB_CACHE snapshot"])
+                }
+            }
+        } else if operation != nil {
+            throw NSError(domain: "FolioMLX", code: 9,
+                          userInfo: [NSLocalizedDescriptionKey: "--operation is only supported with --task transcription"])
+        }
+
+        if task == .transcription, operation == "install" {
+            let modelDirectory = try await installWhisperSnapshot(modelID: modelID, revision: revision)
+            writeLine(ReadyResponse(model: modelID, task: task.rawValue,
+                                    modelDirectory: modelDirectory.path, memory: memoryStatus()))
+            return
+        }
+
         let clock = ContinuousClock()
         let processStarted = clock.now
         let generator: ModelContainer?
         let embedder: EmbedderModelContainer?
+        let whisper: WhisperModel?
         if task == .generation {
             log("Loading generation model \(modelID)…")
             if let modelDirectory {
@@ -164,25 +292,37 @@ private struct FolioMLX {
                     progressHandler: writeDownloadProgress)
             }
             embedder = nil
+            whisper = nil
         } else {
-            log("Loading embedding model \(modelID)…")
-            if let modelDirectory {
-                embedder = try await EmbedderModelFactory.shared.loadContainer(
-                    from: modelDirectory, using: #huggingFaceTokenizerLoader())
+            if task == .transcription {
+                log("Loading transcription model \(modelID)…")
+                guard let modelDirectory else { fatalError("validated transcription snapshot was not provided") }
+                try validateWhisperSnapshot(modelDirectory)
+                whisper = try await WhisperModel.fromDirectory(modelDirectory, cache: localHubCache())
+                generator = nil
+                embedder = nil
             } else {
-                embedder = try await EmbedderModelFactory.shared.loadContainer(
-                    from: #hubDownloader(), using: #huggingFaceTokenizerLoader(),
-                    configuration: ModelConfiguration(id: modelID, revision: revision),
-                    progressHandler: writeDownloadProgress)
+                log("Loading embedding model \(modelID)…")
+                if let modelDirectory {
+                    embedder = try await EmbedderModelFactory.shared.loadContainer(
+                        from: modelDirectory, using: #huggingFaceTokenizerLoader())
+                } else {
+                    embedder = try await EmbedderModelFactory.shared.loadContainer(
+                        from: #hubDownloader(), using: #huggingFaceTokenizerLoader(),
+                        configuration: ModelConfiguration(id: modelID, revision: revision),
+                        progressHandler: writeDownloadProgress)
+                }
+                generator = nil
+                whisper = nil
             }
-            generator = nil
         }
         let coldLoadSeconds = seconds(from: processStarted, to: clock.now)
         synchronizeDefaultStream()
         Memory.clearCache()
         synchronizeDefaultStream()
         log("Model ready. Reading JSONL requests from stdin.")
-        writeLine(ReadyResponse(model: modelID, task: task.rawValue, memory: memoryStatus()))
+        writeLine(ReadyResponse(model: modelID, task: task.rawValue,
+                                modelDirectory: modelDirectory?.path, memory: memoryStatus()))
 
         while let line = readLine() {
             guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
@@ -191,7 +331,7 @@ private struct FolioMLX {
             do {
                 let request = try JSONDecoder().decode(Request.self, from: Data(line.utf8))
                 requestID = request.id
-                switch request.operation ?? (task == .generation ? "generate" : "embed") {
+                switch request.operation ?? (task == .generation ? "generate" : (task == .embedding ? "embed" : "transcribe")) {
                 case "status":
                     writeLine(Response(id: requestID, model: modelID, text: nil, embeddings: nil,
                                        state: "loaded", memory: memoryStatus(), metrics: nil))
@@ -246,6 +386,22 @@ private struct FolioMLX {
                     synchronizeDefaultStream()
                     writeLine(Response(id: requestID, model: modelID, text: nil, embeddings: vectors,
                                        state: nil, memory: memoryStatus(), metrics: nil))
+                case "transcribe":
+                    guard task == .transcription, let whisper else { throw modelTaskError("transcription") }
+                    guard let audioPath = request.audioPath, !audioPath.isEmpty else {
+                        throw NSError(domain: "FolioMLX", code: 14, userInfo: [NSLocalizedDescriptionKey: "audioPath must name a local audio file"])
+                    }
+                    let audioURL = URL(fileURLWithPath: audioPath)
+                    guard FileManager.default.fileExists(atPath: audioURL.path) else {
+                        throw NSError(domain: "FolioMLX", code: 15, userInfo: [NSLocalizedDescriptionKey: "The selected audio file is no longer available."])
+                    }
+                    let (_, audio) = try loadAudioArray(from: audioURL, sampleRate: 16_000)
+                    let output = whisper.generate(audio: audio)
+                    synchronizeDefaultStream()
+                    Memory.clearCache()
+                    synchronizeDefaultStream()
+                    writeLine(Response(id: requestID, model: modelID, text: output.text,
+                                       embeddings: nil, state: nil, memory: memoryStatus(), metrics: nil))
                 default:
                     throw NSError(domain: "FolioMLX", code: 13, userInfo: [NSLocalizedDescriptionKey: "unknown operation"])
                 }

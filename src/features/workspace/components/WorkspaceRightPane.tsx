@@ -1,14 +1,18 @@
+import { useState } from "react";
 import type { ReactNode } from "react";
 import { MlxModelStatusPanel } from "../../status/WorkspaceStatus.tsx";
 import type { WorkspaceStatusProps } from "../../status/WorkspaceStatus.tsx";
+import { TranscriptionDock } from "../../transcription/components/TranscriptionDock.tsx";
+import type { TranscriptionDockProps } from "../../transcription/components/TranscriptionDock.tsx";
 
 type WorkspaceRightPaneProps = WorkspaceStatusProps & {
   onHide: () => void;
   historyContent?: ReactNode;
+  transcription: TranscriptionDockProps;
 };
 
-/** A deliberately empty extension surface for future workspace tools. */
-export function WorkspaceRightPane({ onHide, historyContent, ...props }: WorkspaceRightPaneProps) {
+export function WorkspaceRightPane({ onHide, historyContent, transcription, ...props }: WorkspaceRightPaneProps) {
+  const [activeTab, setActiveTab] = useState<"history" | "transcription">("history");
   return (
     <aside className="workspace-right-pane" aria-label="Workspace tools">
       <header className="right-pane-header">
@@ -25,7 +29,13 @@ export function WorkspaceRightPane({ onHide, historyContent, ...props }: Workspa
           </svg>
         </button>
       </header>
-      <div className="right-pane-content">{historyContent}</div>
+      <div className="right-pane-tabs" role="tablist" aria-label="Workspace tools">
+        <button type="button" role="tab" aria-selected={activeTab === "history"} onClick={() => setActiveTab("history")}>History</button>
+        <button type="button" role="tab" aria-selected={activeTab === "transcription"} onClick={() => setActiveTab("transcription")}>Transcription</button>
+      </div>
+      <div className="right-pane-content" role="tabpanel" aria-label={activeTab === "history" ? "History" : "Transcription"}>
+        {activeTab === "history" ? historyContent : <TranscriptionDock {...transcription} />}
+      </div>
       <footer className="right-pane-status"><MlxModelStatusPanel {...props} /></footer>
     </aside>
   );

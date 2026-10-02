@@ -28,6 +28,7 @@ import {
 import { loadWorkspaceSessionState, parseWorkspaceSessionState, reconcileWorkspaceSessionState } from "../model/workspace-state.ts";
 import { readStorageItem, writeStorageItem } from "../../../lib/storage.ts";
 import { useBundleSetup } from "../../settings/hooks/useBundleSetup.ts";
+import { useTranscription } from "../../transcription/hooks/useTranscription.ts";
 
 function draftTitle(content: string) {
   const firstLine = content
@@ -126,6 +127,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
     initialState: initialWorkspaceState,
   });
   const observeAggregateContentRef = useRef<(documentId: string, content: string, rebasedContent?: string) => void>(() => {});
+  const openTranscriptionNoteRef = useRef<(documentId: string) => void>(() => {});
+  const transcriptionDraftFiledRef = useRef<(oldId: string, newId: string, bundleId: string) => void>(() => {});
   const mutations = useWorkspaceDocumentMutations({
     bundleId: persistenceBundleId,
     documents,
@@ -137,7 +140,37 @@ export function useWorkspaceController(): WorkspaceShellProps {
     replaceDiscoveryDocument: explorer.discovery.replaceDocument,
     observeAggregateContent: (documentId, content, rebasedContent) =>
       observeAggregateContentRef.current(documentId, content, rebasedContent),
+    onDraftFiled: (oldId, newId, bundleId) => transcriptionDraftFiledRef.current(oldId, newId, bundleId),
   });
+  const transcription = useTranscription({
+    drafts: {
+      createDraft: (content = "") => {
+        setEditorFocusRequest(null);
+        return tabs.createNewTab(undefined, content);
+      },
+      getDraftContent: (id) => documents.draftsRef.current[id] ?? documents.documentsRef.current[id]?.content,
+      getDraftDocument: (id) => documents.documentsRef.current[id],
+      updateDraftContent: (id, content) => {
+        const document = documents.documentsRef.current[id];
+        if (document) documents.changeDraftContent(document, content);
+        else documents.setDrafts((current) => ({ ...current, [id]: content }));
+      },
+      openDraft: (id) => {
+        setEditorFocusRequest(null);
+        if (isUntitledId(id)) tabs.openLocalDraft(id);
+        else openTranscriptionNoteRef.current(id);
+      },
+    },
+    setMessage,
+    sourceNoteId: (() => {
+      const activeGroup = tabs.groups.find((group) => group.id === tabs.activeGroupId);
+      const activeId = activeGroup?.activeId ?? null;
+      return activeId && !isUntitledId(activeId) ? activeId : null;
+    })(),
+    sourceBundleId: persistenceBundleId,
+  });
+  transcriptionDraftFiledRef.current = (oldId, newId, bundleId) =>
+    transcription.draftFiled(oldId, newId, bundleId);
   const autosave = useFiledDocumentAutosave({
     save: async (documentId, content, baseContent) => {
       const document = documents.documentsRef.current[documentId];
@@ -339,6 +372,9 @@ export function useWorkspaceController(): WorkspaceShellProps {
     setMessage,
     removeDiscoveryDocument: explorer.discovery.removeDocument,
   });
+  openTranscriptionNoteRef.current = (documentId) => {
+    void navigation.openDocument(documentId, 'note');
+  };
 
   const session = useWorkspaceSessionPersistence({
     initialState: initialWorkspaceState,
@@ -612,6 +648,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
 
   return {
     exportPreview: noteExport.preview,
+    transcription: { model: transcription.model, actions: transcription.actions },
     historyCheckpoint,
     historyScopeId: persistenceBundleId,
     app: {

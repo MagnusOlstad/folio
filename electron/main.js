@@ -454,5 +454,6 @@ app.on('before-quit', () => {
   ipcMain.removeAllListeners('folio:set-storage')
   ipcMain.removeAllListeners('folio:remove-storage')
   void localRuntime?.mlxService?.close?.()
+  void localRuntime?.transcriptionService?.close?.()
   localServer?.close()
 })

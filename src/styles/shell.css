@@ -172,7 +172,7 @@ button.update-badge {
 .workspace-right-pane {
   position: relative;
   display: grid;
-  grid-template-rows: var(--workspace-topbar-height) minmax(0, 1fr) auto;
+  grid-template-rows: var(--workspace-topbar-height) 38px minmax(0, 1fr) auto;
   border-left: 1px solid rgba(var(--line-rgb), 0.55);
   background: var(--surface-deep);
 }
@@ -190,6 +190,207 @@ button.update-badge {
 
 .right-pane-content {
   min-height: 0;
+  overflow: auto;
+}
+
+.right-pane-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.right-pane-tabs button {
+  flex: 1;
+  border: 0;
+  border-radius: 4px;
+  padding: 5px 7px;
+  color: var(--muted);
+  background: transparent;
+  font: 11px/1.2 ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.right-pane-tabs button[aria-selected="true"] {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.right-pane-tabs button:focus-visible,
+.transcription-dock button:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 2px;
+}
+
+.transcription-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  color: var(--text);
+  font: 12px/1.45 ui-sans-serif, system-ui, sans-serif;
+}
+
+.transcription-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 18px 12px;
+  border: 1px dashed var(--line);
+  border-radius: 7px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.transcription-dropzone.is-dragging {
+  border-color: var(--acid);
+  background: rgba(var(--acid-rgb), 0.08);
+}
+
+.transcription-dropzone strong,
+.transcription-item-heading strong {
+  color: var(--text);
+}
+
+.transcription-audio-icon {
+  color: var(--acid);
+  font-size: 22px;
+}
+
+.transcription-primary,
+.transcription-secondary,
+.transcription-item-actions button {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 6px 9px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  cursor: pointer;
+}
+
+.transcription-primary {
+  border-color: var(--acid);
+  color: var(--surface-deep);
+  background: var(--acid);
+  font-weight: 650;
+}
+
+.transcription-dock button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.transcription-model-status,
+.transcription-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid rgba(var(--line-rgb), 0.7);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.transcription-model-state {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.transcription-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.transcription-model-state.is-ready .transcription-status-dot {
+  background: var(--acid);
+}
+
+.transcription-model-status p,
+.transcription-item-error,
+.transcription-empty,
+.transcription-progress,
+.transcription-error {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.transcription-download-progress > div {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--surface-deep);
+}
+
+.transcription-download-progress > div > span {
+  display: block;
+  height: 100%;
+  background: var(--acid);
+  transition: width 160ms ease-out;
+}
+
+.transcription-download-progress small,
+.transcription-item > small {
+  color: var(--muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.transcription-subheading {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.transcription-pending {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.transcription-item-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.transcription-item-heading strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transcription-item-heading span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.transcription-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.transcription-item-actions button {
+  padding: 4px 7px;
+  font-size: 10px;
+}
+
+.transcription-error,
+.transcription-item-error {
+  color: var(--danger, #d65c58);
 }
 
 .right-pane-status {

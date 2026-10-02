@@ -10,6 +10,8 @@ import { createMarkdownDocuments } from './markdown/documents.js'
 import { createMarkdownMoves } from './markdown/moves.js'
 import { createKnowledgeIndex } from './knowledge/indexing.js'
 import { createMlxService } from './mlx/service.js'
+import { createTranscriptionStorage } from './transcription/storage.js'
+import { createTranscriptionService } from './transcription/service.js'
 import { createClassificationService } from './knowledge/classification.js'
 import { createSearchService } from './knowledge/search.js'
 import { createFilingService } from './filing/service.js'
@@ -27,11 +29,14 @@ import { registerRoutes as registerImportRoutes } from './routes/imports.js'
 import { registerRoutes as registerBackupRoutes } from './routes/backup.js'
 import { registerRoutes as registerBundleRoutes } from './routes/bundles.js'
 import { registerRoutes as registerHistoryRoutes } from './routes/history.js'
+import { registerRoutes as registerTranscriptionRoutes } from './transcription/routes.js'
 import { createBundleRuntimeManager } from './bundles/registry.js'
 
 export function createRuntime(env = process.env, sharedMlxService = null) {
   const runtime = { ...createConfig(env), ...createTextHelpers() }
   runtime.mlxService = sharedMlxService || createMlxService(runtime)
+  runtime.transcriptionStorage = createTranscriptionStorage(runtime)
+  runtime.transcriptionService = createTranscriptionService(runtime)
   Object.assign(runtime, createFileStorage(runtime))
   Object.assign(runtime, createMarkdownDocuments(runtime))
   Object.assign(runtime, createMarkdownMoves(runtime))
@@ -64,6 +69,7 @@ export async function createApp(runtime = createRuntime()) {
     }, runtime.mlxService),
   })
   const initialBundles = await manager.initialize()
+  await runtime.transcriptionService.recoverInterrupted()
   const legacyBundle = initialBundles.find((bundle) => bundle.markdownPath === runtime.bundleRoot)
   if (legacyBundle) {
     await Promise.all([
@@ -115,6 +121,7 @@ export async function createApp(runtime = createRuntime()) {
   registerExplorerRoutes(app, scopedRuntime)
   registerFileRoutes(app, scopedRuntime)
   registerHistoryRoutes(app, scopedRuntime)
+  registerTranscriptionRoutes(app, scopedRuntime)
   registerCaptureRoutes(app, scopedRuntime)
   registerConfirmationRoutes(app, scopedRuntime)
   registerAskRoutes(app, scopedRuntime)

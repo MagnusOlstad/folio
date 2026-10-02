@@ -16,6 +16,7 @@ import type { NoteExportSnapshot } from "../model/note-export.ts";
 import { NoteHistoryPanel } from "./NoteHistoryPanel.tsx";
 import { isUntitledId } from "../../../lib/workspace.ts";
 import type { SettingsCategory } from "../../settings/model/settings-category.ts";
+import type { TranscriptionDockProps } from "../../transcription/components/TranscriptionDock.tsx";
 
 type WorkspaceAppProps = WorkspaceStatusProps & {
   versionInfo: VersionInfo | null;
@@ -44,6 +45,7 @@ export type WorkspaceShellProps = {
   };
   historyCheckpoint?: { documentId: string; scopeId: string; revision: number } | null;
   historyScopeId?: string;
+  transcription: TranscriptionDockProps;
 };
 
 export function WorkspaceShell({
@@ -55,6 +57,7 @@ export function WorkspaceShell({
   layout,
   historyCheckpoint,
   historyScopeId,
+  transcription,
 }: WorkspaceShellProps) {
   const activeGroup = editor.model.groups.find((group) => group.id === editor.model.activeGroupId);
   const activeDocumentId = activeGroup?.activeId ?? null;
@@ -142,6 +145,7 @@ export function WorkspaceShell({
             {...app}
             onHide={() => layout.setRightPaneOpen(false)}
             historyContent={historyContent}
+            transcription={transcription}
           />
         ) : null}
       </section>
