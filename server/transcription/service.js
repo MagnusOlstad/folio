@@ -2,18 +2,18 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { spawn } from 'node:child_process'
 import { createSerialQueue } from '../core/queue.js'
 import { markdownFromResult, splitTranscript } from './model.js'
+import { DEFAULT_TRANSCRIPTION_MODEL_ID, TRANSCRIPTION_MODELS } from './models.js'
 import { createSessionLocks } from './locks.js'
+import { runHelper } from './helper.js'
 
 export const TRANSCRIPTION_MODEL = Object.freeze({
-  id: 'mlx-community/whisper-large-v3-turbo',
-  revision: 'a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb',
-  downloadSizeBytes: 1_610_000_000,
+  id: TRANSCRIPTION_MODELS.whisper.repository,
+  revision: TRANSCRIPTION_MODELS.whisper.revision,
+  downloadSizeBytes: TRANSCRIPTION_MODELS.whisper.downloadSizeBytes,
 })
-
-const WHISPER_REQUIRED_FILES = ['config.json', 'weights.safetensors', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'added_tokens.json', 'vocab.json', 'merges.txt', 'normalizer.json']
+const transcriptionQueues = new WeakMap()
 
 function helperPath(projectRoot, configuredPath = null) {
   if (configuredPath || process.env.FOLIO_MLX_HELPER) return configuredPath || process.env.FOLIO_MLX_HELPER
@@ -22,17 +22,18 @@ function helperPath(projectRoot, configuredPath = null) {
 }
 
 function isWhisperConfig(config) {
+  const vocabularySize = config?.n_vocab ?? config?.vocab_size
   return config && typeof config === 'object' && config.model_type === 'whisper'
-    && Number.isInteger(config.n_vocab) && config.n_vocab >= 50_000
+    && Number.isInteger(vocabularySize) && vocabularySize >= 50_000
 }
 
-async function completeSnapshot(directory) {
+async function completeSnapshot(directory, model) {
   try {
     const names = new Set(await fs.readdir(directory))
-    if (WHISPER_REQUIRED_FILES.some((name) => !names.has(name))) return false
+    if (model.requiredFiles.some((name) => !names.has(name))) return false
     const config = JSON.parse(await fs.readFile(path.join(directory, 'config.json'), 'utf8'))
     if (!isWhisperConfig(config)) return false
-    for (const name of WHISPER_REQUIRED_FILES) {
+    for (const name of model.requiredFiles) {
       const file = await fs.stat(path.join(directory, name))
       if (!file.isFile() || file.size === 0) return false
     }
@@ -40,9 +41,9 @@ async function completeSnapshot(directory) {
   } catch { return false }
 }
 
-async function installedSnapshot(cacheRoot) {
-  const directory = path.join(cacheRoot, 'models--mlx-community--whisper-large-v3-turbo', 'snapshots', TRANSCRIPTION_MODEL.revision)
-  if (!(await completeSnapshot(directory))) return null
+async function installedSnapshot(cacheRoot, model = TRANSCRIPTION_MODELS.whisper) {
+  const directory = path.join(cacheRoot, `models--${model.repository.replaceAll('/', '--')}`, 'snapshots', model.revision)
+  if (!(await completeSnapshot(directory, model))) return null
   return directory
 }
 
@@ -61,132 +62,66 @@ async function folderBytes(directory) {
   return total
 }
 
-function helperError(value, fallback) {
-  if (value && typeof value.error === 'string') return new Error(value.error)
-  if (value && typeof value.message === 'string') return new Error(value.message)
-  return new Error(fallback)
-}
-
-function runHelper({ executable, args, cacheRoot, request, signal, onEvent, timeoutMs = 30 * 60_000 }) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, HF_HUB_CACHE: cacheRoot },
-    })
-    const closed = new Promise((resolve) => child.once('close', resolve))
-    let stdout = ''
-    let stderr = ''
-    let ready = false
-    let responseMessage = null
-    let settled = false
-    let timer = setTimeout(() => finish(new Error('The local MLX transcription operation timed out.')), timeoutMs)
-    const finish = (error, value) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      signal?.removeEventListener('abort', abort)
-      if (error) {
-        child.kill('SIGTERM')
-        const shutdownTimer = setTimeout(() => child.kill('SIGKILL'), 2_000)
-        void closed.then(() => { clearTimeout(shutdownTimer); reject(error) })
-      }
-      else { child.stdin.end(); resolve(value) }
-    }
-    const abort = () => finish(Object.assign(new Error('Transcription was cancelled. Your audio file is saved and can be retried.'), { code: 'TRANSCRIPTION_CANCELLED' }))
-    if (signal?.aborted) { abort(); return }
-    signal?.addEventListener('abort', abort, { once: true })
-    child.stdout.setEncoding('utf8')
-    child.stderr.setEncoding('utf8')
-    child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-8_000) })
-    child.stdout.on('data', (chunk) => {
-      stdout += chunk
-      for (;;) {
-        const newline = stdout.indexOf('\n')
-        if (newline < 0) break
-        const line = stdout.slice(0, newline)
-        stdout = stdout.slice(newline + 1)
-        let message
-        try { message = JSON.parse(line) } catch { continue }
-        if (message.event === 'download-progress') { onEvent?.(message); continue }
-        if (message.event === 'ready') {
-          ready = true
-          onEvent?.(message)
-          if (request) child.stdin.write(`${JSON.stringify(request)}\n`)
-          else child.stdin.end()
-          continue
-        }
-        if (message.error) finish(helperError(message, 'The MLX transcription helper failed.'))
-        else if (request && message.id === request.id) {
-          responseMessage = message
-          child.stdin.end()
-          clearTimeout(timer)
-          timer = setTimeout(() => {
-            child.kill('SIGTERM')
-            timer = setTimeout(() => child.kill('SIGKILL'), 2_000)
-          }, 5_000)
-        }
-      }
-    })
-    child.once('error', (error) => finish(error))
-    child.once('close', (code, closeSignal) => {
-      if (settled) return
-      if (responseMessage) {
-        finish(code === 0 ? null : new Error(stderr.trim() || `The MLX helper exited unsuccessfully after transcription (${code ?? closeSignal}).`), responseMessage)
-        return
-      }
-      finish(code === 0 && ready && !request
-        ? null
-        : new Error(stderr.trim() || `The MLX helper exited before completing (${code ?? closeSignal}).`), code === 0 && ready && !request ? { event: 'ready' } : undefined)
-    })
-  })
-}
-
 export function createTranscriptionService(runtime) {
-  const serial = createSerialQueue()
+  const serial = runtime.mlxService
+    ? (transcriptionQueues.get(runtime.mlxService) || (() => {
+      const queue = createSerialQueue()
+      transcriptionQueues.set(runtime.mlxService, queue)
+      return queue
+    })())
+    : createSerialQueue()
   const cacheRoot = path.join(runtime.modelRoot, 'hf-cache')
   const executable = helperPath(runtime.projectRoot, runtime.mlxHelperPath)
   const active = new Map()
   const activeSummaries = new Map()
   const locks = createSessionLocks()
-  let installing = null
-  let installProgress = null
-  let installPromise = null
-  let installController = null
+  const installing = new Map()
+  const installProgress = new Map()
+  const installPromises = new Map()
+  const installControllers = new Map()
   const available = (runtime.platform ?? process.platform) === 'darwin'
     && (runtime.architecture ?? process.arch) === 'arm64'
     && Number((runtime.osRelease?.() ?? os.release()).split('.')[0]) >= 23
 
-  async function localStatus() {
+  async function localStatus(modelId) {
+    const model = TRANSCRIPTION_MODELS[modelId]
     let helperAvailable = false
     try { await fs.access(executable); helperAvailable = available } catch { /* native build has not run */ }
-    const snapshot = await installedSnapshot(cacheRoot)
-    const partialSnapshot = path.join(cacheRoot, 'models--mlx-community--whisper-large-v3-turbo', 'snapshots', TRANSCRIPTION_MODEL.revision)
-    const downloadedBytes = installing ? Math.min(TRANSCRIPTION_MODEL.downloadSizeBytes, Math.max(
-      installProgress?.downloadedBytes || 0,
+    const snapshot = await installedSnapshot(cacheRoot, model)
+    const repositoryRoot = path.join(cacheRoot, `models--${model.repository.replaceAll('/', '--')}`)
+    const partialSnapshot = path.join(repositoryRoot, 'snapshots', model.revision)
+    const currentInstallProgress = installProgress.get(modelId)
+    const downloadedBytes = installing.has(modelId) ? Math.min(model.downloadSizeBytes, Math.max(
+      currentInstallProgress?.downloadedBytes || 0,
       await folderBytes(partialSnapshot),
-      await folderBytes(path.join(cacheRoot, 'models--mlx-community--whisper-large-v3-turbo', 'blobs')),
+      await folderBytes(path.join(repositoryRoot, 'blobs')),
     )) : 0
     return {
-      model: TRANSCRIPTION_MODEL.id,
-      revision: TRANSCRIPTION_MODEL.revision,
+      model: model.repository,
+      revision: model.revision,
+      modelId,
+      modelName: model.name,
       available,
       helperAvailable,
-      modelState: snapshot ? 'ready' : installing ? 'downloading' : 'missing',
+      modelState: snapshot ? 'ready' : installing.has(modelId) ? 'downloading' : 'missing',
       downloadedBytes,
-      totalBytes: installProgress?.totalBytes || TRANSCRIPTION_MODEL.downloadSizeBytes,
-      downloadPercent: snapshot ? 100 : installing ? Math.min(99, Math.floor(downloadedBytes / (installProgress?.totalBytes || TRANSCRIPTION_MODEL.downloadSizeBytes) * 100)) : 0,
+      totalBytes: currentInstallProgress?.totalBytes || model.downloadSizeBytes,
+      downloadPercent: snapshot ? 100 : installing.has(modelId) ? Math.min(99, Math.floor(downloadedBytes / (currentInstallProgress?.totalBytes || model.downloadSizeBytes) * 100)) : 0,
       canInstall: available && helperAvailable,
       canTranscribe: available && helperAvailable && Boolean(snapshot),
-      installing: Boolean(installing),
+      installing: installing.has(modelId),
     }
   }
 
   async function status() {
-    const local = await localStatus()
+    const modelId = runtime.mlxService?.selectedTranscriptionModel
+      ? await runtime.mlxService.selectedTranscriptionModel()
+      : DEFAULT_TRANSCRIPTION_MODEL_ID
+    const local = await localStatus(modelId)
     if (!runtime.mlxService?.status) return local
     const shared = await runtime.mlxService.status()
-    const whisper = shared.models?.find((model) => model.id === 'whisper')
-    const progress = shared.downloads?.find((download) => download.id === 'whisper')?.progress
+    const whisper = shared.models?.find((model) => model.id === modelId)
+    const progress = shared.downloads?.find((download) => download.id === modelId)?.progress
     const installed = whisper?.installed ?? (local.modelState === 'ready')
     const isInstalling = Boolean(progress)
     const downloadedBytes = progress?.downloadedBytes ?? local.downloadedBytes
@@ -204,44 +139,63 @@ export function createTranscriptionService(runtime) {
     }
   }
 
-  function taskArgs(operation, modelDirectory = null) {
-    const args = ['--task', 'transcription', '--model', TRANSCRIPTION_MODEL.id,
-      '--revision', TRANSCRIPTION_MODEL.revision, '--operation', operation]
+  function taskArgs(modelId, operation, modelDirectory = null) {
+    const model = TRANSCRIPTION_MODELS[modelId]
+    const args = ['--task', 'transcription', '--model', model.repository,
+      '--revision', model.revision, '--operation', operation]
     if (modelDirectory) args.push('--model-directory', modelDirectory)
     return args
   }
 
-  async function installRaw() {
+  async function installRaw(modelId) {
+    const model = TRANSCRIPTION_MODELS[modelId]
     if (!available) throw Object.assign(new Error('Local Whisper transcription requires Folio on an Apple Silicon Mac running macOS 14 or later.'), { status: 503 })
-    if (installPromise) return installPromise
-    installProgress = null
-    installing = 'whisper'
-    installController = new AbortController()
-    installPromise = (async () => {
+    if (installPromises.has(modelId)) return installPromises.get(modelId)
+    installProgress.delete(modelId)
+    installing.set(modelId, true)
+    const installController = new AbortController()
+    installControllers.set(modelId, installController)
+    const installPromise = (async () => {
       try {
         await fs.mkdir(cacheRoot, { recursive: true })
         const runner = runtime.transcriptionInstaller || runHelper
-        await runner({ executable, args: taskArgs('install'), cacheRoot,
+        await runner({ executable, args: taskArgs(modelId, 'install'), cacheRoot,
           signal: installController.signal,
-          onEvent: (event) => { if (Number.isFinite(event.downloadedBytes) && Number.isFinite(event.totalBytes)) installProgress = event },
+          onEvent: (event) => { if (Number.isFinite(event.downloadedBytes) && Number.isFinite(event.totalBytes)) installProgress.set(modelId, event) },
         })
-        const snapshot = await installedSnapshot(cacheRoot)
+        const snapshot = await installedSnapshot(cacheRoot, model)
         if (!snapshot) throw new Error('The Whisper model download finished, but its configuration, weights, or tokenizer files are incomplete. Retry the model download.')
         return status()
-      } finally { installing = null; installPromise = null; installProgress = null; installController = null }
+      } finally {
+        installing.delete(modelId)
+        installPromises.delete(modelId)
+        installProgress.delete(modelId)
+        installControllers.delete(modelId)
+      }
     })()
+    installPromises.set(modelId, installPromise)
     return installPromise
   }
 
   async function install() {
-    if (!runtime.mlxService?.install) return installRaw()
-    await runtime.mlxService.install('whisper')
+    const modelId = runtime.mlxService?.selectedTranscriptionModel
+      ? await runtime.mlxService.selectedTranscriptionModel()
+      : DEFAULT_TRANSCRIPTION_MODEL_ID
+    if (!runtime.mlxService?.install) return installRaw(modelId)
+    await runtime.mlxService.install(modelId)
     return status()
+  }
+
+  function selectModel(id) {
+    return serial(() => runtime.mlxService.selectTranscriptionModel(id))
   }
 
   async function transcribe(id) {
     if (active.has(id)) throw Object.assign(new Error('This recording is already being transcribed.'), { status: 409 })
     locks.beginTranscription(id)
+    const selectedModelId = runtime.mlxService?.selectedTranscriptionModel
+      ? await runtime.mlxService.selectedTranscriptionModel()
+      : DEFAULT_TRANSCRIPTION_MODEL_ID
     return serial(async () => {
       try {
       if (locks.deleting.has(id)) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
@@ -250,8 +204,9 @@ export function createTranscriptionService(runtime) {
       if (!session) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
       if (session.state === 'ready') return { session, result: await runtime.transcriptionStorage.readResult(id) }
       if (active.has(id)) throw Object.assign(new Error('This recording is already being transcribed.'), { status: 409 })
-      const snapshot = await installedSnapshot(cacheRoot)
-      if (!snapshot) throw Object.assign(new Error('Download mlx-community/whisper-large-v3-turbo in the Transcription tab before starting.'), { status: 409 })
+      const selectedModel = TRANSCRIPTION_MODELS[selectedModelId]
+      const snapshot = await installedSnapshot(cacheRoot, selectedModel)
+      if (!snapshot) throw Object.assign(new Error(`Download ${selectedModel.repository} in the Transcription tab before starting.`), { status: 409 })
       if (!(await runtime.transcriptionStorage.hasRecording(session))) {
         throw Object.assign(new Error('The audio file is missing. Re-import it to continue.'), { status: 409 })
       }
@@ -265,7 +220,7 @@ export function createTranscriptionService(runtime) {
         let response
         if (runtime.transcriptionRunner) {
           const runner = runtime.transcriptionRunner
-          const runTranscription = () => runner({ executable, args: taskArgs('transcribe', snapshot), cacheRoot, request, signal: controller.signal,
+          const runTranscription = () => runner({ executable, args: taskArgs(selectedModelId, 'transcribe', snapshot), cacheRoot, request, signal: controller.signal,
             onEvent: (event) => {
               if (event.event !== 'ready') return
               const current = active.get(id)
@@ -274,14 +229,14 @@ export function createTranscriptionService(runtime) {
             timeoutMs: 6 * 60 * 60_000,
           })
           response = runtime.mlxService?.withModelActivity
-            ? await runtime.mlxService.withModelActivity('whisper', runTranscription)
+            ? await runtime.mlxService.withModelActivity(selectedModelId, runTranscription)
             : await runTranscription()
         } else if (runtime.mlxService?.transcribe) {
           active.get(id).progress = 'Loading local Whisper model…'
-          response = await runtime.mlxService.transcribe(runtime.transcriptionStorage.recordingPath(session), { signal: controller.signal })
+          response = await runtime.mlxService.transcribe(runtime.transcriptionStorage.recordingPath(session), { signal: controller.signal, modelId: selectedModelId })
           active.get(id).progress = 'Transcribing audio locally…'
         } else {
-          response = await runHelper({ executable, args: taskArgs('transcribe', snapshot), cacheRoot, request, signal: controller.signal,
+          response = await runHelper({ executable, args: taskArgs(selectedModelId, 'transcribe', snapshot), cacheRoot, request, signal: controller.signal,
             onEvent: (event) => {
               if (event.event !== 'ready') return
               const current = active.get(id)
@@ -424,45 +379,48 @@ export function createTranscriptionService(runtime) {
   }
 
   async function close() {
-    installController?.abort()
+    for (const controller of installControllers.values()) controller.abort()
     const jobs = [...active.values()]
     for (const operation of jobs) operation.controller.abort()
     const summaries = [...activeSummaries.values()]
     for (const operation of summaries) operation.controller.abort()
-    await Promise.allSettled([installPromise, ...jobs.map((job) => job.finished), ...summaries.map((job) => job.finished)].filter(Boolean))
+    await Promise.allSettled([...installPromises.values(), ...jobs.map((job) => job.finished), ...summaries.map((job) => job.finished)].filter(Boolean))
   }
 
-  runtime.mlxService?.registerExternalModel?.('whisper', {
-    snapshot: () => installedSnapshot(cacheRoot),
-    status: async () => {
-      const current = await localStatus()
-      return {
-        installed: current.modelState === 'ready',
-        loading: current.installing,
-        progress: current.installing ? {
-          downloadedBytes: current.downloadedBytes,
-          totalBytes: current.totalBytes,
-          percent: current.downloadPercent,
-          phase: current.modelState === 'ready' ? 'loading' : 'downloading',
-        } : null,
-      }
-    },
-    install: async () => {
-      await installRaw()
-      return runtime.mlxService.status()
-    },
-    remove: async () => {
-      if (installPromise || active.size) throw Object.assign(new Error('Wait for Whisper activity to finish before removing it.'), { statusCode: 409 })
-      const repositoryRoot = path.join(cacheRoot, 'models--mlx-community--whisper-large-v3-turbo')
-      await fs.rm(repositoryRoot, { recursive: true, force: true })
-      return runtime.mlxService.status()
-    },
-    close,
-  })
+  for (const model of Object.values(TRANSCRIPTION_MODELS)) {
+    runtime.mlxService?.registerExternalModel?.(model.id, {
+      snapshot: () => installedSnapshot(cacheRoot, model),
+      status: async () => {
+        const current = await localStatus(model.id)
+        return {
+          installed: current.modelState === 'ready',
+          loading: current.installing,
+          progress: current.installing ? {
+            downloadedBytes: current.downloadedBytes,
+            totalBytes: current.totalBytes,
+            percent: current.downloadPercent,
+            phase: current.modelState === 'ready' ? 'loading' : 'downloading',
+          } : null,
+        }
+      },
+      install: async () => {
+        await installRaw(model.id)
+        return runtime.mlxService.status()
+      },
+      remove: async () => {
+        if (installPromises.has(model.id) || active.size) throw Object.assign(new Error('Wait for Whisper activity to finish before removing it.'), { statusCode: 409 })
+        const repositoryRoot = path.join(cacheRoot, `models--${model.repository.replaceAll('/', '--')}`)
+        await fs.rm(repositoryRoot, { recursive: true, force: true })
+        return runtime.mlxService.status()
+      },
+      close,
+    })
+  }
 
   return {
     status,
     install,
+    selectModel,
     transcribe,
     cancel,
     updateDraftId,

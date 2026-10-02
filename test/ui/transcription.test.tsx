@@ -43,6 +43,8 @@ function actions(): TranscriptionDockActions {
 }
 
 const status = {
+  modelId: "whisper" as const,
+  modelName: "Whisper Large v3 Turbo",
   model: "mlx-community/whisper-large-v3-turbo",
   revision: "pinned",
   available: true,
@@ -90,8 +92,9 @@ describe("transcription UI", () => {
     const { container } = render(<TranscriptionDock model={model({ status, pending: [session] })} actions={dockActions} />);
     expect(screen.getByRole("button", { name: "Choose audio" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Start recording" })).toBeEnabled();
+    expect(screen.getByText("Whisper Large v3 Turbo is not installed")).toBeInTheDocument();
     expect(screen.getByText(/mlx-community\/whisper-large-v3-turbo/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Download model" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Download Whisper Large v3 Turbo" })).toBeEnabled();
     const file = new File(["local audio"], "meeting.wav", { type: "audio/wav" });
     fireEvent.drop(container.querySelector(".transcription-input-card")!, { dataTransfer: { files: { length: 1, item: () => file } } });
     expect(dockActions.importFile).toHaveBeenCalledWith(file);
@@ -100,6 +103,19 @@ describe("transcription UI", () => {
     expect(screen.getByText("Record, choose, or drop an audio file. Audio stays on this device.")).toBeInTheDocument();
     expect(container.querySelectorAll(".transcription-input-card")).toHaveLength(1);
     expect(container.querySelector(".transcription-recorder")).toBeNull();
+  });
+
+  it("reports the selected full Whisper variant and download size", () => {
+    render(<TranscriptionDock model={model({ status: {
+      ...status,
+      modelId: "whisperlarge",
+      modelName: "Whisper Large v3",
+      model: "mlx-community/whisper-large-v3",
+      totalBytes: 3_100_000_000,
+    } })} actions={actions()} />);
+    expect(screen.getByText("Whisper Large v3 is not installed")).toBeInTheDocument();
+    expect(screen.getByText(/mlx-community\/whisper-large-v3 \(about 3.1 GB\)/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download Whisper Large v3" })).toBeEnabled();
   });
 
   it("confirms deletion inline and keeps the opened Markdown note", async () => {

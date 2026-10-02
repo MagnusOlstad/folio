@@ -115,6 +115,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     association: { sourceBundleId },
     onImport: importFile,
   })
+  const transcriptionModelName = status?.modelName ?? (status?.modelId === 'whisperlarge' ? 'Whisper Large v3' : 'Whisper Large v3 Turbo')
 
   useLayoutEffect(() => { activeBundle.current = sourceBundleId }, [sourceBundleId])
   useLayoutEffect(() => { draftsRef.current = drafts }, [drafts])
@@ -185,7 +186,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
       if (activeBundle.current !== importBundle) {
         setMessage(`Saved ${file.name}. Switch back to the source workspace to transcribe it.`)
       } else {
-        setMessage(`Saved ${file.name} locally. Download Whisper if needed, then transcribe it.`)
+        setMessage(`Saved ${file.name} locally. Download ${transcriptionModelName} if needed, then transcribe it.`)
       }
       await refresh()
       setPhase('idle')
@@ -204,15 +205,15 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     busyRef.current = true
     setError('')
     setPhase('downloading')
-    setProgress('Downloading Whisper weights and tokenizer files…')
+    setProgress(`Downloading ${transcriptionModelName} weights and tokenizer files…`)
     try {
       await api<TranscriptionStatus>('/api/transcriptions/model/install', { method: 'POST' })
-      setMessage('Whisper is ready for local transcription.')
+      setMessage(`${transcriptionModelName} is ready for local transcription.`)
       await refresh()
       setPhase('idle')
       setProgress('')
     } catch (downloadError) {
-      setError(errorMessage(downloadError, 'Could not download the Whisper model.'))
+      setError(errorMessage(downloadError, `Could not download ${transcriptionModelName}.`))
       setPhase('error')
       setProgress('')
     } finally { busyRef.current = false }
@@ -237,7 +238,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     setError('')
     setActiveSession(session)
     setPhase('transcribing')
-    setProgress('Transcribing audio with local Whisper…')
+    setProgress(`Transcribing audio with ${transcriptionModelName} locally…`)
     try {
       const response = await apiForBundle<TranscriptionProcessResponse>(taskBundle, `/api/transcriptions/${encodeURIComponent(session.id)}/process`, { method: 'POST' })
       openTranscriptDraft({ ...response.session, sourceBundleId: taskBundle }, response.result)

@@ -21,7 +21,7 @@ the projection shape is deliberately fixed to the selected snapshot. MLX's
 loader converts these linear layers to 4-bit quantized modules from the
 checkpoint scales before applying their weights.
 
-The two pinned model snapshots are:
+The pinned model snapshots are:
 
 - `mlx-community/gemma-4-e4b-it-4bit` at
   `475b9088d29754a3379866cf5aeb6b41acd313c2` for generation.
@@ -32,6 +32,11 @@ The two pinned model snapshots are:
   assets come from `openai/whisper-large-v3-turbo` at
   `876622f22dcb70921aea42327501f41c5f7f3354` and are copied into the installed
   MLX snapshot so runtime loading can stay offline.
+- `mlx-community/whisper-large-v3-asr-fp16` at
+  `f4b9d561e7f1a5c0587726ff7ff03da2cc80fcf9` for full Whisper Large v3. Its
+  3.08 GB `model.safetensors` and matching tokenizer files are pinned together
+  in this repository snapshot. The native Whisper loader accepts the
+  Hugging Face config and tensor layout, so no conversion is needed.
 
 ## Build
 
@@ -72,14 +77,17 @@ DEVELOPER_DIR="/path/to/Xcode.app/Contents/Developer" npm run build:mlx
 
 The Node service starts one helper process per model with `--task generation`,
 `--task embedding`, or `--task transcription`, plus the pinned repository and
-revision. Transcription installation uses `--operation install`; it downloads
-the pinned weight and tokenizer snapshots under `HF_HUB_CACHE`, reports JSONL
-progress, and emits a ready event with the concrete installed directory. The
-transcription worker uses `--operation transcribe` and must receive that exact
-revision's `--model-directory`. It checks for `config.json`, `weights.safetensors`,
-`tokenizer.json`, `tokenizer_config.json`, `special_tokens_map.json`,
-`added_tokens.json`, `vocab.json`, `merges.txt`, and `normalizer.json` before
-loading locally.
+revision. Transcription accepts only the exact Turbo or full Large v3
+repository/revision pairs listed above; omitting both arguments retains Turbo
+as the default. Installation uses `--operation install`; it downloads the
+pinned weight and matching tokenizer snapshots under `HF_HUB_CACHE`, reports
+JSONL progress, and emits a ready event with the concrete installed directory.
+The transcription worker uses `--operation transcribe` and must receive that
+exact variant's `--model-directory`. Turbo requires `weights.safetensors` and
+its separately pinned tokenizer snapshot. Full Large v3 requires
+`model.safetensors` and the tokenizer files from its same pinned snapshot. Both
+variants are validated before loading, and transcription stays offline after
+installation.
 
 The helper reports a JSON `ready` event on stdout and then accepts one JSON
 object per stdin line. Generation requests provide a system and user message;

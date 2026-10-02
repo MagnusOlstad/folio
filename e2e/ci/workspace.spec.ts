@@ -60,15 +60,16 @@ test('opens a path-directed draft from a bundle directory context menu', async (
   }
 })
 
-test('shows controls for all five supported local models', async ({ page }) => {
+test('shows controls for all six supported local models', async ({ page }) => {
   const models = page.getByRole('region', { name: 'MLX model management' })
   await expect(models).toBeVisible()
   await expect(models.getByText(/Gemma 4/)).toBeVisible()
   await expect(models.getByText(/Qwen 3.5/)).toBeVisible()
   await expect(models.getByText(/Llama 3.2/)).toBeVisible()
   await expect(models.getByText('EmbeddingGemma', { exact: true })).toBeVisible()
-  await expect(models.getByText(/Whisper/)).toBeVisible()
-  await expect(models.locator('.mlx-model')).toHaveCount(5)
+  await expect(models.getByRole('button', { name: /Whisper Large v3 Turbo/ })).toBeVisible()
+  await expect(models.getByRole('button', { name: /Whisper Large v3$/ })).toBeVisible()
+  await expect(models.locator('.mlx-model')).toHaveCount(6)
 })
 
 test('first-open model setup opens the real model settings controls', async ({ page }) => {
@@ -81,6 +82,8 @@ test('first-open model setup opens the real model settings controls', async ({ p
   await expect(models.getByRole('radio', { name: /Qwen 3\.5 4B/ })).toBeVisible()
   await expect(models.getByRole('radio', { name: /Llama 3\.2 3B Instruct/ })).toBeVisible()
   await expect(models.getByRole('radio', { name: /Gemma 4/ })).toBeVisible()
+  await expect(models.getByRole('radio', { name: /Whisper Large v3 Turbo/ })).toBeVisible()
+  await expect(models.getByRole('radio', { name: /Whisper Large v3.*3\.1 GB/ })).toBeVisible()
   await expect(models.getByText('EmbeddingGemma', { exact: true })).toBeVisible()
   await expect(models.getByRole('radio', { name: /EmbeddingGemma/ })).toHaveCount(0)
   await expect(models.getByRole('button', { name: 'Download' }).first()).toBeDisabled()

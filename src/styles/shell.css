@@ -597,6 +597,7 @@ body.resizing-horizontal * {
 .mlx-model-llama32 { --model-color: #eba778; --blob-shape: 47% 53% 31% 69% / 60% 33% 67% 40%; }
 .mlx-model-embeddinggemma { --model-color: #a6ca7d; --blob-shape: 64% 36% 58% 42% / 41% 58% 42% 59%; }
 .mlx-model-whisper { --model-color: #87bffd; --blob-shape: 35% 65% 52% 48% / 57% 39% 61% 43%; }
+.mlx-model-whisperlarge { --model-color: #cb9bf2; --blob-shape: 57% 43% 38% 62% / 39% 62% 38% 61%; }
 
 .model-orbit {
   position: relative;

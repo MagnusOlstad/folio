@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MLX_GENERATION_MODEL } from "../../../domain/types.ts";
-import type { MlxModelId, MlxStatus, VersionInfo } from "../../../domain/types.ts";
+import type { MlxModelId, MlxStatus, MlxTranscriptionModelId, VersionInfo } from "../../../domain/types.ts";
 import { api, apiWithRetry } from "../../../lib/api.ts";
 
-type ModelAction = "install" | "load" | "unload" | "remove" | "select";
+type ModelAction = "install" | "load" | "unload" | "remove" | "select" | "select-transcription";
 
 export function useWorkspaceModels(setMessage: (message: string) => void, enabled = true) {
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
@@ -58,7 +58,8 @@ export function useWorkspaceModels(setMessage: (message: string) => void, enable
 
   async function runMlxAction(id: MlxModelId, action: ModelAction) {
     if (actionRef.current) return;
-    if (action === "select" && (id === "embeddinggemma" || id === "whisper")) return;
+    if (action === "select" && (id === "embeddinggemma" || id === "whisper" || id === "whisperlarge")) return;
+    if (action === "select-transcription" && id !== "whisper" && id !== "whisperlarge") return;
     actionRef.current = true;
     epochRef.current += 1;
     setMlxActionModel(id);
@@ -66,9 +67,11 @@ export function useWorkspaceModels(setMessage: (message: string) => void, enable
     setModelError("");
     setMessage("");
     try {
-      await api<MlxStatus>(action === "select" ? "/api/mlx/models/selection" : `/api/mlx/models/${id}/${action}`, {
-        method: action === "select" ? "PUT" : "POST",
-        ...(action === "select" ? { body: JSON.stringify({ id }) } : {}),
+      const selectionAction = action === "select" || action === "select-transcription";
+      const selectionPath = action === "select-transcription" ? "/api/mlx/models/transcription-selection" : "/api/mlx/models/selection";
+      await api<MlxStatus>(selectionAction ? selectionPath : `/api/mlx/models/${id}/${action}`, {
+        method: selectionAction ? "PUT" : "POST",
+        ...(selectionAction ? { body: JSON.stringify({ id }) } : {}),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : `Could not ${action} ${id}`;
@@ -85,15 +88,17 @@ export function useWorkspaceModels(setMessage: (message: string) => void, enable
   }
 
   const selectedAnswerModel = mlxStatus?.selectedGenerationModel || MLX_GENERATION_MODEL.id;
+  const selectedTranscriptionModel = mlxStatus?.selectedTranscriptionModel ?? "whisper";
   const selectedAnswerModelMissing = !mlxStatus?.available || !mlxStatus.helperAvailable || !mlxStatus.models.some(
     (model) => model.id === selectedAnswerModel && model.installed,
   );
   return {
-    versionInfo, setVersionInfo, selectedAnswerModel, selectedAnswerModelMissing,
+    versionInfo, setVersionInfo, selectedAnswerModel, selectedAnswerModelMissing, selectedTranscriptionModel,
     mlxStatus, setMlxStatus, mlxActionModel, mlxAction, modelError: modelError || statusError,
     installMlxModel: (id: MlxModelId) => runMlxAction(id, "install"),
     removeMlxModel: (id: MlxModelId) => runMlxAction(id, "remove"),
     selectGenerationModel: (id: MlxModelId) => runMlxAction(id, "select"),
+    selectTranscriptionModel: (id: MlxTranscriptionModelId) => runMlxAction(id, "select-transcription"),
     toggleMlxModel: (id: MlxModelId, loaded: boolean) => runMlxAction(id, loaded ? "unload" : "load"),
     refreshMlxStatus,
   };

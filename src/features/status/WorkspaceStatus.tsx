@@ -146,7 +146,7 @@ export function MlxModelStatusPanel({
             const installed = Boolean(model?.installed);
             const name = model?.name || definition.name;
             const modelState = !mlxStatus ? "Checking status"
-              : loading ? download?.phase === "downloading" || (acting && mlxAction === "install") ? "Downloading" : acting && mlxAction === "unload" ? "Unloading" : acting && mlxAction === "remove" ? "Removing" : acting && mlxAction === "select" ? "Selecting" : "Loading"
+              : loading ? download?.phase === "downloading" || (acting && mlxAction === "install") ? "Downloading" : acting && mlxAction === "unload" ? "Unloading" : acting && mlxAction === "remove" ? "Removing" : acting && (mlxAction === "select" || mlxAction === "select-transcription") ? "Selecting" : "Loading"
               : !available ? "Unavailable"
               : busy ? "In use"
               : loaded ? "Running"

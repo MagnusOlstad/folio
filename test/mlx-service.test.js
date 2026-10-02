@@ -3,7 +3,9 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import express from 'express'
 import { createMlxService } from '../server/mlx/service.js'
+import { registerRoutes } from '../server/routes/mlx.js'
 
 const helperPath = path.resolve('test/fixtures/fake-mlx-helper.js')
 const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
@@ -90,7 +92,8 @@ test('models install explicitly into their pinned snapshots and use the JSONL wo
     { id: 'qwen35', purpose: 'generation', downloadSizeBytes: 3_060_000_000, selected: false },
     { id: 'llama32', purpose: 'generation', downloadSizeBytes: 1_810_000_000, selected: false },
     { id: 'embeddinggemma', purpose: 'embeddings', downloadSizeBytes: 212_000_000, selected: false },
-    { id: 'whisper', purpose: 'transcription', downloadSizeBytes: 1_610_000_000, selected: false },
+    { id: 'whisper', purpose: 'transcription', downloadSizeBytes: 1_610_000_000, selected: true },
+    { id: 'whisperlarge', purpose: 'transcription', downloadSizeBytes: 3_090_000_000, selected: false },
   ])
 
   await assert.rejects(service.load('gemma4'), /not installed/)
@@ -263,6 +266,58 @@ test('persists generation selection and consistently launches the selected model
   assert.equal((await reopened.install('qwen35')).models.find((model) => model.id === 'qwen35').installed, true)
 })
 
+test('persists transcription selection separately and rejects models with another purpose', async (t) => {
+  const { root, service } = await fixture(t)
+  const defaultStatus = await service.status()
+  assert.equal(defaultStatus.selectedTranscriptionModel, 'whisper')
+  assert.equal(defaultStatus.models.find((model) => model.id === 'whisper').selected, true)
+  assert.equal(defaultStatus.models.find((model) => model.id === 'whisperlarge').selected, false)
+
+  const preferencePath = path.join(root, 'models', 'transcription-model.json')
+  await fs.mkdir(path.dirname(preferencePath), { recursive: true })
+  await fs.writeFile(preferencePath, '{broken')
+  assert.equal((await service.status()).selectedTranscriptionModel, 'whisper')
+  await fs.writeFile(preferencePath, JSON.stringify({ id: 'constructor' }))
+  assert.equal((await service.status()).selectedTranscriptionModel, 'whisper')
+
+  const selected = await service.selectTranscriptionModel('whisperlarge')
+  assert.equal(selected.selectedTranscriptionModel, 'whisperlarge')
+  assert.equal(selected.models.find((model) => model.id === 'whisperlarge').selected, true)
+  assert.equal(selected.models.find((model) => model.id === 'whisperlarge').installed, false)
+  assert.deepEqual(JSON.parse(await fs.readFile(preferencePath, 'utf8')), { id: 'whisperlarge' })
+  await assert.rejects(service.selectTranscriptionModel('gemma4'), { statusCode: 400 })
+  await service.close()
+
+  const reopened = createMlxService({ projectRoot: root, modelRoot: path.join(root, 'models'), mlxHelperPath: helperPath })
+  t.after(() => reopened.close())
+  assert.equal((await reopened.status()).selectedTranscriptionModel, 'whisperlarge')
+})
+
+test('transcription selection route updates shared MLX status and rejects generation models', async (t) => {
+  const { service } = await fixture(t)
+  const app = express()
+  app.use(express.json())
+  registerRoutes(app, service, null)
+  const server = app.listen(0, '127.0.0.1')
+  await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject) })
+  t.after(() => new Promise((resolve) => server.close(resolve)))
+  const address = server.address()
+  assert.ok(address && typeof address === 'object')
+  const base = `http://127.0.0.1:${address.port}`
+
+  const selection = await fetch(`${base}/api/mlx/models/transcription-selection`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'whisperlarge' }),
+  })
+  assert.equal(selection.status, 200)
+  assert.equal((await selection.json()).selectedTranscriptionModel, 'whisperlarge')
+  const status = await fetch(`${base}/api/mlx/status`)
+  assert.equal((await status.json()).models.find((model) => model.id === 'whisperlarge').selected, true)
+  const rejected = await fetch(`${base}/api/mlx/models/transcription-selection`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'gemma4' }),
+  })
+  assert.equal(rejected.status, 400)
+})
+
 test('queues cache removal until active requests finish', async (t) => {
   const { root, service } = await fixture(t)
   await service.install('llama32')
@@ -331,7 +386,7 @@ test('serializes generation and Whisper workers globally while embeddings coexis
   ])
   assert.deepEqual((await service.status()).models.find((model) => model.id === 'whisper'), {
     id: 'whisper', name: 'Whisper Large v3 Turbo', purpose: 'transcription', downloadSizeBytes: 1_610_000_000,
-    downloadSizeIsEstimate: true, selected: false, installed: true, loaded: false, loading: false, busy: false,
+    downloadSizeIsEstimate: true, selected: true, installed: true, loaded: false, loading: false, busy: false,
     requestCount: 0, memory: null,
   })
 
@@ -343,6 +398,59 @@ test('serializes generation and Whisper workers globally while embeddings coexis
   await Promise.all([slowGeneration, embedding])
   const readyEvents = (await readLog(logPath)).filter((entry) => entry.event === 'ready')
   assert.ok(readyEvents.some((entry) => entry.task === 'embedding'))
+})
+
+test('switches between Turbo and full Whisper workers while preserving embedding workers', async (t) => {
+  const { root, logPath, service } = await fixture(t)
+  const snapshots = new Map()
+  for (const id of ['whisper', 'whisperlarge']) {
+    const definition = service.modelDefinitions[id]
+    const directory = path.join(root, `${id}-snapshot`)
+    await fs.mkdir(directory, { recursive: true })
+    await Promise.all(definition.requiredFiles.map((name) => fs.writeFile(path.join(directory, name),
+      name === 'config.json' ? JSON.stringify({ model_type: 'whisper', vocab_size: 51866 }) : 'fixture')))
+    snapshots.set(id, directory)
+    service.registerExternalModel(id, {
+      snapshot: async () => directory,
+      status: async () => ({ installed: true, loading: false, progress: null }),
+    })
+  }
+  await service.install('gemma4')
+  await service.install('embeddinggemma')
+  await setControl(root, { operationDelayMs: 80 })
+  const activeTranscription = service.transcribe(path.join(root, 'meeting.wav'))
+  await waitUntil(async () => (await readLog(logPath)).some((entry) => entry.event === 'request' && entry.operation === 'transcribe'))
+  const selection = service.selectTranscriptionModel('whisperlarge')
+  await activeTranscription
+  await selection
+  const turboReady = (await readLog(logPath)).find((entry) => entry.event === 'ready' && entry.task === 'transcription')
+  assert.equal(turboReady.model, service.modelDefinitions.whisper.repository)
+
+  await service.selectTranscriptionModel('whisperlarge')
+  await service.transcribe(path.join(root, 'meeting.wav'))
+  const fullReady = (await readLog(logPath)).findLast((entry) => entry.event === 'ready' && entry.task === 'transcription')
+  assert.equal(fullReady.model, service.modelDefinitions.whisperlarge.repository)
+  assert.equal(fullReady.revision, service.modelDefinitions.whisperlarge.revision)
+  const lifecycle = await readLog(logPath)
+  const turboResponseIndex = lifecycle.findIndex((entry) => entry.event === 'response' && entry.operation === 'transcribe')
+  const turboShutdownIndex = lifecycle.findIndex((entry, index) => index > turboResponseIndex && entry.event === 'request' && entry.operation === 'shutdown')
+  const fullReadyIndex = lifecycle.findIndex((entry) => entry.event === 'ready' && entry.model === fullReady.model)
+  assert.ok(turboShutdownIndex > turboResponseIndex)
+  assert.ok(fullReadyIndex > turboShutdownIndex)
+  assertProcessExited(turboReady.pid)
+  assert.equal((await service.status()).models.find((model) => model.id === 'embeddinggemma').loaded, true)
+
+  await service.generate([{ role: 'user', content: 'Planning note.' }])
+  assertProcessExited(fullReady.pid)
+  const readyModels = (await readLog(logPath)).filter((entry) => entry.event === 'ready'
+    && entry.task !== 'embedding').map((entry) => entry.model)
+  assert.deepEqual(readyModels, [
+    service.modelDefinitions.gemma4.repository,
+    service.modelDefinitions.whisper.repository,
+    service.modelDefinitions.whisperlarge.repository,
+    service.modelDefinitions.gemma4.repository,
+  ])
+  assert.equal(snapshots.size, 2)
 })
 
 test('queues heavy model loading behind in-flight generation without overlapping processes', async (t) => {

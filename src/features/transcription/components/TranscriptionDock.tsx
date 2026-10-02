@@ -37,6 +37,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
   const busy = model.phase === 'importing' || model.phase === 'downloading' || model.phase === 'transcribing' || model.phase === 'summarizing' || model.phase === 'cancelling-summary'
   const controlsBusy = busy || recorder.phase !== 'idle' || model.deletingSessionId !== null
   const status = model.status
+  const selectedModelName = status?.modelName ?? (status?.modelId === 'whisperlarge' ? 'Whisper Large v3' : 'Whisper Large v3 Turbo')
   const canTranscribe = status?.canTranscribe === true
 
   useEffect(() => {
@@ -143,18 +144,18 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
       <div className="transcription-model-status" role="status" aria-live="polite">
         <div className={`transcription-model-state${status?.modelState === 'ready' ? ' is-ready' : ''}`}>
           <span className="transcription-status-dot" aria-hidden="true" />
-          <strong>{status?.modelState === 'ready' ? 'Whisper is ready' : status?.modelState === 'downloading' ? 'Downloading Whisper' : 'Whisper is not installed'}</strong>
+          <strong>{status?.modelState === 'ready' ? `${selectedModelName} is ready` : status?.modelState === 'downloading' ? `Downloading ${selectedModelName}` : `${selectedModelName} is not installed`}</strong>
         </div>
         {!status?.available && <p>Local transcription requires the Folio desktop app on an Apple Silicon Mac with macOS 14 or later.</p>}
         {status?.available && !status.helperAvailable && <p>Build the bundled MLX helper to enable local transcription.</p>}
         {status?.modelState === 'missing' && status.canInstall && (
           <>
-            <p>Download mlx-community/whisper-large-v3-turbo (about 1.6 GB). The model runs locally.</p>
-            <button type="button" className="transcription-secondary" onClick={actions.installModel} disabled={controlsBusy}>Download model</button>
+            <p>Download {status.model} (about {(status.totalBytes / 1_000_000_000).toFixed(1)} GB). The model runs locally.</p>
+            <button type="button" className="transcription-secondary" onClick={actions.installModel} disabled={controlsBusy}>Download {selectedModelName}</button>
           </>
         )}
         {status?.modelState === 'downloading' && (
-          <div className="transcription-download-progress" aria-label={`Whisper download ${status.downloadPercent}%`}>
+          <div className="transcription-download-progress" aria-label={`${selectedModelName} download ${status.downloadPercent}%`}>
             <div><span style={{ width: `${status.downloadPercent}%` }} /></div>
             <small>{status.downloadPercent}% · {status.downloadedBytes.toLocaleString()} of about {status.totalBytes.toLocaleString()} bytes</small>
           </div>

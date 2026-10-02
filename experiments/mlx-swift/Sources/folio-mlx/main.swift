@@ -107,10 +107,34 @@ private func writeDownloadProgress(_ progress: Progress) {
                                       totalBytes: progress.totalUnitCount))
 }
 
-private let transcriptionModelID = "mlx-community/whisper-large-v3-turbo"
-private let transcriptionRevision = "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb"
-private let whisperTokenizerModelID = "openai/whisper-large-v3-turbo"
-private let whisperTokenizerRevision = "876622f22dcb70921aea42327501f41c5f7f3354"
+private struct WhisperVariant {
+    let modelID: String
+    let revision: String
+    let tokenizerModelID: String
+    let tokenizerRevision: String
+    let modelFiles: [String]
+
+    static let turbo = WhisperVariant(
+        modelID: "mlx-community/whisper-large-v3-turbo",
+        revision: "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb",
+        tokenizerModelID: "openai/whisper-large-v3-turbo",
+        tokenizerRevision: "876622f22dcb70921aea42327501f41c5f7f3354",
+        modelFiles: ["config.json", "weights.safetensors"])
+
+    static let large = WhisperVariant(
+        modelID: "mlx-community/whisper-large-v3-asr-fp16",
+        revision: "f4b9d561e7f1a5c0587726ff7ff03da2cc80fcf9",
+        tokenizerModelID: "mlx-community/whisper-large-v3-asr-fp16",
+        tokenizerRevision: "f4b9d561e7f1a5c0587726ff7ff03da2cc80fcf9",
+        modelFiles: ["config.json", "model.safetensors"] + whisperTokenizerFiles)
+
+    static let supported = [turbo, large]
+
+    static func resolve(modelID: String, revision: String) -> WhisperVariant? {
+        supported.first { $0.modelID == modelID && $0.revision == revision }
+    }
+}
+
 private let whisperTokenizerFiles = [
     "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json",
     "added_tokens.json", "vocab.json", "merges.txt", "normalizer.json",
@@ -138,10 +162,8 @@ private func isNonEmptyFile(_ url: URL) -> Bool {
     return values.isRegularFile == true && (values.fileSize ?? 0) > 0
 }
 
-private func validateWhisperSnapshot(_ directory: URL) throws {
-    let required = ["config.json", "weights.safetensors", "tokenizer.json", "tokenizer_config.json",
-                    "special_tokens_map.json", "added_tokens.json", "vocab.json", "merges.txt",
-                    "normalizer.json"]
+private func validateWhisperSnapshot(_ directory: URL, variant: WhisperVariant) throws {
+    let required = variant.modelFiles + whisperTokenizerFiles
     let missing = required.filter { !isNonEmptyFile(directory.appendingPathComponent($0)) }
     guard missing.isEmpty else {
         throw NSError(domain: "FolioMLX", code: 21,
@@ -150,30 +172,37 @@ private func validateWhisperSnapshot(_ directory: URL) throws {
     }
 }
 
-private func installWhisperSnapshot(modelID: String, revision: String) async throws -> URL {
+private func installWhisperSnapshot(_ variant: WhisperVariant) async throws -> URL {
     let cache = localHubCache()
     let client = HubClient(cache: cache)
-    let modelRepo = try modelRepository(modelID)
-    guard modelID == transcriptionModelID, revision == transcriptionRevision else {
-        throw NSError(domain: "FolioMLX", code: 22,
-                      userInfo: [NSLocalizedDescriptionKey: "transcription installs require the pinned Whisper Turbo model and revision"])
-    }
+    let modelRepo = try modelRepository(variant.modelID)
 
     let modelDirectory = try await client.downloadSnapshot(
-        of: modelRepo, revision: revision, matching: ["config.json", "weights.safetensors"],
+        of: modelRepo, revision: variant.revision, matching: variant.modelFiles,
         progressHandler: { progress in writeDownloadProgress(progress) })
-    let expectedModelDirectory = try cache.snapshotPath(repo: modelRepo, kind: .model, commitHash: revision)
+    let expectedModelDirectory = try cache.snapshotPath(repo: modelRepo, kind: .model, commitHash: variant.revision)
     guard modelDirectory.standardizedFileURL == expectedModelDirectory.standardizedFileURL else {
         throw NSError(domain: "FolioMLX", code: 24,
                       userInfo: [NSLocalizedDescriptionKey: "HubClient returned an unexpected Whisper snapshot path"])
     }
 
-    let tokenizerRepo = try modelRepository(whisperTokenizerModelID)
-    let tokenizerDirectory = try await client.downloadSnapshot(
-        of: tokenizerRepo,
-        revision: whisperTokenizerRevision,
-        matching: whisperTokenizerFiles,
-        progressHandler: { progress in writeDownloadProgress(progress) })
+    let tokenizerDirectory: URL
+    if variant.tokenizerModelID == variant.modelID && variant.tokenizerRevision == variant.revision {
+        tokenizerDirectory = modelDirectory
+    } else {
+        let tokenizerRepo = try modelRepository(variant.tokenizerModelID)
+        tokenizerDirectory = try await client.downloadSnapshot(
+            of: tokenizerRepo,
+            revision: variant.tokenizerRevision,
+            matching: whisperTokenizerFiles,
+            progressHandler: { progress in writeDownloadProgress(progress) })
+        let expectedTokenizerDirectory = try cache.snapshotPath(
+            repo: tokenizerRepo, kind: .model, commitHash: variant.tokenizerRevision)
+        guard tokenizerDirectory.standardizedFileURL == expectedTokenizerDirectory.standardizedFileURL else {
+            throw NSError(domain: "FolioMLX", code: 24,
+                          userInfo: [NSLocalizedDescriptionKey: "HubClient returned an unexpected Whisper tokenizer snapshot path"])
+        }
+    }
 
     for name in whisperTokenizerFiles {
         let source = tokenizerDirectory.appendingPathComponent(name)
@@ -186,7 +215,7 @@ private func installWhisperSnapshot(modelID: String, revision: String) async thr
             try FileManager.default.copyItem(at: source.resolvingSymlinksInPath(), to: destination)
         }
     }
-    try validateWhisperSnapshot(modelDirectory)
+    try validateWhisperSnapshot(modelDirectory, variant: variant)
     return modelDirectory
 }
 
@@ -239,13 +268,22 @@ private struct FolioMLX {
             }
         }
 
+        var whisperVariant: WhisperVariant?
         if task == .transcription {
-            if !modelWasProvided { modelID = transcriptionModelID }
-            if !revisionWasProvided { revision = transcriptionRevision }
-            guard modelID == transcriptionModelID, revision == transcriptionRevision else {
-                throw NSError(domain: "FolioMLX", code: 6,
-                              userInfo: [NSLocalizedDescriptionKey: "transcription supports only the pinned Whisper Turbo model and revision"])
+            if !modelWasProvided && !revisionWasProvided {
+                modelID = WhisperVariant.turbo.modelID
+                revision = WhisperVariant.turbo.revision
+            } else if modelWasProvided && !revisionWasProvided,
+                      let variant = WhisperVariant.supported.first(where: { $0.modelID == modelID }) {
+                revision = variant.revision
+            } else if !modelWasProvided {
+                modelID = WhisperVariant.turbo.modelID
             }
+            guard let variant = WhisperVariant.resolve(modelID: modelID, revision: revision) else {
+                throw NSError(domain: "FolioMLX", code: 6,
+                              userInfo: [NSLocalizedDescriptionKey: "transcription requires one supported pinned Whisper model and revision pair"])
+            }
+            whisperVariant = variant
             guard operation == "install" || operation == "transcribe" else {
                 throw NSError(domain: "FolioMLX", code: 7,
                               userInfo: [NSLocalizedDescriptionKey: "transcription requires --operation install or --operation transcribe"])
@@ -256,12 +294,13 @@ private struct FolioMLX {
             }
             if operation == "transcribe", let modelDirectory {
                 let cache = localHubCache()
-                let repository = try modelRepository(modelID)
-                let expected = try cache.snapshotPath(repo: repository, kind: .model, commitHash: revision)
+                let repository = try modelRepository(variant.modelID)
+                let expected = try cache.snapshotPath(repo: repository, kind: .model, commitHash: variant.revision)
                 guard modelDirectory.standardizedFileURL == expected.standardizedFileURL else {
                     throw NSError(domain: "FolioMLX", code: 25,
-                                  userInfo: [NSLocalizedDescriptionKey: "transcription must load from the pinned HF_HUB_CACHE snapshot"])
+                                  userInfo: [NSLocalizedDescriptionKey: "transcription must load from the matching pinned HF_HUB_CACHE snapshot"])
                 }
+                try validateWhisperSnapshot(modelDirectory, variant: variant)
             }
         } else if operation != nil {
             throw NSError(domain: "FolioMLX", code: 9,
@@ -269,7 +308,8 @@ private struct FolioMLX {
         }
 
         if task == .transcription, operation == "install" {
-            let modelDirectory = try await installWhisperSnapshot(modelID: modelID, revision: revision)
+            guard let whisperVariant else { fatalError("validated transcription variant was not provided") }
+            let modelDirectory = try await installWhisperSnapshot(whisperVariant)
             writeLine(ReadyResponse(model: modelID, task: task.rawValue,
                                     modelDirectory: modelDirectory.path, memory: memoryStatus()))
             return
@@ -297,7 +337,8 @@ private struct FolioMLX {
             if task == .transcription {
                 log("Loading transcription model \(modelID)…")
                 guard let modelDirectory else { fatalError("validated transcription snapshot was not provided") }
-                try validateWhisperSnapshot(modelDirectory)
+                guard let whisperVariant else { fatalError("validated transcription variant was not provided") }
+                try validateWhisperSnapshot(modelDirectory, variant: whisperVariant)
                 whisper = try await WhisperModel.fromDirectory(modelDirectory, cache: localHubCache())
                 generator = nil
                 embedder = nil

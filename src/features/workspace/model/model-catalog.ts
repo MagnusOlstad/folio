@@ -1,11 +1,12 @@
 import type { MlxModelId, MlxStatus } from "../../../domain/types.ts";
 
-export const modelCatalog: { id: MlxModelId; name: string; gridName?: string; purpose: string; description: string; bytes: number; generation: boolean }[] = [
+export const modelCatalog: { id: MlxModelId; name: string; gridName?: string; purpose: string; description: string; bytes: number; generation: boolean; transcription?: boolean }[] = [
   { id: "gemma4", name: "Gemma 4 E4B", purpose: "Filing & Ask", description: "4-bit · about 5.2 GB", bytes: 5_180_000_000, generation: true },
   { id: "qwen35", name: "Qwen 3.5 4B", purpose: "Filing & Ask", description: "4-bit · about 3.1 GB", bytes: 3_060_000_000, generation: true },
   { id: "llama32", name: "Llama 3.2 3B Instruct", gridName: "Llama 3.2 3B", purpose: "Filing & Ask", description: "4-bit · about 1.8 GB", bytes: 1_810_000_000, generation: true },
   { id: "embeddinggemma", name: "EmbeddingGemma", purpose: "Semantic search", description: "Fixed embedding model · about 212 MB", bytes: 212_000_000, generation: false },
-  { id: "whisper", name: "Whisper", gridName: "Whisper", purpose: "Transcription", description: "Large v3 Turbo · about 1.6 GB", bytes: 1_610_000_000, generation: false },
+  { id: "whisper", name: "Whisper Large v3 Turbo", gridName: "Whisper Turbo", purpose: "Transcription", description: "Large v3 Turbo · about 1.6 GB", bytes: 1_610_000_000, generation: false, transcription: true },
+  { id: "whisperlarge", name: "Whisper Large v3", gridName: "Whisper Large v3", purpose: "Transcription", description: "Large v3 · about 3.1 GB", bytes: 3_100_000_000, generation: false, transcription: true },
 ];
 
 /** Prioritize live work, then installed models, with stable catalog ties. */

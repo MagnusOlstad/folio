@@ -20,6 +20,7 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
     filedNoteId = payload.note?.id || ''
   })
   await page.route('**/api/transcriptions/status', (route) => route.fulfill({ json: {
+    modelId: 'whisper', modelName: 'Whisper Large v3 Turbo',
     model: 'mlx-community/whisper-large-v3-turbo', revision: 'test-revision',
     available: true, helperAvailable: true, modelState: installed ? 'ready' : 'missing',
     downloadedBytes: installed ? 1_610_000_000 : 0, totalBytes: 1_610_000_000,
@@ -69,8 +70,8 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   await page.getByRole('button', { name: 'Todo List', exact: true }).click()
   await page.getByRole('tab', { name: 'Transcription' }).click()
   await expect(page.getByText(/Download mlx-community\/whisper-large-v3-turbo/)).toBeVisible()
-  await page.getByRole('button', { name: 'Download model' }).click()
-  await expect(page.getByText('Whisper is ready', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Download Whisper Large v3 Turbo' }).click()
+  await expect(page.getByText('Whisper Large v3 Turbo is ready', { exact: true })).toBeVisible()
 
   await page.getByLabel('Choose local audio file').setInputFiles({
     name: 'project-review.wav',

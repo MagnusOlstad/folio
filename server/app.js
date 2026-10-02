@@ -92,7 +92,7 @@ export async function createApp(runtime = createRuntime()) {
   app.use(express.json({ limit: '1mb' }))
   registerBundleRoutes(app, manager)
   registerBackupRoutes(app, manager)
-  registerMlxRoutes(app, runtime.mlxService, manager)
+  registerMlxRoutes(app, runtime.mlxService, manager, runtime.transcriptionService)
   app.use((request, response, next) => {
     const requestedId = request.header('x-folio-bundle') || request.header('x-folio-bundle-id') || String(request.query.bundle || '') || null
     const entry = requestedId ? manager.registry.get(requestedId) : manager.registry.list()[0] || null

@@ -8,6 +8,7 @@ import express from 'express'
 import { createTranscriptionStorage } from '../server/transcription/storage.js'
 import { createTranscriptionService, TRANSCRIPTION_MODEL } from '../server/transcription/service.js'
 import { createMlxService } from '../server/mlx/service.js'
+import { TRANSCRIPTION_MODELS } from '../server/transcription/models.js'
 import { safeAudioFilename, safeTranscriptionId, splitTranscript } from '../server/transcription/model.js'
 import { registerRoutes } from '../server/transcription/routes.js'
 
@@ -30,12 +31,12 @@ async function fixture(t) {
   return { root, runtime }
 }
 
-async function installSnapshot(runtime) {
-  const directory = path.join(runtime.modelRoot, 'hf-cache', 'models--mlx-community--whisper-large-v3-turbo', 'snapshots', TRANSCRIPTION_MODEL.revision)
+async function installSnapshot(runtime, model = TRANSCRIPTION_MODELS.whisper) {
+  const directory = path.join(runtime.modelRoot, 'hf-cache', `models--${model.repository.replaceAll('/', '--')}`, 'snapshots', model.revision)
   await fs.mkdir(directory, { recursive: true })
   const files = {
-    'config.json': JSON.stringify({ model_type: 'whisper', n_vocab: 51866 }),
-    'weights.safetensors': 'weights',
+    'config.json': JSON.stringify({ model_type: 'whisper', ...(model.id === 'whisperlarge' ? { vocab_size: 51866 } : { n_vocab: 51866 }) }),
+    [model.id === 'whisperlarge' ? 'model.safetensors' : 'weights.safetensors']: 'weights',
     'tokenizer.json': '{}',
     'tokenizer_config.json': '{}',
     'special_tokens_map.json': '{}',
@@ -43,6 +44,7 @@ async function installSnapshot(runtime) {
     'vocab.json': '{}',
     'merges.txt': 'merge',
     'normalizer.json': '{}',
+    'generation_config.json': '{}',
   }
   await Promise.all(Object.entries(files).map(([name, contents]) => fs.writeFile(path.join(directory, name), contents)))
   return directory
@@ -168,7 +170,7 @@ test('Whisper status requires its model-specific snapshot and transcribes from i
     assert.ok(args.includes('--revision'))
     assert.ok(args.includes(TRANSCRIPTION_MODEL.revision))
     assert.ok(!args.includes('--cache-directory'))
-    await fs.mkdir(path.join(runtime.modelRoot, 'hf-cache', 'models--mlx-community--whisper-large-v3-turbo', 'snapshots', TRANSCRIPTION_MODEL.revision), { recursive: true })
+    await fs.mkdir(path.join(runtime.modelRoot, 'hf-cache', `models--${TRANSCRIPTION_MODELS.whisper.repository.replaceAll('/', '--')}`, 'snapshots', TRANSCRIPTION_MODEL.revision), { recursive: true })
     return { event: 'ready' }
   }
   const runtimeStatus = async () => service.status()
@@ -187,7 +189,7 @@ test('Whisper status requires its model-specific snapshot and transcribes from i
   const session = await service.createFileSession({ fileName: 'meeting.wav', sourceBundleId: 'bundle-a', durationMs: 1250 })
   await runtime.transcriptionStorage.writeAudio(session.id, '.wav', Readable.from([Buffer.from('audio')]))
   await runtime.transcriptionStorage.writeManifest({ ...session, state: 'recorded' })
-  const directory = path.join(runtime.modelRoot, 'hf-cache', 'models--mlx-community--whisper-large-v3-turbo', 'snapshots', TRANSCRIPTION_MODEL.revision)
+  const directory = path.join(runtime.modelRoot, 'hf-cache', `models--${TRANSCRIPTION_MODELS.whisper.repository.replaceAll('/', '--')}`, 'snapshots', TRANSCRIPTION_MODEL.revision)
   runtime.transcriptionRunner = async ({ args, request }) => {
     assert.ok(args.includes('--model-directory'))
     assert.ok(args.includes(directory))
@@ -199,6 +201,86 @@ test('Whisper status requires its model-specific snapshot and transcribes from i
   assert.equal(completed.session.state, 'ready')
   assert.equal(completed.result.transcript, 'The meeting starts at ten.')
   assert.equal((await runtime.transcriptionStorage.readManifest(session.id)).sourceBundleId, 'bundle-a')
+  await service.close()
+})
+
+test('full Whisper uses its pinned HF snapshot, independent install state, and captured model choice', async (t) => {
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
+  const originalArch = Object.getOwnPropertyDescriptor(process, 'arch')
+  const originalRelease = os.release
+  Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'darwin' })
+  Object.defineProperty(process, 'arch', { ...originalArch, value: 'arm64' })
+  os.release = () => '23.0.0'
+  const { root, runtime } = await fixture(t)
+  t.after(async () => {
+    await runtime.mlxService.close()
+    Object.defineProperty(process, 'platform', originalPlatform)
+    Object.defineProperty(process, 'arch', originalArch)
+    os.release = originalRelease
+  })
+  runtime.mlxService = createMlxService({ projectRoot: root, modelRoot: runtime.modelRoot, mlxHelperPath: runtime.mlxHelperPath })
+  const full = TRANSCRIPTION_MODELS.whisperlarge
+  runtime.transcriptionInstaller = async ({ args }) => {
+    assert.ok(args.includes(full.repository))
+    assert.ok(args.includes(full.revision))
+    await installSnapshot(runtime, full)
+  }
+  const service = createTranscriptionService(runtime)
+  assert.equal((await service.status()).modelId, 'whisper')
+  await service.selectModel('whisperlarge')
+  const partialSnapshot = path.join(runtime.modelRoot, 'hf-cache', `models--${full.repository.replaceAll('/', '--')}`, 'snapshots', full.revision)
+  await fs.mkdir(partialSnapshot, { recursive: true })
+  for (const name of full.requiredFiles.filter((item) => !['model.safetensors', 'generation_config.json'].includes(item))) {
+    await fs.writeFile(path.join(partialSnapshot, name), name === 'config.json' ? JSON.stringify({ model_type: 'whisper', vocab_size: 51866 }) : 'fixture')
+  }
+  await fs.writeFile(path.join(partialSnapshot, 'weights.safetensors'), 'wrong filename')
+  assert.equal((await service.status()).modelState, 'missing')
+  await service.install()
+  assert.equal((await service.status()).modelId, 'whisperlarge')
+  assert.equal((await service.status()).canTranscribe, true)
+  const turbo = TRANSCRIPTION_MODELS.whisper
+  assert.equal((await fs.stat(path.join(runtime.modelRoot, 'hf-cache', `models--${full.repository.replaceAll('/', '--')}`, 'snapshots', full.revision))).isDirectory(), true)
+  await assert.rejects(fs.access(path.join(runtime.modelRoot, 'hf-cache', `models--${turbo.repository.replaceAll('/', '--')}`, 'snapshots', turbo.revision)), { code: 'ENOENT' })
+  const session = await service.createFileSession({ fileName: 'meeting.wav' })
+  await runtime.transcriptionStorage.writeAudio(session.id, '.wav', Readable.from([Buffer.from('audio')]))
+  await runtime.transcriptionStorage.writeManifest({ ...session, state: 'recorded' })
+  await service.selectModel('whisper')
+  await assert.rejects(service.transcribe(session.id), /Download mlx-community\/whisper-large-v3-turbo/)
+  await service.selectModel('whisperlarge')
+  const snapshot = path.join(runtime.modelRoot, 'hf-cache', `models--${full.repository.replaceAll('/', '--')}`, 'snapshots', full.revision)
+  runtime.transcriptionRunner = async ({ args, request }) => {
+    assert.ok(args.includes(full.repository))
+    assert.ok(args.includes(full.revision))
+    assert.ok(args.includes(snapshot))
+    return { id: request.id, text: 'Full model transcript.' }
+  }
+  const completed = await service.transcribe(session.id)
+  assert.equal(completed.result.transcript, 'Full model transcript.')
+
+  const queuedSessions = await Promise.all(['queued-a.wav', 'queued-b.wav'].map(async (fileName) => {
+    const queued = await service.createFileSession({ fileName })
+    await runtime.transcriptionStorage.writeAudio(queued.id, '.wav', Readable.from([Buffer.from('audio')]))
+    return runtime.transcriptionStorage.writeManifest({ ...queued, state: 'recorded' })
+  }))
+  let announceStarted
+  let finishFirst
+  let runCount = 0
+  const started = new Promise((resolve) => { announceStarted = resolve })
+  const firstGate = new Promise((resolve) => { finishFirst = resolve })
+  const capturedModels = []
+  runtime.transcriptionRunner = async ({ args, request }) => {
+    capturedModels.push(args[args.indexOf('--model') + 1])
+    if (++runCount === 1) { announceStarted(); await firstGate }
+    return { id: request.id, text: 'Captured model transcript.' }
+  }
+  const firstQueued = service.transcribe(queuedSessions[0].id)
+  await started
+  const secondQueued = service.transcribe(queuedSessions[1].id)
+  const switchAfterQueue = service.selectModel('whisper')
+  finishFirst()
+  await Promise.all([firstQueued, secondQueued, switchAfterQueue])
+  assert.deepEqual(capturedModels, [full.repository, full.repository])
+  assert.equal((await service.status()).modelId, 'whisper')
   await service.close()
 })
 

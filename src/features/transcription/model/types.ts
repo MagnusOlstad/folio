@@ -30,6 +30,8 @@ export type TranscriptionProcessResponse = { session: TranscriptionSession; resu
 export type TranscriptionStatus = {
   model: string
   revision: string
+  modelId?: 'whisper' | 'whisperlarge'
+  modelName?: string
   available: boolean
   helperAvailable: boolean
   modelState: 'ready' | 'missing' | 'downloading'

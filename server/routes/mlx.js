@@ -1,4 +1,4 @@
-export function registerRoutes(app, mlxService, manager) {
+export function registerRoutes(app, mlxService, manager, transcriptionService = null) {
   const modelActions = new Map()
   app.get('/api/mlx/status', async (_request, response, next) => {
     try { response.json(await mlxService.status()) } catch (error) { next(error) }
@@ -9,6 +9,19 @@ export function registerRoutes(app, mlxService, manager) {
     catch (error) {
       const status = Number.isInteger(error.statusCode) ? error.statusCode : 503
       response.status(status).json({ error: error.message || 'Could not select the generation model.' })
+    }
+  })
+
+  app.put('/api/mlx/models/transcription-selection', async (request, response) => {
+    try {
+      const id = String(request.body?.id || '')
+      response.json(transcriptionService?.selectModel
+        ? await transcriptionService.selectModel(id)
+        : await mlxService.selectTranscriptionModel(id))
+    }
+    catch (error) {
+      const status = Number.isInteger(error.statusCode) ? error.statusCode : 503
+      response.status(status).json({ error: error.message || 'Could not select the transcription model.' })
     }
   })
 

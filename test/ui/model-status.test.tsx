@@ -5,9 +5,10 @@ import { MlxModelStatusPanel } from "../../src/features/status/WorkspaceStatus.t
 import { useWorkspaceModels } from "../../src/features/workspace/hooks/useWorkspaceModels.ts";
 
 const status: MlxStatus = {
-  available: true, helperAvailable: true, keepAliveMs: 60_000, installing: [], downloads: [], selectedGenerationModel: "gemma4", activeModel: "whisper",
+  available: true, helperAvailable: true, keepAliveMs: 60_000, installing: [], downloads: [], selectedGenerationModel: "gemma4", selectedTranscriptionModel: "whisper", activeModel: "whisper",
   models: [
-    { id: "whisper", name: "Whisper", purpose: "transcription", downloadSizeBytes: 1_610_000_000, downloadSizeIsEstimate: true, selected: false, installed: true, loaded: true, loading: false, busy: true, requestCount: 1, memory: null },
+    { id: "whisper", name: "Whisper Large v3 Turbo", purpose: "transcription", downloadSizeBytes: 1_610_000_000, downloadSizeIsEstimate: true, selected: true, installed: true, loaded: true, loading: false, busy: true, requestCount: 1, memory: null },
+    { id: "whisperlarge", name: "Whisper Large v3", purpose: "transcription", downloadSizeBytes: 3_100_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, loading: false, memory: null },
     { id: "gemma4", name: "Gemma 4 E4B", purpose: "generation", downloadSizeBytes: 5_180_000_000, downloadSizeIsEstimate: true, selected: true, installed: true, loaded: false, memory: null },
   ],
 };
@@ -31,7 +32,7 @@ describe("model status", () => {
     expect(screen.queryByRole("button", { name: "Start Gemma 4 E4B" })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Models, active first" })).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("MLX · 1 running");
-    expect(screen.getByRole("status")).toHaveAccessibleName("MLX 1 running: Whisper (in use)");
+    expect(screen.getByRole("status")).toHaveAccessibleName("MLX 1 running: Whisper Large v3 Turbo (in use)");
     expect(screen.getByRole("alert")).toHaveTextContent("Could not stop this model");
     fireEvent.click(screen.getByRole("button", { name: "Manage", exact: true }));
     expect(open).toHaveBeenCalledWith("models");
@@ -70,7 +71,7 @@ describe("model status", () => {
 
   it("distinguishes running, stopped and missing models with text and shapes", () => {
     render(<MlxModelStatusPanel mlxStatus={{ ...status, models: status.models.map((model) => ({ ...model, busy: false, requestCount: 0 })) }} mlxActionModel={null} onInstallMlxModel={vi.fn()} onToggleMlxModel={vi.fn()} onOpenSettings={vi.fn()} />);
-    const running = screen.getByRole("button", { name: "Stop Whisper" });
+    const running = screen.getByRole("button", { name: "Stop Whisper Large v3 Turbo" });
     const stopped = screen.getByRole("button", { name: "Start Gemma 4 E4B" });
     const missing = screen.getByRole("button", { name: "Manage Qwen 3.5 4B" });
     expect(running).toHaveClass("is-loaded");
@@ -83,19 +84,20 @@ describe("model status", () => {
   });
 
   it("orders active models before stopped models and missing downloads with stable ties", () => {
+    const generationModel = status.models.find((model) => model.id === "gemma4")!;
     const loadingStatus: MlxStatus = { ...status, installing: ["qwen35"], models: [
       ...status.models,
-      { ...status.models[1], id: "llama32", name: "Llama 3.2 3B Instruct", selected: false, loaded: false, loading: true },
-      { ...status.models[1], id: "embeddinggemma", name: "EmbeddingGemma", purpose: "embeddings", selected: false, loaded: false },
-      { ...status.models[1], id: "qwen35", name: "Qwen 3.5 4B", selected: false, installed: false, loaded: false, loading: true },
+      { ...generationModel, id: "llama32", name: "Llama 3.2 3B Instruct", selected: false, loaded: false, loading: true },
+      { ...generationModel, id: "embeddinggemma", name: "EmbeddingGemma", purpose: "embeddings", selected: false, loaded: false },
+      { ...generationModel, id: "qwen35", name: "Qwen 3.5 4B", selected: false, installed: false, loaded: false, loading: true },
     ] };
     const props = { mlxStatus: loadingStatus, mlxActionModel: null, onInstallMlxModel: vi.fn(), onToggleMlxModel: vi.fn(), onOpenSettings: vi.fn() };
     const { rerender } = render(<MlxModelStatusPanel {...props} />);
     const grid = screen.getByRole("group", { name: "Models, active first" });
     const names = () => Array.from(grid.querySelectorAll("button")).map((button) => button.getAttribute("aria-label"));
-    expect(names()).toEqual(["Start Llama 3.2 3B Instruct", "Stop Whisper", "Start Gemma 4 E4B", "Start EmbeddingGemma", "Manage Qwen 3.5 4B"]);
+    expect(names()).toEqual(["Start Llama 3.2 3B Instruct", "Stop Whisper Large v3 Turbo", "Start Gemma 4 E4B", "Start EmbeddingGemma", "Manage Qwen 3.5 4B", "Manage Whisper Large v3"]);
     rerender(<MlxModelStatusPanel {...props} mlxActionModel="gemma4" mlxAction="load" />);
-    expect(names()).toEqual(["Start Gemma 4 E4B", "Start Llama 3.2 3B Instruct", "Stop Whisper", "Start EmbeddingGemma", "Manage Qwen 3.5 4B"]);
+    expect(names()).toEqual(["Start Gemma 4 E4B", "Start Llama 3.2 3B Instruct", "Stop Whisper Large v3 Turbo", "Start EmbeddingGemma", "Manage Qwen 3.5 4B", "Manage Whisper Large v3"]);
     expect(grid).toHaveAttribute("tabindex", "0");
   });
 
@@ -103,7 +105,7 @@ describe("model status", () => {
     const toggle = vi.fn();
     render(<MlxModelStatusPanel mlxStatus={status} mlxActionModel={null} onInstallMlxModel={vi.fn()} onToggleMlxModel={toggle} onOpenSettings={vi.fn()} />);
     expect(screen.getByText("1 active request")).toBeInTheDocument();
-    const whisper = screen.getByRole("button", { name: "Stop Whisper" });
+    const whisper = screen.getByRole("button", { name: "Stop Whisper Large v3 Turbo" });
     expect(whisper).toBeDisabled();
     expect(whisper).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(whisper);
@@ -115,7 +117,7 @@ describe("model status", () => {
   it("opens Models settings for unavailable models", () => {
     const open = vi.fn();
     render(<MlxModelStatusPanel mlxStatus={{ ...status, helperAvailable: false }} mlxActionModel={null} onInstallMlxModel={vi.fn()} onToggleMlxModel={vi.fn()} onOpenSettings={open} />);
-    fireEvent.click(screen.getByRole("button", { name: "Manage Whisper" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage Whisper Large v3 Turbo" }));
     expect(open).toHaveBeenCalledWith("models");
     expect(screen.queryByText("Click to load")).not.toBeInTheDocument();
   });
@@ -160,6 +162,28 @@ describe("model status", () => {
     });
     expect(reads).toBe(2);
     expect(result.current.mlxStatus?.activeModel).toBe("whisper");
+  });
+
+  it("routes transcription selection independently and falls back to Turbo for legacy status", async () => {
+    let snapshot: MlxStatus = { ...status, selectedTranscriptionModel: undefined };
+    const fetchMock = vi.fn(async (url: string, options?: RequestInit) => {
+      if (url === "/api/mlx/models/transcription-selection") {
+        const { id } = JSON.parse(String(options?.body)) as { id: MlxStatus["selectedTranscriptionModel"] };
+        snapshot = { ...snapshot, selectedTranscriptionModel: id };
+      }
+      return response(snapshot);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useWorkspaceModels(vi.fn()));
+    await act(async () => { await result.current.refreshMlxStatus(); });
+    expect(result.current.selectedTranscriptionModel).toBe("whisper");
+    await act(async () => { await result.current.selectTranscriptionModel("whisperlarge"); });
+    expect(fetchMock).toHaveBeenCalledWith("/api/mlx/models/transcription-selection", expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({ id: "whisperlarge" }),
+    }));
+    expect(result.current.selectedTranscriptionModel).toBe("whisperlarge");
+    expect(result.current.mlxStatus?.selectedGenerationModel).toBe("gemma4");
   });
 
   it("refreshes actual helper state after a failed action and locks duplicate clicks", async () => {

@@ -672,6 +672,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
         install: models.installMlxModel,
         remove: models.removeMlxModel,
         select: models.selectGenerationModel,
+        selectTranscription: models.selectTranscriptionModel,
       },
       onClose: themeSettings.closeSettings,
     },

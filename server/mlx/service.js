@@ -3,7 +3,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createMlxWorker, terminateMlxWorker } from './worker.js'
-import { findModelSnapshot, modelSnapshotRoot } from './snapshots.js'
+import { findModelSnapshot } from './snapshots.js'
+import { installationProgress } from './progress.js'
+import { TRANSCRIPTION_MODELS,
+  readTranscriptionModelPreference, writeTranscriptionModelPreference } from '../transcription/models.js'
 
 const KEEP_ALIVE_MS = 60 * 60 * 1000
 const MODEL_DEFINITIONS = Object.freeze({
@@ -27,11 +30,7 @@ const MODEL_DEFINITIONS = Object.freeze({
     repository: 'mlx-community/embeddinggemma-300m-4bit', revision: '5d9ef074df3957afc5c77127f208fddbc3c54187',
     task: 'embedding', downloadSizeBytes: 212_000_000,
   },
-  whisper: {
-    id: 'whisper', name: 'Whisper Large v3 Turbo', purpose: 'transcription',
-    repository: 'mlx-community/whisper-large-v3-turbo', revision: 'a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb',
-    task: 'transcription', downloadSizeBytes: 1_610_000_000,
-  },
+  ...TRANSCRIPTION_MODELS,
 })
 
 function helperPath(projectRoot, configuredPath = null) {
@@ -58,6 +57,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   const modelActivities = new Map()
   const externalModels = new Map()
   const externalModelAdapters = new Map()
+  let transcriptionSelectionTail = Promise.resolve()
   let heavyQueue = Promise.resolve()
   let activeHeavyModel = null
   const loadingModels = new Set()
@@ -99,7 +99,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   }
 
   function registerExternalModel(id, adapter) {
-    if (id !== 'whisper' || !adapter || !MODEL_DEFINITIONS[id]) throw new Error('Invalid external MLX model adapter.')
+    if (MODEL_DEFINITIONS[id]?.purpose !== 'transcription' || !adapter) throw new Error('Invalid external MLX model adapter.')
     if (!externalModels.has(id)) externalModels.set(id, adapter)
     const adapters = externalModelAdapters.get(id) || new Set()
     adapters.add(adapter)
@@ -129,48 +129,27 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     }, { activate: false })
   }
 
-  async function installationProgress(definition) {
-    if (!installing.has(definition.id)) return null
-    const repoRoot = path.join(cacheRoot, `models--${definition.repository.replaceAll('/', '--')}`)
-    let downloadedBytes = 0
-    const countedFiles = new Set()
-    async function countFile(entryPath) {
-      try {
-        const stat = await fs.stat(entryPath)
-        if (!stat.isFile()) return
-        const realPath = await fs.realpath(entryPath)
-        if (countedFiles.has(realPath)) return
-        countedFiles.add(realPath)
-        downloadedBytes += stat.size
-      } catch { /* an in-progress cache write may disappear between reads */ }
+  async function selectedTranscriptionModel() {
+    return readTranscriptionModelPreference(modelRoot)
+  }
+
+  async function selectTranscriptionModel(id) {
+    const definition = MODEL_DEFINITIONS[id]
+    if (!definition || definition.purpose !== 'transcription') {
+      throw Object.assign(new Error('Choose a transcription model.'), { statusCode: 400 })
     }
-    async function visitSnapshot(directory) {
-      let entries
-      try { entries = await fs.readdir(directory, { withFileTypes: true }) } catch { return }
-      await Promise.all(entries.map(async (entry) => {
-        const entryPath = path.join(directory, entry.name)
-        if (entry.isDirectory()) return visitSnapshot(entryPath)
-        if (entry.isFile() || entry.isSymbolicLink()) return countFile(entryPath)
-      }))
-    }
-    await visitSnapshot(path.join(modelSnapshotRoot(cacheRoot, definition), definition.revision))
-    let blobs = []
-    try { blobs = await fs.readdir(path.join(repoRoot, 'blobs'), { withFileTypes: true }) } catch { /* not downloaded yet */ }
-    await Promise.all(blobs.filter((entry) => entry.isFile() && entry.name.endsWith('.incomplete'))
-      .map((entry) => countFile(path.join(repoRoot, 'blobs', entry.name))))
-    const installed = await isInstalled(definition)
-    const worker = startingWorkers.get(definition.id) || workers.get(definition.id)
-    const nativeProgress = worker?.downloadProgress
-    if (nativeProgress) downloadedBytes = Math.max(downloadedBytes, nativeProgress.downloadedBytes)
-    const totalBytes = nativeProgress?.totalBytes || definition.downloadSizeBytes
-    const percent = installed ? 100 : Math.min(99, Math.floor((downloadedBytes
-      / totalBytes) * 100))
-    return {
-      downloadedBytes: Math.min(downloadedBytes, totalBytes),
-      totalBytes,
-      percent,
-      phase: installed ? 'loading' : 'downloading',
-    }
+    const previousSelection = transcriptionSelectionTail
+    let finishSelection
+    transcriptionSelectionTail = new Promise((resolve) => { finishSelection = resolve })
+    await previousSelection
+    try {
+      return await withModelActivity(id, async () => {
+        const previous = await selectedTranscriptionModel()
+        if (previous !== id) await stopModel(previous)
+        await writeTranscriptionModelPreference(modelRoot, id)
+        return status()
+      }, { activate: false })
+    } finally { finishSelection() }
   }
 
   async function isInstalled(definition) {
@@ -232,7 +211,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
       let abortStartup
       let abortTimer
       try {
-        const snapshot = id === 'whisper'
+        const snapshot = definition.purpose === 'transcription'
           ? await externalModels.get(id)?.snapshot?.()
           : await findModelSnapshot(cacheRoot, definition)
         if (closed) throw new Error('The MLX service is shutting down.')
@@ -347,7 +326,9 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   }
 
   async function status() {
-    const selected = await selectedGenerationModel()
+    const [selected, selectedTranscription] = await Promise.all([
+      selectedGenerationModel(), selectedTranscriptionModel(),
+    ])
     const models = await Promise.all(Object.values(MODEL_DEFINITIONS).map(async (definition) => {
       const external = externalModels.get(definition.id)
       const externalStatus = external?.status ? await external.status() : null
@@ -358,7 +339,8 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
         purpose: definition.purpose,
         downloadSizeBytes: definition.downloadSizeBytes,
         downloadSizeIsEstimate: true,
-        selected: definition.purpose === 'generation' && selected === definition.id,
+        selected: definition.purpose === 'generation' ? selected === definition.id
+          : definition.purpose === 'transcription' && selectedTranscription === definition.id,
         installed: externalStatus ? Boolean(externalStatus.installed) : await isInstalled(definition),
         loaded: externalStatus?.loaded ?? workers.has(definition.id),
         loading: loadingModels.has(definition.id) || starting.has(definition.id) || Boolean(externalStatus?.loading),
@@ -381,11 +363,18 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
       installing: [...new Set([...installing, ...models.filter((model) => model.loading).map((model) => model.id)])],
       models,
       selectedGenerationModel: selected,
+      selectedTranscriptionModel: selectedTranscription,
       downloads: await Promise.all([...new Set([...installing, ...models.filter((model) => model.loading).map((model) => model.id)])]
         .map(async (id) => {
           const external = externalModels.get(id)
           const externalStatus = external?.status ? await external.status() : null
-          const progress = externalStatus?.progress || await installationProgress(MODEL_DEFINITIONS[id])
+          const progress = externalStatus?.progress || await installationProgress({
+            cacheRoot,
+            definition: MODEL_DEFINITIONS[id],
+            installing: installing.has(id),
+            isInstalled,
+            worker: startingWorkers.get(id) || workers.get(id),
+          })
           return { id, progress }
         })),
     }
@@ -466,8 +455,10 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     return run('embeddinggemma', 'embed', { input }, 2 * 60_000)
   }
 
-  async function transcribe(audioPath, { signal } = {}) {
-    return run('whisper', 'transcribe', { audioPath }, 6 * 60 * 60_000, signal)
+  async function transcribe(audioPath, { signal, modelId = null } = {}) {
+    const id = modelId || await selectedTranscriptionModel()
+    if (MODEL_DEFINITIONS[id]?.purpose !== 'transcription') throw new Error('The selected MLX model cannot transcribe audio.')
+    return run(id, 'transcribe', { audioPath }, 6 * 60 * 60_000, signal)
   }
 
   async function close() {
@@ -483,6 +474,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     workers.clear()
   }
 
-  return { status, install, load, unload, remove, selectGenerationModel, selectedGenerationModel, generate, embed, transcribe, close, withModelActivity, registerExternalModel, keepAliveMs: warmKeepAliveMs,
+  return { status, install, load, unload, remove, selectGenerationModel, selectedGenerationModel,
+    selectTranscriptionModel, selectedTranscriptionModel, generate, embed, transcribe, close, withModelActivity, registerExternalModel, keepAliveMs: warmKeepAliveMs,
     modelDefinitions: MODEL_DEFINITIONS }
 }
