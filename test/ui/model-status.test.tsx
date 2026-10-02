@@ -1,5 +1,5 @@
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MlxStatus } from "../../src/domain/types.ts";
 import { MlxModelStatusPanel } from "../../src/features/status/WorkspaceStatus.tsx";
 import { useWorkspaceModels } from "../../src/features/workspace/hooks/useWorkspaceModels.ts";
@@ -13,9 +13,75 @@ const status: MlxStatus = {
 };
 const response = (body: unknown, code = 200) => new Response(JSON.stringify(body), { status: code });
 
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+beforeEach(() => { window.localStorage.removeItem("folio:model-panel-collapsed"); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); window.localStorage.removeItem("folio:model-panel-collapsed"); });
 
 describe("model status", () => {
+  it("collapses model actions, retains management and errors, and follows live running state", () => {
+    const open = vi.fn();
+    const props = { mlxStatus: status, mlxActionModel: null, modelError: "Could not stop this model", onInstallMlxModel: vi.fn(), onToggleMlxModel: vi.fn(), onOpenSettings: open };
+    const { rerender } = render(<MlxModelStatusPanel {...props} />);
+    const collapse = screen.getByRole("button", { name: "Collapse models" });
+    expect(collapse).toHaveAttribute("aria-expanded", "true");
+    const bodyId = collapse.getAttribute("aria-controls")!;
+    expect(document.getElementById(bodyId)).not.toHaveAttribute("hidden");
+    fireEvent.click(collapse);
+    expect(screen.getByRole("button", { name: "Expand models" })).toHaveAttribute("aria-expanded", "false");
+    expect(document.getElementById(bodyId)).toHaveAttribute("hidden");
+    expect(screen.queryByRole("button", { name: "Start Gemma 4 E4B" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Models, active first" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("MLX · 1 running");
+    expect(screen.getByRole("status")).toHaveAccessibleName("MLX 1 running: Whisper (in use)");
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not stop this model");
+    fireEvent.click(screen.getByRole("button", { name: "Manage", exact: true }));
+    expect(open).toHaveBeenCalledWith("models");
+    rerender(<MlxModelStatusPanel {...props} mlxStatus={{ ...status, models: status.models.map((model) => ({ ...model, loaded: false, busy: false, requestCount: 0 })) }} />);
+    expect(screen.getByRole("status")).toHaveTextContent("MLX · 0 running");
+    rerender(<MlxModelStatusPanel {...props} mlxStatus={{ ...status, helperAvailable: false }} />);
+    expect(screen.getByRole("status")).toHaveTextContent("MLX · unavailable");
+    fireEvent.click(screen.getByRole("button", { name: "Expand models" }));
+    expect(document.getElementById(bodyId)).not.toHaveAttribute("hidden");
+    expect(screen.getByRole("group", { name: "Models, active first" })).toBeInTheDocument();
+  });
+
+  it("remembers collapse across mounts without changing existing preferences", () => {
+    window.localStorage.setItem("folio:model-setup-prompt-seen", "1");
+    const props = { mlxStatus: status, mlxActionModel: null, onInstallMlxModel: vi.fn(), onToggleMlxModel: vi.fn() };
+    const { unmount } = render(<MlxModelStatusPanel {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Collapse models" }));
+    expect(window.localStorage.getItem("folio:model-panel-collapsed")).toBe("1");
+    unmount();
+    render(<MlxModelStatusPanel {...props} />);
+    expect(screen.getByRole("button", { name: "Expand models" })).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Expand models" }));
+    expect(window.localStorage.getItem("folio:model-panel-collapsed")).toBe("0");
+    expect(window.localStorage.getItem("folio:model-setup-prompt-seen")).toBe("1");
+  });
+
+  it("still expands and collapses when preference storage fails", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("Storage unavailable"); });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("Storage unavailable"); });
+    render(<MlxModelStatusPanel mlxStatus={status} mlxActionModel={null} onInstallMlxModel={vi.fn()} onToggleMlxModel={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Collapse models" }));
+    expect(screen.getByRole("status")).toHaveTextContent("1 running");
+    fireEvent.click(screen.getByRole("button", { name: "Expand models" }));
+    expect(screen.getByRole("button", { name: "Start Gemma 4 E4B" })).toBeVisible();
+  });
+
+  it("distinguishes running, stopped and missing models with text and shapes", () => {
+    render(<MlxModelStatusPanel mlxStatus={{ ...status, models: status.models.map((model) => ({ ...model, busy: false, requestCount: 0 })) }} mlxActionModel={null} onInstallMlxModel={vi.fn()} onToggleMlxModel={vi.fn()} onOpenSettings={vi.fn()} />);
+    const running = screen.getByRole("button", { name: "Stop Whisper" });
+    const stopped = screen.getByRole("button", { name: "Start Gemma 4 E4B" });
+    const missing = screen.getByRole("button", { name: "Manage Qwen 3.5 4B" });
+    expect(running).toHaveClass("is-loaded");
+    expect(running).toHaveTextContent("▶Running");
+    expect(stopped).toHaveClass("is-stopped");
+    expect(stopped).toHaveTextContent("■Stopped");
+    expect(stopped).not.toHaveClass("is-loaded");
+    expect(missing).toHaveClass("is-dormant");
+    expect(missing).toHaveTextContent("↓Not installed");
+  });
+
   it("orders active models before stopped models and missing downloads with stable ties", () => {
     const loadingStatus: MlxStatus = { ...status, installing: ["qwen35"], models: [
       ...status.models,

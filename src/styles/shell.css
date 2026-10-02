@@ -415,6 +415,13 @@ button.update-badge {
   overflow-wrap: anywhere;
 }
 
+.right-pane-status:has(.mlx-status.is-collapsed) {
+  padding: 4px 10px;
+}
+
+.right-pane-status .mlx-status.is-collapsed { gap: 0; }
+.right-pane-status .mlx-status.is-collapsed .model-status-error { padding: 4px 0; }
+
 .horizontal-resize-handle {
   position: relative;
   z-index: 6;
@@ -511,6 +518,26 @@ body.resizing-horizontal * {
   gap: 8px;
 }
 
+.model-status-controls { display: flex; flex: 0 0 auto; align-items: center; gap: 9px; }
+.model-collapse-toggle {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+.model-collapse-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.model-collapse-toggle:hover { color: var(--ink); border-color: var(--line); background: var(--surface-deep); }
+.model-status-header .model-status { min-width: 0; gap: 7px; }
+.model-status-summary { overflow: hidden; text-overflow: ellipsis; letter-spacing: .025em; }
+.mlx-model-panel-body { display: flex; flex-direction: column; width: 100%; min-width: 0; gap: 8px; }
+.mlx-model-panel-body[hidden] { display: none; }
+
 .model-manage-link,
 .mlx-model-settings-link {
   padding: 0;
@@ -553,7 +580,7 @@ body.resizing-horizontal * {
   padding: 7px 5px 8px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: linear-gradient(160deg, color-mix(in srgb, var(--model-color) 6%, var(--surface-deep)), var(--surface-deep));
+  background: var(--surface-deeper);
   color: var(--ink);
   font: inherit;
   text-align: center;
@@ -570,8 +597,8 @@ body.resizing-horizontal * {
   position: relative;
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 38px;
+  width: 44px;
+  height: 30px;
   isolation: isolate;
 }
 
@@ -579,8 +606,8 @@ body.resizing-horizontal * {
 .model-blob-core {
   position: absolute;
   display: block;
-  width: 32px;
-  height: 32px;
+  width: 25px;
+  height: 25px;
   border-radius: var(--blob-shape);
 }
 
@@ -593,26 +620,34 @@ body.resizing-horizontal * {
 }
 
 .model-blob-core {
-  width: 25px;
-  height: 27px;
+  width: 20px;
+  height: 22px;
   border: 1px solid color-mix(in srgb, var(--model-color) 40%, transparent);
   transform: rotate(30deg);
   opacity: .6;
 }
 
-.is-dormant .model-orbit { filter: saturate(.35); opacity: .45; }
-.is-loaded { border-color: color-mix(in srgb, var(--model-color) 45%, var(--line)); }
+.mlx-model.is-dormant:not(.is-working) { border-style: dashed; background: transparent; }
+.is-dormant:not(.is-working) .model-orbit { filter: grayscale(1); opacity: .35; }
+.is-stopped .model-orbit { filter: grayscale(1); opacity: .72; }
+.is-stopped .model-blob { box-shadow: inset -3px -5px 8px rgba(0, 0, 0, .18); }
+.mlx-model.is-loaded,
+.mlx-model.is-working {
+  border-color: color-mix(in srgb, var(--model-color) 65%, var(--line));
+  background: linear-gradient(145deg, color-mix(in srgb, var(--model-color) 20%, var(--surface-deep)), color-mix(in srgb, var(--model-color) 9%, var(--surface-deep)));
+}
 .is-loaded .model-blob {
   opacity: 1;
   box-shadow: 0 0 12px color-mix(in srgb, var(--model-color) 30%, transparent), inset -3px -5px 8px rgba(0, 0, 0, .16);
-  animation: model-breathe 7s ease-in-out infinite alternate;
+  animation: model-breathe 2.5s ease-in-out infinite alternate;
 }
 .is-loaded .model-blob-core { opacity: .9; }
-.is-working .model-blob-core { animation: model-orbit 4s linear infinite; }
+.is-working .model-blob-core { animation: model-orbit 1.8s linear infinite; }
 
 .mlx-model:hover:not(:disabled) { border-color: var(--model-color); }
 .mlx-model-list:focus-visible { outline: 1px solid var(--acid); outline-offset: -1px; }
 .mlx-model:focus-visible,
+.model-collapse-toggle:focus-visible,
 .model-manage-link:focus-visible,
 .mlx-model-settings-link:focus-visible { outline: 2px solid var(--acid); outline-offset: 3px; }
 .mlx-model:disabled { cursor: default; }
@@ -620,8 +655,11 @@ body.resizing-horizontal * {
 .mlx-model-heading { display: grid; width: 100%; min-width: 0; gap: 3px; }
 .mlx-model-heading strong { color: var(--ink); font-size: 10px; font-weight: 600; overflow-wrap: anywhere; line-height: 1.3; }
 .mlx-model-heading > span { color: var(--muted); font-size: 9px; line-height: 1.35; }
-.mlx-model-state { margin-top: auto; color: var(--muted); font-size: 9px; letter-spacing: .035em; }
-.mlx-model-state.online { color: color-mix(in srgb, var(--model-color) 65%, var(--ink)); }
+.mlx-model-state { display: inline-flex; align-items: center; gap: 4px; margin-top: auto; padding: 2px 5px; border: 1px solid transparent; border-radius: 4px; color: var(--muted); font-size: 9px; letter-spacing: .035em; line-height: 1.2; }
+.model-state-mark { font-size: 7px; }
+.mlx-model-state.online { border-color: color-mix(in srgb, var(--model-color) 40%, transparent); background: color-mix(in srgb, var(--model-color) 12%, var(--surface-deep)); color: var(--ink); font-weight: 600; }
+.is-stopped .mlx-model-state { border-color: var(--line); background: var(--surface-deep); color: var(--ink); }
+.is-working .mlx-model-state { color: var(--ink); }
 .mlx-model-details { display: grid; gap: 2px; color: var(--muted); font-size: 9px; line-height: 1.3; }
 .model-status-hint { margin: 0; color: var(--muted); font-size: 9px; }
 .model-status-error { margin: 0; color: var(--orange); font-size: 10px; overflow-wrap: anywhere; }
@@ -632,6 +670,7 @@ body.resizing-horizontal * {
 @keyframes model-orbit { to { transform: rotate(390deg); } }
 @media (prefers-reduced-motion: reduce) {
   .model-blob, .model-blob-core { animation: none !important; transition: none; }
+  .mlx-model { transition: none; }
 }
 
 @media (max-width: 900px) {
