@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/MagnusOlstad/folio/compare/v0.6.1...v0.7.0) (2026-10-02)
+
+
+### Features
+
+* add model settings and note refiling ([#88](https://github.com/MagnusOlstad/folio/issues/88)) ([3097983](https://github.com/MagnusOlstad/folio/commit/30979830ecd5c4b957ed00254683bef22198b6fd))
+* **filing:** improve metadata routing on mlx ([#85](https://github.com/MagnusOlstad/folio/issues/85)) ([4f47273](https://github.com/MagnusOlstad/folio/commit/4f47273979641ae86138e6f513a3b17741630a21))
+* **mlx:** replace ollama with bundled local inference ([#84](https://github.com/MagnusOlstad/folio/issues/84)) ([6ddc372](https://github.com/MagnusOlstad/folio/commit/6ddc3722bc9dd432290672b03d2b39fb832b0d3e))
+* **search:** show last edited dates in search results ([#93](https://github.com/MagnusOlstad/folio/issues/93)) ([2ce69ce](https://github.com/MagnusOlstad/folio/commit/2ce69ce9e48d8012ad3645d6cb1391ca5cda7fa0))
+* **transcription:** add recording and coordinated local models ([#95](https://github.com/MagnusOlstad/folio/issues/95)) ([ebddaa9](https://github.com/MagnusOlstad/folio/commit/ebddaa964a83a078634cbc1709d1d5462a98722c))
+* **updater:** check for app updates daily ([#91](https://github.com/MagnusOlstad/folio/issues/91)) ([28e2132](https://github.com/MagnusOlstad/folio/commit/28e213247efbacb672f2e086ff165a3b372955e5))
+
 ## [0.6.1](https://github.com/MagnusOlstad/folio/compare/v0.6.0...v0.6.1) (2026-09-30)
 
 
