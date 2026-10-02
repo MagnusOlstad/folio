@@ -14,6 +14,22 @@ async function atomicWrite(filePath, value) {
 
 export function createTranscriptionStorage(runtime) {
   const { transcriptionsRoot } = runtime
+  const deleted = new Set()
+  const mutations = new Map()
+  function assertPresent(id) {
+    if (deleted.has(id)) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
+  }
+  async function mutate(id, operation) {
+    assertPresent(id)
+    let state = mutations.get(id)
+    if (!state) { state = { count: 0, waiters: [] }; mutations.set(id, state) }
+    state.count += 1
+    try { assertPresent(id); return await operation() }
+    finally {
+      state.count -= 1
+      if (!state.count) { mutations.delete(id); state.waiters.splice(0).forEach((resolve) => resolve()) }
+    }
+  }
   function directory(id) {
     const value = transcriptionDirectory(transcriptionsRoot, id)
     if (!value) throw new Error('Invalid transcription ID.')
@@ -27,12 +43,16 @@ export function createTranscriptionStorage(runtime) {
   async function writeManifest(manifest) {
     const safe = validateManifest(manifest)
     if (!safe) throw new Error('Invalid transcription manifest.')
-    safe.updatedAt = new Date().toISOString()
-    await fs.mkdir(directory(safe.id), { recursive: true })
-    await atomicWrite(filePath(safe.id, 'session.json'), safe)
-    return safe
+    return mutate(safe.id, async () => {
+      safe.updatedAt = new Date().toISOString()
+      await fs.mkdir(directory(safe.id), { recursive: true })
+      assertPresent(safe.id)
+      await atomicWrite(filePath(safe.id, 'session.json'), safe)
+      return safe
+    })
   }
   async function readManifest(id) {
+    if (deleted.has(id)) return null
     try {
       const parsed = JSON.parse(await fs.readFile(filePath(id, 'session.json'), 'utf8'))
       return validateManifest(parsed)
@@ -45,8 +65,9 @@ export function createTranscriptionStorage(runtime) {
     const now = new Date().toISOString()
     return writeManifest({ id, state: 'queued', createdAt: now, updatedAt: now, durationMs, draftId, source: 'file', fileName, audioExtension, sourceNoteId, sourceBundleId, error: null })
   }
-  async function writeResult(id, result) { await atomicWrite(filePath(id, 'result.json'), result); return result }
+  async function writeResult(id, result) { return mutate(id, async () => { await atomicWrite(filePath(id, 'result.json'), result); return result }) }
   async function readResult(id) {
+    if (deleted.has(id)) return null
     try { return JSON.parse(await fs.readFile(filePath(id, 'result.json'), 'utf8')) }
     catch (error) { if (error.code === 'ENOENT' || error instanceof SyntaxError) return null; throw error }
   }
@@ -81,7 +102,7 @@ export function createTranscriptionStorage(runtime) {
       if (size > maxBytes) callback(Object.assign(new Error('Audio files must be 500 MB or smaller.'), { status: 413 }))
       else callback(null, chunk)
     } })
-    try {
+    return mutate(id, async () => { try {
       await fs.mkdir(directory(id), { recursive: true })
       await pipeline(source, limiter, createWriteStream(temporary, { flags: 'wx' }))
       if (!size) throw new Error('The audio file is empty.')
@@ -90,8 +111,21 @@ export function createTranscriptionStorage(runtime) {
     } catch (error) {
       await fs.rm(temporary, { force: true })
       throw error
-    }
+    } })
+  }
+  async function deleteSession(id) {
+    if (!safeTranscriptionId(id)) throw Object.assign(new Error('Invalid transcription ID.'), { status: 400 })
+    deleted.add(id)
+    const state = mutations.get(id)
+    if (state?.count) await new Promise((resolve) => state.waiters.push(resolve))
+    const original = directory(id)
+    const staged = `${original}.deleting-${crypto.randomBytes(4).toString('hex')}`
+    try {
+      await fs.rename(original, staged)
+      try { await fs.rm(staged, { recursive: true, force: true }) }
+      catch (error) { await fs.rename(staged, original).catch(() => undefined); throw error }
+    } catch (error) { deleted.delete(id); throw error }
   }
   async function hasRecording(session) { try { await fs.access(recordingPath(session)); return true } catch { return false } }
-  return { directory, filePath, recordingPath, writeManifest, readManifest, createSession, writeAudio, writeResult, readResult, listSessions, recoverInterrupted, hasRecording, retryableStates: RETRYABLE_STATES }
+  return { directory, filePath, recordingPath, writeManifest, readManifest, createSession, writeAudio, writeResult, readResult, listSessions, recoverInterrupted, hasRecording, deleteSession, retryableStates: RETRYABLE_STATES }
 }

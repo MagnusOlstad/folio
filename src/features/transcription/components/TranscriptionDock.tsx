@@ -26,12 +26,16 @@ function importedDate(session: TranscriptionSession) {
 
 export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const confirmationCancelRef = useRef<HTMLButtonElement>(null)
+  const pendingHeadingRef = useRef<HTMLDivElement>(null)
+  const lastDeletingIdRef = useRef<string | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
   const recorder = model.recording
   const recordingPhaseRef = useRef(recorder.phase)
   const stopRecordingRef = useRef(actions.stopRecording)
   const busy = model.phase === 'importing' || model.phase === 'downloading' || model.phase === 'transcribing' || model.phase === 'summarizing' || model.phase === 'cancelling-summary'
-  const controlsBusy = busy || recorder.phase !== 'idle'
+  const controlsBusy = busy || recorder.phase !== 'idle' || model.deletingSessionId !== null
   const status = model.status
   const canTranscribe = status?.canTranscribe === true
 
@@ -39,6 +43,26 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
     recordingPhaseRef.current = recorder.phase
     stopRecordingRef.current = actions.stopRecording
   }, [actions.stopRecording, recorder.phase])
+
+  useEffect(() => {
+    if (confirmingDeleteId) confirmationCancelRef.current?.focus()
+  }, [confirmingDeleteId])
+
+  useEffect(() => {
+    if (model.deletingSessionId) {
+      lastDeletingIdRef.current = model.deletingSessionId
+      return
+    }
+    const deletedId = lastDeletingIdRef.current
+    if (!deletedId) return
+    lastDeletingIdRef.current = null
+    if (!model.pending.some((session) => session.id === deletedId)) {
+      setConfirmingDeleteId(null)
+      pendingHeadingRef.current?.focus()
+    } else {
+      confirmationCancelRef.current?.focus()
+    }
+  }, [model.deletingSessionId, model.pending])
 
   useEffect(() => () => {
     if (recordingPhaseRef.current === 'recording' || recordingPhaseRef.current === 'requesting') stopRecordingRef.current()
@@ -141,13 +165,15 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
       {model.error && <p className="transcription-error" role="alert">{model.error}</p>}
 
       <div className="transcription-pending">
-        <div className="transcription-subheading">Audio and transcripts <span>{model.pending.length}</span></div>
+        <div ref={pendingHeadingRef} className="transcription-subheading" tabIndex={-1}>Audio and transcripts <span>{model.pending.length}</span></div>
         {model.pending.length === 0 ? (
           <p className="transcription-empty">Imported audio and editable transcript notes will appear here.</p>
         ) : model.pending.map((session) => {
           const processing = session.state === 'transcribing' || (busy && model.activeSession?.id === session.id && model.phase === 'transcribing')
           const summarizing = busy && model.activeSession?.id === session.id
             && (model.phase === 'summarizing' || model.phase === 'cancelling-summary')
+          const deleting = model.deletingSessionId === session.id
+          const deleteDisabled = controlsBusy || recorder.phase !== 'idle' || processing || summarizing || Boolean(model.deletingSessionId)
           return (
             <article className="transcription-item" key={session.id}>
               <div className="transcription-item-heading">
@@ -169,6 +195,17 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
                 )}
                 {processing && <button type="button" onClick={() => actions.cancel(session)}>Cancel</button>}
                 {summarizing && <button type="button" onClick={() => actions.cancel(session)} disabled={model.phase === 'cancelling-summary'}>{model.phase === 'cancelling-summary' ? 'Cancelling…' : 'Cancel summary'}</button>}
+                {confirmingDeleteId === session.id ? (
+                  <div className="transcription-delete-confirm" role="group" aria-label={`Confirm deletion of ${session.fileName || 'audio recording'}`}>
+                    <p>Delete this local audio, transcript, and summary? Any opened or saved Markdown note will be kept.</p>
+                    {deleting ? <span role="status">Deleting local session…</span> : <>
+                      <button ref={confirmationCancelRef} type="button" onClick={() => setConfirmingDeleteId(null)} disabled={deleteDisabled}>Cancel</button>
+                      <button type="button" className="transcription-delete-confirm-button" onClick={() => void actions.deleteSession(session)} disabled={deleteDisabled}>Delete recording</button>
+                    </>}
+                  </div>
+                ) : (
+                  <button type="button" className="transcription-delete-button" onClick={() => setConfirmingDeleteId(session.id)} disabled={deleteDisabled}>Delete</button>
+                )}
               </div>
             </article>
           )

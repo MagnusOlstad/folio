@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createSerialQueue } from '../core/queue.js'
 import { markdownFromResult, splitTranscript } from './model.js'
+import { createSessionLocks } from './locks.js'
 
 export const TRANSCRIPTION_MODEL = Object.freeze({
   id: 'mlx-community/whisper-large-v3-turbo',
@@ -146,6 +147,7 @@ export function createTranscriptionService(runtime) {
   const executable = helperPath(runtime.projectRoot, runtime.mlxHelperPath)
   const active = new Map()
   const activeSummaries = new Map()
+  const locks = createSessionLocks()
   let installing = null
   let installProgress = null
   let installPromise = null
@@ -238,8 +240,13 @@ export function createTranscriptionService(runtime) {
   }
 
   async function transcribe(id) {
+    if (active.has(id)) throw Object.assign(new Error('This recording is already being transcribed.'), { status: 409 })
+    locks.beginTranscription(id)
     return serial(async () => {
+      try {
+      if (locks.deleting.has(id)) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
       const session = await runtime.transcriptionStorage.readManifest(id)
+      if (locks.deleting.has(id)) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
       if (!session) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
       if (session.state === 'ready') return { session, result: await runtime.transcriptionStorage.readResult(id) }
       if (active.has(id)) throw Object.assign(new Error('This recording is already being transcribed.'), { status: 409 })
@@ -294,6 +301,7 @@ export function createTranscriptionService(runtime) {
         if (latest) await runtime.transcriptionStorage.writeManifest({ ...latest, state: 'failed', error: message })
         throw error
       } finally { active.get(id)?.finish(); active.delete(id) }
+      } finally { locks.pendingTranscriptions.delete(id) }
     })
   }
 
@@ -325,7 +333,10 @@ export function createTranscriptionService(runtime) {
   }
 
   async function summarize(id, transcript) {
+    locks.beginSummary(id)
+    try {
     const session = await runtime.transcriptionStorage.readManifest(id)
+    if (locks.deleting.has(id)) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
     if (!session) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
     if (activeSummaries.has(id)) throw Object.assign(new Error('A summary is already being generated for this audio.'), { status: 409 })
     const controller = new AbortController()
@@ -384,6 +395,7 @@ export function createTranscriptionService(runtime) {
       activeSummaries.get(id)?.finish()
       activeSummaries.delete(id)
     }
+    } finally { locks.pendingSummaries.delete(id) }
   }
 
   async function cancelSummary(id) {
@@ -402,6 +414,16 @@ export function createTranscriptionService(runtime) {
     const session = await runtime.transcriptionStorage.readManifest(id)
     if (!session) return null
     return { session, result: await runtime.transcriptionStorage.readResult(id) }
+  }
+
+  function beginUpload(id) {
+    if (active.has(id) || activeSummaries.has(id)) throw Object.assign(new Error('Wait for this transcription activity to finish before uploading audio.'), { status: 409 })
+    locks.beginUpload(id)
+  }
+  function endUpload(id) { locks.activeUploads.delete(id) }
+  async function deleteSession(id) {
+    locks.beginDelete(id, active, activeSummaries)
+    try { await runtime.transcriptionStorage.deleteSession(id) } finally { locks.deleting.delete(id) }
   }
 
   async function close() {
@@ -452,6 +474,9 @@ export function createTranscriptionService(runtime) {
     cancelSummary,
     createFileSession,
     getSession,
+    beginUpload,
+    endUpload,
+    deleteSession,
     list: runtime.transcriptionStorage.listSessions,
     recoverInterrupted: runtime.transcriptionStorage.recoverInterrupted,
     close,

@@ -60,9 +60,12 @@ export function registerRoutes(app, runtime) {
         || (extension === '.flac' && ['audio/flac', 'audio/x-flac'].includes(mediaType))
         || (extension === '.wav' && ['audio/wav', 'audio/x-wav'].includes(mediaType))
       if (!mediaTypeMatches) return response.status(415).json({ error: 'The selected file extension does not match its audio type.' })
-      await storage.writeAudio(session.id, session.audioExtension, request)
-      const updated = await storage.writeManifest({ ...session, state: 'recorded', error: null })
-      response.status(201).json({ session: updated })
+      service.beginUpload(session.id)
+      try {
+        await storage.writeAudio(session.id, session.audioExtension, request)
+        const updated = await storage.writeManifest({ ...session, state: 'recorded', error: null })
+        response.status(201).json({ session: updated })
+      } finally { service.endUpload(session.id) }
     } catch (error) { fail(response, error) }
   })
   app.get('/api/transcriptions/:id', async (request, response) => {
@@ -71,6 +74,14 @@ export function registerRoutes(app, runtime) {
       const result = await service.getSession(request.params.id)
       if (!result) return response.status(404).json({ error: 'Transcription session not found.' })
       response.json(result)
+    } catch (error) { fail(response, error) }
+  })
+  app.delete('/api/transcriptions/:id', async (request, response) => {
+    try {
+      if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
+      if (!(await storage.readManifest(request.params.id))) return response.status(404).json({ error: 'Transcription session not found.' })
+      await service.deleteSession(request.params.id)
+      response.json({ deleted: true })
     } catch (error) { fail(response, error) }
   })
   app.post('/api/transcriptions/:id/process', async (request, response) => {

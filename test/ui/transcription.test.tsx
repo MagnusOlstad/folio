@@ -20,6 +20,7 @@ function model(overrides: Partial<TranscriptionDockModel> = {}): TranscriptionDo
     status: null,
     progress: "",
     error: "",
+    deletingSessionId: null,
     recording: { phase: "idle", duration: "0:00", error: "", saving: false },
     ...overrides,
   };
@@ -37,6 +38,7 @@ function actions(): TranscriptionDockActions {
     cancel: vi.fn(),
     openTranscript: vi.fn(),
     regenerateSummary: vi.fn(),
+    deleteSession: vi.fn(async () => undefined),
   };
 }
 
@@ -92,6 +94,84 @@ describe("transcription UI", () => {
     expect(dockActions.importFile).toHaveBeenCalledWith(file);
     expect(screen.getByText("meeting.wav")).toBeInTheDocument();
     expect(screen.getByText(/Duration unavailable|1:01/)).toBeInTheDocument();
+  });
+
+  it("confirms deletion inline and keeps the opened Markdown note", async () => {
+    const dockActions = actions();
+    render(<TranscriptionDock model={model({ pending: [session] })} actions={dockActions} />);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByText(/Delete this local audio, transcript, and summary/)).toBeInTheDocument();
+    expect(screen.getByText(/Any opened or saved Markdown note will be kept/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("group", { name: /Confirm deletion/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete recording" }));
+    await waitFor(() => expect(dockActions.deleteSession).toHaveBeenCalledWith(session));
+  });
+
+  it("does not offer deletion while a session is being processed or the recorder is active", () => {
+    const dockActions = actions();
+    render(<TranscriptionDock model={model({
+      pending: [{ ...session, state: "transcribing" }],
+      recording: { phase: "recording", duration: "0:03", error: "", saving: false },
+    })} actions={dockActions} />);
+    expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
+  });
+
+  it("deletes from the session's bundle and ignores a stale refresh result", async () => {
+    let resolveSessions: ((value: TranscriptionSession[]) => void) | undefined;
+    apiMock.mockImplementation((url: string) => {
+      if (url === "/api/transcriptions/status") return status;
+      if (url === "/api/transcriptions?pending=1") return new Promise((resolve) => { resolveSessions = resolve; });
+      throw new Error(`Unexpected API request: ${url}`);
+    });
+    apiForBundleMock.mockResolvedValue({ deleted: true });
+    const setMessage = vi.fn();
+    const drafts = {
+      createDraft: vi.fn(() => "untitled:new"),
+      getDraftContent: vi.fn(() => undefined),
+      getDraftDocument: vi.fn(() => undefined),
+      updateDraftContent: vi.fn(),
+      openDraft: vi.fn(),
+    };
+    const { result } = renderHook(() => useTranscription({
+      drafts, setMessage, sourceNoteId: null, sourceBundleId: "bundle-a",
+    }));
+    await waitFor(() => expect(resolveSessions).toBeDefined());
+    await act(async () => { await result.current.actions.deleteSession(session); });
+    expect(apiForBundleMock).toHaveBeenCalledWith("bundle-a", `/api/transcriptions/${session.id}`, { method: "DELETE" });
+    await act(async () => { resolveSessions?.([session]); });
+    expect(result.current.model.pending).toEqual([]);
+    expect(setMessage).toHaveBeenCalledWith(expect.stringContaining("Markdown note you opened or saved was kept"));
+  });
+
+  it("keeps a session after DELETE fails and permits a retry", async () => {
+    apiMock.mockImplementation((url: string) => {
+      if (url === "/api/transcriptions/status") return status;
+      if (url === "/api/transcriptions?pending=1") return [session];
+      throw new Error(`Unexpected API request: ${url}`);
+    });
+    apiForBundleMock.mockRejectedValueOnce(new Error("Local storage is unavailable."))
+      .mockResolvedValueOnce({ deleted: true });
+    const drafts = {
+      createDraft: vi.fn(() => "untitled:new"),
+      getDraftContent: vi.fn(() => undefined),
+      getDraftDocument: vi.fn(() => undefined),
+      updateDraftContent: vi.fn(),
+      openDraft: vi.fn(),
+    };
+    const { result } = renderHook(() => useTranscription({
+      drafts, setMessage: vi.fn(), sourceNoteId: null, sourceBundleId: "bundle-a",
+    }));
+    await waitFor(() => expect(result.current.model.pending).toEqual([session]));
+    await act(async () => { await result.current.actions.deleteSession(session); });
+    expect(result.current.model.pending).toEqual([session]);
+    expect(result.current.model.error).toBe("Local storage is unavailable.");
+    await act(async () => { await result.current.actions.deleteSession(session); });
+    expect(result.current.model.pending).toEqual([]);
+    expect(apiForBundleMock).toHaveBeenCalledTimes(2);
   });
 
   it("records to WAV, retains failed saves for retry, and keeps the starting note association", async () => {

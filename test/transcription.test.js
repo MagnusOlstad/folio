@@ -81,6 +81,84 @@ test('binary audio upload streams through the JSON API without parsing or buffer
   assert.equal(uploadResponse.status, 201)
   assert.equal((await uploadResponse.json()).session.state, 'recorded')
   assert.deepEqual(await fs.readFile(runtime.transcriptionStorage.recordingPath(session)), audio)
+  const deletedResponse = await fetch(`${base}/api/transcriptions/${session.id}`, { method: 'DELETE' })
+  assert.equal(deletedResponse.status, 200)
+  assert.deepEqual(await deletedResponse.json(), { deleted: true })
+  assert.equal((await fetch(`${base}/api/transcriptions/${session.id}`)).status, 404)
+  assert.equal((await fetch(`${base}/api/transcriptions/not-an-id`, { method: 'DELETE' })).status, 400)
+  assert.equal((await fetch(`${base}/api/transcriptions/11111111-1111-4111-8111-111111111111`, { method: 'DELETE' })).status, 404)
+  await service.close()
+})
+
+test('deleting a session removes audio and transcript artifacts while retaining its Markdown note', async (t) => {
+  const { root, runtime } = await fixture(t)
+  const service = createTranscriptionService(runtime)
+  const notePath = path.join(root, 'notes', 'meeting.md')
+  await fs.mkdir(path.dirname(notePath), { recursive: true })
+  await fs.writeFile(notePath, '# Edited transcript note\n')
+  const session = await runtime.transcriptionStorage.createSession({
+    fileName: 'meeting.wav', sourceBundleId: 'bundle-a', draftId: 'notes/meeting.md',
+  })
+  await runtime.transcriptionStorage.writeAudio(session.id, '.wav', Readable.from([Buffer.from('audio bytes')]))
+  await runtime.transcriptionStorage.writeResult(session.id, { transcript: 'Local transcript', summary: 'Local summary' })
+  await runtime.transcriptionStorage.writeManifest({ ...session, state: 'ready' })
+  const audioPath = runtime.transcriptionStorage.recordingPath(session)
+  const resultPath = runtime.transcriptionStorage.filePath(session.id, 'result.json')
+  const manifestPath = runtime.transcriptionStorage.filePath(session.id, 'session.json')
+
+  await service.deleteSession(session.id)
+
+  for (const artifact of [audioPath, resultPath, manifestPath]) await assert.rejects(fs.access(artifact), { code: 'ENOENT' })
+  assert.deepEqual(await service.list(), [])
+  assert.equal(await fs.readFile(notePath, 'utf8'), '# Edited transcript note\n')
+  await assert.rejects(runtime.transcriptionStorage.deleteSession('../notes'), /Invalid transcription ID/)
+  assert.equal(await fs.readFile(notePath, 'utf8'), '# Edited transcript note\n')
+  await service.close()
+})
+
+test('deletion conflicts with active uploads and transcription, then succeeds after the job ends', async (t) => {
+  const { runtime } = await fixture(t)
+  await installSnapshot(runtime)
+  const service = createTranscriptionService(runtime)
+  const session = await service.createFileSession({ fileName: 'meeting.wav' })
+  await runtime.transcriptionStorage.writeAudio(session.id, '.wav', Readable.from([Buffer.from('audio')]))
+  await runtime.transcriptionStorage.writeManifest({ ...session, state: 'recorded' })
+  service.beginUpload(session.id)
+  assert.throws(() => service.beginUpload(session.id), { status: 409 })
+  await assert.rejects(service.deleteSession(session.id), { status: 409 })
+  service.endUpload(session.id)
+
+  let announceStarted
+  let finishTranscription
+  const started = new Promise((resolve) => { announceStarted = resolve })
+  runtime.transcriptionRunner = () => new Promise((resolve) => { finishTranscription = resolve; announceStarted() })
+  const processing = service.transcribe(session.id)
+  await started
+  await assert.rejects(service.deleteSession(session.id), { status: 409 })
+  finishTranscription({ text: 'The session is still protected.' })
+  await processing
+  await service.deleteSession(session.id)
+  assert.equal(await runtime.transcriptionStorage.readManifest(session.id), null)
+  await service.close()
+})
+
+test('deletion conflicts with active summary generation', async (t) => {
+  const { runtime } = await fixture(t)
+  let announceStarted
+  let finishGeneration
+  const started = new Promise((resolve) => { announceStarted = resolve })
+  runtime.mlxService = { generate: () => new Promise((resolve) => { finishGeneration = resolve; announceStarted() }) }
+  const service = createTranscriptionService(runtime)
+  const session = await service.createFileSession({ fileName: 'meeting.wav' })
+  await runtime.transcriptionStorage.writeResult(session.id, { transcript: 'Meeting transcript', summary: 'Previous summary' })
+  const summary = service.summarize(session.id, 'Meeting transcript')
+  await started
+  await assert.rejects(service.deleteSession(session.id), { status: 409 })
+  const cancelling = service.cancelSummary(session.id)
+  finishGeneration({ text: 'Discard this generated summary.' })
+  await assert.rejects(summary, /Summary cancelled/)
+  assert.equal(await cancelling, true)
+  await service.deleteSession(session.id)
   await service.close()
 })
 

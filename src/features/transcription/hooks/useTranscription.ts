@@ -19,6 +19,7 @@ export type TranscriptionDockModel = {
   status: TranscriptionStatus | null
   progress: string
   error: string
+  deletingSessionId: string | null
   recording: { phase: RecordingPhase; duration: string; error: string; saving: boolean }
 }
 
@@ -33,6 +34,7 @@ export type TranscriptionDockActions = {
   cancel: (session: TranscriptionSession) => void
   openTranscript: (session: TranscriptionSession) => void
   regenerateSummary: (session: TranscriptionSession) => void
+  deleteSession: (session: TranscriptionSession) => Promise<void>
 }
 
 type Options = {
@@ -102,8 +104,11 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
   const [status, setStatus] = useState<TranscriptionStatus | null>(null)
   const [progress, setProgress] = useState('')
   const [error, setError] = useState('')
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
   const activeBundle = useRef(sourceBundleId)
   const busyRef = useRef(false)
+  const deletingRef = useRef<string | null>(null)
+  const deletedSessionIds = useRef(new Set<string>())
   const draftsRef = useRef(drafts)
   const recorder = useAudioRecorder({
     association: { sourceNoteId, sourceBundleId },
@@ -135,7 +140,8 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
         api<SessionListResponse>('/api/transcriptions?pending=1'),
       ])
       setStatus(nextStatus)
-      setPending(sessionList(sessions).filter((session) => !session.sourceBundleId || session.sourceBundleId === activeBundle.current))
+      setPending(sessionList(sessions).filter((session) => !deletedSessionIds.current.has(session.id)
+        && (!session.sourceBundleId || session.sourceBundleId === activeBundle.current)))
     } catch { /* the rest of the workspace remains usable if the local API is starting */ }
   }
 
@@ -146,7 +152,6 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
   }, [phase, sourceBundleId])
 
   useEffect(() => {
-    setPending((sessions) => sessions.filter((session) => !session.sourceBundleId || session.sourceBundleId === sourceBundleId))
     if (activeSession?.sourceBundleId && activeSession.sourceBundleId !== sourceBundleId) {
       setActiveSession(null)
       setProgress('')
@@ -260,7 +265,7 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
   }
 
   async function transcribe(session: TranscriptionSession) {
-    if (busyRef.current) return
+    if (busyRef.current || deletingRef.current === session.id) return
     const taskBundle = session.sourceBundleId ?? null
     busyRef.current = true
     setError('')
@@ -307,6 +312,7 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
   }
 
   async function openTranscript(session: TranscriptionSession) {
+    if (deletingRef.current === session.id) return
     setError('')
     try {
       const response = await apiForBundle<TranscriptionProcessResponse>(session.sourceBundleId ?? null, `/api/transcriptions/${encodeURIComponent(session.id)}`)
@@ -315,8 +321,36 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
     } catch (openError) { setError(errorMessage(openError, 'Could not open the transcript note.')); setPhase('error') }
   }
 
+  async function deleteSession(session: TranscriptionSession) {
+    if (deletingRef.current || (busyRef.current && activeSession?.id === session.id)
+      || recorder.phase !== 'idle' || session.state === 'transcribing') return
+    deletingRef.current = session.id
+    setDeletingSessionId(session.id)
+    setError('')
+    try {
+      await apiForBundle<{ deleted: boolean }>(session.sourceBundleId ?? null,
+        `/api/transcriptions/${encodeURIComponent(session.id)}`, { method: 'DELETE' })
+      deletedSessionIds.current.add(session.id)
+      setPending((sessions) => sessions.filter((item) => item.id !== session.id))
+      if (activeSession?.id === session.id) {
+        setActiveSession(null)
+        setPhase('idle')
+        setProgress('')
+      }
+      if (activeBundle.current === (session.sourceBundleId ?? null)) {
+        setMessage('Deleted local audio, transcript, and summary. Any Markdown note you opened or saved was kept.')
+      }
+    } catch (deleteError) {
+      if (activeBundle.current === (session.sourceBundleId ?? null)) setError(errorMessage(deleteError, 'Could not delete this transcription.'))
+      await refresh()
+    } finally {
+      deletingRef.current = null
+      setDeletingSessionId(null)
+    }
+  }
+
   async function regenerateSummary(session: TranscriptionSession) {
-    if (busyRef.current) return
+    if (busyRef.current || deletingRef.current === session.id) return
     const draftId = session.draftId
     const taskBundle = session.sourceBundleId ?? null
     if (activeBundle.current !== taskBundle) return
@@ -394,10 +428,11 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
   const model: TranscriptionDockModel = {
     phase,
     activeSession,
-    pending,
+    pending: pending.filter((session) => !session.sourceBundleId || session.sourceBundleId === sourceBundleId),
     status,
     progress,
     error,
+    deletingSessionId,
     recording: { phase: recorder.phase, duration: recorder.duration, error: recorder.error, saving: recorder.saving },
   }
   const actions: TranscriptionDockActions = {
@@ -411,6 +446,7 @@ export function useTranscription({ drafts, setMessage, sourceNoteId, sourceBundl
     cancel: (session) => void cancel(session),
     openTranscript: (session) => void openTranscript(session),
     regenerateSummary: (session) => void regenerateSummary(session),
+    deleteSession,
   }
   return { model, actions, draftFiled }
 }

@@ -109,6 +109,40 @@
   overflow-wrap: anywhere;
 }
 
+.transcription-delete-button,
+.transcription-delete-confirm button {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 5px 8px;
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.transcription-delete-confirm {
+  display: flex;
+  flex-basis: 100%;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid rgba(var(--danger-rgb, 214, 92, 88), 0.5);
+  border-radius: 5px;
+  background: var(--paper);
+}
+
+.transcription-delete-confirm p {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--ink);
+  font-size: 10px;
+}
+
+.transcription-delete-confirm [role='status'] { color: var(--muted); font-size: 10px; }
+.transcription-delete-confirm .transcription-delete-confirm-button { color: var(--danger, #d65c58); }
+
 @keyframes recorder-pulse {
   50% { opacity: 0.45; }
 }

@@ -92,4 +92,20 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
     if (!response.ok()) return ''
     return (await response.json()).content
   }).toContain('Corrected: the project review is Wednesday at noon.')
+
+  await filed.getByRole('button', { name: 'Delete' }).click()
+  await expect(filed.getByText(/Any opened or saved Markdown note will be kept/)).toBeVisible()
+  await filed.getByRole('button', { name: 'Delete recording' }).click()
+  await expect(filed).toHaveCount(0)
+  await expect.poll(async () => {
+    const response = await request.get('/api/transcriptions?pending=1')
+    const sessions = await response.json()
+    return sessions.some((session: { fileName: string }) => session.fileName === 'project-review.wav')
+  }).toBe(false)
+  await expect.poll(async () => {
+    const response = await request.get(`/api/note?id=${encodeURIComponent(filedNoteId)}`, {
+      headers: { 'x-folio-bundle': sourceBundleId },
+    })
+    return response.ok() ? (await response.json()).content : ''
+  }).toContain('- The project review is Wednesday at noon.')
 })
