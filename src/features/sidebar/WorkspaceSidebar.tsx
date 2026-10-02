@@ -179,7 +179,12 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                   <span>
                     {result.type} / {Math.round(result.score * 100)}%
                   </span>
-                  <strong>{result.title}</strong>
+                  <strong>
+                    <span>{result.title}</span>
+                    {result.updatedAt && !Number.isNaN(Date.parse(result.updatedAt)) && (
+                      <time dateTime={result.updatedAt}>{formatDate(result.updatedAt)}</time>
+                    )}
+                  </strong>
                   <p>{result.snippet}</p>
                 </button>
               ))}

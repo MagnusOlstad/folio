@@ -96,6 +96,36 @@ describe("WorkspaceSidebar preview navigation", () => {
     expect(props.searchNotes).toHaveBeenCalledOnce();
   });
 
+  it("shows the indexed last-edited date after a search result title", () => {
+    const props = sidebarProps(vi.fn().mockResolvedValue(undefined));
+    props.searchResults = [{
+      ...note,
+      updatedAt: "2026-09-12T08:30:00.000Z",
+      snippet: "Match",
+      score: 1,
+    }];
+    props.formatDate = (value) => value.slice(0, 10);
+    const { container } = render(<WorkspaceSidebar {...props} />);
+
+    const title = container.querySelector(".sidebar-result strong")!;
+    expect(within(title).getByText("Preview note")).toBeInTheDocument();
+    expect(within(title).getByText("2026-09-12")).toHaveAttribute(
+      "dateTime",
+      "2026-09-12T08:30:00.000Z",
+    );
+  });
+
+  it("omits a missing or invalid search result date", () => {
+    const props = sidebarProps(vi.fn().mockResolvedValue(undefined));
+    props.searchResults = [
+      { ...note, updatedAt: "not-a-date", snippet: "Invalid date", score: 1 },
+      { ...note, id: "/notes/missing.md", title: "Missing date", snippet: "No date", score: 1 },
+    ];
+    const { container } = render(<WorkspaceSidebar {...props} />);
+
+    expect(container.querySelectorAll(".sidebar-result time")).toHaveLength(0);
+  });
+
   it("previews single-clicked Search and Recent notes and pins double-clicks", () => {
     const openDocument = vi.fn().mockResolvedValue(undefined);
     const props = sidebarProps(openDocument);
