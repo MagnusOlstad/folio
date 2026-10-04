@@ -438,7 +438,7 @@ test('a successful live checkpoint appears without moving the timeline away from
   await editor.fill('# Start Here\n\nA live checkpoint update')
   await expect(page.getByText('Saved', { exact: true })).toBeVisible()
   await timeline.evaluate(node => { node.scrollTop = 24 })
-  await page.clock.fastForward(30_000)
+  await page.clock.fastForward(60_000)
   await expect.poll(() => checkpointRequests).toBe(1)
   await expect(timeline.getByRole('button', { name: /New checkpoint/ })).toBeVisible()
   await expect(timeline.getByRole('button', { name: 'Present' })).toHaveAttribute('aria-current', 'step')

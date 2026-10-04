@@ -50,6 +50,55 @@ function noteSummary(id: string): Note {
 describe("workspace document mutations", () => {
   beforeEach(() => mockApi.mockReset());
 
+  it("omits tags for content autosaves and keeps tags on explicit document saves", async () => {
+    mockApi.mockImplementation((path?: string, options?: RequestInit) => {
+      if (path === undefined) return Promise.resolve([]);
+      if (path === "/api/note?id=%2Ftodo-list.md" && options?.method === "PATCH") {
+        const body = JSON.parse(String(options.body)) as { content: string };
+        return Promise.resolve({ ...noteDetail(body.content), oldId: "/todo-list.md", newId: "/todo-list.md", warning: null });
+      }
+      throw new Error(`Unexpected API request: ${String(path)}`);
+    });
+    const { result } = renderHook(() => {
+      const documents = useWorkspaceDocumentState({
+        expandedDirectories: new Set(),
+        expandedDirectoriesReady: false,
+        persistenceEnabled: false,
+      });
+      const [, setGroups] = useState<TabGroup[]>([]);
+      const [, setNotes] = useState<Note[]>([]);
+      const [, setFiles] = useState<BundleFile[]>([]);
+      const mutations = useWorkspaceDocumentMutations({
+        documents,
+        setGroups,
+        setNotes,
+        setFiles,
+        setMessage: vi.fn(),
+        clearDiscovery: vi.fn(),
+        replaceDiscoveryDocument: vi.fn(),
+        observeAggregateContent: vi.fn(),
+      });
+      return { documents, mutations };
+    });
+    const base = "# Todo\n- [ ] A";
+    const document = viewerDocument(base);
+    document.tags = ["existing"];
+    act(() => result.current.documents.setDocuments({ [document.id]: document }));
+
+    await act(async () => {
+      await result.current.mutations.persistDocument(document, `${base}\nAutosaved`, document.tags, true, false, base, { includeTags: false });
+    });
+    const autosaveBody = JSON.parse(String(mockApi.mock.calls[0][1]?.body)) as Record<string, unknown>;
+    expect(autosaveBody).toMatchObject({ content: `${base}\nAutosaved`, baseContent: base, refreshEmbeddings: false });
+    expect(autosaveBody).not.toHaveProperty("tags");
+
+    await act(async () => {
+      await result.current.mutations.persistDocument(document, `${base}\nTagged`, ["edited"], true, false, base);
+    });
+    const explicitSaveBody = JSON.parse(String(mockApi.mock.calls[1][1]?.body)) as Record<string, unknown>;
+    expect(explicitSaveBody.tags).toEqual(["edited"]);
+  });
+
   it("does not let a stale Todo PATCH response roll back two newer capture observations", async () => {
     let resolveOldPatch: ((value: NoteUpdateResult) => void) | undefined;
     const oldPatch = new Promise<NoteUpdateResult>((resolve) => { resolveOldPatch = resolve; });

@@ -383,6 +383,7 @@ export function useWorkspaceDocumentMutations({
     propagateError = false,
     refreshEmbeddings = true,
     baseContent = document.content,
+    options: { includeTags?: boolean } = {},
   ) {
     if (!document.deletable || !nextContent.trim()) return Promise.resolve();
     const id = document.id;
@@ -504,7 +505,7 @@ export function useWorkspaceDocumentMutations({
             body: JSON.stringify({
               content: nextContent,
               baseContent,
-              tags: nextTags,
+              ...(options.includeTags === false ? {} : { tags: nextTags }),
               refreshEmbeddings,
             }),
           },

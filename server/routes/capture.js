@@ -9,7 +9,7 @@ export function registerRoutes(app, runtime) {
     embeddingSchemaVersion, classify, openingSpecialKind, rawDocument, normalizeBundlePath, resolveBundlePath, assertNoBundleSymlinks,
     slugify, confirmationIdFor, destinationFor, availableConceptFilename, findExactConceptFile, appendConceptDocument, appendAggregateDocument, filingActor,
     conceptDocument, validTimeZone, dateKeyInTimeZone, normalizeClassification, embeddingDimension,
-    normalizeMarkdownBreaks, creationRelationships, history } = runtime
+    normalizeMarkdownBreaks, creationRelationships } = runtime
   const rawRootForRequest = typeof getRawRoot === 'function' ? getRawRoot : () => runtime.rawRoot
   const bundleRootForRequest = typeof getBundleRoot === 'function' ? getBundleRoot : () => runtime.bundleRoot
 app.post('/api/notes', async (request, response, next) => {
@@ -285,7 +285,7 @@ app.post('/api/notes', async (request, response, next) => {
       await archiveDraft(sourceDraftId, { content, filedId: createdNote.id, appended, filing: confirmation })
     }
     try {
-      await history.reconcile(`Created ${createdNote.id}`, [createdNote.id])
+      await runtime.history.reconcile(`Created ${createdNote.id}`, [createdNote.id])
     } catch (error) {
       console.error(`The note was created, but its history checkpoint failed: ${error.message}`)
       warning ||= 'The note was created, but its history checkpoint could not be saved.'

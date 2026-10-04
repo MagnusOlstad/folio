@@ -182,6 +182,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
         true,
         false,
         baseContent,
+        { includeTags: false },
       );
     },
   });

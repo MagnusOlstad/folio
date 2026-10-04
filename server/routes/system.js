@@ -6,7 +6,7 @@ export function registerRoutes(app, runtime) {
     readRecords, publicRecord, readDrafts, normalizeDraftId, draftFilePath, queueDraftMutation, readDraft,
     writeDraft, resolveBundleMarkdownPath, isMovableConceptId, queueMarkdownMutation, reindexBundle,
     relationshipIndex, recordIsStale, semanticSuggestionSummaries, removeEmptyBundleDirectories,
-    assertNoBundleSymlinks, history } = runtime
+    assertNoBundleSymlinks } = runtime
 app.get('/api/status', async (_request, response) => {
   const modelStatus = await mlxService.status()
   const records = await readRecords()
@@ -154,7 +154,7 @@ app.delete('/api/note', async (request, response, next) => {
     await reindexBundle()
     let warning = null
     try {
-      await history.reconcile(`Deleted ${id}`, [id])
+      await runtime.history.reconcile(`Deleted ${id}`, [id])
     } catch (error) {
       console.error(`The note deleted, but its history checkpoint failed: ${error.message}`)
       warning = 'The note was deleted, but its history checkpoint could not be saved.'
