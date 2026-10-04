@@ -1,4 +1,9 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useId, useLayoutEffect, useRef } from "react";
+import {
+  draftFilingGuidance,
+  filedDraftContent,
+  serializeDraft,
+} from "../../../lib/workspace.ts";
 import { LiveMarkdownEditor } from "./LiveMarkdownEditor.tsx";
 
 type DraftMarkdownEditorProps = {
@@ -14,14 +19,7 @@ type DraftMarkdownEditorProps = {
   onSelectionChange?: (from: number, to: number) => void;
 };
 
-const steeringPlaceholder =
-  "Optional: steer the title or path here. Press Enter to let the agent decide.";
-
-/**
- * Keeps the untitled-note steering affordance around the same editor used for
- * filed notes. The first source line remains in the dark steering band while
- * all inactive lines receive the live Markdown treatment.
- */
+/** Keeps the filing guidance separate from the continuously mounted note editor. */
 export function DraftMarkdownEditor({
   value,
   onChange,
@@ -34,59 +32,116 @@ export function DraftMarkdownEditor({
   initialSelection,
   onSelectionChange,
 }: DraftMarkdownEditorProps) {
+  const hasSerializedGuidance = value.includes("\n");
+  const serializedGuidance = draftFilingGuidance(value);
+  const body = filedDraftContent(value);
+  const serializedOffset = hasSerializedGuidance ? serializedGuidance.length + 1 : 0;
+  const lineOffset = hasSerializedGuidance ? 1 : 0;
+  const id = useId();
   const shellRef = useRef<HTMLDivElement>(null);
-  const measureRef = useRef<HTMLDivElement>(null);
-  const [steeringHeight, setSteeringHeight] = useState(0);
-  const firstLine = value.split("\n", 1)[0];
-  const selection = initialSelection ?? (firstLine.startsWith("path: ")
-    ? { from: firstLine.length + 1, to: firstLine.length + 1 }
-    : undefined);
-  const measuredFirstLine = firstLine || (!value ? steeringPlaceholder : " ");
+  const guidanceInputRef = useRef<HTMLTextAreaElement>(null);
+  const noteSelectionRef = useRef({
+    from: Math.max(0, (initialSelection?.from ?? serializedOffset) - serializedOffset),
+    to: Math.max(0, (initialSelection?.to ?? serializedOffset) - serializedOffset),
+  });
 
   useLayoutEffect(() => {
-    const shell = shellRef.current;
-    const measure = measureRef.current;
-    if (!shell || !measure) return;
-    const updateHeight = () =>
-      setSteeringHeight(Math.ceil(measure.getBoundingClientRect().height));
-    updateHeight();
-    const observer = new ResizeObserver(updateHeight);
-    observer.observe(shell);
+    const input = guidanceInputRef.current;
+    if (!input) return;
+    const resize = () => {
+      input.style.height = "auto";
+      input.style.height = `${Math.max(36, Math.min(input.scrollHeight, 96))}px`;
+    };
+    resize();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(resize);
+    observer.observe(input);
     return () => observer.disconnect();
-  }, [measuredFirstLine]);
+  }, [serializedGuidance]);
+
+  function updateGuidance(nextValue: string) {
+    const nextGuidance = nextValue.replace(/[\r\n]+/g, " ");
+    onChange(serializeDraft(nextGuidance, body));
+    const nextOffset = nextGuidance.length + 1;
+    onSelectionChange?.(
+      noteSelectionRef.current.from + nextOffset,
+      noteSelectionRef.current.to + nextOffset,
+    );
+  }
+
+  function focusNote() {
+    shellRef.current?.querySelector<HTMLElement>(".cm-content")?.focus();
+  }
 
   return (
-    <div
-      className="draft-note-editor"
-      ref={shellRef}
-      style={
-        { "--steering-height": `${steeringHeight}px` } as CSSProperties
-      }
-    >
-      <div className="draft-steering-band" />
-      <div
-        className="draft-steering-measure"
-        ref={measureRef}
-        aria-hidden="true"
-      >
-        {measuredFirstLine}
-      </div>
-      {!value && (
-        <span className="draft-steering-placeholder" aria-hidden="true">
-          {steeringPlaceholder}
-        </span>
-      )}
+    <div className="draft-note-editor" ref={shellRef}>
+      <section className="draft-guidance" aria-label="Filing guidance">
+        <div className="draft-guidance-editor">
+          <div className="draft-guidance-caption">
+            <label htmlFor={`${id}-guidance`}>Filing guidance</label>
+            <span className="draft-guidance-info-wrap">
+              <button
+                className="draft-guidance-info"
+                type="button"
+                aria-label="About filing guidance"
+                aria-describedby={`${id}-tooltip`}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") focusNote();
+                }}
+              >
+                i
+              </button>
+              <span className="draft-guidance-tooltip" id={`${id}-tooltip`} role="tooltip">
+                Use a short hint when the note doesn’t make its title, folder, or kind obvious. Folio sends this separately from the full note to the filing model. Relevant hints and existing folder names guide filing; unrelated hints yield to the note. Titles stay grounded in the note, and the body remains unchanged. Use <code>path: /projects/atlas</code> to choose a destination, or leave this blank for automatic filing.
+              </span>
+            </span>
+          </div>
+          <textarea
+            id={`${id}-guidance`}
+            ref={guidanceInputRef}
+            rows={1}
+            value={serializedGuidance}
+            placeholder="Optional: title, folder, or filing context…"
+            onChange={(event) => updateGuidance(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && (event.key === "Enter" || event.key.toLowerCase() === "s")) {
+                event.preventDefault();
+                onFile();
+              } else if (event.key === "Escape" || event.key === "Enter") {
+                event.preventDefault();
+                focusNote();
+              }
+            }}
+          />
+        </div>
+      </section>
       <LiveMarkdownEditor
-        value={value}
-        onChange={onChange}
+        value={body}
+        onChange={(nextBody) => {
+          onChange(serializeDraft(serializedGuidance, nextBody));
+          const nextOffset = serializedGuidance.length + 1;
+          onSelectionChange?.(
+            noteSelectionRef.current.from + nextOffset,
+            noteSelectionRef.current.to + nextOffset,
+          );
+        }}
         onFile={onFile}
         onOpenLink={onOpenLink}
-        onToggleTask={onToggleTask}
-        initialSelection={selection}
-        onSelectionChange={onSelectionChange}
+        onToggleTask={(lineNumber, checked) => onToggleTask?.(lineNumber + lineOffset, checked)}
+        initialSelection={initialSelection
+          ? {
+              from: Math.max(0, initialSelection.from - serializedOffset),
+              to: Math.max(0, initialSelection.to - serializedOffset),
+            }
+          : undefined}
+        onSelectionChange={(from, to) => {
+          noteSelectionRef.current = { from, to };
+          onSelectionChange?.(from + serializedOffset, to + serializedOffset);
+        }}
         focusRequestId={focusRequestId}
         onFocusRequestConsumed={onFocusRequestConsumed}
         autoFocus
+        placeholder="Write your note…"
         ariaLabel={ariaLabel}
       />
     </div>

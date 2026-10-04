@@ -21,10 +21,15 @@ folio_related:
 
 ## Create a note
 
-Select **+** or press `Cmd/Ctrl + T`. The first line is an optional filing hint:
+Select **+** or press `Cmd/Ctrl + T`, then write the note directly in the body. The **Filing guidance** field above it is optional; use it to suggest a title, folder, or context for filing:
 
 ```text
-projects/website - Launch decision
+Title this “Launch decision” and file it under /projects/website.
+```
+
+The note body remains ordinary Markdown:
+
+```text
 We agreed to publish the new site on Monday.
 ```
 

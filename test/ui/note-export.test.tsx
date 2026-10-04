@@ -47,9 +47,21 @@ describe("note export model", () => {
     expect(
       noteExportSnapshot(
         { ...document, id: "untitled:export", title: "Untitled" },
-        "# Draft heading\n\nBody",
+        "\n# Draft heading\n\nBody",
       ).title,
     ).toBe("Draft heading");
+  });
+
+  it("excludes persisted filing guidance when exporting an untouched recovered draft", () => {
+    const recoveredDraft = {
+      ...document,
+      id: "untitled:recovered",
+      title: "Untitled",
+      content: "File under /Work\n# Project notes\n\nKeep this body",
+    };
+    const snapshot = noteExportSnapshot(recoveredDraft, undefined);
+    expect(snapshot.title).toBe("Project notes");
+    expect(snapshot.content).toBe("# Project notes\n\nKeep this body");
   });
 });
 

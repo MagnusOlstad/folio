@@ -1,5 +1,5 @@
 import type { ViewerDocument } from "../../../domain/types.ts";
-import { isUntitledId } from "../../../lib/workspace.ts";
+import { filedDraftContent, isUntitledId } from "../../../lib/workspace.ts";
 
 export type NoteExportFormat = "markdown" | "pdf";
 
@@ -34,8 +34,9 @@ export function noteExportSnapshot(
   document: ViewerDocument,
   draft: string | undefined,
 ): NoteExportSnapshot {
-  const content = draft ?? document.content;
   const isDraft = isUntitledId(document.id);
+  const sourceContent = draft ?? document.content;
+  const content = isDraft ? filedDraftContent(sourceContent) : sourceContent;
   return {
     id: document.id,
     title: isDraft

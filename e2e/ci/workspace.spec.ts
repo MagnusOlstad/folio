@@ -42,8 +42,8 @@ test('opens a path-directed draft from a bundle directory context menu', async (
     await page.getByRole('menuitem', { name: 'New note', exact: true }).click()
     await expect(folder).toHaveAttribute('aria-expanded', 'true')
     const editor = page.getByRole('textbox', { name: 'Write a new note' })
-    await expect(editor).toHaveText(`path: /${folderName}`)
-    await editor.fill(`path: /${folderName}\n${title}\nA note created through ordinary filing.`)
+    await expect(page.getByRole('textbox', { name: 'Filing guidance' })).toHaveValue(`path: /${folderName}`)
+    await editor.fill(`${title}\nA note created through ordinary filing.`)
     await page.getByRole('button', { name: 'File note' }).click()
     await page.getByRole('dialog', { name: 'Filing confirmation' }).getByRole('button', { name: 'Accept' }).click()
     const files = await request.get('/api/files')
@@ -260,6 +260,42 @@ test('creates a new local draft note from the editor', async ({ page }) => {
   await editor.fill('My first draft note')
 
   await expect(page.locator('.draft-tree-open', { hasText: 'My first draft note' })).toBeVisible()
+})
+
+test('keeps filing guidance separate from the note body and files the full pasted note', async ({ page, request }, testInfo) => {
+  await page.getByTitle('New note (Cmd+T)').click()
+  const editor = page.getByLabel('Write a new note')
+  const body = 'Body starts here\nSecond body line'
+  await editor.fill(body)
+
+  const guidance = page.getByRole('textbox', { name: 'Filing guidance' })
+  await guidance.fill('Project ')
+  await guidance.pressSequentially('notes')
+  await expect(guidance).toHaveValue('Project notes')
+  await guidance.press('Escape')
+  await expect(editor).toBeFocused()
+
+  await expect(editor).toContainText('Body starts here')
+  await expect(editor).toContainText('Second body line')
+  await page.screenshot({ path: testInfo.outputPath('draft-guidance.png') })
+
+  await expect.poll(async () => {
+    const drafts = await (await request.get('/api/drafts')).json() as Array<{ content: string }>
+    return drafts.some((draft) => draft.content === `Project notes\n${body}`)
+  }).toBeTruthy()
+
+  const filingRequest = page.waitForRequest((request) =>
+    request.method() === 'POST' && new URL(request.url()).pathname === '/api/notes',
+  )
+  const filingResponse = page.waitForResponse((response) =>
+    response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/notes',
+  )
+  await page.getByRole('button', { name: 'File note' }).click()
+  await page.getByRole('dialog', { name: 'Filing confirmation' }).getByRole('button', { name: 'Accept' }).click()
+  const [requestPayload, response] = await Promise.all([filingRequest, filingResponse])
+  expect(requestPayload.postDataJSON().filedContent).toBe(body)
+  const result = await response.json()
+  if (result.note?.id) await request.delete(`/api/note?id=${encodeURIComponent(result.note.id)}`)
 })
 
 test('exports the current draft as an exact Markdown download', async ({ page }) => {
