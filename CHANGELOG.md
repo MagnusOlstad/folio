@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/MagnusOlstad/folio/compare/v0.7.1...v0.7.2) (2026-10-04)
+
+
+### Bug Fixes
+
+* **editor:** polish draft guidance and history empty state ([#101](https://github.com/MagnusOlstad/folio/issues/101)) ([5395bca](https://github.com/MagnusOlstad/folio/commit/5395bcae80ea8c761323b42ea6fc72b452b75851))
+
 ## [0.7.1](https://github.com/MagnusOlstad/folio/compare/v0.7.0...v0.7.1) (2026-10-04)
 
 
