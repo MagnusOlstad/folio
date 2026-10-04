@@ -170,7 +170,7 @@ test('selects, persists, downloads, and removes a missing transcription variant 
   })
   await page.route('**/api/mlx/models/*/install', async (route) => {
     const id = new URL(route.request().url()).pathname.split('/').at(-2) as 'whisper' | 'whisperlarge'
-    status = { ...status, models: status.models.map((model) => model.id === id ? { ...model, installed: true } : model) }
+    status = { ...status, installing: [id], downloads: [{ id, progress: { downloadedBytes: 0, totalBytes: 3_100_000_000, percent: 0, phase: 'downloading' } }] }
     await route.fulfill({ json: status })
   })
   await page.route('**/api/mlx/models/*/remove', async (route) => {
@@ -196,7 +196,17 @@ test('selects, persists, downloads, and removes a missing transcription variant 
   await expect(persistedSettings.getByRole('radio', { name: /Whisper Large v3.*3\.1 GB/ })).toBeChecked()
   const largeRow = persistedSettings.getByRole('radio', { name: /Whisper Large v3.*3\.1 GB/ }).locator('xpath=ancestor::article')
   await largeRow.getByRole('button', { name: 'Download' }).click()
+  const largeProgress = largeRow.getByRole('progressbar', { name: 'Downloading Whisper Large v3' })
+  await expect(largeProgress).toBeVisible()
+  await expect(largeProgress).not.toHaveAttribute('value')
+  await expect(largeRow.getByText('Preparing download')).toBeVisible()
+  status = { ...status, downloads: [{ id: 'whisperlarge', progress: { downloadedBytes: 775_000_000, totalBytes: 3_100_000_000, percent: 25, phase: 'downloading' } }] }
+  await expect(largeProgress).toHaveAttribute('value', '25')
+  status = { ...status, downloads: [{ id: 'whisperlarge', progress: { downloadedBytes: 2_325_000_000, totalBytes: 3_100_000_000, percent: 75, phase: 'downloading' } }] }
+  await expect(largeProgress).toHaveAttribute('value', '75')
+  status = { ...status, installing: [], downloads: [], models: status.models.map((model) => model.id === 'whisperlarge' ? { ...model, installed: true } : model) }
   await expect(largeRow.getByRole('button', { name: 'Remove' })).toBeEnabled()
+  await expect(largeProgress).toHaveCount(0)
   await largeRow.getByRole('button', { name: 'Remove' }).click()
   await expect(largeRow.getByRole('button', { name: 'Download' })).toBeEnabled()
   await expect(persistedSettings.getByRole('radio', { name: /Whisper Large v3.*3\.1 GB/ })).toBeChecked()

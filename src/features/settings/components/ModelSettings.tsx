@@ -1,5 +1,6 @@
 import type { MlxModelId, MlxStatus, MlxTranscriptionModelId } from "../../../domain/types.ts";
 
+import { ModelDownloadProgress } from "../../workspace/components/ModelDownloadProgress.tsx";
 import { modelCatalog } from "../../workspace/model/model-catalog.ts";
 
 export type ModelSettingsControls = {
@@ -23,6 +24,9 @@ export function ModelSettings({ controls }: { controls: ModelSettingsControls })
     const download = controls.status?.downloads.find((item) => item.id === definition.id)?.progress;
     const acting = controls.actionModel === definition.id;
     const downloading = Boolean(controls.status?.installing.includes(definition.id));
+    const installing = Boolean(download) || (!model?.installed && (downloading || (acting && controls.action === "install") || Boolean(model?.loading)));
+    const installLabel = download?.phase === "downloading" ? "Downloading…"
+      : download?.phase === "loading" || model?.loading ? "Loading…" : "Downloading…";
     const busy = Boolean(model?.busy || model?.loading || downloading || controls.actionModel !== null);
     const identity = <span><strong>{definition.name}</strong><small>{definition.description}</small></span>;
     return (
@@ -35,23 +39,18 @@ export function ModelSettings({ controls }: { controls: ModelSettingsControls })
           {identity}
         </label> : identity}
         <div className="model-settings-actions">
-          {model?.installed ? <span className="model-installed">{model.busy ? "In use" : model.loaded ? "Ready" : "Installed"}</span> : null}
+          {model?.installed ? <span className="model-installed">{model.busy ? "In use" : model.loading ? "Loading…" : model.loaded ? "Ready" : "Installed"}</span> : null}
           {model?.installed ? (
             <button type="button" onClick={() => controls.remove(definition.id)} disabled={!canManage || busy} title={model.busy ? "Wait until this model finishes its requests to remove it." : undefined}>
               {acting && controls.action === "remove" ? "Removing…" : "Remove"}
             </button>
           ) : (
             <button type="button" onClick={() => controls.install(definition.id)} disabled={!canManage || busy}>
-              {downloading || (acting && controls.action === "install") ? "Downloading…" : "Download"}
+              {installing ? installLabel : "Download"}
             </button>
           )}
         </div>
-        {download ? (
-          <div className="model-download-progress" aria-live="polite">
-            <div><span>{download.phase === "loading" ? "Loading model" : "Downloading"}</span><span>{download.percent}% · {(download.downloadedBytes / 1_000_000_000).toFixed(1)} GB of {(download.totalBytes / 1_000_000_000).toFixed(1)} GB</span></div>
-            <progress max={100} value={download.percent} aria-label={`Downloading ${definition.name}`} />
-          </div>
-        ) : null}
+        {installing ? <ModelDownloadProgress modelName={definition.name} progress={download} /> : null}
       </article>
     );
   };

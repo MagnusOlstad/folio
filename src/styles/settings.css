@@ -657,6 +657,10 @@
   gap: 6px;
   font-size: 10px;
 }
+.mlx-model .model-download-progress {
+  width: 100%;
+  box-sizing: border-box;
+}
 .model-download-progress > div {
   display: flex;
   justify-content: space-between;
