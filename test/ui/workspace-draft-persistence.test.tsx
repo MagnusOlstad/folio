@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ViewerDocument } from "../../src/domain/types.ts";
 import { useWorkspaceDocumentState } from "../../src/features/workspace/hooks/useWorkspaceDocumentState.ts";
 import { storedDraftDocument } from "../../src/lib/workspace.ts";
 
@@ -158,6 +159,37 @@ describe("draft persistence", () => {
       expect.objectContaining({ "x-folio-bundle": "bundle-a" }),
       expect.objectContaining({ "x-folio-bundle": "bundle-b" }),
     ]);
+    hook.unmount();
+  });
+
+  it("skips transient document derivation while disabled and syncs after re-enabling", async () => {
+    const storageWrite = vi.spyOn(Storage.prototype, "setItem");
+    const hook = renderHook(
+      ({ enabled }: { enabled: boolean }) => useWorkspaceDocumentState({
+        expandedDirectories: new Set<string>(), expandedDirectoriesReady: false,
+        persistenceEnabled: enabled,
+      }),
+      { initialProps: { enabled: false } },
+    );
+    const writesAtMount = storageWrite.mock.calls.filter(([key]) => key === "folio:drafts:v2:legacy-bundle").length;
+    act(() => hook.result.current.setDocuments({
+      transient: {} as ViewerDocument,
+    }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(storageWrite.mock.calls.filter(([key]) => key === "folio:drafts:v2:legacy-bundle")).toHaveLength(writesAtMount);
+
+    act(() => hook.result.current.setDocuments({ "untitled:test": draft("Ready") }));
+    hook.rerender({ enabled: true });
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+
+    expect(JSON.parse(localStorage.getItem("folio:drafts:v2:legacy-bundle")!)[0].content).toBe("Ready");
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ method: "PUT", body: expect.stringContaining("Ready") }),
+    );
+    expect(storageWrite.mock.calls.filter(([key]) => key === "folio:drafts:v2:legacy-bundle").length).toBeGreaterThan(writesAtMount);
+    storageWrite.mockRestore();
     hook.unmount();
   });
 

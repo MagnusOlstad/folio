@@ -34,6 +34,12 @@ export function useWorkspacePersistence({
   // Keep the original synchronization cadence: it follows draft changes, not callback identity.
   useEffect(() => {
     documentsRef.current = documents;
+    if (!enabled) {
+      draftSnapshotRef.current = [];
+      syncedDrafts.current.clear();
+      persistedDraftSerialization.current = null;
+      return;
+    }
     const localDrafts: StoredDraft[] = Object.values(documents)
       .filter((document) => isUntitledId(document.id))
       .map((document) => ({
@@ -48,7 +54,6 @@ export function useWorkspacePersistence({
     for (const key of syncedDrafts.current.keys()) {
       if (!relevantSyncKeys.has(key)) syncedDrafts.current.delete(key);
     }
-    if (!enabled) return;
     const nonemptyDrafts = localDrafts.filter((draft) => draft.content.trim());
     draftSnapshotRef.current = localDrafts;
     try {
