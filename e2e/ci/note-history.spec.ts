@@ -116,8 +116,10 @@ test('loads older history pages before the focus reaches the edge and keeps the 
 
 test('untitled drafts stay editable without history controls', async ({ page }) => {
   await page.goto('/')
+  await expect(page.getByRole('button', { name: 'Todo List', exact: true })).toBeVisible()
   await page.getByTitle('New note (Cmd+T)').click()
-  await expect(page.getByText('Drafts do not have history.')).toBeVisible()
+  await expect(page.getByText('History begins after filing')).toBeVisible()
+  await expect(page.getByText('File this draft to start keeping earlier versions.')).toBeVisible()
   await expect(page.getByRole('region', { name: 'Note history' })).toHaveCount(0)
   await expect(page.locator('.cm-content')).toBeEditable()
 })
