@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { StoredDraft, ViewerDocument } from "../../../domain/types.ts";
-import { api } from "../../../lib/api.ts";
+import { apiForBundle } from "../../../lib/api.ts";
 import { loadLocalDrafts } from "../../../lib/storage.ts";
 import {
   isUntitledId,
@@ -53,6 +53,9 @@ export function useWorkspaceDocumentState({
   const documentRequests = useRef<Record<string, number>>({});
   const saveQueues = useRef<Record<string, Promise<unknown>>>({});
   const draftSyncQueues = useRef<Record<string, Promise<void>>>({});
+  const syncedDrafts = useRef(new Map<string, string>());
+  const persistenceEnabledRef = useRef(persistenceEnabled);
+  const activeBundleIdRef = useRef(bundleId);
   const filingDraftIds = useRef<Set<string>>(new Set());
   const documentsRef = useRef(documents);
   const draftSnapshotRef = useRef<StoredDraft[]>([]);
@@ -61,18 +64,42 @@ export function useWorkspaceDocumentState({
     draftsRef.current = drafts;
   }, [drafts]);
 
-  function queueDraftSync(draft: StoredDraft) {
-    if (filingDraftIds.current.has(draft.id)) return Promise.resolve();
+  useLayoutEffect(() => {
+    persistenceEnabledRef.current = persistenceEnabled;
+    activeBundleIdRef.current = bundleId;
+  }, [bundleId, persistenceEnabled]);
+
+  const queueDraftSync = useCallback((draft: StoredDraft) => {
+    if (!persistenceEnabledRef.current || filingDraftIds.current.has(draft.id))
+      return Promise.resolve();
     const existingQueue =
       draftSyncQueues.current[draft.id] || Promise.resolve();
     const sync = existingQueue
       .catch(() => undefined)
       .then(async () => {
-        if (filingDraftIds.current.has(draft.id)) return;
-        await api<StoredDraft>(`/api/draft?id=${encodeURIComponent(draft.id)}`, {
-          method: draft.content.trim() ? "PUT" : "DELETE",
-          ...(draft.content.trim() ? { body: JSON.stringify(draft) } : {}),
-        });
+        if (!persistenceEnabledRef.current || filingDraftIds.current.has(draft.id)) return;
+        const isNonempty = Boolean(draft.content.trim());
+        const signature = isNonempty ? JSON.stringify(draft) : "DELETE";
+        const syncKey = `${bundleId}\u0000${draft.id}`;
+        if (syncedDrafts.current.get(syncKey) === signature) return;
+        await apiForBundle<StoredDraft>(
+          bundleId === "legacy-bundle" ? null : bundleId,
+          `/api/draft?id=${encodeURIComponent(draft.id)}`,
+          {
+            method: isNonempty ? "PUT" : "DELETE",
+            ...(isNonempty ? { body: JSON.stringify(draft) } : {}),
+          },
+        );
+        const currentDraft = draftSnapshotRef.current.find(
+          (snapshot) => snapshot.id === draft.id,
+        );
+        if (
+          activeBundleIdRef.current === bundleId &&
+          currentDraft &&
+          (currentDraft.content.trim() ? JSON.stringify(currentDraft) : "DELETE") === signature
+        ) {
+          syncedDrafts.current.set(syncKey, signature);
+        }
       })
       .catch(() => undefined)
       .finally(() => {
@@ -81,7 +108,7 @@ export function useWorkspaceDocumentState({
       });
     draftSyncQueues.current[draft.id] = sync;
     return sync;
-  }
+  }, [bundleId]);
 
   function mergeRemoteDrafts(remoteDrafts: StoredDraft[]) {
     const currentDocuments = documentsRef.current;
@@ -130,6 +157,7 @@ export function useWorkspaceDocumentState({
     drafts,
     documentsRef,
     draftSnapshotRef,
+    syncedDrafts,
     queueDraftSync,
     expandedDirectories,
     expandedDirectoriesReady,
@@ -138,11 +166,12 @@ export function useWorkspaceDocumentState({
   });
 
   useEffect(() => {
+    if (!persistenceEnabled) return;
     const interval = window.setInterval(() => {
       for (const draft of draftSnapshotRef.current) queueDraftSync(draft);
     }, 15_000);
     return () => window.clearInterval(interval);
-  }, []);
+  }, [bundleId, persistenceEnabled, queueDraftSync]);
 
   return {
     documents,

@@ -5,7 +5,7 @@ export function registerRoutes(app, runtime) {
   const { embedModel, embeddingSchemaVersion, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, queueDraftMutation, readDraft, writeDraft, resolveBundleMarkdownPath,
     listBundleMarkdownFiles, bundleFileId, parseMarkdownFile, isMovableConceptId, queueMarkdownMutation, moveConceptMarkdown, reindexBundle, normalizeInlineText,
     markdownDocument, updatedGenerated, filingPreviousPaths, embeddingInputHash, persistEmbeddingUpdates, refreshRecordEmbeddings, normalizeConfirmationFields, captureContribution,
-    restoreCaptureMetadata, captureMarker, removeEmptyBundleDirectories, history } = runtime
+    restoreCaptureMetadata, captureMarker, removeEmptyBundleDirectories } = runtime
   let filingConfirmationQueue = Promise.resolve()
 app.post(['/api/filing/confirm', '/api/notes/confirm'], async (request, response, next) => {
   let releaseFilingConfirmation
@@ -214,7 +214,7 @@ app.post(['/api/filing/confirm', '/api/notes/confirm'], async (request, response
     })
     const note = publicRecord(record)
     try {
-      await history.reconcile(`Confirmed ${targetId}`)
+      await runtime.history.reconcile(`Confirmed ${targetId}`)
     } catch (error) {
       console.error(`The filing was confirmed, but its history checkpoint failed: ${error.message}`)
       embeddingWarning ||= 'The filing was confirmed, but its history checkpoint could not be saved.'

@@ -9,7 +9,7 @@ export function registerRoutes(app, runtime) {
     rankedRecords, normalizeInlineText, normalizeTag, normalizeMoveDirectory, normalizeMarkdownBreaks, markdownDocument, updatedGenerated,
     replaceIndexedConceptContent, indexedConceptContent, embeddingInputHash, refreshRecordEmbeddings, queueIndexOperation,
     performReindexBundle, persistEmbeddingUpdatesNow, relationshipIndex, recordIsStale,
-    semanticSuggestionSummaries, history, classify } = runtime
+    semanticSuggestionSummaries, classify } = runtime
 app.get('/api/search', async (request, response, next) => {
   try {
     const query = String(request.query.q || '').trim()
@@ -117,7 +117,7 @@ app.post('/api/file/move', async (request, response, next) => {
     const current = records.find((record) => record.id === moveResult.newId) || moveResult.record
     let historyWarning = null
     try {
-      await history.reconcile(`Moved ${moveResult.oldId}`)
+      await runtime.history.reconcile(`Moved ${moveResult.oldId}`)
     } catch (error) {
       console.error(`The note moved, but its history checkpoint failed: ${error.message}`)
       historyWarning = 'The note moved, but its history checkpoint could not be saved.'
@@ -186,7 +186,7 @@ app.post('/api/file/refile', async (request, response, next) => {
     if ((filename !== path.posix.basename(id) && !/^[a-z0-9][a-z0-9-]*\.md$/i.test(filename)) || !title || !expectedHash) return response.status(400).json({ error: 'Choose a valid path and title.' })
     if (!directory) return response.status(400).json({ error: 'Choose a valid destination path.' })
 
-    try { await history.reconcile(`Before refile ${id}`, [id]) }
+    try { await runtime.history.reconcile(`Before refile ${id}`, [id]) }
     catch (error) {
       console.error(`Refusing to refile because the current note could not be checkpointed: ${error.message}`)
       return response.status(409).json({ error: 'Could not save a history checkpoint before refiling. Your note was not changed.' })
@@ -254,7 +254,7 @@ app.post('/api/file/refile', async (request, response, next) => {
     if (outcome.invalid) return response.status(400).json({ error: 'Choose a valid destination path.' })
     if (outcome.missing) return response.status(404).json({ error: 'Note not found.' })
     let warning = null
-    try { await history.reconcile(`Refiled ${outcome.oldId}`) }
+    try { await runtime.history.reconcile(`Refiled ${outcome.oldId}`) }
     catch { warning = 'The note was refiled, but its history checkpoint could not be saved.' }
     warning ||= outcome.warning
     const records = await readRecords()
@@ -340,7 +340,7 @@ app.post('/api/reindex', async (_request, response, next) => {
     const result = await reindexBundle({ refreshEmbeddings: true })
     let historyWarning = null
     try {
-      await history.reconcile('Reindexed notes')
+      await runtime.history.reconcile('Reindexed notes')
     } catch (error) {
       console.error(`The bundle reindexed, but its history checkpoint failed: ${error.message}`)
       historyWarning = 'The bundle reindexed, but its history checkpoint could not be saved.'
@@ -466,7 +466,7 @@ app.patch('/api/note', async (request, response, next) => {
     let historyWarning = null
     if (refreshEmbeddings === true || (hasMarkdownChanges && !contentAutosaveOnly)) {
       try {
-        await history.reconcile(`Updated ${newId}`, [newId])
+        await runtime.history.reconcile(`Updated ${newId}`, [newId])
       } catch (error) {
         console.error(`The note updated, but its history checkpoint failed: ${error.message}`)
         historyWarning = 'The note was updated, but its history checkpoint could not be saved.'
