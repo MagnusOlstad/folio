@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/MagnusOlstad/folio/compare/v0.7.0...v0.7.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **mlx:** build native helper with the swiftbuild backend ([#99](https://github.com/MagnusOlstad/folio/issues/99)) ([e225a2f](https://github.com/MagnusOlstad/folio/commit/e225a2f263252aa9279c9c8bafc3bfdc03fe6d1a))
+
 ## [0.7.0](https://github.com/MagnusOlstad/folio/compare/v0.6.1...v0.7.0) (2026-10-04)
 
 
