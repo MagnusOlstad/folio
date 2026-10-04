@@ -2,7 +2,7 @@
   "name": "okf-notetaker",
   "productName": "Folio",
   "private": true,
-  "version": "0.6.1",
+  "version": "0.7.0",
   "type": "module",
   "main": "electron/main.js",
   "repository": {
