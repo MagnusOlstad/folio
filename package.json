@@ -66,6 +66,7 @@
   "build": {
     "appId": "no.okf.folio",
     "productName": "Folio",
+    "afterPack": "./scripts/macos-update-config.mjs",
     "asar": true,
     "directories": {
       "output": "release"
