@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.3](https://github.com/MagnusOlstad/folio/compare/v0.7.2...v0.7.3) (2026-10-04)
+
+
+### Bug Fixes
+
+* **updater:** include update configuration in staged macos builds ([#103](https://github.com/MagnusOlstad/folio/issues/103)) ([1256040](https://github.com/MagnusOlstad/folio/commit/1256040f8a45ff4971325a4b30ce5c1abadf30f4))
+
 ## [0.7.2](https://github.com/MagnusOlstad/folio/compare/v0.7.1...v0.7.2) (2026-10-04)
 
 
