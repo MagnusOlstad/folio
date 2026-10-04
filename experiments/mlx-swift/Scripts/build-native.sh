@@ -88,6 +88,17 @@ if (( STAGE_ONLY == 0 )); then
         fi
         exit 1
     fi
+
+    swift_version="$(xcrun swift --version 2>&1)" \
+        || die "could not read the Swift version from developer directory $selected_developer_dir"
+    swift_version="${swift_version%%$'\n'*}"
+    printf 'build-native: using %s (developer directory: %s)\n' "$swift_version" "$selected_developer_dir" >&2
+    # The legacy native build system emits flat resource bundles without
+    # Info.plist. An invalid value makes SwiftPM list every supported backend
+    # without touching a package, which works whether or not help lists them.
+    build_system_probe="$(xcrun swift build --build-system folio-probe 2>&1 || true)"
+    [[ "$build_system_probe" == *"'swiftbuild'"* ]] \
+        || die "the selected Swift toolchain does not support --build-system swiftbuild; select a newer Xcode or Swift toolchain (developer directory: $selected_developer_dir, $swift_version)"
 fi
 
 APP_DIR="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$APP_DIR")"
@@ -224,8 +235,10 @@ fi
 # SwiftPM resolves remote transitive packages from the checked-in lockfile.
 cp "$EXPERIMENT_DIR/Package.resolved" "$BUILD_DIR/Package.resolved"
 xcrun swift package --package-path "$BUILD_DIR" resolve
-xcrun swift build --package-path "$BUILD_DIR" --configuration release --arch arm64
-PRODUCTS_DIR="$(xcrun swift build --package-path "$BUILD_DIR" --configuration release --arch arm64 --show-bin-path)"
+# Shared by the build and bin-path queries so both use the Swift Build layout.
+swift_build_args=(--package-path "$BUILD_DIR" --configuration release --arch arm64 --build-system swiftbuild)
+xcrun swift build "${swift_build_args[@]}"
+PRODUCTS_DIR="$(xcrun swift build "${swift_build_args[@]}" --show-bin-path)"
 else
     [[ -n "$STAGE_ONLY_PRODUCTS" && -d "$STAGE_ONLY_PRODUCTS" ]] \
         || die "--stage-only requires an existing SwiftPM products directory"
