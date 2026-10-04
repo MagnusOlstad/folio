@@ -46,6 +46,16 @@ async function writeExecutable(directory, name, contents) {
   await fs.chmod(file, 0o755)
 }
 
+const supportedSwiftStub = [
+  'case "$*" in',
+  '  "swift package --version") echo "Swift Package Manager - Swift 6.4.0"; exit 0 ;;',
+  '  "swift --version") echo "Apple Swift version 6.4 (swiftlang-6.4.0.34.1)"; echo "Target: arm64-apple-macosx26.0"; exit 0 ;;',
+  '  "swift build --build-system folio-probe") echo "Error: The value \'folio-probe\' is invalid for \'--build-system <build-system>\'. Please provide one of \'native\', \'swiftbuild\' or \'xcode\'." >&2; exit 64 ;;',
+  'esac',
+  'exit 49',
+  '',
+].join('\n')
+
 function runBuild(fixtureData, env = {}) {
   return spawnSync('bash', [path.join(fixtureData.experiment, 'Scripts', 'build-native.sh')], {
     cwd: fixtureData.root,
@@ -89,7 +99,7 @@ test('a missing per-command developer directory is reported before Python or dow
 })
 
 test('SwiftPM preflight preserves per-command developer directory and toolchain selection', async (t) => {
-  const fixtureData = await fixture(t, '#!/bin/sh\nprintf "%s|%s|%s\\n" "${DEVELOPER_DIR:-}" "${TOOLCHAINS:-}" "$*" >> "$XCRUN_LOG"\nif [ "$*" = "swift package --version" ]; then echo "Swift Package Manager - Swift 6.4.0"; exit 0; fi\nexit 49\n')
+  const fixtureData = await fixture(t, `#!/bin/sh\nprintf "%s|%s|%s\\n" "\${DEVELOPER_DIR:-}" "\${TOOLCHAINS:-}" "$*" >> "$XCRUN_LOG"\n${supportedSwiftStub}`)
   const xcrunLog = path.join(fixtureData.root, 'xcrun.log')
   const selectedDeveloperDir = path.join(fixtureData.root, 'Full Xcode.app', 'Contents', 'Developer')
   const selectedToolchain = 'org.swift.custom-toolchain'
@@ -101,7 +111,48 @@ test('SwiftPM preflight preserves per-command developer directory and toolchain 
   })
 
   assert.notEqual(result.status, 0)
-  assert.equal((await fs.readFile(xcrunLog, 'utf8')).trim(), `${selectedDeveloperDir}|${selectedToolchain}|swift package --version`)
+  assert.deepEqual((await fs.readFile(xcrunLog, 'utf8')).trim().split('\n'), [
+    `${selectedDeveloperDir}|${selectedToolchain}|swift package --version`,
+    `${selectedDeveloperDir}|${selectedToolchain}|swift --version`,
+    `${selectedDeveloperDir}|${selectedToolchain}|swift build --build-system folio-probe`,
+  ])
+  assert.match(result.stderr, /build-native: using Apple Swift version 6\.4 /)
   assert.match(await fs.readFile(fixtureData.sideEffectLog, 'utf8'), /^git clone /)
   assert.equal(await fs.stat(path.join(fixtureData.experiment, '.cache')).then((stat) => stat.isDirectory()), true)
+})
+
+test('toolchains without the swiftbuild backend fail preflight before fetching sources', async (t) => {
+  const xcrunSource = [
+    '#!/bin/sh',
+    'case "$*" in',
+    '  "swift package --version") echo "Swift Package Manager - Swift 6.0.3"; exit 0 ;;',
+    '  "swift --version") echo "Apple Swift version 6.0.3 (swiftlang-6.0.3.1.10)"; exit 0 ;;',
+    '  "swift build --build-system folio-probe") echo "Error: The value \'folio-probe\' is invalid for \'--build-system <build-system>\'. Please provide one of \'native\' or \'xcode\'." >&2; exit 64 ;;',
+    'esac',
+    'exit 49',
+    '',
+  ].join('\n')
+  const fixtureData = await fixture(t, xcrunSource)
+  const selectedDeveloperDir = path.join(fixtureData.root, 'Old Xcode.app', 'Contents', 'Developer')
+  const result = runBuild(fixtureData, { DEVELOPER_DIR: selectedDeveloperDir, PYTHON_LOG: fixtureData.pythonLog })
+
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /does not support --build-system swiftbuild/)
+  assert.ok(result.stderr.includes(`developer directory: ${selectedDeveloperDir}, Apple Swift version 6.0.3`))
+  await assert.rejects(fs.access(path.join(fixtureData.experiment, '.cache')))
+  await assert.rejects(fs.access(fixtureData.sideEffectLog))
+  await assert.rejects(fs.access(fixtureData.pythonLog))
+})
+
+test('the native build and its bin-path query share the swiftbuild backend arguments', async () => {
+  const script = await fs.readFile(path.join(sourceExperiment, 'Scripts', 'build-native.sh'), 'utf8')
+  const sharedArgs = script.match(/^swift_build_args=\((.*)\)$/m)
+
+  assert.ok(sharedArgs, 'expected a shared swift_build_args array')
+  assert.match(sharedArgs[1], /--build-system swiftbuild/)
+  const buildInvocations = script.split('\n').filter((line) => /xcrun swift build (?!--build-system folio-probe)/.test(line))
+  assert.deepEqual(buildInvocations, [
+    'xcrun swift build "${swift_build_args[@]}"',
+    'PRODUCTS_DIR="$(xcrun swift build "${swift_build_args[@]}" --show-bin-path)"',
+  ])
 })
