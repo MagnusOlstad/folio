@@ -16,7 +16,7 @@ import { useWorkspaceShortcutActions } from "./useWorkspaceShortcutActions.ts";
 import { useFiledDocumentAutosave } from "./useFiledDocumentAutosave.ts";
 import { useNoteHistoryCheckpoint } from "./useNoteHistoryCheckpoint.ts";
 import { prepareFiledDocumentHistory } from "../model/history-actions.ts";
-import { expandedPathsForFiles, isUntitledId } from "../../../lib/workspace.ts";
+import { expandedPathsForFiles, filedDraftContent, isUntitledId } from "../../../lib/workspace.ts";
 import { bundleDirectories } from "../model/directory-suggestions.ts";
 import { useNoteExport } from "./useNoteExport.ts";
 import { useThemeSettings } from "../../settings/hooks/useThemeSettings.ts";
@@ -31,7 +31,7 @@ import { useBundleSetup } from "../../settings/hooks/useBundleSetup.ts";
 import { useTranscription } from "../../transcription/hooks/useTranscription.ts";
 
 function draftTitle(content: string) {
-  const firstLine = content
+  const firstLine = filedDraftContent(content)
     .split("\n")
     .map((line) => line.replace(/^\s*#+\s*/, "").trim())
     .find(Boolean);

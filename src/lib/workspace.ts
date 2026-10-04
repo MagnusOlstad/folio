@@ -29,6 +29,13 @@ export function filedDraftContent(value: string) {
   const firstLineBreak = value.indexOf("\n");
   return firstLineBreak === -1 ? value : value.slice(firstLineBreak + 1);
 }
+export function draftFilingGuidance(value: string) {
+  const firstLineBreak = value.indexOf("\n");
+  return firstLineBreak === -1 ? "" : value.slice(0, firstLineBreak);
+}
+export function serializeDraft(guidance: string, body: string) {
+  return `${guidance.replace(/[\r\n]+/g, " ")}\n${body}`;
+}
 export function mergeRemoteAppend(
   baseContent: string,
   localContent: string,

@@ -10,7 +10,7 @@ import {
   selectAll,
 } from "@codemirror/commands";
 import { Compartment, EditorSelection, EditorState } from "@codemirror/state";
-import { EditorView, keymap, panels } from "@codemirror/view";
+import { EditorView, keymap, panels, placeholder as editorPlaceholder } from "@codemirror/view";
 import {
   useEffect,
   useLayoutEffect,
@@ -42,6 +42,7 @@ export type LiveMarkdownEditorProps = {
   containerClassName?: string;
   focusRequestId?: number;
   onFocusRequestConsumed?: () => void;
+  placeholder?: string;
   ariaLabel: string;
 };
 
@@ -117,6 +118,7 @@ export function LiveMarkdownEditor({
   containerClassName,
   focusRequestId,
   onFocusRequestConsumed,
+  placeholder,
   ariaLabel,
   initialSelection,
   onSelectionChange,
@@ -197,6 +199,7 @@ export function LiveMarkdownEditor({
             // typed, and also take precedence over `---` as a rule.
             extensions: { remove: ["SetextHeading"] },
           }),
+          ...(placeholder ? [editorPlaceholder(placeholder)] : []),
           history(),
           search({ top: true, createPanel: createNoteSearchPanel }),
           panels(findLayer ? { topContainer: findLayer } : undefined),
@@ -370,7 +373,7 @@ export function LiveMarkdownEditor({
       view.destroy();
       viewRef.current = null;
     };
-  }, [autoFocus, readOnly]);
+  }, [autoFocus, placeholder, readOnly]);
 
   useLayoutEffect(() => {
     if (readOnly || focusRequestId === undefined) return;

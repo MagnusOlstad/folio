@@ -50,7 +50,7 @@ test("closing a nonempty new draft preserves its server copy", async ({ page, re
 
   await expect(close).toHaveCount(0);
   const drafts = await (await request.get("/api/drafts")).json();
-  expect(drafts).toContainEqual(expect.objectContaining({ id, content }));
+  expect(drafts).toContainEqual(expect.objectContaining({ id, content: `\n${content}` }));
 });
 
 test("Cmd/Ctrl+F searches the open read-only bundle file", async ({ page }) => {

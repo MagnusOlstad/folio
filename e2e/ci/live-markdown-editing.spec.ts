@@ -531,7 +531,7 @@ test("draft Find stays over the editor and reports match progress", async ({ pag
   const editor = page.getByLabel("Write a new note");
   const filler = Array.from({ length: 80 }, (_, index) => `filler ${index}`).join("\n");
   await editor.fill(`alpha beta alpha\n${filler}\nalpha`);
-  const steeringBand = page.locator(".draft-steering-band");
+  const steeringRow = page.locator(".draft-guidance");
   const scroller = scrollSurface(page);
   await scroller.evaluate((element) => {
     element.scrollTop = 500;
@@ -545,7 +545,7 @@ test("draft Find stays over the editor and reports match progress", async ({ pag
       }),
   );
   const scrollBefore = await scroller.evaluate((element) => element.scrollTop);
-  const before = await steeringBand.boundingBox();
+  const before = await steeringRow.boundingBox();
 
   await page.keyboard.press(`${modifier}+f`);
   const find = page.getByRole("searchbox", { name: "Find in note" });
@@ -553,7 +553,7 @@ test("draft Find stays over the editor and reports match progress", async ({ pag
   await expect
     .poll(() => scroller.evaluate((element) => element.scrollTop))
     .toBe(scrollBefore);
-  const afterOpen = await steeringBand.boundingBox();
+  const afterOpen = await steeringRow.boundingBox();
   expect(afterOpen?.y).toBe(before?.y);
   expect(afterOpen?.height).toBe(before?.height);
   const noteBox = await page.locator(".document-view").boundingBox();
@@ -575,7 +575,7 @@ test("draft Find stays over the editor and reports match progress", async ({ pag
   await find.fill("alpha");
 
   await expect(page.getByText("3 results")).toBeVisible();
-  const after = await steeringBand.boundingBox();
+  const after = await steeringRow.boundingBox();
   expect(after?.height).toBe(before?.height);
 
   await page.getByRole("button", { name: "Next match" }).click();
