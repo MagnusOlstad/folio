@@ -91,6 +91,9 @@ def main() -> None:
     build.mkdir(parents=True, exist_ok=True)
     (build / "Sources").mkdir(exist_ok=True)
     copy_tree(experiment / "Sources", build / "Sources")
+    test_sources = experiment / "Tests"
+    if test_sources.is_dir():
+        copy_tree(test_sources, build / "Tests")
     manifest = (experiment / "Package.swift").read_text()
     replacements = {
         '.package(url: "https://github.com/ml-explore/mlx-swift-lm", exact: "3.31.3")':

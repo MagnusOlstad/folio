@@ -9,6 +9,7 @@ import HuggingFace
 import Tokenizers
 import MLXAudioCore
 import MLXAudioSTT
+import FolioMLXProgress
 
 private enum TaskKind: String { case generation, embedding, transcription }
 
@@ -103,7 +104,8 @@ private func writeLine<T: Encodable>(_ value: T) {
 }
 
 private func writeDownloadProgress(_ progress: Progress) {
-    writeLine(DownloadProgressResponse(downloadedBytes: progress.completedUnitCount,
+    guard let downloadedBytes = DownloadProgressBytes.downloadedBytes(for: progress) else { return }
+    writeLine(DownloadProgressResponse(downloadedBytes: downloadedBytes,
                                       totalBytes: progress.totalUnitCount))
 }
 

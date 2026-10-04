@@ -3,6 +3,7 @@ import type { DesktopUpdateState, MlxModelId, MlxStatus, VersionInfo } from "../
 import { orderedModelCatalog, formatModelBytes } from "../workspace/model/model-catalog.ts";
 import type { SettingsCategory } from "../settings/model/settings-category.ts";
 import { useModelPanelCollapse } from "../workspace/hooks/useModelPanelCollapse.ts";
+import { ModelDownloadProgress } from "../workspace/components/ModelDownloadProgress.tsx";
 
 export type WorkspaceStatusProps = {
   mlxStatus: MlxStatus | null;
@@ -140,17 +141,22 @@ export function MlxModelStatusPanel({
             const download = mlxStatus?.downloads.find((item) => item.id === id)?.progress;
             const installing = Boolean(mlxStatus?.installing.includes(id));
             const acting = mlxActionModel === id;
+            const downloading = Boolean(download) || (!model?.installed && (installing || (acting && mlxAction === "install") || Boolean(model?.loading)));
             const loading = Boolean(model?.loading || installing || acting);
             const busy = Boolean(model?.busy || model?.requestCount);
             const loaded = Boolean(model?.loaded && available);
             const installed = Boolean(model?.installed);
             const name = model?.name || definition.name;
             const modelState = !mlxStatus ? "Checking status"
-              : loading ? download?.phase === "downloading" || (acting && mlxAction === "install") ? "Downloading" : acting && mlxAction === "unload" ? "Unloading" : acting && mlxAction === "remove" ? "Removing" : acting && (mlxAction === "select" || mlxAction === "select-transcription") ? "Selecting" : "Loading"
+              : loading ? download?.phase === "loading" ? "Loading" : download?.phase === "downloading" || (acting && mlxAction === "install") ? "Downloading" : acting && mlxAction === "unload" ? "Unloading" : acting && mlxAction === "remove" ? "Removing" : acting && (mlxAction === "select" || mlxAction === "select-transcription") ? "Selecting" : "Loading"
               : !available ? "Unavailable"
               : busy ? "In use"
               : loaded ? "Running"
               : installed ? "Stopped" : "Not installed";
+            const downloadPercent = downloading && download?.phase === "downloading"
+              && Number.isFinite(download.downloadedBytes) && download.downloadedBytes > 0
+              && Number.isFinite(download.totalBytes) && download.totalBytes > 0
+              && Number.isFinite(download.percent) ? ` ${download.percent}%` : "";
             const actionLabel = installed && available ? `${loaded ? "Stop" : "Start"} ${name}` : `Manage ${name}`;
             const disabled = installed && available ? loading || busy || mlxActionModel !== null : !onOpenSettings;
             const memory = loaded ? model?.memory : null;
@@ -168,7 +174,7 @@ export function MlxModelStatusPanel({
               >
                 <span className="model-orbit" aria-hidden="true"><span className="model-blob" /><span className="model-blob-core" /></span>
                 <span className="mlx-model-heading"><strong title={name}>{definition.gridName ?? name}</strong><span>{definition.purpose}{model?.selected ? " · Selected" : ""}</span></span>
-                <span className={`mlx-model-state${loaded ? " online" : ""}`}><span className="model-state-mark" aria-hidden="true">{loaded || loading ? "▶" : installed ? "■" : "↓"}</span>{modelState}{download ? ` ${download.percent}%` : ""}</span>
+                <span className={`mlx-model-state${loaded ? " online" : ""}`}><span className="model-state-mark" aria-hidden="true">{loaded || loading ? "▶" : installed ? "■" : "↓"}</span>{modelState}{downloadPercent}</span>
                 <span className="mlx-model-details" id={`model-details-${id}`}>
                   {memory ? <span title={`Memory ${formatModelBytes(memory.activeBytes)} active · ${formatModelBytes(memory.cacheBytes)} allocator cache · ${formatModelBytes(memory.peakResidentBytes)} peak process`}>{formatModelBytes(memory.activeBytes)} active memory</span>
                     : busy ? <span>Processing locally</span>
@@ -176,6 +182,7 @@ export function MlxModelStatusPanel({
                     : <span>{model?.downloadSizeIsEstimate ?? true ? "About " : ""}{formatModelBytes(model?.downloadSizeBytes ?? definition.bytes)} download</span>}
                   {busy ? <span>{model?.requestCount ? `${model.requestCount} active request${model.requestCount === 1 ? "" : "s"}` : "Request in progress"}</span> : null}
                 </span>
+                {downloading ? <ModelDownloadProgress modelName={name} progress={download} /> : null}
               </button>
             );
           })}

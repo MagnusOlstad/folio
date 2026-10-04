@@ -1,6 +1,7 @@
-import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MlxStatus } from "../../src/domain/types.ts";
+import { ModelSettings } from "../../src/features/settings/components/ModelSettings.tsx";
 import { MlxModelStatusPanel } from "../../src/features/status/WorkspaceStatus.tsx";
 import { useWorkspaceModels } from "../../src/features/workspace/hooks/useWorkspaceModels.ts";
 
@@ -18,6 +19,123 @@ beforeEach(() => { window.localStorage.removeItem("folio:model-panel-collapsed")
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); window.localStorage.removeItem("folio:model-panel-collapsed"); });
 
 describe("model status", () => {
+  it("advances both progress bars while the install request remains pending", async () => {
+    vi.useFakeTimers();
+    let currentStatus: MlxStatus = {
+      ...status,
+      models: status.models.map((model) => model.id === "gemma4" ? { ...model, installed: false, loaded: false } : model),
+    };
+    let finishInstall: ((value: Response) => void) | undefined;
+    const fetchMock = vi.fn((_url: string, options?: RequestInit) => options?.method === "POST"
+      ? new Promise<Response>((resolve) => { finishInstall = resolve; })
+      : Promise.resolve(response(currentStatus)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    function ProgressHarness() {
+      const models = useWorkspaceModels(vi.fn());
+      return <>
+        <ModelSettings controls={{ status: models.mlxStatus, actionModel: models.mlxActionModel, action: models.mlxAction, error: models.modelError, install: models.installMlxModel, remove: models.removeMlxModel, select: models.selectGenerationModel, selectTranscription: models.selectTranscriptionModel }} />
+        <MlxModelStatusPanel mlxStatus={models.mlxStatus} mlxActionModel={models.mlxActionModel} mlxAction={models.mlxAction} onInstallMlxModel={models.installMlxModel} onToggleMlxModel={models.toggleMlxModel} onOpenSettings={vi.fn()} />
+      </>;
+    }
+
+    render(<ProgressHarness />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    const generationRow = screen.getAllByText("Gemma 4 E4B").find((element) => element.closest(".model-settings-row"))?.closest(".model-settings-row") as HTMLElement;
+    fireEvent.click(within(generationRow).getByRole("button", { name: "Download" }));
+    const progress = () => screen.getAllByRole("progressbar", { name: "Downloading Gemma 4 E4B" });
+    expect(finishInstall).toBeDefined();
+    expect(progress()).toHaveLength(2);
+    expect(progress()[0]).not.toHaveAttribute("value");
+    expect(progress()[1]).not.toHaveAttribute("value");
+
+    const poll = async (nextStatus: MlxStatus) => {
+      currentStatus = nextStatus;
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    };
+    const statusRequestCount = () => fetchMock.mock.calls.filter(([url]) => url === "/api/mlx/status").length;
+    await poll({ ...currentStatus, installing: ["gemma4"], downloads: [{ id: "gemma4", progress: { downloadedBytes: 0, totalBytes: 5_000_000_000, percent: 0, phase: "downloading" } }] });
+    expect(statusRequestCount()).toBe(2);
+    expect(progress().map((bar) => bar.hasAttribute("value"))).toEqual([false, false]);
+    expect(screen.getByRole("button", { name: "Manage Gemma 4 E4B" }).querySelector(".mlx-model-state")).not.toHaveTextContent("0%");
+    await poll({ ...currentStatus, downloads: [{ id: "gemma4", progress: { downloadedBytes: 1_000_000_000, totalBytes: 5_000_000_000, percent: 20, phase: "downloading" } }] });
+    expect(statusRequestCount()).toBe(3);
+    expect(progress().map((bar) => bar.getAttribute("value"))).toEqual(["20", "20"]);
+    await poll({ ...currentStatus, downloads: [{ id: "gemma4", progress: { downloadedBytes: 3_000_000_000, totalBytes: 5_000_000_000, percent: 60, phase: "downloading" } }] });
+    expect(statusRequestCount()).toBe(4);
+    expect(progress().map((bar) => bar.getAttribute("value"))).toEqual(["60", "60"]);
+    await poll({ ...currentStatus, downloads: [{ id: "gemma4", progress: { downloadedBytes: 5_000_000_000, totalBytes: 5_000_000_000, percent: 100, phase: "loading" } }] });
+    expect(statusRequestCount()).toBe(5);
+    expect(screen.getAllByRole("progressbar", { name: "Loading model Gemma 4 E4B" })).toHaveLength(2);
+
+    await poll({
+      ...currentStatus,
+      installing: [],
+      downloads: [],
+      models: currentStatus.models.map((model) => model.id === "gemma4" ? { ...model, installed: true, loading: false } : model),
+    });
+    expect(statusRequestCount()).toBe(6);
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(finishInstall).toBeDefined();
+    await act(async () => { finishInstall?.(response(currentStatus)); });
+  });
+
+  it.each([
+    ["qwen35", "Qwen 3.5 4B", "generation"],
+    ["embeddinggemma", "EmbeddingGemma", "embeddings"],
+    ["whisperlarge", "Whisper Large v3", "transcription"],
+  ] as const)("renders advancing download progress for %s until it is ready", (id, name, purpose) => {
+    const template = status.models.find((model) => model.id === "gemma4")!;
+    const installingStatus: MlxStatus = {
+      ...status,
+      installing: [id],
+      downloads: [{ id, progress: null }],
+      models: [...status.models, { ...template, id, name, purpose, installed: false, loaded: false, selected: false, memory: null }],
+    };
+    const props = { mlxStatus: installingStatus, mlxActionModel: null, onInstallMlxModel: vi.fn(), onToggleMlxModel: vi.fn(), onOpenSettings: vi.fn() };
+    const { rerender } = render(<MlxModelStatusPanel {...props} />);
+    const progressName = `Downloading ${name}`;
+    expect(screen.getByRole("progressbar", { name: progressName })).not.toHaveAttribute("value");
+    expect(screen.getByText("Preparing download")).toBeInTheDocument();
+
+    const update = (downloadedBytes: number, percent: number, phase: "downloading" | "loading" = "downloading") => ({
+      ...installingStatus,
+      downloads: [{ id, progress: { downloadedBytes, totalBytes: 2_000_000_000, percent, phase } }],
+      models: phase === "loading" ? installingStatus.models.map((model) => model.id === id ? { ...model, installed: true, loading: true } : model) : installingStatus.models,
+    });
+    rerender(<MlxModelStatusPanel {...props} mlxStatus={update(400_000_000, 20)} />);
+    expect(screen.getByRole("progressbar", { name: progressName })).toHaveAttribute("value", "20");
+    rerender(<MlxModelStatusPanel {...props} mlxStatus={update(1_400_000_000, 70)} />);
+    expect(screen.getByRole("progressbar", { name: progressName })).toHaveAttribute("value", "70");
+    rerender(<MlxModelStatusPanel {...props} mlxStatus={update(2_000_000_000, 100, "loading")} />);
+    expect(screen.getByRole("progressbar", { name: `Loading model ${name}` })).not.toHaveAttribute("value");
+    expect(screen.getByRole("button", { name: `Start ${name}` })).toHaveTextContent("Loading");
+
+    rerender(<MlxModelStatusPanel {...props} mlxStatus={{
+      ...installingStatus,
+      installing: [],
+      downloads: [],
+      models: installingStatus.models.map((model) => model.id === id ? { ...model, installed: true, loading: false } : model),
+    }} />);
+    expect(screen.queryByRole("progressbar", { name: new RegExp(name) })).not.toBeInTheDocument();
+  });
+
+  it("clears progress and reports an install failure on the workspace surface", () => {
+    const template = status.models.find((model) => model.id === "gemma4")!;
+    const installingStatus: MlxStatus = {
+      ...status,
+      installing: ["qwen35"],
+      downloads: [{ id: "qwen35", progress: { downloadedBytes: 500_000_000, totalBytes: 2_000_000_000, percent: 25, phase: "downloading" } }],
+      models: [...status.models, { ...template, id: "qwen35", name: "Qwen 3.5 4B", installed: false, loaded: false, selected: false, memory: null }],
+    };
+    const props = { mlxStatus: installingStatus, mlxActionModel: null, onInstallMlxModel: vi.fn(), onToggleMlxModel: vi.fn(), onOpenSettings: vi.fn() };
+    const { rerender } = render(<MlxModelStatusPanel {...props} />);
+    expect(screen.getByRole("progressbar", { name: "Downloading Qwen 3.5 4B" })).toHaveAttribute("value", "25");
+    rerender(<MlxModelStatusPanel {...props} mlxStatus={{ ...installingStatus, installing: [], downloads: [] }} modelError="Could not download Qwen 3.5 4B" />);
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not download Qwen 3.5 4B");
+  });
+
   it("collapses model actions, retains management and errors, and follows live running state", () => {
     const open = vi.fn();
     const props = { mlxStatus: status, mlxActionModel: null, modelError: "Could not stop this model", onInstallMlxModel: vi.fn(), onToggleMlxModel: vi.fn(), onOpenSettings: open };
@@ -70,7 +188,7 @@ describe("model status", () => {
   });
 
   it("distinguishes running, stopped and missing models with text and shapes", () => {
-    render(<MlxModelStatusPanel mlxStatus={{ ...status, models: status.models.map((model) => ({ ...model, busy: false, requestCount: 0 })) }} mlxActionModel={null} onInstallMlxModel={vi.fn()} onToggleMlxModel={vi.fn()} onOpenSettings={vi.fn()} />);
+    const { rerender } = render(<MlxModelStatusPanel mlxStatus={{ ...status, models: status.models.map((model) => ({ ...model, busy: false, requestCount: 0 })) }} mlxActionModel={null} onInstallMlxModel={vi.fn()} onToggleMlxModel={vi.fn()} onOpenSettings={vi.fn()} />);
     const running = screen.getByRole("button", { name: "Stop Whisper Large v3 Turbo" });
     const stopped = screen.getByRole("button", { name: "Start Gemma 4 E4B" });
     const missing = screen.getByRole("button", { name: "Manage Qwen 3.5 4B" });
@@ -81,6 +199,14 @@ describe("model status", () => {
     expect(stopped).not.toHaveClass("is-loaded");
     expect(missing).toHaveClass("is-dormant");
     expect(missing).toHaveTextContent("↓Not installed");
+    const cachedLoadStatus: MlxStatus = {
+      ...status,
+      installing: ["gemma4"],
+      downloads: [{ id: "gemma4", progress: null }],
+      models: status.models.map((model) => model.id === "gemma4" ? { ...model, loading: true } : model),
+    };
+    rerender(<MlxModelStatusPanel mlxStatus={cachedLoadStatus} mlxActionModel="gemma4" mlxAction="load" onInstallMlxModel={vi.fn()} onToggleMlxModel={vi.fn()} onOpenSettings={vi.fn()} />);
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
 
   it("orders active models before stopped models and missing downloads with stable ties", () => {
