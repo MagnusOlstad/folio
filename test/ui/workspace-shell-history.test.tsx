@@ -111,9 +111,11 @@ describe("workspace history mode", () => {
     rerender(<WorkspaceShell {...shellProps()} />);
     expect(screen.getByRole("region", { name: "Note history" })).toBeInTheDocument();
     rerender(<WorkspaceShell {...shellProps({ primaryId: "untitled:draft", documents: {} })} />);
-    expect(screen.getByText("Drafts do not have history.")).toBeVisible();
+    expect(screen.getByText("History begins after filing")).toBeVisible();
+    expect(screen.getByText("File this draft to start keeping earlier versions.")).toBeVisible();
     expect(screen.queryByRole("region", { name: "Note history" })).not.toBeInTheDocument();
     expect(screen.getByTestId("main-note")).toHaveTextContent("Live editor");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     rerender(<WorkspaceShell {...shellProps({ documents: {}, loadingDocuments: new Set([noteId]) })} />);
     expect(screen.getByRole("status")).toHaveTextContent("Loading note");
     expect(fetchMock).toHaveBeenCalledTimes(1);

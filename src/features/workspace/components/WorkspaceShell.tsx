@@ -86,7 +86,10 @@ export function WorkspaceShell({
   ) : editor.model.loadingDocuments.has(activeDocumentId) ? (
     <p className="right-pane-placeholder" role="status">Loading note…</p>
   ) : isUntitledId(activeDocumentId) ? (
-    <p className="right-pane-placeholder">Drafts do not have history.</p>
+    <div className="draft-history-empty">
+      <p>History begins after filing</p>
+      <p>File this draft to start keeping earlier versions.</p>
+    </div>
   ) : (
     <p className="right-pane-placeholder">Open a filed note to see its history.</p>
   );
