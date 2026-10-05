@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.4](https://github.com/MagnusOlstad/folio/compare/v0.7.3...v0.7.4) (2026-10-05)
+
+
+### Bug Fixes
+
+* **transcription:** bound audio memory and improve progress reporting ([fa8bee1](https://github.com/MagnusOlstad/folio/commit/fa8bee148e27fd49c45a533ffaf23c9fc11974bf))
+
 ## [0.7.3](https://github.com/MagnusOlstad/folio/compare/v0.7.2...v0.7.3) (2026-10-04)
 
 
