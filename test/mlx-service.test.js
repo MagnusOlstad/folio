@@ -143,7 +143,7 @@ test('models install explicitly into their pinned snapshots and use the JSONL wo
   assert.equal((await readLog(logPath)).findLast((entry) => entry.event === 'response' && entry.operation === 'shutdown').memory.cacheBytes, 0)
 })
 
-test('download progress counts deduplicated cached blobs and growing partial files', async (t) => {
+test('download progress counts pinned snapshot files and ignores unrelated incomplete blobs', async (t) => {
   const { root, logPath, service } = await fixture(t)
   await setControl(root, { readyDelayMs: 1_000 })
   const definition = service.modelDefinitions.qwen35
@@ -155,6 +155,9 @@ test('download progress counts deduplicated cached blobs and growing partial fil
   await fs.writeFile(incompleteBlob, Buffer.alloc(20))
   const old = new Date(Date.now() - 60_000)
   await fs.utimes(incompleteBlob, old, old)
+  const historicalSnapshot = path.join(repoRoot, 'snapshots', 'previous-revision')
+  await fs.mkdir(historicalSnapshot, { recursive: true })
+  await fs.writeFile(path.join(historicalSnapshot, 'stale-large-weight'), Buffer.alloc(5_000_000))
   const installation = service.install('qwen35')
   await waitUntil(async () => (await readLog(logPath)).some((entry) => entry.event === 'ready' && entry.model?.includes('Qwen3.5')))
 
@@ -171,10 +174,10 @@ test('download progress counts deduplicated cached blobs and growing partial fil
     (await fs.stat(path.join(snapshot, name))).size
   )))).reduce((total, bytes) => total + bytes, 0)
   assert.equal(first.phase, 'downloading')
-  assert.equal(first.downloadedBytes, otherCachedBytes + 100 + 20, 'snapshot and blob links plus partial bytes are counted once')
+  assert.equal(first.downloadedBytes, otherCachedBytes + 100, 'snapshot links are counted once while unrelated partial blobs are ignored')
   await fs.appendFile(incompleteBlob, Buffer.alloc(30))
   const next = (await service.status()).downloads.find(({ id }) => id === 'qwen35').progress
-  assert.equal(next.downloadedBytes, first.downloadedBytes + 30)
+  assert.equal(next.downloadedBytes, first.downloadedBytes)
   assert.ok(next.percent >= first.percent && next.percent <= 99)
 
   await setControl(root, {})
@@ -199,6 +202,30 @@ test('download progress includes native helper progress before cache files becom
   assert.equal(progress.totalBytes, 1_000)
   assert.equal(progress.percent, 50)
   assert.equal(progress.phase, 'downloading')
+  await installation
+})
+
+test('aggregates model and tokenizer download stages without treating tokenizer bytes as the whole install', async (t) => {
+  const { root, logPath, service } = await fixture(t)
+  await setControl(root, {
+    readyDelayMs: 1_000,
+    downloadProgressEvents: [
+      { scope: 'model', downloadedBytes: 1_200_000_000, totalBytes: 1_600_000_000 },
+      { scope: 'tokenizer', downloadedBytes: 2_000_000, totalBytes: 4_000_000 },
+    ],
+  })
+  const installation = service.install('qwen35')
+  await waitUntil(async () => (await readLog(logPath)).some(({ event }) => event === 'ready'))
+  const definition = service.modelDefinitions.qwen35
+  const snapshot = path.join(root, 'models', 'hf-cache', `models--${definition.repository.replaceAll('/', '--')}`, 'snapshots', definition.revision)
+  await fs.rm(path.join(snapshot, 'model.safetensors'))
+  await fs.rm(path.join(snapshot, 'tokenizer_config.json'))
+  await waitUntil(async () => (await service.status()).downloads
+    .find(({ id }) => id === 'qwen35')?.progress.totalBytes === 1_604_000_000)
+  const progress = (await service.status()).downloads.find(({ id }) => id === 'qwen35').progress
+  assert.equal(progress.totalBytes, 1_604_000_000)
+  assert.equal(progress.downloadedBytes, 1_202_000_000)
+  assert.equal(progress.percent, 74)
   await installation
 })
 
@@ -230,6 +257,88 @@ test('propagates helper protocol errors and rejects invalid JSON readiness', asy
   })
   t.after(() => fresh.close())
   await assert.rejects(fresh.install('gemma4'), /invalid JSON/)
+})
+
+test('transcription progress is request scoped and never resolves the request, then unloads after success', async (t) => {
+  const { root, logPath, service } = await fixture(t)
+  await setControl(root, { transcriptionProgress: [35, 12, 99, 100] })
+  const whisper = service.modelDefinitions.whisper
+  const snapshot = path.join(root, 'models', 'hf-cache', `models--${whisper.repository.replaceAll('/', '--')}`, 'snapshots', whisper.revision)
+  await fs.mkdir(snapshot, { recursive: true })
+  await Promise.all([
+    fs.writeFile(path.join(snapshot, 'config.json'), JSON.stringify({ model_type: 'whisper' })),
+    fs.writeFile(path.join(snapshot, 'model.safetensors'), 'fake weights'),
+    fs.writeFile(path.join(snapshot, 'tokenizer.json'), '{}'),
+    fs.writeFile(path.join(snapshot, 'tokenizer_config.json'), '{}'),
+  ])
+  assert.equal((await service.status()).models.find((model) => model.id === 'whisper').installed, true)
+  await service.install('whisper')
+  const progress = []
+  const result = await service.transcribe('/tmp/recording.wav', { onProgress: (percent) => progress.push(percent) })
+  assert.equal(result.text, 'Fixture transcription.')
+  assert.deepEqual(progress, [35, 99])
+  assert.equal((await service.status()).models.find((model) => model.id === 'whisper').loaded, false)
+  assert.ok((await readLog(logPath)).some((entry) => entry.event === 'response' && entry.operation === 'shutdown'))
+
+  const largeWhisper = service.modelDefinitions.whisperlarge
+  const largeSnapshot = path.join(root, 'models', 'hf-cache', `models--${largeWhisper.repository.replaceAll('/', '--')}`, 'snapshots', largeWhisper.revision)
+  await fs.mkdir(largeSnapshot, { recursive: true })
+  await Promise.all([
+    fs.writeFile(path.join(largeSnapshot, 'config.json'), JSON.stringify({ model_type: 'whisper' })),
+    fs.writeFile(path.join(largeSnapshot, 'model.safetensors'), 'fake weights'),
+    fs.writeFile(path.join(largeSnapshot, 'tokenizer.json'), '{}'),
+    fs.writeFile(path.join(largeSnapshot, 'tokenizer_config.json'), '{}'),
+  ])
+  await service.selectTranscriptionModel('whisperlarge')
+  await service.install('whisperlarge')
+  const largeResult = await service.transcribe('/tmp/recording.wav', { onProgress: (percent) => progress.push(percent) })
+  assert.equal(largeResult.text, 'Fixture transcription.')
+  assert.equal((await service.status()).models.find((model) => model.id === 'whisperlarge').loaded, false)
+})
+
+test('transcription worker also unloads when inference fails and queued generation can proceed', async (t) => {
+  const { root, service } = await fixture(t)
+  const whisper = service.modelDefinitions.whisper
+  const snapshot = path.join(root, 'models', 'hf-cache', `models--${whisper.repository.replaceAll('/', '--')}`, 'snapshots', whisper.revision)
+  await fs.mkdir(snapshot, { recursive: true })
+  await Promise.all([
+    fs.writeFile(path.join(snapshot, 'config.json'), JSON.stringify({ model_type: 'whisper' })),
+    fs.writeFile(path.join(snapshot, 'model.safetensors'), 'fake weights'),
+    fs.writeFile(path.join(snapshot, 'tokenizer.json'), '{}'),
+    fs.writeFile(path.join(snapshot, 'tokenizer_config.json'), '{}'),
+  ])
+  await setControl(root, { failTranscribe: true })
+  await service.install('whisper')
+  await assert.rejects(service.transcribe('/tmp/recording.wav'), /fixture transcription error/)
+  assert.equal((await service.status()).models.find((model) => model.id === 'whisper').loaded, false)
+  await service.install('gemma4')
+  await service.generate([{ role: 'user', content: 'Queued after transcription.' }])
+  assert.equal((await service.status()).models.find((model) => model.id === 'gemma4').loaded, true)
+})
+
+test('cancelling active Whisper inference unloads its worker before queued work proceeds', async (t) => {
+  const { root, logPath, service } = await fixture(t)
+  const whisper = service.modelDefinitions.whisper
+  const snapshot = path.join(root, 'models', 'hf-cache', `models--${whisper.repository.replaceAll('/', '--')}`, 'snapshots', whisper.revision)
+  await fs.mkdir(snapshot, { recursive: true })
+  await Promise.all([
+    fs.writeFile(path.join(snapshot, 'config.json'), JSON.stringify({ model_type: 'whisper' })),
+    fs.writeFile(path.join(snapshot, 'model.safetensors'), 'fake weights'),
+    fs.writeFile(path.join(snapshot, 'tokenizer.json'), '{}'),
+    fs.writeFile(path.join(snapshot, 'tokenizer_config.json'), '{}'),
+  ])
+  await service.install('whisper')
+  await setControl(root, { operationDelayMs: 2_000 })
+  const controller = new AbortController()
+  const transcribing = service.transcribe('/tmp/recording.wav', { signal: controller.signal })
+  await waitUntil(async () => (await readLog(logPath)).some((entry) => entry.event === 'request' && entry.operation === 'transcribe'))
+  controller.abort()
+  await assert.rejects(transcribing, { code: 'TRANSCRIPTION_CANCELLED' })
+  assert.equal((await service.status()).models.find((model) => model.id === 'whisper').loaded, false)
+  await setControl(root, {})
+  await service.install('gemma4')
+  await service.generate([{ role: 'user', content: 'Queued after cancellation.' }])
+  assert.equal((await service.status()).models.find((model) => model.id === 'gemma4').loaded, true)
 })
 
 test('deduplicates simultaneous launches for the same model', async (t) => {

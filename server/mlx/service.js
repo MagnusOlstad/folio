@@ -282,7 +282,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     if (!closed && workers.get(id) === worker && (activeRequests.get(id) || 0) === 0) armIdleTimer(id, worker)
   }
 
-  async function run(id, operation, payload, timeoutMs, signal = null) {
+  async function run(id, operation, payload, timeoutMs, signal = null, { onEvent = null, unloadAfter = false } = {}) {
     if (removing.has(id)) throw Object.assign(new Error('This model is being removed. Try again when it finishes.'), { statusCode: 409 })
     if (unloading.has(id)) throw Object.assign(new Error('This model is stopping. Try again when it finishes.'), { statusCode: 409 })
     if (stopping.has(id)) await stoppingJobs.get(id)
@@ -305,7 +305,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
           }
           signal.addEventListener('abort', abort, { once: true })
         }
-        return await worker.request(operation, payload, timeoutMs)
+        return await worker.request(operation, payload, timeoutMs, onEvent)
       } catch (error) {
         if (signal?.aborted && worker) {
           await terminateMlxWorker(worker, 2_000)
@@ -322,7 +322,18 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
         notifyRequestsFinished(id)
       }
     }
-    return MODEL_DEFINITIONS[id].purpose === 'embeddings' ? execute() : withModelActivity(id, execute)
+    const executeWithCleanup = async () => {
+      let result
+      let requestError
+      try { result = await execute() } catch (error) { requestError = error }
+      if (unloadAfter) {
+        try { await stopModel(id) } catch (cleanupError) { if (!requestError) requestError = cleanupError }
+      }
+      if (requestError) throw requestError
+      return result
+    }
+    return MODEL_DEFINITIONS[id].purpose === 'embeddings'
+      ? executeWithCleanup() : withModelActivity(id, executeWithCleanup)
   }
 
   async function status() {
@@ -455,10 +466,18 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     return run('embeddinggemma', 'embed', { input }, 2 * 60_000)
   }
 
-  async function transcribe(audioPath, { signal, modelId = null } = {}) {
+  async function transcribe(audioPath, { signal, modelId = null, onProgress = null } = {}) {
     const id = modelId || await selectedTranscriptionModel()
     if (MODEL_DEFINITIONS[id]?.purpose !== 'transcription') throw new Error('The selected MLX model cannot transcribe audio.')
-    return run(id, 'transcribe', { audioPath }, 6 * 60 * 60_000, signal)
+    let lastPercent = -1
+    return run(id, 'transcribe', { audioPath }, 6 * 60 * 60_000, signal, {
+      unloadAfter: true,
+      onEvent: (event) => {
+        if (event.percent <= lastPercent) return
+        lastPercent = event.percent
+        onProgress?.(event.percent)
+      },
+    })
   }
 
   async function close() {

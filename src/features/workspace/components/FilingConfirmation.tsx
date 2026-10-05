@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import type { FilingQueueEntry } from "../model/filing.ts";
 import { isInternalBundlePath, normalizeDirectoryInput } from "../../../lib/paths.ts";
 import { FilingFieldsForm } from "./FilingFieldsForm.tsx";
@@ -34,7 +34,7 @@ export function FilingConfirmation({
     if (autoFocus && entry.status === "ready") acceptRef.current?.focus();
   }, [autoFocus, entry.status, entry.filing.id]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!autoFocus) return;
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;

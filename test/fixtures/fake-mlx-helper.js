@@ -98,11 +98,13 @@ if (startupControl.exitBeforeReady) {
   process.stderr.write('fixture exited before readiness\n')
   process.exit(Number(startupControl.exitBeforeReady) || 23)
 }
-if (startupControl.downloadProgress) {
+for (const downloadProgress of startupControl.downloadProgressEvents || (startupControl.downloadProgress ? [startupControl.downloadProgress] : [])) {
   process.stdout.write(`${JSON.stringify({
     event: 'download-progress',
-    downloadedBytes: startupControl.downloadProgress.downloadedBytes,
-    totalBytes: startupControl.downloadProgress.totalBytes,
+    ...(typeof downloadProgress.scope === 'string' ? { scope: downloadProgress.scope } : {}),
+    ...(typeof downloadProgress.complete === 'boolean' ? { complete: downloadProgress.complete } : {}),
+    downloadedBytes: downloadProgress.downloadedBytes,
+    totalBytes: downloadProgress.totalBytes,
   })}\n`)
 }
 if (startupControl.readyDelayMs) await new Promise((resolve) => setTimeout(resolve, startupControl.readyDelayMs))
@@ -134,7 +136,13 @@ for await (const line of lines) {
     else if (request.operation === 'generate' && control.failGenerate) response = { id: request.id, error: 'fixture generation error', memory }
     else if (request.operation === 'generate') response = { id: request.id, text: await generate(request.messages), memory }
     else if (request.operation === 'embed') response = { id: request.id, embeddings: await embed(request.input), memory }
-    else if (request.operation === 'transcribe') response = { id: request.id, text: 'Fixture transcription.', memory }
+    else if (request.operation === 'transcribe' && control.failTranscribe) response = { id: request.id, error: 'fixture transcription error', memory }
+    else if (request.operation === 'transcribe') {
+      for (const percent of control.transcriptionProgress || []) {
+        process.stdout.write(`${JSON.stringify({ event: 'transcription-progress', id: request.id, percent })}\n`)
+      }
+      response = { id: request.id, text: 'Fixture transcription.', memory }
+    }
     else response = { id: request.id, error: `unknown operation: ${request.operation}`, memory }
     await appendLog({ event: 'response', operation: request.operation, error: response.error, memory: response.memory })
     process.stdout.write(`${JSON.stringify(response)}\n`)

@@ -7,7 +7,9 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   let sourceBundleId = ''
   let importBody: Record<string, unknown> | null = null
   const processedSessionIds = new Set<string>()
+  const activeSessionIds = new Set<string>()
   const rawResults = new Map<string, { summary: string; transcript: string }>()
+  let releaseTranscription = () => {}
   await page.addInitScript(() => localStorage.setItem('folio:model-setup-prompt-seen', '1'))
   page.on('request', (request) => {
     if (new URL(request.url()).pathname === '/api/transcriptions' && request.method() === 'POST') {
@@ -33,13 +35,19 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   await page.route('**/api/transcriptions?pending=1', async (route) => {
     const upstream = await route.fetch()
     const sessions = await upstream.json()
-    await route.fulfill({ json: sessions.map((session: { id: string; state: string }) => session.state === 'recorded' && processedSessionIds.has(session.id) ? { ...session, state: 'ready' } : session) })
+    await route.fulfill({ json: sessions.map((session: { id: string; state: string }) => activeSessionIds.has(session.id)
+      ? { ...session, state: 'transcribing', progressPercent: 37 }
+      : session.state === 'recorded' && processedSessionIds.has(session.id) ? { ...session, state: 'ready' } : session) })
   })
   await page.route('**/api/transcriptions/*/process', async (route) => {
     const id = new URL(route.request().url()).pathname.split('/').at(-2)
-    if (id) processedSessionIds.add(id)
+    if (id) activeSessionIds.add(id)
+    await new Promise<void>((resolve) => {
+      const fallback = setTimeout(resolve, 10_000)
+      releaseTranscription = () => { clearTimeout(fallback); resolve() }
+    })
     const result = { summary: '', transcript: 'The project review is next Tuesday at noon.' }
-    if (id) rawResults.set(id, result)
+    if (id) { activeSessionIds.delete(id); processedSessionIds.add(id); rawResults.set(id, result) }
     const sessionResponse = await request.get(`/api/transcriptions/${id}`)
     const { session } = await sessionResponse.json()
     sourceBundleId = session.sourceBundleId
@@ -84,6 +92,9 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   expect(importBody).not.toHaveProperty('sourceNoteId')
   const tabsBeforeTranscribe = await page.locator('.editor-tab').count()
   await imported.getByRole('button', { name: 'Transcribe' }).first().click()
+  await expect(imported.getByText('37%', { exact: true })).toBeVisible()
+  await expect(imported.locator('.transcription-download-progress')).toHaveCount(0)
+  releaseTranscription()
   const draftEditor = page.getByLabel('Write a new note')
   await expect(draftEditor).toBeVisible()
   await expect(draftEditor).toContainText('Source audio: project-review.wav')

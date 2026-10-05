@@ -89,12 +89,21 @@ its separately pinned tokenizer snapshot. Full Large v3 requires
 variants are validated before loading, and transcription stays offline after
 installation.
 
+Run the bounded reader's short, exact, trailing, stereo first-channel, and
+15/60-minute frame-sequencing checks on macOS with
+`Scripts/test-audio-window.sh`. The integration build also exercises the
+upstream `resampleAudio` path used by Whisper.
+
 The helper reports a JSON `ready` event on stdout and then accepts one JSON
 object per stdin line. Generation requests provide a system and user message;
 embedding requests provide an array of non-empty strings; transcription
-requests provide a local `audioPath` to a mono 16 kHz audio file. Each response
-carries the request id, generated text, transcript, or embedding vectors, and
-allocator memory readings. `status` and `shutdown` operations support lifecycle
+requests provide a local `audioPath` to an audio file. The reader decodes one
+30-second source window at a time, preserves the first channel used by the
+upstream audio loader, and resamples each window to 16 kHz for Whisper. It emits
+request-scoped `transcription-progress` events from completed source frames,
+then joins the non-empty window transcripts in order. The response carries the
+request id, generated text, transcript, or embedding vectors, and allocator
+memory readings. `status` and `shutdown` operations support lifecycle
 management.
 Diagnostics go to stderr. A fresh generation session is released and MLX's
 allocator cache is cleared after every request, including failures; the model

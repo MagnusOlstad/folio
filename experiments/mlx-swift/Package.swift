@@ -12,6 +12,7 @@ let package = Package(
         .package(url: "https://github.com/Blaizzy/mlx-audio-swift.git", revision: "8d86630ade569728aaea3dc1a29fc44e2efa719b"),
     ],
     targets: [
+        .target(name: "FolioMLXAudio"),
         .target(name: "FolioMLXProgress"),
         .testTarget(
             name: "FolioMLXProgressTests",
@@ -21,6 +22,7 @@ let package = Package(
             name: "folio-mlx",
             dependencies: [
                 "FolioMLXProgress",
+                "FolioMLXAudio",
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "MLXEmbedders", package: "mlx-swift-lm"),

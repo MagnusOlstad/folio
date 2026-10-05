@@ -49,6 +49,11 @@ export function runHelper({ executable, args, cacheRoot, request, signal, onEven
         let message
         try { message = JSON.parse(line) } catch { continue }
         if (message.event === 'download-progress') { onEvent?.(message); continue }
+        if (message.event === 'transcription-progress') {
+          if (request && message.id === request.id && Number.isInteger(message.percent)
+            && message.percent >= 0 && message.percent <= 99) onEvent?.(message)
+          continue
+        }
         if (message.event === 'ready') {
           ready = true
           onEvent?.(message)

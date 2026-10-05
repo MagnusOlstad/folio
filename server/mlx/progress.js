@@ -4,7 +4,6 @@ import { modelSnapshotRoot } from './snapshots.js'
 
 export async function installationProgress({ cacheRoot, definition, installing, isInstalled, worker }) {
   if (!installing) return null
-  const repoRoot = path.join(cacheRoot, `models--${definition.repository.replaceAll('/', '--')}`)
   let downloadedBytes = 0
   const countedFiles = new Set()
   async function countFile(entryPath) {
@@ -27,14 +26,12 @@ export async function installationProgress({ cacheRoot, definition, installing, 
     }))
   }
   await visitSnapshot(path.join(modelSnapshotRoot(cacheRoot, definition), definition.revision))
-  let blobs = []
-  try { blobs = await fs.readdir(path.join(repoRoot, 'blobs'), { withFileTypes: true }) } catch { /* not downloaded yet */ }
-  await Promise.all(blobs.filter((entry) => entry.isFile() && entry.name.endsWith('.incomplete'))
-    .map((entry) => countFile(path.join(repoRoot, 'blobs', entry.name))))
   const installed = await isInstalled(definition)
   const nativeProgress = worker?.downloadProgress
   if (nativeProgress) downloadedBytes = Math.max(downloadedBytes, nativeProgress.downloadedBytes)
-  const totalBytes = nativeProgress?.totalBytes || definition.downloadSizeBytes
+  const totalBytes = definition.purpose === 'transcription'
+    ? definition.downloadSizeBytes
+    : nativeProgress?.totalBytes || definition.downloadSizeBytes
   const percent = installed ? 100 : Math.min(99, Math.floor((downloadedBytes / totalBytes) * 100))
   return {
     downloadedBytes: Math.min(downloadedBytes, totalBytes),

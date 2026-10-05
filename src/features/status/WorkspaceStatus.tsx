@@ -15,6 +15,40 @@ export type WorkspaceStatusProps = {
   onOpenSettings?: (category?: SettingsCategory) => void;
 };
 
+const FIRST_OPEN_SETTINGS_KEY = "folio:model-setup-prompt-seen";
+
+type FirstOpenSettingsPromptProps = {
+  mlxStatus: MlxStatus | null;
+  onOpenSettings?: (category?: SettingsCategory) => void;
+};
+
+function FirstOpenSettingsPrompt({ mlxStatus, onOpenSettings }: FirstOpenSettingsPromptProps) {
+  const [alreadySeen] = useState(() => {
+    try { return window.localStorage.getItem(FIRST_OPEN_SETTINGS_KEY) === "1"; }
+    catch { return false; }
+  });
+  const [decision, setDecision] = useState<{ resolved: boolean; show: boolean }>({ resolved: false, show: false });
+
+  if (!decision.resolved && mlxStatus) {
+    const selectedInstalled = mlxStatus.models.some((model) => model.id === mlxStatus.selectedGenerationModel && model.installed);
+    setDecision({ resolved: true, show: !alreadySeen && !selectedInstalled });
+  }
+
+  useEffect(() => {
+    if (!decision.resolved) return;
+    try { window.localStorage.setItem(FIRST_OPEN_SETTINGS_KEY, "1"); }
+    catch { /* settings remain available when browser storage is disabled */ }
+  }, [decision.resolved]);
+
+  if (!decision.show || !onOpenSettings) return null;
+  return (
+    <button className="mlx-model-settings-link" type="button" onClick={() => {
+      setDecision((current) => ({ ...current, show: false }));
+      onOpenSettings("models");
+    }}>Open model settings</button>
+  );
+}
+
 export function FolioBrand({ versionInfo }: { versionInfo: VersionInfo | null }) {
   const [updateState, setUpdateState] = useState<DesktopUpdateState | null>(null);
   useEffect(() => {
@@ -99,18 +133,6 @@ export function MlxModelStatusPanel({
 }: WorkspaceStatusProps) {
   const { collapsed, toggleCollapsed } = useModelPanelCollapse();
   const bodyId = useId();
-  const [showFirstOpenSettings, setShowFirstOpenSettings] = useState(false);
-  useEffect(() => {
-    if (!mlxStatus) return;
-    try {
-      if (window.localStorage.getItem("folio:model-setup-prompt-seen") === "1") return;
-      const selectedInstalled = mlxStatus.models.some((model) => model.id === mlxStatus.selectedGenerationModel && model.installed);
-      window.localStorage.setItem("folio:model-setup-prompt-seen", "1");
-      setShowFirstOpenSettings(!selectedInstalled);
-    } catch {
-      setShowFirstOpenSettings(!mlxStatus.models.some((model) => model.id === mlxStatus.selectedGenerationModel && model.installed));
-    }
-  }, [mlxStatus]);
   const available = Boolean(mlxStatus?.available && mlxStatus.helperAvailable);
   const stateText = !mlxStatus ? "Checking" : available ? "Available" : "Unavailable";
   const runningModels = available ? mlxStatus?.models.filter((model) => model.loaded) ?? [] : [];
@@ -131,9 +153,7 @@ export function MlxModelStatusPanel({
         </div>
       </div>
       <div className="mlx-model-panel-body" id={bodyId} hidden={collapsed}>
-        {showFirstOpenSettings && onOpenSettings ? (
-          <button className="mlx-model-settings-link" type="button" onClick={() => { setShowFirstOpenSettings(false); onOpenSettings("models"); }}>Open model settings</button>
-        ) : null}
+        <FirstOpenSettingsPrompt mlxStatus={mlxStatus} onOpenSettings={onOpenSettings} />
         <div className="mlx-model-list" role="group" aria-label="Models, active first" tabIndex={0}>
           {orderedModelCatalog(mlxStatus, mlxActionModel, mlxAction).map((definition) => {
             const { id } = definition;

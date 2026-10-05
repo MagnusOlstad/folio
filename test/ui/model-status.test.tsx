@@ -1,4 +1,5 @@
 import { act, fireEvent, render, renderHook, screen, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MlxStatus } from "../../src/domain/types.ts";
 import { ModelSettings } from "../../src/features/settings/components/ModelSettings.tsx";
@@ -16,9 +17,66 @@ const status: MlxStatus = {
 const response = (body: unknown, code = 200) => new Response(JSON.stringify(body), { status: code });
 
 beforeEach(() => { window.localStorage.removeItem("folio:model-panel-collapsed"); });
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); window.localStorage.removeItem("folio:model-panel-collapsed"); });
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  window.localStorage.removeItem("folio:model-panel-collapsed");
+  window.localStorage.removeItem("folio:model-setup-prompt-seen");
+});
 
 describe("model status", () => {
+  it("latches first-open setup from the first loaded status across refresh failures and remounts", () => {
+    window.localStorage.removeItem("folio:model-setup-prompt-seen");
+    const onOpenSettings = vi.fn();
+    const missingSelectedModel: MlxStatus = {
+      ...status,
+      models: status.models.map((model) => model.id === "gemma4" ? { ...model, installed: false, loaded: false } : model),
+    };
+    const props = { mlxActionModel: null, onInstallMlxModel: vi.fn(), onToggleMlxModel: vi.fn(), onOpenSettings };
+    const view = render(<StrictMode><MlxModelStatusPanel {...props} mlxStatus={null} /></StrictMode>);
+    expect(screen.queryByRole("button", { name: "Open model settings" })).not.toBeInTheDocument();
+
+    view.rerender(<StrictMode><MlxModelStatusPanel {...props} mlxStatus={missingSelectedModel} /></StrictMode>);
+    expect(screen.getByRole("button", { name: "Open model settings" })).toBeInTheDocument();
+    expect(window.localStorage.getItem("folio:model-setup-prompt-seen")).toBe("1");
+
+    view.rerender(<StrictMode><MlxModelStatusPanel {...props} mlxStatus={null} /></StrictMode>);
+    expect(screen.getByRole("button", { name: "Open model settings" })).toBeInTheDocument();
+    view.rerender(<StrictMode><MlxModelStatusPanel {...props} mlxStatus={status} /></StrictMode>);
+    expect(screen.getByRole("button", { name: "Open model settings" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open model settings" }));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Open model settings" })).not.toBeInTheDocument();
+    view.rerender(<StrictMode><MlxModelStatusPanel {...props} mlxStatus={missingSelectedModel} /></StrictMode>);
+    expect(screen.queryByRole("button", { name: "Open model settings" })).not.toBeInTheDocument();
+    view.unmount();
+
+    render(<MlxModelStatusPanel {...props} mlxStatus={missingSelectedModel} />);
+    expect(screen.queryByRole("button", { name: "Open model settings" })).not.toBeInTheDocument();
+  });
+
+  it("still lets users dismiss the setup prompt when localStorage is unavailable", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("storage unavailable"); });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("storage unavailable"); });
+    const onOpenSettings = vi.fn();
+    const missingSelectedModel: MlxStatus = {
+      ...status,
+      models: status.models.map((model) => model.id === "gemma4" ? { ...model, installed: false, loaded: false } : model),
+    };
+    render(<MlxModelStatusPanel
+      mlxStatus={missingSelectedModel}
+      mlxActionModel={null}
+      onInstallMlxModel={vi.fn()}
+      onToggleMlxModel={vi.fn()}
+      onOpenSettings={onOpenSettings}
+    />);
+    fireEvent.click(screen.getByRole("button", { name: "Open model settings" }));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Open model settings" })).not.toBeInTheDocument();
+  });
+
   it("advances both progress bars while the install request remains pending", async () => {
     vi.useFakeTimers();
     let currentStatus: MlxStatus = {
