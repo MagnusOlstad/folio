@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { recordDownloadProgress, summarizeDownloadProgress } from './download-progress.js'
 
 export function createMlxWorker({ id, definition, executable, cacheRoot, modelDirectory, onExit }) {
   const args = ['--task', definition.task, '--model', definition.repository, '--revision', definition.revision]
@@ -31,6 +32,7 @@ export function createMlxWorker({ id, definition, executable, cacheRoot, modelDi
     ready,
     memory: null,
     downloadProgress: null,
+    downloadProgressByScope: new Map(),
     closed: false,
     request(operation, payload = {}, timeoutMs = 120_000, onEvent = null) {
       if (worker.closed || !child.stdin.writable) return Promise.reject(new Error('The MLX worker is not running.'))
@@ -81,13 +83,8 @@ export function createMlxWorker({ id, definition, executable, cacheRoot, modelDi
         continue
       }
       if (message.event === 'download-progress') {
-        if (Number.isFinite(message.downloadedBytes) && Number.isFinite(message.totalBytes)
-          && message.downloadedBytes >= 0 && message.totalBytes > 0) {
-          worker.downloadProgress = {
-            downloadedBytes: Math.max(worker.downloadProgress?.downloadedBytes || 0, message.downloadedBytes),
-            totalBytes: message.totalBytes,
-          }
-        }
+        recordDownloadProgress(worker.downloadProgressByScope, message)
+        worker.downloadProgress = summarizeDownloadProgress(worker.downloadProgressByScope)
         continue
       }
       const pendingRequest = pending.get(message.id)

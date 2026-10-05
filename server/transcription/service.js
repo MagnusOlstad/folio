@@ -7,6 +7,7 @@ import { markdownFromResult, splitTranscript } from './model.js'
 import { DEFAULT_TRANSCRIPTION_MODEL_ID, TRANSCRIPTION_MODELS } from './models.js'
 import { createSessionLocks } from './locks.js'
 import { runHelper } from './helper.js'
+import { recordDownloadProgress, summarizeDownloadProgress } from '../mlx/download-progress.js'
 
 export const TRANSCRIPTION_MODEL = Object.freeze({
   id: TRANSCRIPTION_MODELS.whisper.repository,
@@ -90,11 +91,10 @@ export function createTranscriptionService(runtime) {
     const snapshot = await installedSnapshot(cacheRoot, model)
     const repositoryRoot = path.join(cacheRoot, `models--${model.repository.replaceAll('/', '--')}`)
     const partialSnapshot = path.join(repositoryRoot, 'snapshots', model.revision)
-    const currentInstallProgress = installProgress.get(modelId)
+    const currentInstallProgress = summarizeDownloadProgress(installProgress.get(modelId) || new Map())
     const downloadedBytes = installing.has(modelId) ? Math.min(model.downloadSizeBytes, Math.max(
       currentInstallProgress?.downloadedBytes || 0,
       await folderBytes(partialSnapshot),
-      await folderBytes(path.join(repositoryRoot, 'blobs')),
     )) : 0
     return {
       model: model.repository,
@@ -105,8 +105,8 @@ export function createTranscriptionService(runtime) {
       helperAvailable,
       modelState: snapshot ? 'ready' : installing.has(modelId) ? 'downloading' : 'missing',
       downloadedBytes,
-      totalBytes: currentInstallProgress?.totalBytes || model.downloadSizeBytes,
-      downloadPercent: snapshot ? 100 : installing.has(modelId) ? Math.min(99, Math.floor(downloadedBytes / (currentInstallProgress?.totalBytes || model.downloadSizeBytes) * 100)) : 0,
+      totalBytes: model.downloadSizeBytes,
+      downloadPercent: snapshot ? 100 : installing.has(modelId) ? Math.min(99, Math.floor(downloadedBytes / model.downloadSizeBytes * 100)) : 0,
       canInstall: available && helperAvailable,
       canTranscribe: available && helperAvailable && Boolean(snapshot),
       installing: installing.has(modelId),
@@ -171,7 +171,10 @@ export function createTranscriptionService(runtime) {
         const runner = runtime.transcriptionInstaller || runHelper
         await runner({ executable, args: taskArgs(modelId, 'install'), cacheRoot,
           signal: installController.signal,
-          onEvent: (event) => { if (Number.isFinite(event.downloadedBytes) && Number.isFinite(event.totalBytes)) installProgress.set(modelId, event) },
+          onEvent: (event) => {
+            if (!installProgress.has(modelId)) installProgress.set(modelId, new Map())
+            recordDownloadProgress(installProgress.get(modelId), event)
+          },
         })
         const snapshot = await installedSnapshot(cacheRoot, model)
         if (!snapshot) throw new Error('The Whisper model download finished, but its configuration, weights, or tokenizer files are incomplete. Retry the model download.')

@@ -56,6 +56,8 @@ private struct ReadyResponse: Encodable {
 
 private struct DownloadProgressResponse: Encodable {
     let event = "download-progress"
+    let scope: String
+    let complete: Bool
     let downloadedBytes: Int64
     let totalBytes: Int64
 }
@@ -110,10 +112,27 @@ private func writeLine<T: Encodable>(_ value: T) {
     FileHandle.standardOutput.write(data + Data([0x0a]))
 }
 
-private func writeDownloadProgress(_ progress: Progress) {
+private func writeDownloadProgress(_ progress: Progress, scope: String = "model") {
     guard let downloadedBytes = DownloadProgressBytes.downloadedBytes(for: progress) else { return }
-    writeLine(DownloadProgressResponse(downloadedBytes: downloadedBytes,
+    // HubClient emits a synthetic 1/1 value for a cached snapshot; file sizes
+    // from the completed stage below provide the real cached-byte count.
+    guard progress.totalUnitCount > 1 else { return }
+    writeLine(DownloadProgressResponse(scope: scope, complete: false,
+                                      downloadedBytes: downloadedBytes,
                                       totalBytes: progress.totalUnitCount))
+}
+
+private func writeDownloadStageCompletion(scope: String, directory: URL, files: [String]) {
+    let downloadedBytes = files.reduce(Int64(0)) { total, filename in
+        let file = directory.appendingPathComponent(filename).resolvingSymlinksInPath()
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
+              let size = attributes[.size] as? NSNumber else { return total }
+        return total + size.int64Value
+    }
+    guard downloadedBytes > 0 else { return }
+    writeLine(DownloadProgressResponse(scope: scope, complete: true,
+                                      downloadedBytes: downloadedBytes,
+                                      totalBytes: downloadedBytes))
 }
 
 private struct WhisperVariant {
@@ -188,7 +207,8 @@ private func installWhisperSnapshot(_ variant: WhisperVariant) async throws -> U
 
     let modelDirectory = try await client.downloadSnapshot(
         of: modelRepo, revision: variant.revision, matching: variant.modelFiles,
-        progressHandler: { progress in writeDownloadProgress(progress) })
+        progressHandler: { progress in writeDownloadProgress(progress, scope: "model") })
+    writeDownloadStageCompletion(scope: "model", directory: modelDirectory, files: variant.modelFiles)
     let expectedModelDirectory = try cache.snapshotPath(repo: modelRepo, kind: .model, commitHash: variant.revision)
     guard modelDirectory.standardizedFileURL == expectedModelDirectory.standardizedFileURL else {
         throw NSError(domain: "FolioMLX", code: 24,
@@ -204,7 +224,8 @@ private func installWhisperSnapshot(_ variant: WhisperVariant) async throws -> U
             of: tokenizerRepo,
             revision: variant.tokenizerRevision,
             matching: whisperTokenizerFiles,
-            progressHandler: { progress in writeDownloadProgress(progress) })
+            progressHandler: { progress in writeDownloadProgress(progress, scope: "tokenizer") })
+        writeDownloadStageCompletion(scope: "tokenizer", directory: tokenizerDirectory, files: whisperTokenizerFiles)
         let expectedTokenizerDirectory = try cache.snapshotPath(
             repo: tokenizerRepo, kind: .model, commitHash: variant.tokenizerRevision)
         guard tokenizerDirectory.standardizedFileURL == expectedTokenizerDirectory.standardizedFileURL else {
@@ -338,7 +359,7 @@ private struct FolioMLX {
                     extraEOSTokens: Set(stopTokens(for: modelID)))
                 generator = try await #huggingFaceLoadModelContainer(
                     configuration: configuration,
-                    progressHandler: writeDownloadProgress)
+                    progressHandler: { progress in writeDownloadProgress(progress) })
             }
             embedder = nil
             whisper = nil
@@ -360,7 +381,7 @@ private struct FolioMLX {
                     embedder = try await EmbedderModelFactory.shared.loadContainer(
                         from: #hubDownloader(), using: #huggingFaceTokenizerLoader(),
                         configuration: ModelConfiguration(id: modelID, revision: revision),
-                        progressHandler: writeDownloadProgress)
+                        progressHandler: { progress in writeDownloadProgress(progress) })
                 }
                 generator = nil
                 whisper = nil

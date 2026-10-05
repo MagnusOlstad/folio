@@ -143,7 +143,7 @@ test('models install explicitly into their pinned snapshots and use the JSONL wo
   assert.equal((await readLog(logPath)).findLast((entry) => entry.event === 'response' && entry.operation === 'shutdown').memory.cacheBytes, 0)
 })
 
-test('download progress counts deduplicated cached blobs and growing partial files', async (t) => {
+test('download progress counts pinned snapshot files and ignores unrelated incomplete blobs', async (t) => {
   const { root, logPath, service } = await fixture(t)
   await setControl(root, { readyDelayMs: 1_000 })
   const definition = service.modelDefinitions.qwen35
@@ -155,6 +155,9 @@ test('download progress counts deduplicated cached blobs and growing partial fil
   await fs.writeFile(incompleteBlob, Buffer.alloc(20))
   const old = new Date(Date.now() - 60_000)
   await fs.utimes(incompleteBlob, old, old)
+  const historicalSnapshot = path.join(repoRoot, 'snapshots', 'previous-revision')
+  await fs.mkdir(historicalSnapshot, { recursive: true })
+  await fs.writeFile(path.join(historicalSnapshot, 'stale-large-weight'), Buffer.alloc(5_000_000))
   const installation = service.install('qwen35')
   await waitUntil(async () => (await readLog(logPath)).some((entry) => entry.event === 'ready' && entry.model?.includes('Qwen3.5')))
 
@@ -171,10 +174,10 @@ test('download progress counts deduplicated cached blobs and growing partial fil
     (await fs.stat(path.join(snapshot, name))).size
   )))).reduce((total, bytes) => total + bytes, 0)
   assert.equal(first.phase, 'downloading')
-  assert.equal(first.downloadedBytes, otherCachedBytes + 100 + 20, 'snapshot and blob links plus partial bytes are counted once')
+  assert.equal(first.downloadedBytes, otherCachedBytes + 100, 'snapshot links are counted once while unrelated partial blobs are ignored')
   await fs.appendFile(incompleteBlob, Buffer.alloc(30))
   const next = (await service.status()).downloads.find(({ id }) => id === 'qwen35').progress
-  assert.equal(next.downloadedBytes, first.downloadedBytes + 30)
+  assert.equal(next.downloadedBytes, first.downloadedBytes)
   assert.ok(next.percent >= first.percent && next.percent <= 99)
 
   await setControl(root, {})
@@ -199,6 +202,30 @@ test('download progress includes native helper progress before cache files becom
   assert.equal(progress.totalBytes, 1_000)
   assert.equal(progress.percent, 50)
   assert.equal(progress.phase, 'downloading')
+  await installation
+})
+
+test('aggregates model and tokenizer download stages without treating tokenizer bytes as the whole install', async (t) => {
+  const { root, logPath, service } = await fixture(t)
+  await setControl(root, {
+    readyDelayMs: 1_000,
+    downloadProgressEvents: [
+      { scope: 'model', downloadedBytes: 1_200_000_000, totalBytes: 1_600_000_000 },
+      { scope: 'tokenizer', downloadedBytes: 2_000_000, totalBytes: 4_000_000 },
+    ],
+  })
+  const installation = service.install('qwen35')
+  await waitUntil(async () => (await readLog(logPath)).some(({ event }) => event === 'ready'))
+  const definition = service.modelDefinitions.qwen35
+  const snapshot = path.join(root, 'models', 'hf-cache', `models--${definition.repository.replaceAll('/', '--')}`, 'snapshots', definition.revision)
+  await fs.rm(path.join(snapshot, 'model.safetensors'))
+  await fs.rm(path.join(snapshot, 'tokenizer_config.json'))
+  await waitUntil(async () => (await service.status()).downloads
+    .find(({ id }) => id === 'qwen35')?.progress.totalBytes === 1_604_000_000)
+  const progress = (await service.status()).downloads.find(({ id }) => id === 'qwen35').progress
+  assert.equal(progress.totalBytes, 1_604_000_000)
+  assert.equal(progress.downloadedBytes, 1_202_000_000)
+  assert.equal(progress.percent, 74)
   await installation
 })
 

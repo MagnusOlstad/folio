@@ -210,6 +210,101 @@ test('transcription progress is transient, monotonic, session scoped, and reache
   await service.close()
 })
 
+test('Whisper installation aggregates model and tokenizer scopes and resets progress after retry', async (t) => {
+  const { runtime } = await fixture(t)
+  let attempt = 0
+  let finishRetry
+  runtime.transcriptionInstaller = async ({ onEvent }) => {
+    attempt += 1
+    if (attempt === 1) {
+      onEvent({ event: 'download-progress', scope: 'model', downloadedBytes: 1_500_000_000, totalBytes: 1_600_000_000, complete: true })
+      onEvent({ event: 'download-progress', scope: 'tokenizer', downloadedBytes: 3_000_000, totalBytes: 4_000_000 })
+      throw new Error('Tokenizer download failed.')
+    }
+    onEvent({ event: 'download-progress', scope: 'tokenizer', downloadedBytes: 1_000, totalBytes: 4_000 })
+    await new Promise((resolve) => { finishRetry = resolve })
+    return installSnapshot(runtime)
+  }
+  const service = createTranscriptionService(runtime)
+  await assert.rejects(service.install(), /Tokenizer download failed/)
+  const failed = await service.status()
+  assert.equal(failed.installing, false)
+  assert.equal(failed.downloadedBytes, 0, 'failed-install progress is not retained for the next attempt')
+  assert.equal(failed.downloadPercent, 0)
+
+  const retry = service.install()
+  const deadline = Date.now() + 2_000
+  let inProgress
+  while (Date.now() < deadline) {
+    inProgress = await service.status()
+    if (inProgress.installing) break
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  assert.equal(inProgress?.downloadedBytes, 1_000)
+  assert.equal(inProgress?.totalBytes, TRANSCRIPTION_MODELS.whisper.downloadSizeBytes)
+  assert.equal(inProgress?.downloadPercent, 0, 'retry starts with only its current stage bytes')
+  finishRetry?.()
+  await retry
+  assert.equal((await service.status()).downloadPercent, 100)
+  await service.close()
+})
+
+test('Whisper stage progress stays monotonic for both models and ignores cached or historical bytes', async (t) => {
+  for (const modelId of ['whisper', 'whisperlarge']) {
+    const { runtime } = await fixture(t)
+    const model = TRANSCRIPTION_MODELS[modelId]
+    let sendEvent
+    let finishInstall
+    let announceStarted
+    const started = new Promise((resolve) => { announceStarted = resolve })
+    runtime.mlxService = { selectedTranscriptionModel: async () => modelId }
+    runtime.transcriptionInstaller = async ({ onEvent }) => {
+      sendEvent = onEvent
+      announceStarted()
+      await new Promise((resolve) => { finishInstall = resolve })
+      return installSnapshot(runtime, model)
+    }
+    const repoRoot = path.join(runtime.modelRoot, 'hf-cache', `models--${model.repository.replaceAll('/', '--')}`)
+    const historical = path.join(repoRoot, 'snapshots', 'previous-revision')
+    await fs.mkdir(historical, { recursive: true })
+    await fs.writeFile(path.join(historical, 'stale-weights'), Buffer.alloc(10_000_000))
+    const blobs = path.join(repoRoot, 'blobs')
+    await fs.mkdir(blobs, { recursive: true })
+    await fs.writeFile(path.join(blobs, 'unrelated-complete-blob'), Buffer.alloc(20_000_000))
+    await fs.writeFile(path.join(blobs, 'unrelated.incomplete'), Buffer.alloc(30_000_000))
+
+    const service = createTranscriptionService(runtime)
+    const installation = service.install()
+    await started
+    sendEvent({ event: 'download-progress', scope: 'model', downloadedBytes: 1, totalBytes: 1 })
+    assert.equal((await service.status()).downloadedBytes, 0, `${modelId} cached sentinel must not look like one byte of progress`)
+
+    const modelStageTotal = model.downloadSizeBytes - 4_000_000
+    const progressEvents = [
+      { scope: 'model', downloadedBytes: Math.floor(modelStageTotal * 0.5), totalBytes: modelStageTotal },
+      { scope: 'model', downloadedBytes: Math.floor(modelStageTotal * 0.75), totalBytes: modelStageTotal },
+      { scope: 'model', downloadedBytes: modelStageTotal, totalBytes: modelStageTotal, complete: true },
+      { scope: 'tokenizer', downloadedBytes: 2_000_000, totalBytes: 4_000_000 },
+    ]
+    let previousPercent = 0
+    for (const event of progressEvents) {
+      sendEvent({ event: 'download-progress', ...event })
+      const status = await service.status()
+      assert.equal(status.totalBytes, model.downloadSizeBytes)
+      assert.ok(status.downloadedBytes >= 0 && status.downloadedBytes <= model.downloadSizeBytes)
+      assert.ok(status.downloadPercent >= previousPercent, `${modelId} progress regressed at ${event.scope} stage`)
+      previousPercent = status.downloadPercent
+    }
+    const inProgress = await service.status()
+    assert.equal(inProgress.downloadedBytes, model.downloadSizeBytes - 2_000_000)
+    assert.equal(inProgress.downloadPercent, 99)
+    finishInstall()
+    await installation
+    assert.equal((await service.status()).downloadPercent, 100)
+    await service.close()
+  }
+})
+
 test('deletion conflicts with active summary generation', async (t) => {
   const { runtime } = await fixture(t)
   let announceStarted
@@ -371,7 +466,9 @@ test('bundle-local transcription status reflects the shared Whisper installation
   let finishInstall
   const installGate = new Promise((resolve) => { finishInstall = resolve })
   runtime.transcriptionInstaller = async ({ onEvent }) => {
-    onEvent({ downloadedBytes: 75, totalBytes: 100 })
+    onEvent({ event: 'download-progress', scope: 'model', downloadedBytes: 1, totalBytes: 1 })
+    onEvent({ scope: 'model', downloadedBytes: 1_500_000_000, totalBytes: 1_600_000_000, complete: true })
+    onEvent({ scope: 'tokenizer', downloadedBytes: 3_500_000, totalBytes: 4_000_000 })
     await installGate
     return installSnapshot(runtime)
   }
@@ -393,8 +490,9 @@ test('bundle-local transcription status reflects the shared Whisper installation
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
     assert.equal(sharedProgress?.modelState, 'downloading')
-    assert.equal(sharedProgress?.downloadedBytes, 75)
-    assert.equal(sharedProgress?.downloadPercent, 75)
+    assert.equal(sharedProgress?.downloadedBytes, 1_503_500_000)
+    assert.equal(sharedProgress?.totalBytes, TRANSCRIPTION_MODELS.whisper.downloadSizeBytes)
+    assert.equal(sharedProgress?.downloadPercent, 93)
     finishInstall()
     await installation
     const shared = await second.status()
