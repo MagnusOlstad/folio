@@ -106,6 +106,10 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
   const [error, setError] = useState('')
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
   const activeBundle = useRef(sourceBundleId)
+  const activeTranscriptionId = useRef<string | null>(null)
+  const bundleGeneration = useRef(0)
+  const refreshSequence = useRef(0)
+  const latestAppliedRefresh = useRef(0)
   const busyRef = useRef(false)
   const deletingRef = useRef<string | null>(null)
   const deletedSessionIds = useRef(new Set<string>())
@@ -115,9 +119,15 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     association: { sourceBundleId },
     onImport: importFile,
   })
+  const hasTranscribingSession = pending.some((session) => session.state === 'transcribing')
   const transcriptionModelName = status?.modelName ?? (status?.modelId === 'whisperlarge' ? 'Whisper Large v3' : 'Whisper Large v3 Turbo')
 
-  useLayoutEffect(() => { activeBundle.current = sourceBundleId }, [sourceBundleId])
+  useLayoutEffect(() => {
+    if (activeBundle.current !== sourceBundleId) {
+      activeBundle.current = sourceBundleId
+      bundleGeneration.current += 1
+    }
+  }, [sourceBundleId])
   useLayoutEffect(() => { draftsRef.current = drafts }, [drafts])
 
   function draftFiled(oldId: string, _newId: string, bundleId: string) {
@@ -127,11 +137,16 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
   }
 
   async function refresh() {
+    const sequence = ++refreshSequence.current
+    const bundle = activeBundle.current
+    const generation = bundleGeneration.current
     try {
       const [nextStatus, sessions] = await Promise.all([
         api<TranscriptionStatus>('/api/transcriptions/status'),
         api<SessionListResponse>('/api/transcriptions?pending=1'),
       ])
+      if (sequence < latestAppliedRefresh.current || generation !== bundleGeneration.current || bundle !== activeBundle.current) return
+      latestAppliedRefresh.current = sequence
       setStatus(nextStatus)
       setPending(sessionList(sessions).filter((session) => !deletedSessionIds.current.has(session.id)
         && (!session.sourceBundleId || session.sourceBundleId === activeBundle.current)))
@@ -140,18 +155,19 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
 
   useEffect(() => {
     const initial = window.setTimeout(() => void refresh(), 0)
-    const interval = window.setInterval(() => void refresh(), phase === 'downloading' ? 1_000 : 5_000)
+    const interval = window.setInterval(() => void refresh(), phase === 'downloading' || phase === 'transcribing' || hasTranscribingSession ? 1_000 : 5_000)
     return () => { window.clearTimeout(initial); window.clearInterval(interval) }
-  }, [phase, sourceBundleId])
+  }, [hasTranscribingSession, phase, sourceBundleId])
 
   useEffect(() => {
-    if (activeSession?.sourceBundleId && activeSession.sourceBundleId !== sourceBundleId) {
+    if (activeSession && (activeSession.sourceBundleId ?? null) !== sourceBundleId) {
+      activeTranscriptionId.current = null
       setActiveSession(null)
       setProgress('')
       setPhase('idle')
       setError('')
     }
-  }, [sourceBundleId, activeSession?.sourceBundleId])
+  }, [sourceBundleId, activeSession])
 
   async function importFile(file: File, association?: RecordingAssociation): Promise<boolean> {
     if (busyRef.current) return false
@@ -234,24 +250,37 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
   async function transcribe(session: TranscriptionSession) {
     if (busyRef.current || deletingRef.current === session.id) return
     const taskBundle = session.sourceBundleId ?? null
+    const taskGeneration = bundleGeneration.current
     busyRef.current = true
+    activeTranscriptionId.current = session.id
     setError('')
     setActiveSession(session)
+    setPending((sessions) => sessions.map((item) => item.id === session.id
+      ? { ...item, state: 'transcribing', progressPercent: 0 } : item))
     setPhase('transcribing')
     setProgress(`Transcribing audio with ${transcriptionModelName} locally…`)
     try {
       const response = await apiForBundle<TranscriptionProcessResponse>(taskBundle, `/api/transcriptions/${encodeURIComponent(session.id)}/process`, { method: 'POST' })
-      openTranscriptDraft({ ...response.session, sourceBundleId: taskBundle }, response.result)
+      if (activeBundle.current === taskBundle && bundleGeneration.current === taskGeneration
+        && activeTranscriptionId.current === session.id) {
+        openTranscriptDraft({ ...response.session, sourceBundleId: taskBundle }, response.result)
+        setPhase('idle')
+        setProgress('')
+        setActiveSession(null)
+      }
       await refresh()
-      setPhase('idle')
-      setProgress('')
-      setActiveSession(null)
     } catch (transcribeError) {
-      setError(errorMessage(transcribeError, 'Could not transcribe the audio.'))
-      setPhase('error')
-      setProgress('')
+      if (activeBundle.current === taskBundle && bundleGeneration.current === taskGeneration
+        && activeTranscriptionId.current === session.id) {
+        setError(errorMessage(transcribeError, 'Could not transcribe the audio.'))
+        setPhase('error')
+        setProgress('')
+      }
       await refresh()
-    } finally { busyRef.current = false }
+    } finally {
+      busyRef.current = false
+      if (activeTranscriptionId.current === session.id) activeTranscriptionId.current = null
+    }
   }
 
   async function cancel(session: TranscriptionSession) {
@@ -273,19 +302,27 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     }
     try {
       await apiForBundle(session.sourceBundleId ?? null, `/api/transcriptions/${encodeURIComponent(session.id)}/cancel`, { method: 'POST' })
-      setMessage('Transcription cancelled. The audio file is saved and can be retried.')
-    } catch (cancelError) { setError(errorMessage(cancelError, 'Could not cancel transcription.')) }
+      if (activeBundle.current === (session.sourceBundleId ?? null)) setMessage('Transcription cancelled. The audio file is saved and can be retried.')
+    } catch (cancelError) { if (activeBundle.current === (session.sourceBundleId ?? null)) setError(errorMessage(cancelError, 'Could not cancel transcription.')) }
     await refresh()
   }
 
   async function openTranscript(session: TranscriptionSession) {
     if (deletingRef.current === session.id) return
+    const taskBundle = session.sourceBundleId ?? null
+    const taskGeneration = bundleGeneration.current
     setError('')
     try {
-      const response = await apiForBundle<TranscriptionProcessResponse>(session.sourceBundleId ?? null, `/api/transcriptions/${encodeURIComponent(session.id)}`)
+      const response = await apiForBundle<TranscriptionProcessResponse>(taskBundle, `/api/transcriptions/${encodeURIComponent(session.id)}`)
+      if (activeBundle.current !== taskBundle || bundleGeneration.current !== taskGeneration) return
       if (!response.result) throw new Error('No transcript has been saved for this audio yet. Transcribe it first.')
-      openTranscriptDraft(session, response.result)
-    } catch (openError) { setError(errorMessage(openError, 'Could not open the transcript note.')); setPhase('error') }
+      openTranscriptDraft({ ...session, sourceBundleId: taskBundle }, response.result)
+    } catch (openError) {
+      if (activeBundle.current === taskBundle && bundleGeneration.current === taskGeneration) {
+        setError(errorMessage(openError, 'Could not open the transcript note.'))
+        setPhase('error')
+      }
+    }
   }
 
   async function deleteSession(session: TranscriptionSession) {
@@ -397,7 +434,9 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     activeSession,
     pending: pending.filter((session) => !session.sourceBundleId || session.sourceBundleId === sourceBundleId),
     status,
-    progress,
+    progress: phase === 'transcribing'
+      ? `${pending.find((session) => session.id === activeSession?.id)?.progressPercent ?? 0}%`
+      : progress,
     error,
     deletingSessionId,
     recording: { phase: recorder.phase, duration: recorder.duration, error: recorder.error, saving: recorder.saving },

@@ -47,7 +47,7 @@ test('refile flushes edits, discard preserves the note, and history restore keep
     })
 
     await page.goto('/')
-    await page.getByRole('button', { name: title, exact: true }).click()
+    await page.locator('.workbench-sidebar').getByRole('button', { name: title, exact: true }).click()
     const editor = page.getByRole('textbox', { name: `Edit ${title}` })
     await editor.fill(latestBody)
     await page.getByRole('button', { name: 'Refile', exact: true }).click()
@@ -58,7 +58,7 @@ test('refile flushes edits, discard preserves the note, and history restore keep
     await dialog.getByRole('combobox', { name: 'Path' }).fill(reviewedDirectory)
     await page.getByRole('button', { name: otherTitle, exact: true }).first().click()
     await expect(page.getByRole('textbox', { name: `Edit ${otherTitle}` })).toBeVisible()
-    await page.getByRole('button', { name: title, exact: true }).first().click()
+    await page.locator('.workbench-sidebar').getByRole('button', { name: title, exact: true }).click()
     const returnedDialog = page.getByRole('dialog', { name: 'Refile note' })
     await expect(returnedDialog.getByRole('combobox', { name: 'Path' })).toHaveValue(reviewedDirectory)
     expect(proposalsObserved).toHaveLength(1)
@@ -101,7 +101,7 @@ test('refile flushes edits, discard preserves the note, and history restore keep
     expect(restored.note.content).toContain('Original text stays in the note.')
     await expect(page.getByRole('button', { name: `Reviewed ${title}`, exact: true })).toBeVisible()
     await page.reload()
-    await page.getByRole('button', { name: title, exact: true }).click()
+    await page.locator('.workbench-sidebar').getByRole('button', { name: title, exact: true }).click()
     await expect(page.locator('.document-heading').getByRole('button', { name: title, exact: true })).toBeVisible()
     await expect(page.getByText('Original text stays in the note.')).toBeVisible()
   } finally {

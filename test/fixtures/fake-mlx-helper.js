@@ -134,7 +134,13 @@ for await (const line of lines) {
     else if (request.operation === 'generate' && control.failGenerate) response = { id: request.id, error: 'fixture generation error', memory }
     else if (request.operation === 'generate') response = { id: request.id, text: await generate(request.messages), memory }
     else if (request.operation === 'embed') response = { id: request.id, embeddings: await embed(request.input), memory }
-    else if (request.operation === 'transcribe') response = { id: request.id, text: 'Fixture transcription.', memory }
+    else if (request.operation === 'transcribe' && control.failTranscribe) response = { id: request.id, error: 'fixture transcription error', memory }
+    else if (request.operation === 'transcribe') {
+      for (const percent of control.transcriptionProgress || []) {
+        process.stdout.write(`${JSON.stringify({ event: 'transcription-progress', id: request.id, percent })}\n`)
+      }
+      response = { id: request.id, text: 'Fixture transcription.', memory }
+    }
     else response = { id: request.id, error: `unknown operation: ${request.operation}`, memory }
     await appendLog({ event: 'response', operation: request.operation, error: response.error, memory: response.memory })
     process.stdout.write(`${JSON.stringify(response)}\n`)

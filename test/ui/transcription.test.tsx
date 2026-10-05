@@ -142,6 +142,16 @@ describe("transcription UI", () => {
     expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
   });
 
+  it("shows only the current transcription percentage on the session", () => {
+    render(<TranscriptionDock model={model({
+      phase: "transcribing",
+      activeSession: { ...session, state: "recorded" },
+      pending: [{ ...session, state: "recorded", progressPercent: 47 }],
+    })} actions={actions()} />);
+    expect(screen.getByText("47%")).toBeInTheDocument();
+    expect(document.querySelector(".transcription-download-progress")).toBeNull();
+  });
+
   it("deletes from the session's bundle and ignores a stale refresh result", async () => {
     let resolveSessions: ((value: TranscriptionSession[]) => void) | undefined;
     apiMock.mockImplementation((url: string) => {
@@ -194,6 +204,110 @@ describe("transcription UI", () => {
     await act(async () => { await result.current.actions.deleteSession(session); });
     expect(result.current.model.pending).toEqual([]);
     expect(apiForBundleMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores a completed process response after switching workspaces", async () => {
+    let resolveProcess: ((value: unknown) => void) | undefined;
+    apiMock.mockImplementation((url: string) => {
+      if (url === "/api/transcriptions/status") return status;
+      if (url === "/api/transcriptions?pending=1") return [{ ...session, state: "recorded" }];
+      throw new Error(`Unexpected API request: ${url}`);
+    });
+    apiForBundleMock.mockImplementation((_bundle: string | null, url: string) => {
+      if (url.endsWith("/process")) return new Promise((resolve) => { resolveProcess = resolve; });
+      throw new Error(`Unexpected bundle API request: ${url}`);
+    });
+    const drafts = {
+      createDraft: vi.fn(() => "untitled:new"),
+      getDraftContent: vi.fn(() => undefined),
+      getDraftDocument: vi.fn(() => undefined),
+      updateDraftContent: vi.fn(),
+      openDraft: vi.fn(),
+    };
+    const setMessage = vi.fn();
+    const { result, rerender } = renderHook(({ bundle }: { bundle: string | null }) => useTranscription({
+      drafts, setMessage, sourceBundleId: bundle,
+    }), { initialProps: { bundle: "bundle-a" } });
+    await waitFor(() => expect(result.current.model.pending).toHaveLength(1));
+    act(() => { result.current.actions.transcribe({ ...session, state: "recorded" }); });
+    await waitFor(() => expect(resolveProcess).toBeDefined());
+    rerender({ bundle: "bundle-b" });
+    await act(async () => { resolveProcess?.({
+      session: { ...session, state: "ready" },
+      result: { transcript: "Do not open this stale response.", summary: "" },
+    }); });
+    expect(drafts.createDraft).not.toHaveBeenCalled();
+    expect(setMessage).not.toHaveBeenCalled();
+    expect(result.current.model.activeSession).toBeNull();
+  });
+
+  it("polls a transcription found after reload every second and ignores an older refresh result", async () => {
+    let listCalls = 0;
+    let resolveSlow: ((value: TranscriptionSession[]) => void) | undefined;
+    let resolveFresh: ((value: TranscriptionSession[]) => void) | undefined;
+    const resumed = { ...session, state: "transcribing" as const, progressPercent: 10 };
+    apiMock.mockImplementation((url: string) => {
+      if (url === "/api/transcriptions/status") return status;
+      if (url === "/api/transcriptions?pending=1") {
+        listCalls += 1;
+        if (listCalls === 1) return [resumed];
+        if (listCalls === 2) return new Promise((resolve) => { resolveSlow = resolve; });
+        if (listCalls === 3) return new Promise((resolve) => { resolveFresh = resolve; });
+        return [{ ...resumed, progressPercent: 72 }];
+      }
+      throw new Error(`Unexpected API request: ${url}`);
+    });
+    const drafts = {
+      createDraft: vi.fn(() => "untitled:new"),
+      getDraftContent: vi.fn(() => undefined),
+      getDraftDocument: vi.fn(() => undefined),
+      updateDraftContent: vi.fn(),
+      openDraft: vi.fn(),
+    };
+    const { result, unmount } = renderHook(() => useTranscription({
+      drafts, setMessage: vi.fn(), sourceBundleId: "bundle-a",
+    }));
+    await waitFor(() => expect(result.current.model.pending[0]?.progressPercent).toBe(10));
+    await waitFor(() => expect(resolveSlow).toBeDefined());
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    await waitFor(() => expect(resolveFresh).toBeDefined());
+    await act(async () => { resolveFresh?.([{ ...resumed, progressPercent: 72 }]); });
+    await waitFor(() => expect(result.current.model.pending[0]?.progressPercent).toBe(72));
+    await act(async () => { resolveSlow?.([{ ...resumed, progressPercent: 12 }]); });
+    expect(result.current.model.pending[0]?.progressPercent).toBe(72);
+    unmount();
+  });
+
+  it("clears an active transcription when switching from an unbundled workspace", async () => {
+    let resolveProcess: ((value: unknown) => void) | undefined;
+    apiMock.mockImplementation((url: string) => {
+      if (url === "/api/transcriptions/status") return status;
+      if (url === "/api/transcriptions?pending=1") return [];
+      throw new Error(`Unexpected API request: ${url}`);
+    });
+    apiForBundleMock.mockImplementation((_bundle: string | null, url: string) => {
+      if (url.endsWith("/process")) return new Promise((resolve) => { resolveProcess = resolve; });
+      throw new Error(`Unexpected bundle API request: ${url}`);
+    });
+    const drafts = {
+      createDraft: vi.fn(() => "untitled:new"),
+      getDraftContent: vi.fn(() => undefined),
+      getDraftDocument: vi.fn(() => undefined),
+      updateDraftContent: vi.fn(),
+      openDraft: vi.fn(),
+    };
+    const { result, rerender } = renderHook(({ bundle }: { bundle: string | null }) => useTranscription({
+      drafts, setMessage: vi.fn(), sourceBundleId: bundle,
+    }), { initialProps: { bundle: null } });
+    act(() => { result.current.actions.transcribe({ ...session, sourceBundleId: null, state: "recorded" }); });
+    await waitFor(() => expect(resolveProcess).toBeDefined());
+    rerender({ bundle: "bundle-b" });
+    await waitFor(() => expect(result.current.model.activeSession).toBeNull());
+    await act(async () => { resolveProcess?.({
+      session: { ...session, sourceBundleId: null, state: "ready" },
+      result: { transcript: "Stale unbundled result.", summary: "" },
+    }); });
+    expect(drafts.createDraft).not.toHaveBeenCalled();
   });
 
   it("records to WAV, retains failed saves for retry, and keeps the starting workspace association", async () => {
@@ -519,7 +633,7 @@ describe("transcription UI", () => {
       resolveProcess?.({ session: { ...session, draftId: null, sourceBundleId: "bundle-a" }, result: { summary: "", transcript: "local transcript" } });
       await processResult;
     });
-    await waitFor(() => expect(setMessage).toHaveBeenCalledWith("Transcription finished. Switch back to the source workspace to open its Markdown note."));
+    await waitFor(() => expect(result.current.model.activeSession).toBeNull());
     expect(drafts.createDraft).not.toHaveBeenCalled();
     expect(drafts.openDraft).not.toHaveBeenCalled();
   });
@@ -558,7 +672,7 @@ describe("transcription UI", () => {
     await loadStarted;
     rerender({ bundleId: "bundle-b" });
     await act(async () => { resolveSession?.({ session, result: { summary: "Raw summary", transcript: "Raw transcript" } }); });
-    expect(setMessage).toHaveBeenCalledWith("Transcription finished. Switch back to the source workspace to open its Markdown note.");
+    expect(setMessage).not.toHaveBeenCalled();
     expect(drafts.createDraft).not.toHaveBeenCalled();
     expect(drafts.openDraft).not.toHaveBeenCalled();
   });

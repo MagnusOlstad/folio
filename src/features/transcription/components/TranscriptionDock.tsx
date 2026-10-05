@@ -11,10 +11,10 @@ function durationLabel(durationMs: number | null) {
   return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')}`
 }
 
-function stateLabel(session: TranscriptionSession) {
+function stateLabel(session: TranscriptionSession, processing: boolean) {
   if (session.state === 'failed') return 'Needs attention'
   if (session.state === 'ready') return 'Transcript ready'
-  if (session.state === 'transcribing') return 'Transcribing'
+  if (session.state === 'transcribing' || processing) return `${session.progressPercent ?? 0}%`
   return 'Saved audio'
 }
 
@@ -162,7 +162,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
         )}
       </div>
 
-      {model.progress && <p className="transcription-progress" role="status">{model.progress}</p>}
+      {model.progress && model.phase !== 'transcribing' && <p className="transcription-progress" role="status">{model.progress}</p>}
       {(model.phase === 'summarizing' || model.phase === 'cancelling-summary') && <p className="transcription-empty">Cancel waits for the current local model request; your draft and original transcript stay unchanged.</p>}
       {model.error && <p className="transcription-error" role="alert">{model.error}</p>}
 
@@ -180,7 +180,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
             <article className="transcription-item" key={session.id}>
               <div className="transcription-item-heading">
                 <strong title={session.fileName || 'Audio recording'}>{session.fileName || 'Audio recording'}</strong>
-                <span>{stateLabel(session)}</span>
+                <span role={processing ? 'status' : undefined} aria-live={processing ? 'polite' : undefined}>{stateLabel(session, processing)}</span>
               </div>
               <small>{importedDate(session)}{session.durationMs === null ? '' : ` · ${durationLabel(session.durationMs)}`}</small>
               {session.error && <p className="transcription-item-error" role="status">{session.error}</p>}

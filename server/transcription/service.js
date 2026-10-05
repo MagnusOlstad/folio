@@ -147,6 +147,16 @@ export function createTranscriptionService(runtime) {
     return args
   }
 
+  function withProgress(session) {
+    if (!session) return session
+    const operation = active.get(session.id)
+    return { ...session, progressPercent: session.state === 'ready' ? 100 : operation?.progressPercent ?? 0 }
+  }
+
+  async function list() {
+    return (await runtime.transcriptionStorage.listSessions()).map(withProgress)
+  }
+
   async function installRaw(modelId) {
     const model = TRANSCRIPTION_MODELS[modelId]
     if (!available) throw Object.assign(new Error('Local Whisper transcription requires Folio on an Apple Silicon Mac running macOS 14 or later.'), { status: 503 })
@@ -202,7 +212,7 @@ export function createTranscriptionService(runtime) {
       const session = await runtime.transcriptionStorage.readManifest(id)
       if (locks.deleting.has(id)) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
       if (!session) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
-      if (session.state === 'ready') return { session, result: await runtime.transcriptionStorage.readResult(id) }
+      if (session.state === 'ready') return { session: withProgress(session), result: await runtime.transcriptionStorage.readResult(id) }
       if (active.has(id)) throw Object.assign(new Error('This recording is already being transcribed.'), { status: 409 })
       const selectedModel = TRANSCRIPTION_MODELS[selectedModelId]
       const snapshot = await installedSnapshot(cacheRoot, selectedModel)
@@ -213,7 +223,13 @@ export function createTranscriptionService(runtime) {
       const controller = new AbortController()
       let finishActive
       const finished = new Promise((resolve) => { finishActive = resolve })
-      active.set(id, { controller, finished, finish: finishActive, progress: 'Loading local Whisper model…' })
+      active.set(id, { controller, finished, finish: finishActive, progress: 'Loading local Whisper model…', progressPercent: 0 })
+      const onProgress = (percent) => {
+        const current = active.get(id)
+        if (current?.controller === controller && Number.isInteger(percent) && percent >= 0 && percent <= 99) {
+          current.progressPercent = Math.max(current.progressPercent, percent)
+        }
+      }
       await runtime.transcriptionStorage.writeManifest({ ...session, state: 'transcribing', error: null })
       try {
         const request = { id: randomUUID(), operation: 'transcribe', audioPath: runtime.transcriptionStorage.recordingPath(session) }
@@ -222,9 +238,11 @@ export function createTranscriptionService(runtime) {
           const runner = runtime.transcriptionRunner
           const runTranscription = () => runner({ executable, args: taskArgs(selectedModelId, 'transcribe', snapshot), cacheRoot, request, signal: controller.signal,
             onEvent: (event) => {
-              if (event.event !== 'ready') return
-              const current = active.get(id)
-              if (current) current.progress = 'Transcribing audio locally…'
+              if (event.event === 'transcription-progress' && event.id === request.id) onProgress(event.percent)
+              else if (event.event === 'ready') {
+                const current = active.get(id)
+                if (current) current.progress = 'Transcribing audio locally…'
+              }
             },
             timeoutMs: 6 * 60 * 60_000,
           })
@@ -233,14 +251,21 @@ export function createTranscriptionService(runtime) {
             : await runTranscription()
         } else if (runtime.mlxService?.transcribe) {
           active.get(id).progress = 'Loading local Whisper model…'
-          response = await runtime.mlxService.transcribe(runtime.transcriptionStorage.recordingPath(session), { signal: controller.signal, modelId: selectedModelId })
-          active.get(id).progress = 'Transcribing audio locally…'
+          response = await runtime.mlxService.transcribe(runtime.transcriptionStorage.recordingPath(session), {
+            signal: controller.signal,
+            modelId: selectedModelId,
+            onProgress,
+          })
+          const current = active.get(id)
+          if (current) current.progress = 'Transcribing audio locally…'
         } else {
           response = await runHelper({ executable, args: taskArgs(selectedModelId, 'transcribe', snapshot), cacheRoot, request, signal: controller.signal,
             onEvent: (event) => {
-              if (event.event !== 'ready') return
-              const current = active.get(id)
-              if (current) current.progress = 'Transcribing audio locally…'
+              if (event.event === 'transcription-progress' && event.id === request.id) onProgress(event.percent)
+              else if (event.event === 'ready') {
+                const current = active.get(id)
+                if (current) current.progress = 'Transcribing audio locally…'
+              }
             },
             timeoutMs: 6 * 60 * 60_000,
           })
@@ -249,7 +274,7 @@ export function createTranscriptionService(runtime) {
         const result = { summary: '', transcript: response.text.trim(), markdown: markdownFromResult({ summary: '', transcript: response.text }, response.text), generatedAt: new Date().toISOString() }
         await runtime.transcriptionStorage.writeResult(id, result)
         const ready = await runtime.transcriptionStorage.writeManifest({ ...(await runtime.transcriptionStorage.readManifest(id)), state: 'ready', error: null })
-        return { session: ready, result }
+        return { session: withProgress(ready), result }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Transcription failed.'
         const latest = await runtime.transcriptionStorage.readManifest(id)
@@ -365,7 +390,7 @@ export function createTranscriptionService(runtime) {
   async function getSession(id) {
     const session = await runtime.transcriptionStorage.readManifest(id)
     if (!session) return null
-    return { session, result: await runtime.transcriptionStorage.readResult(id) }
+    return { session: withProgress(session), result: await runtime.transcriptionStorage.readResult(id) }
   }
 
   function beginUpload(id) {
@@ -432,7 +457,7 @@ export function createTranscriptionService(runtime) {
     beginUpload,
     endUpload,
     deleteSession,
-    list: runtime.transcriptionStorage.listSessions,
+    list,
     recoverInterrupted: runtime.transcriptionStorage.recoverInterrupted,
     close,
     storage: runtime.transcriptionStorage,

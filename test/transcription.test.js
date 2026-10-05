@@ -11,6 +11,7 @@ import { createMlxService } from '../server/mlx/service.js'
 import { TRANSCRIPTION_MODELS } from '../server/transcription/models.js'
 import { safeAudioFilename, safeTranscriptionId, splitTranscript } from '../server/transcription/model.js'
 import { registerRoutes } from '../server/transcription/routes.js'
+import { runHelper } from '../server/transcription/helper.js'
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-transcription-'))
@@ -56,6 +57,32 @@ test('local audio import accepts only supported extensions and sanitizes path co
   assert.equal(safeTranscriptionId('11111111-1111-4111-8111-111111111111'), '11111111-1111-4111-8111-111111111111')
   assert.equal(safeTranscriptionId('../escape'), null)
   assert.deepEqual(splitTranscript('first\n\nsecond\n\nthird', 8), ['first', 'second', 'third'])
+})
+
+test('one-shot helper forwards only matching transcription progress and waits for the final response', async (t) => {
+  const { root } = await fixture(t)
+  const executable = path.join(root, 'progress-helper.mjs')
+  await fs.writeFile(executable, `#!/usr/bin/env node
+import readline from 'node:readline'
+process.stdout.write(JSON.stringify({ event: 'ready' }) + '\\n')
+for await (const line of readline.createInterface({ input: process.stdin })) {
+  const request = JSON.parse(line)
+  process.stdout.write(JSON.stringify({ event: 'transcription-progress', id: 'stale', percent: 50 }) + '\\n')
+  process.stdout.write(JSON.stringify({ event: 'transcription-progress', id: request.id, percent: 62 }) + '\\n')
+  process.stdout.write(JSON.stringify({ id: request.id, text: 'Final transcript.' }) + '\\n')
+}
+`, { mode: 0o755 })
+  await fs.chmod(executable, 0o755)
+  const events = []
+  const response = await runHelper({
+    executable,
+    args: [],
+    cacheRoot: root,
+    request: { id: 'current-request', operation: 'transcribe' },
+    onEvent: (event) => events.push(event),
+  })
+  assert.equal(response.text, 'Final transcript.')
+  assert.deepEqual(events.map(({ event, percent }) => [event, percent]), [['ready', undefined], ['transcription-progress', 62]])
 })
 
 test('binary audio upload streams through the JSON API without parsing or buffering it as JSON', async (t) => {
@@ -141,6 +168,45 @@ test('deletion conflicts with active uploads and transcription, then succeeds af
   await processing
   await service.deleteSession(session.id)
   assert.equal(await runtime.transcriptionStorage.readManifest(session.id), null)
+  await service.close()
+})
+
+test('transcription progress is transient, monotonic, session scoped, and reaches 100 only after saving', async (t) => {
+  const { runtime } = await fixture(t)
+  await installSnapshot(runtime)
+  runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
+  let announceStarted
+  let finishTranscription
+  let sendEvent
+  const started = new Promise((resolve) => { announceStarted = resolve })
+  runtime.transcriptionRunner = ({ request, onEvent }) => new Promise((resolve) => {
+    sendEvent = (percent, id = request.id) => onEvent({ event: 'transcription-progress', id, percent })
+    finishTranscription = () => resolve({ id: request.id, text: 'Progressed transcript.' })
+    announceStarted()
+  })
+  const service = createTranscriptionService(runtime)
+  const session = await service.createFileSession({ fileName: 'progress.wav' })
+  await runtime.transcriptionStorage.writeAudio(session.id, '.wav', Readable.from([Buffer.from('audio')]))
+  await runtime.transcriptionStorage.writeManifest({ ...session, state: 'recorded' })
+  assert.equal((await service.getSession(session.id)).session.progressPercent, 0)
+
+  const processing = service.transcribe(session.id)
+  await started
+  sendEvent(80, 'another-request')
+  sendEvent(140)
+  assert.equal((await service.list()).find((item) => item.id === session.id).progressPercent, 0)
+  sendEvent(48)
+  sendEvent(23)
+  assert.equal((await service.list()).find((item) => item.id === session.id).progressPercent, 48)
+  assert.equal((await service.getSession(session.id)).session.progressPercent, 48)
+  const persisted = await runtime.transcriptionStorage.readManifest(session.id)
+  assert.equal('progressPercent' in persisted, false)
+
+  finishTranscription()
+  const completed = await processing
+  assert.equal(completed.session.progressPercent, 100)
+  assert.equal((await service.list()).find((item) => item.id === session.id).progressPercent, 100)
+  assert.equal((await service.getSession(session.id)).session.progressPercent, 100)
   await service.close()
 })
 

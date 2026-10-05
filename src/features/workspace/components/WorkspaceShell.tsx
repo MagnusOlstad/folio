@@ -82,7 +82,10 @@ export function WorkspaceShell({
       onPreview={(snapshot, loading, failed) => setHistory((current) => current.scope === scope ? { ...current, snapshot, loading, failed } : current)}
     />
   ) : !activeDocumentId ? (
-    <p className="right-pane-placeholder">Open a filed note to see its history.</p>
+    <div className="draft-history-empty">
+      <p>History begins after filing</p>
+      <p>Open a filed note to see its earlier versions.</p>
+    </div>
   ) : editor.model.loadingDocuments.has(activeDocumentId) ? (
     <p className="right-pane-placeholder" role="status">Loading note…</p>
   ) : isUntitledId(activeDocumentId) ? (
@@ -91,7 +94,10 @@ export function WorkspaceShell({
       <p>File this draft to start keeping earlier versions.</p>
     </div>
   ) : (
-    <p className="right-pane-placeholder">Open a filed note to see its history.</p>
+    <div className="draft-history-empty">
+      <p>History begins after filing</p>
+      <p>Open a filed note to see its earlier versions.</p>
+    </div>
   );
   return (
     <main className="shell">

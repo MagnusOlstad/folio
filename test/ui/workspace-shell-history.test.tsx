@@ -21,14 +21,14 @@ const entries = [{ revision: "rev-1", authoredAt: "2026-09-26T12:00:00.000Z", ti
 function shellProps(options: {
   rightPaneOpen?: boolean;
   activeGroupId?: string;
-  primaryId?: string;
+  primaryId?: string | null;
   documents?: Record<string, { title: string; deletable: boolean }>;
   loadingDocuments?: Set<string>;
   beforeHistoryRestore?: (id: string) => Promise<void>;
   historyRestored?: (id: string) => Promise<void>;
   notifyMessage?: (message: string) => void;
 } = {}): WorkspaceShellProps {
-  const primaryId = options.primaryId ?? noteId;
+  const primaryId = options.primaryId === undefined ? noteId : options.primaryId;
   return {
     app: {
       versionInfo: null, onOpenSettings: vi.fn(), status: null, missingModels: [],
@@ -40,7 +40,7 @@ function shellProps(options: {
     editor: {
       model: {
         groups: [
-          { id: "primary", tabs: [primaryId], activeId: primaryId, previewId: null },
+          { id: "primary", tabs: primaryId ? [primaryId] : [], activeId: primaryId, previewId: null },
           { id: "secondary", tabs: [otherNoteId], activeId: otherNoteId, previewId: null },
         ],
         activeGroupId: options.activeGroupId ?? "primary",
@@ -119,6 +119,13 @@ describe("workspace history mode", () => {
     rerender(<WorkspaceShell {...shellProps({ documents: {}, loadingDocuments: new Set([noteId]) })} />);
     expect(screen.getByRole("status")).toHaveTextContent("Loading note");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the filing explanation when no note is selected", () => {
+    render(<WorkspaceShell {...shellProps({ primaryId: null, documents: {} })} />);
+    expect(screen.getByText("History begins after filing")).toBeVisible();
+    expect(screen.getByText("Open a filed note to see its earlier versions.")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Note history" })).not.toBeInTheDocument();
   });
 
   it("restores the selected moment and returns the preview to present", async () => {

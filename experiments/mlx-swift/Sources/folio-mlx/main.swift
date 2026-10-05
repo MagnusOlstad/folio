@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import FolioMLXAudio
 import MLX
 import MLXEmbedders
 import MLXHuggingFace
@@ -57,6 +58,12 @@ private struct DownloadProgressResponse: Encodable {
     let event = "download-progress"
     let downloadedBytes: Int64
     let totalBytes: Int64
+}
+
+private struct TranscriptionProgressResponse: Encodable {
+    let event = "transcription-progress"
+    let id: String?
+    let percent: Int
 }
 
 private struct ErrorResponse: Encodable {
@@ -438,12 +445,11 @@ private struct FolioMLX {
                     guard FileManager.default.fileExists(atPath: audioURL.path) else {
                         throw NSError(domain: "FolioMLX", code: 15, userInfo: [NSLocalizedDescriptionKey: "The selected audio file is no longer available."])
                     }
-                    let (_, audio) = try loadAudioArray(from: audioURL, sampleRate: 16_000)
-                    let output = whisper.generate(audio: audio)
+                    let output = try transcribeAudio(whisper, from: audioURL, requestID: requestID)
                     synchronizeDefaultStream()
                     Memory.clearCache()
                     synchronizeDefaultStream()
-                    writeLine(Response(id: requestID, model: modelID, text: output.text,
+                    writeLine(Response(id: requestID, model: modelID, text: output,
                                        embeddings: nil, state: nil, memory: memoryStatus(), metrics: nil))
                 default:
                     throw NSError(domain: "FolioMLX", code: 13, userInfo: [NSLocalizedDescriptionKey: "unknown operation"])
@@ -457,6 +463,26 @@ private struct FolioMLX {
             _ = seconds(from: started, to: clock.now)
         }
     }
+}
+
+private func transcribeAudio(_ whisper: WhisperModel, from url: URL, requestID: String?) throws -> String {
+    let reader = try AudioWindowReader(url: url)
+    var transcriptParts: [String] = []
+    while let window = try reader.nextWindow() {
+        let part = try autoreleasepool { () throws -> String in
+            let samples = try resampleAudio(window.samples, from: reader.sampleRate, to: 16_000)
+            let audio = MLXArray(samples)
+            return whisper.generate(audio: audio).text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if !part.isEmpty { transcriptParts.append(part) }
+        synchronizeDefaultStream()
+        Memory.clearCache()
+        synchronizeDefaultStream()
+        let percent = reader.totalFrames > 0
+            ? min(99, Int(window.completedFrames * 100 / reader.totalFrames)) : 99
+        writeLine(TranscriptionProgressResponse(id: requestID, percent: percent))
+    }
+    return transcriptParts.joined(separator: " ")
 }
 
 private func generate(model: ModelContainer, system: String, prompt: String, parameters: GenerateParameters,

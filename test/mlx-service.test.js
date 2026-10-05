@@ -232,6 +232,88 @@ test('propagates helper protocol errors and rejects invalid JSON readiness', asy
   await assert.rejects(fresh.install('gemma4'), /invalid JSON/)
 })
 
+test('transcription progress is request scoped and never resolves the request, then unloads after success', async (t) => {
+  const { root, logPath, service } = await fixture(t)
+  await setControl(root, { transcriptionProgress: [35, 12, 99, 100] })
+  const whisper = service.modelDefinitions.whisper
+  const snapshot = path.join(root, 'models', 'hf-cache', `models--${whisper.repository.replaceAll('/', '--')}`, 'snapshots', whisper.revision)
+  await fs.mkdir(snapshot, { recursive: true })
+  await Promise.all([
+    fs.writeFile(path.join(snapshot, 'config.json'), JSON.stringify({ model_type: 'whisper' })),
+    fs.writeFile(path.join(snapshot, 'model.safetensors'), 'fake weights'),
+    fs.writeFile(path.join(snapshot, 'tokenizer.json'), '{}'),
+    fs.writeFile(path.join(snapshot, 'tokenizer_config.json'), '{}'),
+  ])
+  assert.equal((await service.status()).models.find((model) => model.id === 'whisper').installed, true)
+  await service.install('whisper')
+  const progress = []
+  const result = await service.transcribe('/tmp/recording.wav', { onProgress: (percent) => progress.push(percent) })
+  assert.equal(result.text, 'Fixture transcription.')
+  assert.deepEqual(progress, [35, 99])
+  assert.equal((await service.status()).models.find((model) => model.id === 'whisper').loaded, false)
+  assert.ok((await readLog(logPath)).some((entry) => entry.event === 'response' && entry.operation === 'shutdown'))
+
+  const largeWhisper = service.modelDefinitions.whisperlarge
+  const largeSnapshot = path.join(root, 'models', 'hf-cache', `models--${largeWhisper.repository.replaceAll('/', '--')}`, 'snapshots', largeWhisper.revision)
+  await fs.mkdir(largeSnapshot, { recursive: true })
+  await Promise.all([
+    fs.writeFile(path.join(largeSnapshot, 'config.json'), JSON.stringify({ model_type: 'whisper' })),
+    fs.writeFile(path.join(largeSnapshot, 'model.safetensors'), 'fake weights'),
+    fs.writeFile(path.join(largeSnapshot, 'tokenizer.json'), '{}'),
+    fs.writeFile(path.join(largeSnapshot, 'tokenizer_config.json'), '{}'),
+  ])
+  await service.selectTranscriptionModel('whisperlarge')
+  await service.install('whisperlarge')
+  const largeResult = await service.transcribe('/tmp/recording.wav', { onProgress: (percent) => progress.push(percent) })
+  assert.equal(largeResult.text, 'Fixture transcription.')
+  assert.equal((await service.status()).models.find((model) => model.id === 'whisperlarge').loaded, false)
+})
+
+test('transcription worker also unloads when inference fails and queued generation can proceed', async (t) => {
+  const { root, service } = await fixture(t)
+  const whisper = service.modelDefinitions.whisper
+  const snapshot = path.join(root, 'models', 'hf-cache', `models--${whisper.repository.replaceAll('/', '--')}`, 'snapshots', whisper.revision)
+  await fs.mkdir(snapshot, { recursive: true })
+  await Promise.all([
+    fs.writeFile(path.join(snapshot, 'config.json'), JSON.stringify({ model_type: 'whisper' })),
+    fs.writeFile(path.join(snapshot, 'model.safetensors'), 'fake weights'),
+    fs.writeFile(path.join(snapshot, 'tokenizer.json'), '{}'),
+    fs.writeFile(path.join(snapshot, 'tokenizer_config.json'), '{}'),
+  ])
+  await setControl(root, { failTranscribe: true })
+  await service.install('whisper')
+  await assert.rejects(service.transcribe('/tmp/recording.wav'), /fixture transcription error/)
+  assert.equal((await service.status()).models.find((model) => model.id === 'whisper').loaded, false)
+  await service.install('gemma4')
+  await service.generate([{ role: 'user', content: 'Queued after transcription.' }])
+  assert.equal((await service.status()).models.find((model) => model.id === 'gemma4').loaded, true)
+})
+
+test('cancelling active Whisper inference unloads its worker before queued work proceeds', async (t) => {
+  const { root, logPath, service } = await fixture(t)
+  const whisper = service.modelDefinitions.whisper
+  const snapshot = path.join(root, 'models', 'hf-cache', `models--${whisper.repository.replaceAll('/', '--')}`, 'snapshots', whisper.revision)
+  await fs.mkdir(snapshot, { recursive: true })
+  await Promise.all([
+    fs.writeFile(path.join(snapshot, 'config.json'), JSON.stringify({ model_type: 'whisper' })),
+    fs.writeFile(path.join(snapshot, 'model.safetensors'), 'fake weights'),
+    fs.writeFile(path.join(snapshot, 'tokenizer.json'), '{}'),
+    fs.writeFile(path.join(snapshot, 'tokenizer_config.json'), '{}'),
+  ])
+  await service.install('whisper')
+  await setControl(root, { operationDelayMs: 2_000 })
+  const controller = new AbortController()
+  const transcribing = service.transcribe('/tmp/recording.wav', { signal: controller.signal })
+  await waitUntil(async () => (await readLog(logPath)).some((entry) => entry.event === 'request' && entry.operation === 'transcribe'))
+  controller.abort()
+  await assert.rejects(transcribing, { code: 'TRANSCRIPTION_CANCELLED' })
+  assert.equal((await service.status()).models.find((model) => model.id === 'whisper').loaded, false)
+  await setControl(root, {})
+  await service.install('gemma4')
+  await service.generate([{ role: 'user', content: 'Queued after cancellation.' }])
+  assert.equal((await service.status()).models.find((model) => model.id === 'gemma4').loaded, true)
+})
+
 test('deduplicates simultaneous launches for the same model', async (t) => {
   const { logPath, service } = await fixture(t)
   await Promise.all([service.install('gemma4'), service.install('gemma4')])

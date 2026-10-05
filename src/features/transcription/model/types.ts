@@ -6,6 +6,7 @@ export type TranscriptionSessionState = 'recorded' | 'queued' | 'transcribing' |
 export type TranscriptionSession = {
   id: string
   state: TranscriptionSessionState
+  progressPercent?: number
   draftId: string | null
   durationMs: number | null
   error: string | null
