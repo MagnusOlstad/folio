@@ -1,26 +1,35 @@
 import { expect, test } from '@playwright/test'
 
-type MockUpdateState = { status: string; version: string; percent: number | null; error: string | null }
+type MockUpdateState = { status: string; version: string | null; percent: number | null; error: string | null }
 type MockUpdateListener = (state: MockUpdateState) => void
 
-test('desktop update badge starts a background download and reports restart progress', async ({ page }) => {
+declare global {
+  interface Window {
+    __publishUpdateState?: (state: MockUpdateState) => void
+    __updateListenerCount?: () => number
+  }
+}
+
+test('update arrival and download progress survive both panes being collapsed', async ({ page }) => {
   await page.route(/\/api\/version(?:\?.*)?$/, (route) => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({
       version: '0.6.0',
       repo: 'MagnusOlstad/folio',
-      latest: '0.7.0',
-      latestUrl: 'https://github.com/MagnusOlstad/folio/releases/tag/v0.7.0',
-      updateAvailable: true,
+      latest: null,
+      updateAvailable: false,
     }),
   }))
   await page.addInitScript(() => {
-    let state: MockUpdateState = { status: 'available', version: '0.7.0', percent: null, error: null }
+    const browserWindow = globalThis as unknown as Window
+    let state: MockUpdateState = { status: 'checking', version: null, percent: null, error: null }
     const listeners = new Set<MockUpdateListener>()
     const publish = (next: MockUpdateState) => {
       state = next
       listeners.forEach((listener) => listener(state))
     }
+    Object.defineProperty(browserWindow, '__publishUpdateState', { value: publish })
+    Object.defineProperty(browserWindow, '__updateListenerCount', { value: () => listeners.size })
     Object.defineProperty(globalThis, 'folio', {
       configurable: true,
       value: {
@@ -38,9 +47,48 @@ test('desktop update badge starts a background download and reports restart prog
   })
 
   await page.goto('/')
+  await expect(page.getByRole('button', { name: 'Download update: version 0.7.0' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Hide right sidebar' }).click()
+  await page.getByRole('button', { name: 'Hide left sidebar' }).click()
+  const expandRightPane = page.getByRole('button', { name: 'Show right sidebar' })
+  await expect(expandRightPane).toBeVisible()
+  await expect(expandRightPane).not.toHaveAttribute('title', /update is available/)
+
+  await page.evaluate(() => (globalThis as unknown as Window).__publishUpdateState?.({ status: 'available', version: '0.7.0', percent: null, error: null }))
+  await expect(expandRightPane).toHaveAttribute('title', 'Show right sidebar. An update is available.')
+  await expect(expandRightPane.locator('.update-available-dot')).toBeVisible()
+  expect(await page.evaluate(() => (globalThis as unknown as Window).__updateListenerCount?.())).toBe(1)
+
+  await expandRightPane.click()
+  const rightHeader = page.locator('.right-pane-header')
+  await expect(rightHeader.getByText('v0.6.0')).toBeVisible()
   const badge = page.getByRole('button', { name: 'Download update: version 0.7.0' })
   await expect(badge).toBeVisible()
   await badge.click()
   await expect(page.getByRole('button', { name: 'Downloading 33%: version 0.7.0' })).toBeDisabled()
+
+  await page.getByRole('button', { name: 'Hide right sidebar' }).click()
+  await expect(expandRightPane.locator('.update-available-dot')).toBeVisible()
+  await expandRightPane.click()
+  await expect(page.getByRole('button', { name: 'Downloading 33%: version 0.7.0' })).toBeDisabled()
   await expect(page.locator('.update-spinner')).toBeVisible()
+})
+
+test('the collapsed pane signals an API release update', async ({ page }) => {
+  await page.route(/\/api\/version(?:\?.*)?$/, (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      version: '0.6.0',
+      repo: 'MagnusOlstad/folio',
+      latest: '0.7.0',
+      latestUrl: 'https://github.com/MagnusOlstad/folio/releases/tag/v0.7.0',
+      updateAvailable: true,
+    }),
+  }))
+  await page.goto('/')
+  await expect(page.getByRole('link', { name: 'Update to version 0.7.0' })).toBeVisible()
+  await page.getByRole('button', { name: 'Hide right sidebar' }).click()
+  const expandRightPane = page.getByRole('button', { name: 'Show right sidebar' })
+  await expect(expandRightPane).toHaveAttribute('title', 'Show right sidebar. An update is available.')
+  await expect(expandRightPane.locator('.update-available-dot')).toBeVisible()
 })

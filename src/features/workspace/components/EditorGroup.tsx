@@ -34,6 +34,7 @@ type EditorGroupProps = {
   paneControls?: {
     leftOpen: boolean;
     rightOpen: boolean;
+    updateAvailable: boolean;
     onToggleLeft: () => void;
     onToggleRight: () => void;
   };

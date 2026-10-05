@@ -1,22 +1,19 @@
 import { FolioBrand } from "../../status/WorkspaceStatus.tsx";
-import type { VersionInfo } from "../../../domain/types.ts";
 
 type WorkspaceLeftPaneHeaderProps = {
-  versionInfo: VersionInfo | null;
   onOpenSettings: () => void;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
 };
 
 export function WorkspaceLeftPaneHeader({
-  versionInfo,
   onOpenSettings,
   sidebarOpen,
   onToggleSidebar,
 }: WorkspaceLeftPaneHeaderProps) {
   return (
     <header className="sidebar-app-header">
-      <FolioBrand versionInfo={versionInfo} />
+      <FolioBrand />
       <button type="button" className="sidebar-settings-button" onClick={onOpenSettings}>
         Settings
       </button>

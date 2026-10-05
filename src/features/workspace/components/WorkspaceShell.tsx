@@ -6,6 +6,7 @@ import { WorkspaceSidebar } from "../../sidebar/WorkspaceSidebar.tsx";
 import type { WorkspaceSidebarProps } from "../../sidebar/WorkspaceSidebar.tsx";
 import type { NoteHistorySnapshot, VersionInfo } from "../../../domain/types.ts";
 import type { WorkspaceStatusProps } from "../../status/WorkspaceStatus.tsx";
+import { useDesktopUpdateState } from "../hooks/useDesktopUpdateState.ts";
 import { EditorWorkspace } from "./EditorWorkspace.tsx";
 import type { EditorWorkspaceProps } from "../types.ts";
 import { WorkspaceSidebarHandle } from "./WorkspaceSidebarHandle.tsx";
@@ -59,6 +60,10 @@ export function WorkspaceShell({
   historyScopeId,
   transcription,
 }: WorkspaceShellProps) {
+  const updateState = useDesktopUpdateState();
+  const updateAvailable = Boolean(
+    app.versionInfo?.updateAvailable || (updateState?.version && updateState.status !== "idle"),
+  );
   const activeGroup = editor.model.groups.find((group) => group.id === editor.model.activeGroupId);
   const activeDocumentId = activeGroup?.activeId ?? null;
   const activeDocument = activeDocumentId ? editor.model.documents[activeDocumentId] : null;
@@ -112,7 +117,6 @@ export function WorkspaceShell({
         {layout.sidebarOpen ? (
           <aside className="workspace-left-pane">
             <WorkspaceLeftPaneHeader
-              versionInfo={app.versionInfo}
               onOpenSettings={() => app.onOpenSettings()}
               sidebarOpen={layout.sidebarOpen}
               onToggleSidebar={() => layout.setSidebarOpen(false)}
@@ -135,6 +139,7 @@ export function WorkspaceShell({
           paneControls={{
             leftOpen: layout.sidebarOpen,
             rightOpen: layout.rightPaneOpen,
+            updateAvailable,
             onToggleLeft: () => layout.setSidebarOpen(!layout.sidebarOpen),
             onToggleRight: () => layout.setRightPaneOpen(!layout.rightPaneOpen),
           }}
@@ -152,6 +157,7 @@ export function WorkspaceShell({
         {layout.rightPaneOpen ? (
           <WorkspaceRightPane
             {...app}
+            updateState={updateState}
             onHide={() => layout.setRightPaneOpen(false)}
             historyContent={historyContent}
             transcription={transcription}
