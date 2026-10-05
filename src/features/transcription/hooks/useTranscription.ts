@@ -119,6 +119,12 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     association: { sourceBundleId },
     onImport: importFile,
   })
+  if (activeSession && (activeSession.sourceBundleId ?? null) !== sourceBundleId) {
+    setActiveSession(null)
+    setProgress('')
+    setPhase('idle')
+    setError('')
+  }
   const hasTranscribingSession = pending.some((session) => session.state === 'transcribing')
   const transcriptionModelName = status?.modelName ?? (status?.modelId === 'whisperlarge' ? 'Whisper Large v3' : 'Whisper Large v3 Turbo')
 
@@ -126,6 +132,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     if (activeBundle.current !== sourceBundleId) {
       activeBundle.current = sourceBundleId
       bundleGeneration.current += 1
+      activeTranscriptionId.current = null
     }
   }, [sourceBundleId])
   useLayoutEffect(() => { draftsRef.current = drafts }, [drafts])
@@ -158,16 +165,6 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     const interval = window.setInterval(() => void refresh(), phase === 'downloading' || phase === 'transcribing' || hasTranscribingSession ? 1_000 : 5_000)
     return () => { window.clearTimeout(initial); window.clearInterval(interval) }
   }, [hasTranscribingSession, phase, sourceBundleId])
-
-  useEffect(() => {
-    if (activeSession && (activeSession.sourceBundleId ?? null) !== sourceBundleId) {
-      activeTranscriptionId.current = null
-      setActiveSession(null)
-      setProgress('')
-      setPhase('idle')
-      setError('')
-    }
-  }, [sourceBundleId, activeSession])
 
   async function importFile(file: File, association?: RecordingAssociation): Promise<boolean> {
     if (busyRef.current) return false
@@ -358,6 +355,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     if (busyRef.current || deletingRef.current === session.id) return
     const taskBundle = session.sourceBundleId ?? null
     if (activeBundle.current !== taskBundle) return
+    const taskGeneration = bundleGeneration.current
     busyRef.current = true
     setError('')
     setActiveSession(session)
@@ -374,7 +372,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
         ?? draftsRef.current.getDraftDocument(draft.draftId)?.content) : undefined
       if (!draft || current === undefined) {
         const stored = await apiForBundle<TranscriptionProcessResponse>(taskBundle, `/api/transcriptions/${encodeURIComponent(session.id)}`)
-        if (activeBundle.current !== taskBundle) return
+        if (activeBundle.current !== taskBundle || bundleGeneration.current !== taskGeneration) return
         if (!stored.result) throw new Error('No transcript has been saved for this audio yet. Transcribe it first.')
         current = mergeTranscriptionDraft(session, stored.result)
         const draftId = draftsRef.current.createDraft(current)
@@ -389,7 +387,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
         method: 'POST',
         body: JSON.stringify({ transcript }),
       })
-      if (activeBundle.current !== taskBundle) return
+      if (activeBundle.current !== taskBundle || bundleGeneration.current !== taskGeneration) return
       const associated = sessionDrafts.current.get(session.id)
       const draftIsCurrent = associated?.draftId === draft.draftId && associated.bundleId === taskBundle
         && draft.draftId.startsWith('untitled:') && draftsRef.current.isDraftOpen?.(draft.draftId) !== false
@@ -404,11 +402,14 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
         const newDraftId = draftsRef.current.createDraft(finalContent)
         sessionDrafts.current.set(session.id, { draftId: newDraftId, bundleId: taskBundle })
       }
-      if (activeBundle.current === taskBundle) setMessage('Local summary added to an editable draft.')
+      if (activeBundle.current === taskBundle && bundleGeneration.current === taskGeneration) setMessage('Local summary added to an editable draft.')
       await refresh()
-      setPhase('idle')
-      setProgress('')
+      if (activeBundle.current === taskBundle && bundleGeneration.current === taskGeneration) {
+        setPhase('idle')
+        setProgress('')
+      }
     } catch (summaryError) {
+      if (activeBundle.current !== taskBundle || bundleGeneration.current !== taskGeneration) return
       const message = errorMessage(summaryError, 'Could not generate the local summary.')
       if (message.startsWith('Summary cancelled.')) {
         setError('')
@@ -421,10 +422,8 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
       setProgress('')
     } finally {
       busyRef.current = false
-      setActiveSession((current) => current?.sourceBundleId === taskBundle ? null : current)
-      if (activeBundle.current !== taskBundle) {
-        setPhase((current) => current === 'summarizing' || current === 'cancelling-summary' ? 'idle' : current)
-        setProgress('')
+      if (activeBundle.current === taskBundle && bundleGeneration.current === taskGeneration) {
+        setActiveSession((current) => current?.id === session.id ? null : current)
       }
     }
   }

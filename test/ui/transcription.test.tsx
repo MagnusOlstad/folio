@@ -232,6 +232,10 @@ describe("transcription UI", () => {
     act(() => { result.current.actions.transcribe({ ...session, state: "recorded" }); });
     await waitFor(() => expect(resolveProcess).toBeDefined());
     rerender({ bundle: "bundle-b" });
+    expect(result.current.model.activeSession).toBeNull();
+    expect(result.current.model.phase).toBe("idle");
+    rerender({ bundle: "bundle-a" });
+    expect(result.current.model.activeSession).toBeNull();
     await act(async () => { resolveProcess?.({
       session: { ...session, state: "ready" },
       result: { transcript: "Do not open this stale response.", summary: "" },
@@ -239,6 +243,42 @@ describe("transcription UI", () => {
     expect(drafts.createDraft).not.toHaveBeenCalled();
     expect(setMessage).not.toHaveBeenCalled();
     expect(result.current.model.activeSession).toBeNull();
+  });
+
+  it("keeps a mismatched session hidden without cancelling its already-started request", async () => {
+    let resolveProcess: ((value: unknown) => void) | undefined;
+    apiMock.mockImplementation((url: string) => {
+      if (url === "/api/transcriptions/status") return status;
+      if (url === "/api/transcriptions?pending=1") return [];
+      throw new Error(`Unexpected API request: ${url}`);
+    });
+    apiForBundleMock.mockImplementation((_bundle: string | null, url: string) => {
+      if (url.endsWith("/process")) return new Promise((resolve) => { resolveProcess = resolve; });
+      throw new Error(`Unexpected bundle API request: ${url}`);
+    });
+    const drafts = {
+      createDraft: vi.fn(() => "untitled:new"),
+      getDraftContent: vi.fn(() => undefined),
+      getDraftDocument: vi.fn(() => undefined),
+      updateDraftContent: vi.fn(),
+      openDraft: vi.fn(),
+    };
+    const setMessage = vi.fn();
+    const { result } = renderHook(() => useTranscription({
+      drafts, setMessage, sourceBundleId: "bundle-b",
+    }));
+    act(() => { result.current.actions.transcribe({ ...session, sourceBundleId: "bundle-a", state: "recorded" }); });
+    expect(resolveProcess).toBeDefined();
+    expect(apiForBundleMock).toHaveBeenCalledWith("bundle-a", `/api/transcriptions/${session.id}/process`, { method: "POST" });
+    expect(result.current.model.activeSession).toBeNull();
+    expect(result.current.model.phase).toBe("idle");
+
+    await act(async () => { resolveProcess?.({
+      session: { ...session, sourceBundleId: "bundle-a", state: "ready" },
+      result: { transcript: "Mismatched transcript stays hidden.", summary: "" },
+    }); });
+    expect(drafts.createDraft).not.toHaveBeenCalled();
+    expect(setMessage).not.toHaveBeenCalled();
   });
 
   it("polls a transcription found after reload every second and ignores an older refresh result", async () => {
@@ -679,6 +719,7 @@ describe("transcription UI", () => {
 
   it("releases summary controls after the active bundle changes", async () => {
     let resolveOldSummary: ((value: unknown) => void) | undefined;
+    let rejectOldSummary: ((reason: Error) => void) | undefined;
     let summaryCalls = 0;
     apiMock.mockImplementation((url: string) => {
       if (url === "/api/transcriptions/status") return { ...status, modelState: "ready", canTranscribe: true };
@@ -689,6 +730,7 @@ describe("transcription UI", () => {
       if (url.endsWith("/summarize")) {
         summaryCalls += 1;
         if (summaryCalls === 1) return new Promise((resolve) => { resolveOldSummary = resolve; });
+        if (summaryCalls === 2) return new Promise((_, reject) => { rejectOldSummary = reject; });
         return Promise.resolve({ result: { summary: "New bundle summary.", transcript: "New bundle transcript." } });
       }
       if (/\/api\/transcriptions\/[^/]+$/.test(url)) return Promise.resolve({ result: {
@@ -703,10 +745,11 @@ describe("transcription UI", () => {
       updateDraftContent: vi.fn(),
       openDraft: vi.fn(),
     };
+    const setMessage = vi.fn();
     const { result, rerender } = renderHook(
       ({ bundleId }: { bundleId: string }) => useTranscription({
         drafts,
-        setMessage: vi.fn(),
+        setMessage,
         sourceBundleId: bundleId,
       }),
       { initialProps: { bundleId: "bundle-a" } },
@@ -715,12 +758,25 @@ describe("transcription UI", () => {
     act(() => { result.current.actions.regenerateSummary(oldSession); });
     await waitFor(() => expect(summaryCalls).toBe(1));
     rerender({ bundleId: "bundle-b" });
+    rerender({ bundleId: "bundle-a" });
     await act(async () => { resolveOldSummary?.({ result: { summary: "Stale summary.", transcript: "New bundle transcript." } }); });
     await waitFor(() => expect(result.current.model.phase).toBe("idle"));
+    expect(drafts.updateDraftContent).not.toHaveBeenCalled();
+    expect(setMessage).not.toHaveBeenCalled();
+
+    act(() => { result.current.actions.regenerateSummary(oldSession); });
+    await waitFor(() => expect(summaryCalls).toBe(2));
+    rerender({ bundleId: "bundle-b" });
+    rerender({ bundleId: "bundle-a" });
+    await act(async () => { rejectOldSummary?.(new Error("Stale summary failure.")); });
+    await waitFor(() => expect(result.current.model.phase).toBe("idle"));
+    expect(result.current.model.error).toBe("");
+    expect(setMessage).not.toHaveBeenCalled();
 
     const newSession = { ...session, id: "22222222-2222-4222-8222-222222222222", draftId: null, sourceBundleId: "bundle-b" };
+    rerender({ bundleId: "bundle-b" });
     act(() => { result.current.actions.regenerateSummary(newSession); });
-    await waitFor(() => expect(summaryCalls).toBe(2));
+    await waitFor(() => expect(summaryCalls).toBe(3));
     await waitFor(() => expect(result.current.model.phase).toBe("idle"));
   });
 
