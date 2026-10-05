@@ -117,6 +117,15 @@ export function useWorkspaceExplorerActions(options: ExplorerActionOptions): Exp
     await refreshExplorer();
   }
 
+  async function deleteDirectory(directory: string) {
+    setMessage("");
+    await api<{ path: string }>(`/api/file/folder?path=${encodeURIComponent(directory)}`, { method: "DELETE" });
+    setExpandedDirectories((current) => new Set(
+      [...current].filter((path) => path !== directory && !path.startsWith(`${directory}/`)),
+    ));
+    if (await refreshExplorer()) setMessage(`Deleted folder ${directory.split("/").at(-1)}.`);
+  }
+
   async function copyText(value: string) {
     if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable.");
     await navigator.clipboard.writeText(value);
@@ -128,6 +137,7 @@ export function useWorkspaceExplorerActions(options: ExplorerActionOptions): Exp
     createFile,
     createDirectory,
     deleteFile,
+    deleteDirectory,
     exportFile,
     copyText,
   };

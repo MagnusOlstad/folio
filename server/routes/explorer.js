@@ -76,6 +76,47 @@ export function registerRoutes(app, runtime) {
     }
   })
 
+  app.delete('/api/file/folder', async (request, response, next) => {
+    try {
+      const id = normalizeBundlePath(String(request.query.path || ''))
+      const target = id && !isReservedId(id) ? resolveBundlePath(id) : null
+      if (!target) return response.status(400).json({ error: 'Invalid or reserved folder path.' })
+      await queueMarkdownMutation(async () => {
+        try {
+          await assertNoBundleSymlinks(target.path)
+          const stat = await fs.lstat(target.path)
+          if (!stat.isDirectory()) {
+            const error = new Error('The requested path is not a folder.')
+            error.status = 400
+            throw error
+          }
+          await fs.rmdir(target.path)
+        } catch (error) {
+          if (error.code === 'ENOENT') {
+            const missing = new Error('Folder not found.')
+            missing.status = 404
+            throw missing
+          }
+          if (error.code === 'ENOTDIR') {
+            const invalid = new Error('The requested path is not a folder.')
+            invalid.status = 400
+            throw invalid
+          }
+          if (error.code === 'ENOTEMPTY' || error.code === 'EEXIST') {
+            const nonempty = new Error('Only an empty folder can be deleted.')
+            nonempty.status = 409
+            throw nonempty
+          }
+          throw error
+        }
+      })
+      response.json({ path: id })
+    } catch (error) {
+      if (error.status) return response.status(error.status).json({ error: error.message })
+      next(error)
+    }
+  })
+
   app.post('/api/file/create', async (request, response, next) => {
     try {
       const parentId = normalizeBundlePath(String(request.body?.directory || '/'), { allowRoot: true })

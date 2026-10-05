@@ -111,4 +111,36 @@ test('explorer folders persist and file operations validate, index, and rename p
     method: 'POST', headers, body: JSON.stringify({ id: '/index.md', name: 'index-renamed.md' }),
   })
   assert.equal(fixedRenameResponse.status, 400)
+
+  const nonMarkdownDirectory = path.join(bundleRoot, 'archive', 'non-markdown')
+  await fs.mkdir(nonMarkdownDirectory)
+  await fs.writeFile(path.join(nonMarkdownDirectory, 'asset.bin'), 'preserve')
+  const hiddenContentsDirectory = path.join(bundleRoot, 'archive', 'hidden-contents')
+  await fs.mkdir(hiddenContentsDirectory)
+  await fs.writeFile(path.join(hiddenContentsDirectory, '.keep'), 'preserve')
+  const nestedDirectory = path.join(bundleRoot, 'archive', 'nested')
+  await fs.mkdir(path.join(nestedDirectory, 'child'), { recursive: true })
+
+  const deleteFolder = (folderPath) => fetch(`${baseUrl}/api/file/folder?path=${encodeURIComponent(folderPath)}`, {
+    method: 'DELETE', headers,
+  })
+  assert.equal((await deleteFolder('/archive')).status, 409)
+  assert.equal((await deleteFolder('/archive/non-markdown')).status, 409)
+  assert.equal((await deleteFolder('/archive/hidden-contents')).status, 409)
+  assert.equal((await deleteFolder('/archive/nested')).status, 409)
+  assert.equal((await deleteFolder('/archive/new folder/Meeting plan.md')).status, 400)
+  assert.equal((await deleteFolder('/archive/new folder/Meeting plan.md/child')).status, 400)
+  assert.equal((await deleteFolder('/linked-folder')).status, 400)
+  assert.equal((await deleteFolder('/')).status, 400)
+  assert.equal((await deleteFolder('/archive/../outside')).status, 400)
+  assert.equal((await deleteFolder('/archive/.private')).status, 400)
+  for (const reservedPath of ['/daily', '/daily/old', '/references', '/references/old'])
+    assert.equal((await deleteFolder(reservedPath)).status, 400)
+
+  const deletedEmptyFolderResponse = await deleteFolder('/archive/empty')
+  assert.equal(deletedEmptyFolderResponse.status, 200)
+  assert.deepEqual(await deletedEmptyFolderResponse.json(), { path: '/archive/empty' })
+  assert.ok((await fs.stat(path.join(bundleRoot, 'archive'))).isDirectory())
+  await assert.rejects(fs.stat(path.join(bundleRoot, 'archive', 'empty')), { code: 'ENOENT' })
+  assert.equal((await deleteFolder('/archive/empty')).status, 404)
 })

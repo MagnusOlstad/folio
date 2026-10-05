@@ -17,6 +17,7 @@ export type ExplorerFileActions = {
   createFile: (directory: string) => Promise<void>;
   createDirectory: (directory: string, name: string) => Promise<void>;
   deleteFile: (file: BundleFile) => Promise<void>;
+  deleteDirectory: (path: string) => Promise<void>;
   exportFile: (file: BundleFile, format: NoteExportFormat) => Promise<void>;
   copyText: (value: string) => Promise<void>;
 };
@@ -37,4 +38,12 @@ export function explorerTargetParent(target: ExplorerContextTarget) {
   if (target.kind === "directory") return target.path;
   const separator = target.file.id.lastIndexOf("/");
   return separator <= 0 ? "/" : target.file.id.slice(0, separator);
+}
+
+export function canDeleteExplorerDirectory(directory: string) {
+  return directory !== "/"
+    && directory !== "/daily"
+    && !directory.startsWith("/daily/")
+    && directory !== "/references"
+    && !directory.startsWith("/references/");
 }

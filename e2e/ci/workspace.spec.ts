@@ -60,6 +60,56 @@ test('opens a path-directed draft from a bundle directory context menu', async (
   }
 })
 
+test('deletes only empty folders from the explorer context menu', async ({ page, request }) => {
+  const token = Date.now().toString(36)
+  const emptyFolderName = `empty-${token}`
+  const nonemptyFolderName = `kept-${token}`
+  let nonemptyFileId: string | null = null
+
+  try {
+    const bundleHeading = page.locator('.bundle-explorer-heading.active')
+    await bundleHeading.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'New folder', exact: true }).click()
+    await page.getByRole('textbox', { name: 'New folder' }).fill(emptyFolderName)
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    const emptyFolder = page.locator('.tree-directory').filter({ hasText: emptyFolderName })
+    await expect(emptyFolder).toBeVisible()
+    await emptyFolder.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Delete', exact: true }).click()
+    const emptyDeleteDialog = page.getByRole('dialog', { name: 'Confirm delete' })
+    await expect(emptyDeleteDialog).toContainText(`Delete ${emptyFolderName}?`)
+    await expect(emptyDeleteDialog).toContainText('Only an empty folder can be deleted')
+    await emptyDeleteDialog.getByRole('button', { name: 'Delete' }).click()
+    await expect(emptyFolder).toHaveCount(0)
+
+    await bundleHeading.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'New folder', exact: true }).click()
+    await page.getByRole('textbox', { name: 'New folder' }).fill(nonemptyFolderName)
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    const nonemptyFolder = page.locator('.tree-directory').filter({ hasText: nonemptyFolderName })
+    await expect(nonemptyFolder).toBeVisible()
+    const createFileResponse = await request.post('/api/file/create', {
+      data: { directory: `/${nonemptyFolderName}`, name: 'keep.md' },
+    })
+    expect(createFileResponse.ok()).toBeTruthy()
+    nonemptyFileId = (await createFileResponse.json()).id
+    await page.reload()
+    await expect(page.getByRole('button', { name: 'Todo List', exact: true })).toBeVisible()
+    const reloadedNonemptyFolder = page.locator('.tree-directory').filter({ hasText: nonemptyFolderName })
+    await expect(reloadedNonemptyFolder).toBeVisible()
+    await reloadedNonemptyFolder.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Delete', exact: true }).click()
+    const nonemptyDeleteDialog = page.getByRole('dialog', { name: 'Confirm delete' })
+    await nonemptyDeleteDialog.getByRole('button', { name: 'Delete' }).click()
+    await expect(page.locator('.workspace-message')).toContainText('Only an empty folder can be deleted.')
+    await expect(reloadedNonemptyFolder).toBeVisible()
+  } finally {
+    if (nonemptyFileId) await request.delete(`/api/note?id=${encodeURIComponent(nonemptyFileId)}`)
+    await request.delete(`/api/file/folder?path=${encodeURIComponent(`/${emptyFolderName}`)}`).catch(() => {})
+    await request.delete(`/api/file/folder?path=${encodeURIComponent(`/${nonemptyFolderName}`)}`).catch(() => {})
+  }
+})
+
 test('shows controls for all six supported local models', async ({ page }) => {
   const models = page.getByRole('region', { name: 'MLX model management' })
   await expect(models).toBeVisible()
