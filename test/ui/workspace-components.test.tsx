@@ -1,5 +1,5 @@
 import { act, createEvent, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ViewerDocument } from "../../src/domain/types.ts";
 import { DocumentFooter } from "../../src/features/workspace/components/DocumentFooter.tsx";
@@ -711,6 +711,45 @@ describe("workspace editor components", () => {
     expect(screen.getByText("Filing note…")).toBeInTheDocument();
     rerender(<FilingConfirmation entry={{ ...entry, status: "ready" }} {...props} />);
     expect(screen.getByRole("heading", { name: "Review filing" })).toBeInTheDocument();
+  });
+
+  it("uses the ready filing's Escape handler before passive effects run", () => {
+    const entry = {
+      filing: {
+        id: "filing-escape-ready",
+        draftId: "untitled-escape-ready",
+        mode: "new",
+        destinationId: null,
+        actor: "agent",
+        proposal: { directory: "/projects", filename: "prepared.md", title: "Prepared", description: "", tags: [] },
+      },
+      fields: { directory: "/projects", title: "Prepared", description: "", tags: [] },
+      standalone: false,
+      status: "preparing",
+      error: null,
+    } satisfies FilingQueueEntry;
+    const onDismiss = vi.fn();
+
+    function ReadyEscapeProbe({ status }: { status: "preparing" | "ready" }) {
+      useLayoutEffect(() => {
+        if (status === "ready") window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" }));
+      }, [status]);
+      return (
+        <FilingConfirmation
+          entry={{ ...entry, status }}
+          directories={["/", "/projects"]}
+          onChange={vi.fn()}
+          onAccept={vi.fn()}
+          onStandalone={vi.fn()}
+          onDismiss={() => { if (status === "ready") onDismiss(); }}
+          onRevealStandalone={vi.fn()}
+        />
+      );
+    }
+
+    const { rerender } = render(<ReadyEscapeProbe status="preparing" />);
+    rerender(<ReadyEscapeProbe status="ready" />);
+    expect(onDismiss).toHaveBeenCalledOnce();
   });
 
   it("confirms filing proposals in the note and exposes independent fields", () => {
