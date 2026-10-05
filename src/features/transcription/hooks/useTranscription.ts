@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, apiForBundle } from '../../../lib/api.ts'
 import { useAudioRecorder, type RecordingPhase } from './useAudioRecorder.ts'
 import type { RecordingAssociation } from '../model/recording.ts'
+import { audioDuration } from '../model/audio-duration.ts'
 import {
   mergeTranscriptionDraft,
   replaceMarkdownSection,
@@ -74,27 +75,6 @@ function transcriptSection(markdown: string) {
   const rest = markdown.slice(start)
   const end = rest.search(/^##\s/m)
   return (end < 0 ? rest : rest.slice(0, end)).trim()
-}
-
-async function audioDuration(file: File): Promise<number | null> {
-  if (typeof Audio === 'undefined' || typeof URL.createObjectURL !== 'function') return null
-  const url = URL.createObjectURL(file)
-  try {
-    return await new Promise((resolve) => {
-      const audio = new Audio()
-      const cleanup = () => { audio.src = ''; URL.revokeObjectURL(url) }
-      const timeout = window.setTimeout(() => { cleanup(); resolve(null) }, 2_500)
-      audio.preload = 'metadata'
-      audio.onloadedmetadata = () => {
-        window.clearTimeout(timeout)
-        const result = Number.isFinite(audio.duration) ? Math.round(audio.duration * 1000) : null
-        cleanup()
-        resolve(result)
-      }
-      audio.onerror = () => { window.clearTimeout(timeout); cleanup(); resolve(null) }
-      audio.src = url
-    })
-  } catch { URL.revokeObjectURL(url); return null }
 }
 
 export function useTranscription({ drafts, setMessage, sourceBundleId }: Options) {
