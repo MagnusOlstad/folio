@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.5](https://github.com/MagnusOlstad/folio/compare/v0.7.4...v0.7.5) (2026-10-06)
+
+
+### Bug Fixes
+
+* **transcription:** stop audio metadata cleanup loops ([#107](https://github.com/MagnusOlstad/folio/issues/107)) ([5590937](https://github.com/MagnusOlstad/folio/commit/559093702fe96b304ee4c6dce5ff919ab0213656))
+* **workspace:** move update controls and delete empty folders ([#108](https://github.com/MagnusOlstad/folio/issues/108)) ([1e8f127](https://github.com/MagnusOlstad/folio/commit/1e8f127afb63ba0aaea0c11a4455d8671459e9c5))
+
 ## [0.7.4](https://github.com/MagnusOlstad/folio/compare/v0.7.3...v0.7.4) (2026-10-05)
 
 
