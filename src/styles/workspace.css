@@ -2391,7 +2391,9 @@
   place-items: center;
   border: 1px solid var(--line);
   color: var(--acid);
-  font: italic 46px 'Iowan Old Style', Baskerville, Georgia, serif;
+  font: italic 36px 'Iowan Old Style', Baskerville, Georgia, serif;
+  letter-spacing: -0.04em;
+  text-transform: none;
   opacity: 0.42;
 }
 
