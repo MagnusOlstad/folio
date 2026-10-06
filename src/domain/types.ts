@@ -147,6 +147,7 @@ export type VersionInfo = {
   repo: string;
   latest: string | null;
   latestUrl?: string;
+  checkError?: string | null;
   updateAvailable: boolean;
 };
 export type DesktopUpdateState = {

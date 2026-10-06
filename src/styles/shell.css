@@ -183,7 +183,7 @@ button.update-badge {
   display: grid;
   grid-template-rows: var(--workspace-topbar-height) 39px minmax(0, 1fr) auto;
   border-left: 1px solid rgba(var(--line-rgb), 0.55);
-  background: var(--surface-deep);
+  background: var(--overlay-background);
 }
 
 .right-pane-header {

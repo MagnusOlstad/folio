@@ -8,8 +8,6 @@ import { FileTree } from "./FileTree.tsx";
 export type WorkspaceExplorerProps = {
   explorerScrollTop: number;
   onExplorerScroll: (scrollTop: number) => void;
-  reindexing: boolean;
-  reindexBundle: () => Promise<void>;
   filesLoading: boolean;
   localDraftDocuments: ViewerDocument[];
   drafts: Record<string, string>;
@@ -43,8 +41,6 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
   const {
     explorerScrollTop,
     onExplorerScroll,
-    reindexing,
-    reindexBundle,
     filesLoading,
     localDraftDocuments,
     drafts,
@@ -105,17 +101,6 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
 
   return (
     <>
-      <div className="sidebar-heading">
-        <span>Explorer</span>
-        <button
-          type="button"
-          onClick={() => void reindexBundle()}
-          disabled={reindexing}
-          title="Reread Markdown and rebuild search and relationships"
-        >
-          {reindexing ? "..." : "Reindex"}
-        </button>
-      </div>
       {bundles.length > 0 ? (
         <div className="bundle-explorer-list" aria-label="Bundles">
           {bundles.map((bundle) => {

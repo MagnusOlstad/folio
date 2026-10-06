@@ -7,6 +7,7 @@ declare global {
   interface Window {
     __publishUpdateState?: (state: MockUpdateState) => void
     __updateListenerCount?: () => number
+    __updateSettingsChecks?: number
   }
 }
 
@@ -91,4 +92,48 @@ test('the collapsed pane signals an API release update', async ({ page }) => {
   const expandRightPane = page.getByRole('button', { name: 'Show right sidebar' })
   await expect(expandRightPane).toHaveAttribute('title', 'Show right sidebar. An update is available.')
   await expect(expandRightPane.locator('.update-available-dot')).toBeVisible()
+})
+
+test('settings manually checks stable updates and offers download and install', async ({ page }) => {
+  await page.addInitScript(() => {
+    const browserWindow = globalThis as unknown as Window
+    let state: MockUpdateState = { status: 'idle', version: null, percent: null, error: null }
+    const listeners = new Set<MockUpdateListener>()
+    const publish = (next: MockUpdateState) => {
+      state = next
+      listeners.forEach((listener) => listener(state))
+    }
+    Object.defineProperty(browserWindow, '__publishUpdateState', { value: publish })
+    Object.defineProperty(browserWindow, '__updateSettingsChecks', { configurable: true, writable: true, value: 0 })
+    Object.defineProperty(globalThis, 'folio', {
+      configurable: true,
+      value: {
+        getUpdateState: async () => state,
+        checkForUpdates: async () => {
+          browserWindow.__updateSettingsChecks = (browserWindow.__updateSettingsChecks ?? 0) + 1
+          publish({ status: 'available', version: '0.8.0', percent: null, error: null })
+          return state
+        },
+        startUpdate: async () => {
+          publish({ status: 'downloading', version: '0.8.0', percent: 20, error: null })
+          return state
+        },
+        onUpdateState: (listener: MockUpdateListener) => {
+          listeners.add(listener)
+          return () => listeners.delete(listener)
+        },
+      },
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await settings.getByRole('button', { name: 'Updates' }).click()
+  const updates = settings.getByRole('region', { name: 'Updates settings' })
+  await updates.getByRole('button', { name: 'Check for updates' }).click()
+  await expect(updates.getByRole('button', { name: 'Download and install v0.8.0' })).toBeVisible()
+  expect(await page.evaluate(() => (globalThis as unknown as Window).__updateSettingsChecks)).toBe(1)
+  await updates.getByRole('button', { name: 'Download and install v0.8.0' }).click()
+  await expect(updates.getByRole('progressbar', { name: 'Downloading update' })).toHaveAttribute('value', '20')
 })

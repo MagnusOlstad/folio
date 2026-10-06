@@ -52,6 +52,7 @@ export function useWorkspaceSidebarProps({
 }: Options): {
   sidebar: WorkspaceSidebarProps;
   moveBundleFile: ReturnType<typeof useWorkspaceBundleActions>["moveBundleFile"];
+  reindexBundle: ReturnType<typeof useWorkspaceBundleActions>["reindexBundle"];
 } {
   const { reindexBundle, moveBundleFile } = useWorkspaceBundleActions(
     {
@@ -115,13 +116,12 @@ export function useWorkspaceSidebarProps({
 
   return {
     moveBundleFile,
+    reindexBundle,
     sidebar: {
       sidebarMode: explorer.sidebarMode,
       setSidebarMode: explorer.setSidebarMode,
       explorerScrollTop: explorer.explorerScrollTop,
       onExplorerScroll: explorer.rememberExplorerScrollTop,
-      reindexing: explorer.reindexing,
-      reindexBundle,
       filesLoading: explorer.filesLoading,
       localDraftDocuments,
       drafts: documents.drafts,

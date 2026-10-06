@@ -78,6 +78,7 @@ declare global {
       cancelObsidianImport?: (jobId: string) => Promise<ObsidianImportJob>;
       selectFolder?: () => Promise<string | null>;
       getUpdateState?: () => Promise<DesktopUpdateState | null>;
+      checkForUpdates?: () => Promise<DesktopUpdateState | null>;
       startUpdate?: () => Promise<DesktopUpdateState | null>;
       onUpdateState?: (handler: (state: DesktopUpdateState) => void) => () => void;
       onPrepareUpdateRestart?: (handler: () => Promise<boolean>) => () => void;

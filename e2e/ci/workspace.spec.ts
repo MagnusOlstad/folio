@@ -175,6 +175,65 @@ test('changes and restores the color theme from browser settings', async ({ page
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'editorial')
 })
 
+test('persists note font size across rendered notes, editors, and reloads', async ({ page }, testInfo) => {
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  const editor = page.getByRole('textbox', { name: 'Edit Start Here' })
+  await expect(editor).toBeVisible()
+  const editorContent = page.locator('.live-markdown-editor .cm-content').first()
+  await expect.poll(() => editorContent.evaluate(element => element.ownerDocument.defaultView?.getComputedStyle(element).fontSize)).toBe('18px')
+  await page.getByRole('button', { name: 'index.md', exact: true }).click()
+  await expect(page.locator('[data-readonly-markdown]')).toBeVisible()
+  const viewer = page.locator('.document-content').first()
+  await expect.poll(() => viewer.evaluate(element => element.ownerDocument.defaultView?.getComputedStyle(element).fontSize)).toBe('18px')
+
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await settings.getByRole('button', { name: 'Appearance' }).click()
+  const slider = settings.getByRole('slider', { name: 'Note font size' })
+  await slider.focus()
+  for (let step = 0; step < 6; step += 1) await slider.press('ArrowRight')
+  await expect(settings.locator('.note-font-size-control output')).toHaveText('24px')
+  await expect.poll(() => viewer.evaluate(element => element.ownerDocument.defaultView?.getComputedStyle(element).fontSize)).toBe('24px')
+  await page.screenshot({ path: testInfo.outputPath('appearance-settings.png') })
+  await settings.getByRole('button', { name: 'Close' }).click()
+
+  await page.reload()
+  await expect(page.locator('html')).toHaveCSS('--note-font-size', '24px')
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  await expect.poll(() => page.locator('.live-markdown-editor .cm-content').first().evaluate(element => element.ownerDocument.defaultView?.getComputedStyle(element).fontSize)).toBe('24px')
+  await page.getByTitle('New note (Cmd+T)').click()
+  await expect.poll(() => page.locator('.draft-note-editor .cm-content').first().evaluate(element => element.ownerDocument.defaultView?.getComputedStyle(element).fontSize)).toBe('24px')
+})
+
+test('collapses Recent concepts and restores the saved state after reload', async ({ page }) => {
+  const disclosure = page.getByRole('button', { name: /Recent concepts/ })
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'true')
+  await disclosure.click()
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.locator('#recent-concepts-list')).toBeHidden()
+
+  await page.reload()
+  await expect(page.getByRole('button', { name: /Recent concepts/ })).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.locator('#recent-concepts-list')).toBeHidden()
+})
+
+test('reindexes the active bundle from settings', async ({ page }) => {
+  const activeBundleId = await page.evaluate(() => localStorage.getItem('folio:bundle-active:v1'))
+  expect(activeBundleId).toBeTruthy()
+  await expect(page.locator('.sidebar-heading').filter({ hasText: 'Explorer' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Reindex', exact: true })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  const responsePromise = page.waitForResponse(response =>
+    response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/reindex',
+  )
+  await settings.getByRole('button', { name: 'Reindex active bundle' }).click()
+  const response = await responsePromise
+  expect(response.ok()).toBeTruthy()
+  expect(response.request().headers()['x-folio-bundle-id']).toBe(activeBundleId)
+})
+
 test('keeps the settings category sidebar stationary while model content scrolls', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 420 })
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
@@ -214,6 +273,7 @@ test('keeps every settings category inside a fixed-height dialog on wide and sho
       ['Models', 'models'],
       ['Appearance', 'appearance'],
       ['Backup', 'backup'],
+      ['Updates', 'updates'],
     ]) {
       await nav.getByRole('button', { name: category, exact: true }).click()
       await expect(settings.locator(`#settings-panel-${panel}`)).toBeVisible()

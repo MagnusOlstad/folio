@@ -7,6 +7,10 @@
   background: var(--overlay-background);
 }
 
+.workbench-sidebar.recent-collapsed {
+  grid-template-rows: 39px minmax(0, 1fr) auto;
+}
+
 .sidebar-tabs {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -75,6 +79,42 @@
   text-transform: uppercase;
 }
 
+.recent-heading {
+  width: 100%;
+  border-top: 0;
+  border-right: 0;
+  border-left: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.recent-heading:focus-visible {
+  outline: 1px solid var(--acid);
+  outline-offset: -2px;
+}
+
+.recent-heading-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.sidebar-disclosure-chevron {
+  display: inline-block;
+  color: var(--dim);
+  font-size: 16px;
+  line-height: 12px;
+  transition: transform .15s ease;
+}
+
+.sidebar-disclosure-chevron.collapsed {
+  transform: rotate(0deg);
+}
+
+.sidebar-disclosure-chevron:not(.collapsed) {
+  transform: rotate(90deg);
+}
+
 .sidebar-heading button,
 .sidebar-heading small {
   border: 0;
@@ -114,13 +154,13 @@
 }
 
 .tree-scroll {
-  padding: 7px 0 18px;
+  padding: 4px 0 12px;
 }
 
 .tree-row {
   width: 100%;
   min-width: 0;
-  height: 28px;
+  height: 24px;
   padding: 0 10px 0 calc(11px + var(--tree-depth) * 15px);
   display: flex;
   align-items: center;
@@ -522,6 +562,10 @@
 
 .recent-list {
   flex: 1;
+}
+
+.recent-list[hidden] {
+  display: none;
 }
 
 .recent-row {
@@ -1394,7 +1438,7 @@
   padding: 32px clamp(22px, 6cqi, 64px) max(120px, 25vh);
   color: var(--ink);
   caret-color: var(--ink);
-  font: 400 18px/32px ui-sans-serif, system-ui, sans-serif;
+  font: 400 var(--note-font-size, 18px)/calc(var(--note-font-size, 18px) * 32 / 18) ui-sans-serif, system-ui, sans-serif;
   overflow-wrap: break-word;
 }
 
@@ -1403,7 +1447,7 @@
 }
 
 .live-markdown-editor .cm-line {
-  min-height: 32px;
+  min-height: calc(var(--note-font-size, 18px) * 32 / 18);
 }
 
 .live-markdown-editor .cm-live-markdown-heading {
@@ -1412,31 +1456,31 @@
 }
 
 .live-markdown-editor .cm-live-markdown-heading-1 {
-  font-size: 30px;
-  line-height: 40px;
+  font-size: calc(var(--note-font-size, 18px) * 30 / 18);
+  line-height: calc(var(--note-font-size, 18px) * 40 / 18);
 }
 
 .live-markdown-editor .cm-live-markdown-heading-2 {
-  font-size: 26px;
-  line-height: 36px;
+  font-size: calc(var(--note-font-size, 18px) * 26 / 18);
+  line-height: calc(var(--note-font-size, 18px) * 36 / 18);
 }
 
 .live-markdown-editor .cm-live-markdown-heading-3 {
-  font-size: 22px;
-  line-height: 32px;
+  font-size: calc(var(--note-font-size, 18px) * 22 / 18);
+  line-height: calc(var(--note-font-size, 18px) * 32 / 18);
 }
 
 .live-markdown-editor .cm-live-markdown-heading-4 {
-  font-size: 20px;
+  font-size: calc(var(--note-font-size, 18px) * 20 / 18);
 }
 
 .live-markdown-editor .cm-live-markdown-heading-5 {
-  font-size: 18px;
+  font-size: var(--note-font-size, 18px);
 }
 
 .live-markdown-editor .cm-live-markdown-heading-6 {
   color: var(--muted);
-  font-size: 17px;
+  font-size: calc(var(--note-font-size, 18px) * 17 / 18);
 }
 
 .live-markdown-editor .cm-live-markdown-horizontal-rule {
@@ -1549,7 +1593,7 @@
 .document-content {
   padding: 32px clamp(22px, 6cqi, 64px) max(120px, 25vh);
   color: var(--ink);
-  font: 400 18px/32px ui-sans-serif, system-ui, sans-serif;
+  font: 400 var(--note-font-size, 18px)/calc(var(--note-font-size, 18px) * 32 / 18) ui-sans-serif, system-ui, sans-serif;
   overflow-wrap: break-word;
 }
 
@@ -1570,32 +1614,32 @@
 }
 
 .document-content > p {
-  margin: 0 0 32px;
+  margin: 0 0 calc(var(--note-font-size, 18px) * 32 / 18);
 }
 
 .document-content h1 {
-  margin: 40px 0 24px;
+  margin: calc(var(--note-font-size, 18px) * 40 / 18) 0 calc(var(--note-font-size, 18px) * 24 / 18);
   color: var(--ink);
-  font: 600 30px/40px ui-sans-serif, system-ui, sans-serif;
+  font: 600 calc(var(--note-font-size, 18px) * 30 / 18)/calc(var(--note-font-size, 18px) * 40 / 18) ui-sans-serif, system-ui, sans-serif;
 }
 
 .document-content h2 {
-  margin: 36px 0 24px;
+  margin: calc(var(--note-font-size, 18px) * 36 / 18) 0 calc(var(--note-font-size, 18px) * 24 / 18);
   color: var(--ink);
-  font: 600 26px/36px ui-sans-serif, system-ui, sans-serif;
+  font: 600 calc(var(--note-font-size, 18px) * 26 / 18)/calc(var(--note-font-size, 18px) * 36 / 18) ui-sans-serif, system-ui, sans-serif;
 }
 
 .document-content h3 {
-  margin: 32px 0 20px;
+  margin: calc(var(--note-font-size, 18px) * 32 / 18) 0 calc(var(--note-font-size, 18px) * 20 / 18);
   color: var(--ink);
-  font: 600 22px/32px ui-sans-serif, system-ui, sans-serif;
+  font: 600 calc(var(--note-font-size, 18px) * 22 / 18)/calc(var(--note-font-size, 18px) * 32 / 18) ui-sans-serif, system-ui, sans-serif;
 }
 
 .document-content h4,
 .document-content h5,
 .document-content h6 {
-  margin: 32px 0;
-  font: 600 18px/32px ui-sans-serif, system-ui, sans-serif;
+  margin: calc(var(--note-font-size, 18px) * 32 / 18) 0;
+  font: 600 var(--note-font-size, 18px)/calc(var(--note-font-size, 18px) * 32 / 18) ui-sans-serif, system-ui, sans-serif;
 }
 
 .document-content del {

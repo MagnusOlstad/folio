@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MLX_GENERATION_MODEL } from "../../src/domain/types.ts";
 import type { Note, SearchResult } from "../../src/domain/types.ts";
@@ -32,8 +32,6 @@ function sidebarProps(
   return {
     sidebarMode: "search",
     setSidebarMode: vi.fn(),
-    reindexing: false,
-    reindexBundle: vi.fn().mockResolvedValue(undefined),
     filesLoading: false,
     localDraftDocuments: [],
     drafts: {},
@@ -87,6 +85,10 @@ function sidebarProps(
 }
 
 describe("WorkspaceSidebar preview navigation", () => {
+  afterEach(() => {
+    window.localStorage.removeItem("folio:recent-concepts-collapsed");
+  });
+
   it("submits a note search when Enter is pressed in the search field", () => {
     const props = sidebarProps(vi.fn());
     render(<WorkspaceSidebar {...props} />);
@@ -154,6 +156,22 @@ describe("WorkspaceSidebar preview navigation", () => {
       undefined,
       "preview",
     );
+  });
+
+  it("collapses recent concepts and restores the saved state", () => {
+    const props = sidebarProps(vi.fn().mockResolvedValue(undefined));
+    const { unmount, container } = render(<WorkspaceSidebar {...props} />);
+    const disclosure = container.querySelector<HTMLButtonElement>(".recent-heading")!;
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(container.querySelector(".recent-list")).not.toBeVisible();
+    expect(window.localStorage.getItem("folio:recent-concepts-collapsed")).toBe("true");
+
+    unmount();
+    render(<WorkspaceSidebar {...props} />);
+    expect(screen.getByRole("button", { name: /Recent concepts/ })).toHaveAttribute("aria-expanded", "false");
   });
 
   it("uses preview and permanent dispositions for Ask links and sources", () => {

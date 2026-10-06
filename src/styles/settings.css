@@ -159,6 +159,69 @@
   color: var(--acid-ink, var(--paper));
   font-weight: 600;
 }
+.note-font-size-control {
+  display: grid;
+  grid-template-columns: minmax(110px, auto) minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 22px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.note-font-size-control input {
+  width: 100%;
+  accent-color: var(--acid);
+}
+.note-font-size-control output {
+  min-width: 36px;
+  color: var(--ink);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.bundle-reindex-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 18px 0;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.bundle-reindex-control strong {
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+.bundle-reindex-control p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.settings-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.settings-update-actions button {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  background: var(--paper-raised);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.settings-update-actions button:hover:not(:disabled) {
+  border-color: var(--dim);
+}
+.settings-section > progress {
+  width: 100%;
+  margin-top: 14px;
+  accent-color: var(--acid);
+}
 .settings-dialog button:disabled {
   cursor: default;
   opacity: 0.45;
@@ -718,6 +781,26 @@
   }
   .theme-options {
     grid-template-columns: 1fr;
+  }
+  .note-font-size-control {
+    grid-template-columns: 1fr auto;
+    gap: 8px 12px;
+  }
+  .note-font-size-control input {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .note-font-size-control output {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .bundle-reindex-control {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .bundle-reindex-control .settings-action {
+    width: 100%;
   }
   .bundle-row {
     padding-right: 5px;
