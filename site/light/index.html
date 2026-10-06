@@ -6,15 +6,15 @@
 <title>FolioNotes — local AI notes for your Mac</title>
 <meta name="description" content="FolioNotes is a local-first Mac notetaker. One capture field, an on-device model files your notes as plain Markdown (Open Knowledge Format) that stay on your Mac.">
 <meta name="robots" content="noindex">
-<link rel="canonical" href="https://folionotes.no/apple/">
+<link rel="canonical" href="https://folionotes.no/light/">
 <meta name="color-scheme" content="light">
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="#fafbfc">
 <link rel="icon" type="image/svg+xml" href="../favicon.svg">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="FolioNotes">
 <meta property="og:title" content="FolioNotes — local AI notes for your Mac">
 <meta property="og:description" content="Capture in one field. A local model files it as plain Markdown that lives on your Mac.">
-<meta property="og:url" content="https://folionotes.no/apple/">
+<meta property="og:url" content="https://folionotes.no/light/">
 <meta property="og:image" content="https://folionotes.no/assets/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -22,6 +22,9 @@
 <meta name="twitter:title" content="FolioNotes — local AI notes for your Mac">
 <meta name="twitter:description" content="Capture in one field. A local model files it as plain Markdown that lives on your Mac.">
 <meta name="twitter:image" content="https://folionotes.no/assets/og-image.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 <script src="main.js" defer></script>
 </head>
@@ -30,8 +33,8 @@
 <header class="nav">
   <div class="nav-in">
     <a class="nav-brand" href="#top" aria-label="FolioNotes home"><svg class="mark" viewBox="0 0 1024 1024" width="22" height="22" aria-hidden="true"><rect width="1024" height="1024" rx="220" fill="#161816"/><rect x="190" y="190" width="644" height="644" fill="none" stroke="#b7d892" stroke-width="28"/><g transform="translate(85 0) skewX(-8)" fill="none" stroke="#b7d892" stroke-width="46" stroke-linecap="square" stroke-linejoin="miter"><path d="M290 700V330H500M290 510H460"/><path d="M580 700V470M580 545C580 495 615 468 660 468C710 468 740 500 740 552V700"/></g></svg><span>FolioNotes</span></a>
-    <nav aria-label="Primary"><ul><li><a href="#overview">Overview</a></li><li><a href="#features">Features</a></li><li><a href="#privacy">Privacy</a></li><li><a href="#specs">Tech Specs</a></li><li><a href="#faq">FAQ</a></li></ul></nav>
-    <a class="pill" href="https://github.com/MagnusOlstad/folio/releases/latest/download/FolioNotes-arm64.dmg">Download</a>
+    <nav aria-label="Primary"><ul><li><a href="#overview">Overview</a></li><li><a href="#features">Features</a></li><li><a href="#privacy">Privacy</a></li><li><a href="#specs">Requirements</a></li><li><a href="#faq">FAQ</a></li></ul></nav>
+    <a class="nav-dl" href="https://github.com/MagnusOlstad/folio/releases/latest/download/FolioNotes-arm64.dmg">Download</a>
   </div>
 </header>
 <main id="main">
@@ -40,7 +43,7 @@
     <p class="eyebrow">FolioNotes</p>
     <h1>Capture once.<br>Your Mac files it.</h1>
     <p class="sub">One Markdown capture field. A model running on your Mac decides where each note goes. Everything stays as plain files in a folder you own.</p>
-    <div class="cta"><a class="btn btn-primary" href="https://github.com/MagnusOlstad/folio/releases/latest/download/FolioNotes-arm64.dmg">Download for Mac</a><a class="link" href="https://github.com/MagnusOlstad/folio">View on GitHub<span aria-hidden="true"> ›</span></a></div>
+    <div class="cta"><a class="btn btn-primary" href="https://github.com/MagnusOlstad/folio/releases/latest/download/FolioNotes-arm64.dmg"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg>Download for Mac</a><a class="btn btn-secondary" href="https://github.com/MagnusOlstad/folio">View on GitHub<svg class="ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M8 7h9v9"/></svg></a></div>
     <p class="fine">Apple Silicon · macOS 14 or later</p>
     <p class="fine"><span id="release-info" hidden></span> <a href="https://github.com/MagnusOlstad/folio/releases">All releases</a></p>
     <p class="fine note" id="platform-note" role="note" hidden>FolioNotes is a Mac app for Apple Silicon. Open this page on your Mac to download.</p>
@@ -50,7 +53,7 @@
 
 <section class="band statement" id="overview" aria-labelledby="st-h">
   <div class="wrap center">
-    <h2 id="st-h" class="huge reveal">Your notes.<br>On your Mac.<br>Period.</h2>
+    <h2 id="st-h" class="huge reveal">Your notes stay<br>on your Mac.</h2>
     <p class="lead reveal">Filing, search and answers use models stored on your machine. There is no account, no cloud service and no analytics.</p>
     <dl class="stats reveal">
       <div><dt>accounts</dt><dd>0</dd></div>
@@ -63,7 +66,7 @@
 <section class="band" id="features" aria-labelledby="feat-h">
   <div class="wrap">
     <h2 id="feat-h" class="section-h reveal">Everything in its place.<br><span>Without lifting a finger.</span></h2>
-    <ul class="bento"><li class="tile t-wide reveal"><div class="tile-text"><h3>One field. Filed.</h3><p>Write in plain Markdown. A local model proposes where the note belongs, and you confirm with a keypress.</p></div><div class="tile-shot"><img src="../assets/screenshots/capture-filing-light.webp" alt="A draft note with a filing proposal ready to confirm" width="2880" height="1782" loading="lazy" decoding="async"></div></li><li class="tile  reveal"><div class="tile-text"><h3>Plain folders.</h3><p>Notes are Markdown with frontmatter in a normal folder. No database, no lock-in.</p></div><div class="tile-shot"><img src="../assets/screenshots/explorer-light.webp" alt="The FolioNotes Explorer showing notes organised in a folder hierarchy" width="618" height="1260" loading="lazy" decoding="async"></div></li><li class="tile  reveal"><div class="tile-text"><h3>Find it, or ask it.</h3><p>Search combines keywords and embeddings. Ask writes a grounded answer with citations.</p></div><div class="tile-shot"><img src="../assets/screenshots/ask-light.webp" alt="An Ask answer with citations linking to local notes" width="2880" height="1782" loading="lazy" decoding="async"></div></li><li class="tile  reveal"><div class="tile-text"><h3>Notes that connect.</h3><p>Links and backlinks are indexed automatically from Markdown links and source provenance.</p></div><div class="tile-shot"><img src="../assets/screenshots/links-light.webp" alt="Backlinks and suggested related notes for a note" width="2880" height="1782" loading="lazy" decoding="async"></div></li><li class="tile  reveal"><div class="tile-text"><h3>Every version kept.</h3><p>Edit freely and restore older content whenever you need it.</p></div><div class="tile-shot"><img src="../assets/screenshots/history-light.webp" alt="The version history of a note" width="2880" height="1782" loading="lazy" decoding="async"></div></li><li class="tile t-wide reveal"><div class="tile-text"><h3>Refile with review.</h3><p>Move a saved note through a review dialog that proposes a path and metadata. Discard leaves it unchanged.</p></div><div class="tile-shot"><img src="../assets/screenshots/refile-light.webp" alt="The refile review dialog proposing a new path for a saved note" width="2880" height="1782" loading="lazy" decoding="async"></div></li><li class="tile t-text reveal"><div class="tile-text"><h3>And a lot more.</h3><p>Export, lifecycle states, tag filters, bundles, backup and familiar shortcuts.</p><a class="link" href="#more">See everything<span aria-hidden="true"> ›</span></a></div></li></ul>
+    <ul class="bento"><li class="tile t-wide reveal"><div class="tile-text"><h3>One field. Filed.</h3><p>Write in plain Markdown. A local model proposes where the note belongs, and you confirm with a keypress.</p></div><div class="tile-shot"><img src="../assets/screenshots/capture-filing-light.webp" alt="A draft note with a filing proposal ready to confirm" width="2880" height="1782" loading="lazy" decoding="async"></div></li><li class="tile  reveal"><div class="tile-text"><h3>Plain folders.</h3><p>Notes are Markdown with frontmatter in a normal folder. No database, no lock-in.</p></div><div class="tile-shot"><img src="../assets/screenshots/explorer-light.webp" alt="The FolioNotes Explorer showing notes organised in a folder hierarchy" width="618" height="1260" loading="lazy" decoding="async"></div></li><li class="tile  reveal"><div class="tile-text"><h3>Find it, or ask it.</h3><p>Search combines keywords and embeddings. Ask writes a grounded answer with citations.</p></div><div class="tile-shot"><img src="../assets/screenshots/ask-light.webp" alt="An Ask answer with citations linking to local notes" width="2880" height="1782" loading="lazy" decoding="async"></div></li><li class="tile  reveal"><div class="tile-text"><h3>Notes that connect.</h3><p>Links and backlinks are indexed automatically from Markdown links and source provenance.</p></div><div class="tile-shot"><img src="../assets/screenshots/links-light.webp" alt="Backlinks and suggested related notes for a note" width="2880" height="1782" loading="lazy" decoding="async"></div></li><li class="tile  reveal"><div class="tile-text"><h3>Every version kept.</h3><p>Edit freely and restore older content whenever you need it.</p></div><div class="tile-shot"><img src="../assets/screenshots/history-light.webp" alt="The version history of a note" width="2880" height="1782" loading="lazy" decoding="async"></div></li><li class="tile t-wide reveal"><div class="tile-text"><h3>Refile with review.</h3><p>Move a saved note through a review dialog that proposes a path and metadata. Discard leaves it unchanged.</p></div><div class="tile-shot"><img src="../assets/screenshots/refile-light.webp" alt="The refile review dialog proposing a new path for a saved note" width="2880" height="1782" loading="lazy" decoding="async"></div></li><li class="tile t-text reveal"><div class="tile-text"><h3>And a lot more.</h3><p>Export, lifecycle states, tag filters, bundles, backup and familiar shortcuts.</p><a class="link" href="#more">See everything<svg class="ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M8 7h9v9"/></svg></a></div></li></ul>
   </div>
 </section>
 
@@ -187,7 +190,7 @@ Move the invite step higher, rename workspace to team space, rerun with three us
 
 <section class="band" id="gallery" aria-labelledby="gal-h">
   <div class="wrap">
-    <div class="gal-head reveal"><h2 id="gal-h" class="section-h left">Take a look around.</h2>
+    <div class="gal-head reveal"><h2 id="gal-h" class="section-h left">A closer look</h2>
     <div class="gal-btns"><button type="button" class="arrow" data-dir="-1" aria-label="Previous screenshots"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><button type="button" class="arrow" data-dir="1" aria-label="Next screenshots"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button></div></div>
   </div>
   <div class="gallery" id="gallery-strip" role="region" aria-label="Screenshot gallery" tabindex="0"><ul><li class="slide" tabindex="-1"><figure><img src="../assets/screenshots/capture-filing-light.webp" alt="FolioNotes: Capture and file" width="2880" height="1782" loading="lazy" decoding="async"><figcaption>Capture and file</figcaption></figure></li><li class="slide" tabindex="-1"><figure><img src="../assets/screenshots/models-light.webp" alt="FolioNotes: Models" width="2880" height="1782" loading="lazy" decoding="async"><figcaption>Models</figcaption></figure></li><li class="slide" tabindex="-1"><figure><img src="../assets/screenshots/search-light.webp" alt="FolioNotes: Search" width="2880" height="1782" loading="lazy" decoding="async"><figcaption>Search</figcaption></figure></li><li class="slide" tabindex="-1"><figure><img src="../assets/screenshots/ask-light.webp" alt="FolioNotes: Ask" width="2880" height="1782" loading="lazy" decoding="async"><figcaption>Ask</figcaption></figure></li><li class="slide" tabindex="-1"><figure><img src="../assets/screenshots/transcription-light.webp" alt="FolioNotes: Transcription" width="2880" height="1782" loading="lazy" decoding="async"><figcaption>Transcription</figcaption></figure></li><li class="slide" tabindex="-1"><figure><img src="../assets/screenshots/history-light.webp" alt="FolioNotes: History" width="2880" height="1782" loading="lazy" decoding="async"><figcaption>History</figcaption></figure></li><li class="slide" tabindex="-1"><figure><img src="../assets/screenshots/links-light.webp" alt="FolioNotes: Links" width="2880" height="1782" loading="lazy" decoding="async"><figcaption>Links</figcaption></figure></li><li class="slide" tabindex="-1"><figure><img src="../assets/screenshots/refile-light.webp" alt="FolioNotes: Refile" width="2880" height="1782" loading="lazy" decoding="async"><figcaption>Refile</figcaption></figure></li></ul></div>
@@ -215,7 +218,7 @@ Move the invite step higher, rename workspace to team space, rerun with three us
 
 <section class="band alt" id="specs" aria-labelledby="req-h">
   <div class="wrap narrow">
-    <h2 id="req-h" class="section-h reveal">Tech Specs</h2>
+    <h2 id="req-h" class="section-h reveal">Requirements</h2>
     <dl class="specs reveal"><div><dt>Mac</dt><dd>Apple Silicon (M1 or later)</dd></div><div><dt>System</dt><dd>macOS 14 Sonoma or newer</dd></div><div><dt>Disk space</dt><dd>About 2–7 GB for models, depending on your choice. EmbeddingGemma is about 212 MB; the generation models range from about 1.81 GB to 5.18 GB; Whisper is about 1.61 GB.</dd></div><div><dt>Generation models</dt><dd>Qwen 3.5 4B, Llama 3.2 3B Instruct, Gemma 4 E4B, run with MLX</dd></div><div><dt>Search model</dt><dd>EmbeddingGemma</dd></div><div><dt>Transcription</dt><dd>Whisper large-v3-turbo. Imports AAC, AIFF, FLAC, M4A, MP3 and WAV.</dd></div><div><dt>Storage</dt><dd>Plain Markdown with OKF frontmatter in <code>~/Documents/Folio</code></dd></div><div><dt>Distribution</dt><dd>Signed with a Developer ID and notarized by Apple. Updates install automatically.</dd></div><div><dt>License</dt><dd>Open source under the MIT License</dd></div></dl>
   </div>
 </section>
@@ -231,7 +234,7 @@ Move the invite step higher, rename workspace to team space, rerun with three us
   <div class="wrap center">
     <h2 id="final-h" class="huge m reveal">Try FolioNotes.</h2>
     <p class="lead reveal">Free and open source. Download, open the DMG and drag it to Applications.</p>
-    <div class="cta reveal"><a class="btn btn-primary" href="https://github.com/MagnusOlstad/folio/releases/latest/download/FolioNotes-arm64.dmg">Download for Mac</a><a class="link" href="https://github.com/MagnusOlstad/folio">View on GitHub<span aria-hidden="true"> ›</span></a></div>
+    <div class="cta reveal"><a class="btn btn-primary" href="https://github.com/MagnusOlstad/folio/releases/latest/download/FolioNotes-arm64.dmg"><svg class="ico" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg>Download for Mac</a><a class="btn btn-secondary" href="https://github.com/MagnusOlstad/folio">View on GitHub<svg class="ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M8 7h9v9"/></svg></a></div>
     <p class="fine reveal">Apple Silicon · macOS 14 or later</p>
   </div>
 </section>
