@@ -48,7 +48,7 @@ export async function verifyMacUpdateConfig(appPath, publish = packageJson.build
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [action, appPath] = process.argv.slice(2);
   if (action !== 'verify' || !appPath) {
-    throw new Error('Usage: node scripts/macos-update-config.mjs verify <Folio.app>');
+    throw new Error('Usage: node scripts/macos-update-config.mjs verify <FolioNotes.app>');
   }
   await verifyMacUpdateConfig(appPath);
 }

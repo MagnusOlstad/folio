@@ -43,7 +43,7 @@ export function useWorkspaceBootstrap(options: UseWorkspaceBootstrapOptions) {
     let cancelled = false;
     let reconnectTimer = 0;
     const reconnectMessage =
-      "The local Folio service is still starting. Reconnecting automatically.";
+      "The local FolioNotes service is still starting. Reconnecting automatically.";
 
     const loadWorkspace = async () => {
       try {

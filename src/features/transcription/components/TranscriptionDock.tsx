@@ -146,7 +146,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
           <span className="transcription-status-dot" aria-hidden="true" />
           <strong>{status?.modelState === 'ready' ? `${selectedModelName} is ready` : status?.modelState === 'downloading' ? `Downloading ${selectedModelName}` : `${selectedModelName} is not installed`}</strong>
         </div>
-        {!status?.available && <p>Local transcription requires the Folio desktop app on an Apple Silicon Mac with macOS 14 or later.</p>}
+        {!status?.available && <p>Local transcription requires the FolioNotes desktop app on an Apple Silicon Mac with macOS 14 or later.</p>}
         {status?.available && !status.helperAvailable && <p>Build the bundled MLX helper to enable local transcription.</p>}
         {status?.modelState === 'missing' && status.canInstall && (
           <>

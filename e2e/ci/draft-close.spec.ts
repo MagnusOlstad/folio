@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 async function openWorkspace(page: Page) {
   await page.goto("/");
-  await expect(page.getByRole("link", { name: "Folio home" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "FolioNotes home" })).toBeVisible();
 }
 
 test("closing a blank new draft removes its server copy", async ({ page, request }) => {

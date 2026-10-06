@@ -1,7 +1,7 @@
 ---
 type: Guide
 title: Set Up Local Models
-description: Understand Folio's bundled MLX runtime and install its local models.
+description: Understand FolioNotes's bundled MLX runtime and install its local models.
 tags:
   - getting-started
   - models
@@ -17,13 +17,13 @@ folio_related:
 
 # Set Up Local Models
 
-Folio bundles the Swift MLX runtime for local inference. It uses Gemma 4 E4B for note generation and EmbeddingGemma for semantic search.
+FolioNotes bundles the Swift MLX runtime for local inference. It uses Gemma 4 E4B for note generation and EmbeddingGemma for semantic search.
 
 ## Install models
 
 Open the right pane and use the install control beside each model you want. Model files are downloaded only after you explicitly start that model's installation. The pane shows each model's status and download size before installation.
 
-Gemma 4 E4B supports note generation and Ask. EmbeddingGemma supports semantic search and embedding-based relationships. Install both for all of Folio's model-assisted features.
+Gemma 4 E4B supports note generation and Ask. EmbeddingGemma supports semantic search and embedding-based relationships. Install both for all of FolioNotes's model-assisted features.
 
 ## Manage downloads
 

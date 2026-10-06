@@ -38,8 +38,8 @@ Search and relationship ties prefer the most recently edited note.
 
 - Drag a file onto an Explorer directory to move it.
 - Edit the footer path for precise filing.
-- Select **Reindex** after changing Markdown files outside Folio.
+- Select **Reindex** after changing Markdown files outside FolioNotes.
 - Delete obsolete drafts with their `x` control.
 - Delete obsolete filed notes from their footer. Raw captures remain available for recovery.
 
-Folio automatically updates links when a note is moved and reuses embeddings when their source text has not changed.
+FolioNotes automatically updates links when a note is moved and reuses embeddings when their source text has not changed.

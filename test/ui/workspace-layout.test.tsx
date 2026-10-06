@@ -53,7 +53,7 @@ describe("workspace pane layout", () => {
       />,
     );
 
-    expect(screen.getByRole("link", { name: "Folio home" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "FolioNotes home" })).toBeInTheDocument();
     expect(screen.queryByText("v1.2.3")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Hide left sidebar" }));
     expect(toggle).toHaveBeenCalledOnce();

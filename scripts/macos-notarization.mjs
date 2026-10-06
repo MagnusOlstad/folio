@@ -146,7 +146,7 @@ export function releaseNotesWithInstall(body, dmgName) {
   const normalized = String(body ?? '').trimEnd();
   const managedBlock = new RegExp(`(?:^|\\n)${INSTALL_BLOCK_START}\\n[\\s\\S]*?${INSTALL_BLOCK_END}(?=\\n|$)`, 'g');
   const base = normalized.replace(managedBlock, '').trimEnd();
-  return `${base}\n\n${INSTALL_BLOCK_START}\n## Install\n\nDownload \`${dmgName}\`, open it, and drag Folio to Applications. This release is\nsigned with an Apple Developer ID certificate and notarized by Apple, so macOS Gatekeeper can verify it normally.\n${INSTALL_BLOCK_END}\n`;
+  return `${base}\n\n${INSTALL_BLOCK_START}\n## Install\n\nDownload \`${dmgName}\`, open it, and drag FolioNotes to Applications. This release is\nsigned with an Apple Developer ID certificate and notarized by Apple, so macOS Gatekeeper can verify it normally.\n${INSTALL_BLOCK_END}\n`;
 }
 
 export function resumeSummary({ sourceRunId, submissionId, repository, reason }) {

@@ -1,7 +1,7 @@
 ---
 type: Guide
 title: Start Here
-description: A short tour of Folio and the recommended first steps.
+description: A short tour of FolioNotes and the recommended first steps.
 tags:
   - getting-started
   - folio
@@ -19,7 +19,7 @@ folio_related:
 
 # Start Here
 
-Folio is a local-first notebook. Your notes are Markdown files, and its bundled Swift MLX runtime runs local language and embedding models on your computer.
+FolioNotes is a local-first notebook. Your notes are Markdown files, and its bundled Swift MLX runtime runs local language and embedding models on your computer.
 
 ## Recommended first steps
 

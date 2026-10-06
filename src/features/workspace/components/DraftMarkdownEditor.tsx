@@ -92,7 +92,7 @@ export function DraftMarkdownEditor({
                 i
               </button>
               <span className="draft-guidance-tooltip" id={`${id}-tooltip`} role="tooltip">
-                Use a short hint when the note doesn’t make its title, folder, or kind obvious. Folio sends this separately from the full note to the filing model. Relevant hints and existing folder names guide filing; unrelated hints yield to the note. Titles stay grounded in the note, and the body remains unchanged. Use <code>path: /projects/atlas</code> to choose a destination, or leave this blank for automatic filing.
+                Use a short hint when the note doesn’t make its title, folder, or kind obvious. FolioNotes sends this separately from the full note to the filing model. Relevant hints and existing folder names guide filing; unrelated hints yield to the note. Titles stay grounded in the note, and the body remains unchanged. Use <code>path: /projects/atlas</code> to choose a destination, or leave this blank for automatic filing.
               </span>
             </span>
           </div>

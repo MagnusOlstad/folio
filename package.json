@@ -1,6 +1,6 @@
 {
   "name": "okf-notetaker",
-  "productName": "Folio",
+  "productName": "FolioNotes",
   "private": true,
   "version": "0.7.5",
   "type": "module",
@@ -65,7 +65,7 @@
   },
   "build": {
     "appId": "no.okf.folio",
-    "productName": "Folio",
+    "productName": "FolioNotes",
     "afterPack": "./scripts/macos-update-config.mjs",
     "asar": true,
     "directories": {
@@ -91,7 +91,7 @@
       "category": "public.app-category.productivity",
       "minimumSystemVersion": "14.0",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "Folio uses your microphone to record audio for local transcription."
+        "NSMicrophoneUsageDescription": "FolioNotes uses your microphone to record audio for local transcription."
       },
       "icon": "build/icon.icns",
       "hardenedRuntime": true,

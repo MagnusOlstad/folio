@@ -229,7 +229,7 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
         <div className="bundle-explorer-empty">
           <span aria-hidden="true">▱</span>
           <strong>A space for your notes</strong>
-          <p>Create a bundle or open an existing Folio bundle to get started.</p>
+          <p>Create a bundle or open an existing FolioNotes bundle to get started.</p>
           <button type="button" className="bundle-setup-cta" onClick={openSettings}>Add or import bundle</button>
         </div>
       )}

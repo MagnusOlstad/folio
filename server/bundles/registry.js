@@ -63,7 +63,7 @@ async function legacyEntryFor(config) {
   if (!(await Promise.all(legacyPaths.map(pathExists))).some(Boolean)) return null
   return {
     id: 'legacy-bundle',
-    name: 'Folio bundle',
+    name: 'FolioNotes bundle',
     markdownPath: legacyPath,
     managed: false,
     detached: false,
@@ -140,7 +140,7 @@ export function createBundleRegistry(config) {
     if (entries.some((entry) => isWithin(entry.markdownPath, requestedPath) || isWithin(requestedPath, entry.markdownPath))) throw new Error('Bundle path overlaps an existing bundle.')
     if (managed) {
       const managedRoot = await fs.realpath(path.resolve(config.dataRoot, 'bundles')).catch(() => path.resolve(config.dataRoot, 'bundles'))
-      if (!isWithin(managedRoot, requestedPath)) throw new Error('Managed bundles must be inside the Folio bundles folder.')
+      if (!isWithin(managedRoot, requestedPath)) throw new Error('Managed bundles must be inside the FolioNotes bundles folder.')
     }
     if (source === 'existing' || source === 'obsidian') {
       const stat = await fs.stat(requestedPath).catch(() => null)

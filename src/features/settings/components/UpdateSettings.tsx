@@ -42,18 +42,18 @@ export function UpdateSettings() {
   if (desktop) {
     if (updateState?.status === "checking" || busy) status = "Checking for updates…";
     else if (updateState?.status === "available") status = `Version ${updateState.version ?? "new"} is available.`;
-    else if (updateState?.status === "idle") status = "Folio is up to date.";
+    else if (updateState?.status === "idle") status = "FolioNotes is up to date.";
     else if (updateState?.status === "downloading") status = `Downloading update${updateState.percent === null ? "…" : `: ${updateState.percent}%`}`;
     else if (updateState?.status === "downloaded") status = "Download complete. Preparing installation…";
     else if (updateState?.status === "staging") status = "Preparing installation…";
-    else if (updateState?.status === "installing") status = "Restarting Folio to install the update…";
+    else if (updateState?.status === "installing") status = "Restarting FolioNotes to install the update…";
     else if (updateState?.status === "error") status = updateState.error ?? "The update failed. Try again.";
   } else if (versionInfo) {
     status = versionInfo.updateAvailable
       ? `Version ${versionInfo.latest} is available.`
       : versionInfo.checkError
         ? "Could not check for updates. Try again."
-        : "Folio is up to date.";
+        : "FolioNotes is up to date.";
   }
 
   const canDownload = desktop && (updateState?.status === "available"
@@ -64,7 +64,7 @@ export function UpdateSettings() {
     <section className="settings-section" aria-labelledby="settings-updates-heading">
       <div className="settings-section-copy">
         <h2 id="settings-updates-heading">Updates</h2>
-        <p>Check for the latest stable Folio release.</p>
+        <p>Check for the latest stable FolioNotes release.</p>
       </div>
       <div className="settings-update-actions">
         <button type="button" onClick={() => void checkForUpdates()} disabled={!canCheck}>
@@ -84,7 +84,7 @@ export function UpdateSettings() {
         <a href={versionInfo.latestUrl} target="_blank" rel="noreferrer">View release</a>
       ) : null}
       {error ? <p role="alert">{error}</p> : null}
-      {desktop && changing ? <p>Folio will save pending changes before restarting to finish installation.</p> : null}
+      {desktop && changing ? <p>FolioNotes will save pending changes before restarting to finish installation.</p> : null}
     </section>
   );
 }

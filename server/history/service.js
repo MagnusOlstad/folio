@@ -44,7 +44,7 @@ async function assertSafeBundledGitDir(historyGitDir) {
   for (const candidate of [folioDirectory, historyGitDir]) {
     try {
       const stat = await fsp.lstat(candidate)
-      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`Refusing to use non-directory Folio history path: ${candidate}`)
+      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`Refusing to use non-directory FolioNotes history path: ${candidate}`)
     } catch (error) {
       if (error.code !== 'ENOENT') throw error
     }
@@ -391,7 +391,7 @@ export function createHistoryService(runtime) {
           // Electron's utility process is a separate OS process and resolves this
           // packaged ASAR entry point through Electron's module loader.
           const { utilityProcess } = await import('electron')
-          processChild = utilityProcess.fork(runtime.historyWorkerPath || defaultWorkerPath, [], { serviceName: 'Folio note history' })
+          processChild = utilityProcess.fork(runtime.historyWorkerPath || defaultWorkerPath, [], { serviceName: 'FolioNotes note history' })
           electronProcess = true
         } else {
           processChild = fork(runtime.historyWorkerPath || defaultWorkerPath, [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] })

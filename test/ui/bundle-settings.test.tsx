@@ -69,7 +69,7 @@ describe("bundle setup interface", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Work is ready.");
   });
 
-  it("opens an existing Folio bundle in place and derives its editable name", async () => {
+  it("opens an existing FolioNotes bundle in place and derives its editable name", async () => {
     window.folio = {
       selectFolder: vi.fn().mockResolvedValue("/notes/Research"),
     };
@@ -77,7 +77,7 @@ describe("bundle setup interface", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Create bundle or import Obsidian vault" }),
     );
-    fireEvent.click(screen.getByRole("radio", { name: /Existing Folio bundle/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Existing FolioNotes bundle/ }));
     expect(
       screen.queryByRole("combobox", { name: "Location" }),
     ).not.toBeInTheDocument();
@@ -98,18 +98,18 @@ describe("bundle setup interface", () => {
     });
   });
 
-  it("keeps existing Folio bundle selection desktop-only in the browser", () => {
+  it("keeps existing FolioNotes bundle selection desktop-only in the browser", () => {
     renderSettings();
     fireEvent.click(
       screen.getByRole("button", { name: "Create bundle or import Obsidian vault" }),
     );
-    fireEvent.click(screen.getByRole("radio", { name: /Existing Folio bundle/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Existing FolioNotes bundle/ }));
 
     expect(
       screen.getByRole("button", { name: "Choose folder" }),
     ).toBeDisabled();
     expect(
-      screen.getByText("Open Folio desktop to connect an existing Folio bundle."),
+      screen.getByText("Open FolioNotes desktop to connect an existing FolioNotes bundle."),
     ).toBeInTheDocument();
   });
 

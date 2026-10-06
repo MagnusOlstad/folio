@@ -44,7 +44,7 @@ describe("UpdateSettings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Download and install v0.8.0" }));
     expect(await screen.findByRole("progressbar", { name: "Downloading update" })).toHaveAttribute("value", "42");
     expect(startUpdate).toHaveBeenCalledOnce();
-    expect(screen.getByText("Folio will save pending changes before restarting to finish installation.")).toBeVisible();
+    expect(screen.getByText("FolioNotes will save pending changes before restarting to finish installation.")).toBeVisible();
   });
 
   it("falls back to the release page check when the desktop updater is unavailable", async () => {
@@ -60,7 +60,7 @@ describe("UpdateSettings", () => {
     render(<UpdateSettings />);
     fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
 
-    expect(await screen.findByText("Folio is up to date.")).toBeVisible();
+    expect(await screen.findByText("FolioNotes is up to date.")).toBeVisible();
     expect(fetch).toHaveBeenCalledWith("/api/version?refresh=1");
   });
 
