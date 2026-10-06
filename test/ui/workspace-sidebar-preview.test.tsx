@@ -334,6 +334,7 @@ describe("WorkspaceSidebar preview navigation", () => {
       createFile: vi.fn().mockResolvedValue(undefined),
       createDirectory: vi.fn().mockResolvedValue(undefined),
       deleteFile: vi.fn().mockResolvedValue(undefined),
+      deleteDirectory: vi.fn().mockResolvedValue(undefined),
       exportFile: vi.fn().mockResolvedValue(undefined),
       copyText: vi.fn().mockResolvedValue(undefined),
     };
@@ -374,6 +375,7 @@ describe("WorkspaceSidebar preview navigation", () => {
       createFile: vi.fn().mockResolvedValue(undefined),
       createDirectory: vi.fn().mockResolvedValue(undefined),
       deleteFile: vi.fn().mockResolvedValue(undefined),
+      deleteDirectory: vi.fn().mockResolvedValue(undefined),
       exportFile: vi.fn().mockResolvedValue(undefined),
       copyText: vi.fn().mockResolvedValue(undefined),
     };
@@ -404,6 +406,7 @@ describe("WorkspaceSidebar preview navigation", () => {
       createFile: vi.fn().mockResolvedValue(undefined),
       createDirectory: vi.fn().mockResolvedValue(undefined),
       deleteFile: vi.fn().mockResolvedValue(undefined),
+      deleteDirectory: vi.fn().mockResolvedValue(undefined),
       exportFile: vi.fn().mockResolvedValue(undefined),
       copyText: vi.fn().mockResolvedValue(undefined),
     };
@@ -431,6 +434,73 @@ describe("WorkspaceSidebar preview navigation", () => {
     expect(actions.deleteFile).toHaveBeenCalledWith(expect.objectContaining({ id: "/projects/plan.md" }));
   });
 
+  it("requires confirmation before deleting an empty directory", () => {
+    const actions: ExplorerFileActions = {
+      renameFile: vi.fn().mockResolvedValue(undefined),
+      createFile: vi.fn().mockResolvedValue(undefined),
+      createDirectory: vi.fn().mockResolvedValue(undefined),
+      deleteFile: vi.fn().mockResolvedValue(undefined),
+      deleteDirectory: vi.fn().mockResolvedValue(undefined),
+      exportFile: vi.fn().mockResolvedValue(undefined),
+      copyText: vi.fn().mockResolvedValue(undefined),
+    };
+    const props = {
+      ...sidebarProps(vi.fn().mockResolvedValue(undefined)),
+      sidebarMode: "explore" as const,
+      fileTree: buildFileTree([], [{ path: "/projects" }, { path: "/projects/empty" }]),
+      bundles: [{ id: "work", name: "Work", markdownPath: "/notes/work", managed: false, detached: false }],
+      activeBundleId: "work",
+      expandedDirectories: new Set(["/", "/projects"]),
+      actions,
+      setMessage: vi.fn(),
+    };
+    const { container, getByRole } = render(<WorkspaceSidebar {...props} />);
+
+    const emptyDirectory = Array.from(container.querySelectorAll("button.tree-directory"))
+      .find((button) => button.textContent?.includes("empty"));
+    expect(emptyDirectory).toBeDefined();
+    fireEvent.contextMenu(emptyDirectory!, { clientX: 30, clientY: 40 });
+    fireEvent.click(getByRole("menuitem", { name: "Delete" }));
+    const dialog = getByRole("dialog", { name: "Confirm delete" });
+    expect(dialog).toHaveTextContent("Delete empty?");
+    expect(dialog).toHaveTextContent("Only an empty folder can be deleted");
+    expect(actions.deleteDirectory).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    expect(actions.deleteDirectory).toHaveBeenCalledWith("/projects/empty");
+  });
+
+  it("hides directory Delete for the bundle root and fixed OKF directories", () => {
+    const actions: ExplorerFileActions = {
+      renameFile: vi.fn().mockResolvedValue(undefined),
+      createFile: vi.fn().mockResolvedValue(undefined),
+      createDirectory: vi.fn().mockResolvedValue(undefined),
+      deleteFile: vi.fn().mockResolvedValue(undefined),
+      deleteDirectory: vi.fn().mockResolvedValue(undefined),
+      exportFile: vi.fn().mockResolvedValue(undefined),
+      copyText: vi.fn().mockResolvedValue(undefined),
+    };
+    const props = {
+      ...sidebarProps(vi.fn().mockResolvedValue(undefined)),
+      sidebarMode: "explore" as const,
+      fileTree: buildFileTree([], [{ path: "/daily" }, { path: "/daily/logs" }]),
+      bundles: [{ id: "work", name: "Work", markdownPath: "/notes/work", managed: false, detached: false }],
+      activeBundleId: "work",
+      expandedDirectories: new Set(["/", "/daily"]),
+      actions,
+      setMessage: vi.fn(),
+    };
+    const { container, getByRole, queryByRole } = render(<WorkspaceSidebar {...props} />);
+
+    fireEvent.contextMenu(getByRole("button", { name: /Work/ }), { clientX: 30, clientY: 40 });
+    expect(queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    const dailyDirectory = Array.from(container.querySelectorAll("button.tree-directory"))
+      .find((button) => button.textContent?.includes("daily"));
+    expect(dailyDirectory).toBeDefined();
+    fireEvent.contextMenu(dailyDirectory!, { clientX: 30, clientY: 40 });
+    expect(queryByRole("menuitem", { name: "Delete" })).not.toBeInTheDocument();
+  });
+
   it.each([
     { movable: false, blockedFileIds: new Set<string>() },
     { movable: true, blockedFileIds: new Set(["/projects/plan.md"]) },
@@ -440,6 +510,7 @@ describe("WorkspaceSidebar preview navigation", () => {
       createFile: vi.fn().mockResolvedValue(undefined),
       createDirectory: vi.fn().mockResolvedValue(undefined),
       deleteFile: vi.fn().mockResolvedValue(undefined),
+      deleteDirectory: vi.fn().mockResolvedValue(undefined),
       exportFile: vi.fn().mockResolvedValue(undefined),
       copyText: vi.fn().mockResolvedValue(undefined),
     };
@@ -469,6 +540,7 @@ describe("WorkspaceSidebar preview navigation", () => {
       createFile: vi.fn().mockResolvedValue(undefined),
       createDirectory: vi.fn().mockResolvedValue(undefined),
       deleteFile: vi.fn().mockResolvedValue(undefined),
+      deleteDirectory: vi.fn().mockResolvedValue(undefined),
       exportFile: vi.fn().mockResolvedValue(undefined),
       copyText: vi.fn().mockResolvedValue(undefined),
     };

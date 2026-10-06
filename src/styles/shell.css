@@ -90,6 +90,15 @@
   overflow: hidden;
 }
 
+.desktop-update-controls {
+  min-width: 0;
+  max-width: calc(100% - 38px);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+}
+
 .brand-mark {
   width: 25px;
   height: 25px;
@@ -183,9 +192,21 @@ button.update-badge {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding: 0 4px;
+  gap: 8px;
+  padding: 0 8px;
   border-bottom: 1px solid var(--line);
   background: var(--surface-deep);
+}
+
+.update-available-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--surface-deep);
+  border-radius: 50%;
+  background: var(--blue);
 }
 
 .right-pane-content {
@@ -458,6 +479,7 @@ body.resizing-horizontal * {
 }
 
 .pane-toggle {
+  position: relative;
   width: 30px;
   height: 30px;
   flex: 0 0 30px;

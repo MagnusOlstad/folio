@@ -5,6 +5,7 @@ import {
   explorerTargetName,
   explorerTargetParent,
   explorerTargetPath,
+  canDeleteExplorerDirectory,
 } from "../model/explorer.ts";
 
 type ExplorerContextMenuProps = {
@@ -39,6 +40,8 @@ export function ExplorerContextMenu({
     && target.file.deletable
     && target.file.movable
     && !blockedFileIds.has(target.file.id);
+  const canDeleteDirectory = target.kind === "directory" && canDeleteExplorerDirectory(target.path);
+  const canDeleteTarget = canDelete || canDeleteDirectory;
   const targetPath = explorerTargetPath(target);
   const absolutePath = `${bundlePath.replace(/[\\/]$/, "")}${targetPath}`;
   const relativePath = targetPath === "/" ? "." : targetPath.slice(1);
@@ -123,15 +126,18 @@ export function ExplorerContextMenu({
         <form className="explorer-context-dialog" role="dialog" aria-label={formMode === "delete" ? "Confirm delete" : formMode.replaceAll("-", " ")} onSubmit={submitForm}>
           {formMode === "delete" ? (
             <>
-              <strong>Delete {target.kind === "file" ? target.file.name : "folder"}?</strong>
-              <p>This permanently deletes the Markdown file from this bundle.</p>
+              <strong>Delete {explorerTargetName(target)}?</strong>
+              <p>{target.kind === "file" ? "This permanently deletes the Markdown file from this bundle." : "Only an empty folder can be deleted from this bundle."}</p>
               <div className="explorer-context-actions">
                 <button type="button" onClick={() => onDismiss(true)} disabled={working}>Cancel</button>
                 <button
                   type="button"
                   className="danger"
-                  disabled={working || target.kind !== "file"}
-                  onClick={() => target.kind === "file" && void run(() => actions.deleteFile(target.file))}
+                  disabled={working || !canDeleteTarget}
+                  onClick={() => {
+                    if (target.kind === "file") void run(() => actions.deleteFile(target.file));
+                    else if (canDeleteDirectory) void run(() => actions.deleteDirectory(target.path));
+                  }}
                 >
                   {working ? "Deleting…" : "Delete"}
                 </button>
@@ -173,7 +179,7 @@ export function ExplorerContextMenu({
               <button role="menuitem" type="button" onClick={() => void run(() => actions.exportFile(target.file, "pdf"))}>Export PDF</button>
               <button role="menuitem" type="button" className="danger" disabled={!canDelete} onClick={() => setFormMode("delete")}>Delete</button>
             </>
-          ) : null}
+          ) : canDeleteDirectory ? <button role="menuitem" type="button" className="danger" onClick={() => setFormMode("delete")}>Delete</button> : null}
         </div>
       )}
     </div>

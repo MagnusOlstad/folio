@@ -43,11 +43,10 @@ describe("workspace pane layout", () => {
     }
   });
 
-  it("places app identity and the left pane toggle in its header", () => {
+  it("keeps app identity and the left pane toggle in its header", () => {
     const toggle = vi.fn();
     render(
       <WorkspaceLeftPaneHeader
-        versionInfo={{ version: "1.2.3", repo: "folio", updateAvailable: false, latest: null }}
         onOpenSettings={() => {}}
         sidebarOpen
         onToggleSidebar={toggle}
@@ -55,7 +54,7 @@ describe("workspace pane layout", () => {
     );
 
     expect(screen.getByRole("link", { name: "Folio home" })).toBeInTheDocument();
-    expect(screen.getByText("v1.2.3")).toBeInTheDocument();
+    expect(screen.queryByText("v1.2.3")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Hide left sidebar" }));
     expect(toggle).toHaveBeenCalledOnce();
   });

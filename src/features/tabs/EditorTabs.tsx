@@ -1,19 +1,22 @@
 import type { TabGroup } from "../../domain/types.ts";
 
-function PaneToggle({ side, open, onClick }: { side: "left" | "right"; open: boolean; onClick: () => void }) {
+function PaneToggle({ side, open, onClick, updateAvailable = false }: { side: "left" | "right"; open: boolean; onClick: () => void; updateAvailable?: boolean }) {
   const action = open ? "Hide" : "Show";
+  const title = `${action} ${side} sidebar${side === "right" && updateAvailable ? ". An update is available." : ""}`;
   return (
     <button
       type="button"
       className={`pane-toggle pane-toggle-${side}`}
       onClick={onClick}
       aria-label={`${action} ${side} sidebar`}
-      title={`${action} ${side} sidebar`}
+      aria-description={side === "right" && updateAvailable ? "An update is available." : undefined}
+      title={title}
     >
       <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
         <rect x="2.25" y="2.25" width="11.5" height="11.5" rx="1.5" />
         {side === "left" ? <path d="M6 2.75v10.5" /> : <path d="M10 2.75v10.5" />}
       </svg>
+      {side === "right" && updateAvailable ? <span className="update-available-dot" aria-hidden="true" /> : null}
     </button>
   );
 }
@@ -45,6 +48,7 @@ export type EditorTabsProps = {
   paneControls?: {
     leftOpen: boolean;
     rightOpen: boolean;
+    updateAvailable: boolean;
     onToggleLeft: () => void;
     onToggleRight: () => void;
   };
@@ -148,6 +152,7 @@ export function EditorTabs({
           <PaneToggle
             side="right"
             open={paneControls.rightOpen}
+            updateAvailable={paneControls.updateAvailable}
             onClick={paneControls.onToggleRight}
           />
         </div>

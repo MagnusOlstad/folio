@@ -1,21 +1,25 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { MlxModelStatusPanel } from "../../status/WorkspaceStatus.tsx";
+import { DesktopUpdateControls, MlxModelStatusPanel } from "../../status/WorkspaceStatus.tsx";
 import type { WorkspaceStatusProps } from "../../status/WorkspaceStatus.tsx";
+import type { DesktopUpdateState, VersionInfo } from "../../../domain/types.ts";
 import { TranscriptionDock } from "../../transcription/components/TranscriptionDock.tsx";
 import type { TranscriptionDockProps } from "../../transcription/components/TranscriptionDock.tsx";
 
 type WorkspaceRightPaneProps = WorkspaceStatusProps & {
   onHide: () => void;
+  versionInfo?: VersionInfo | null;
+  updateState?: DesktopUpdateState | null;
   historyContent?: ReactNode;
   transcription: TranscriptionDockProps;
 };
 
-export function WorkspaceRightPane({ onHide, historyContent, transcription, ...props }: WorkspaceRightPaneProps) {
+export function WorkspaceRightPane({ onHide, historyContent, transcription, versionInfo = null, updateState = null, ...props }: WorkspaceRightPaneProps) {
   const [activeTab, setActiveTab] = useState<"history" | "transcription">("history");
   return (
     <aside className="workspace-right-pane" aria-label="Workspace tools">
       <header className="right-pane-header">
+        <DesktopUpdateControls versionInfo={versionInfo} updateState={updateState} />
         <button
           type="button"
           className="pane-toggle pane-toggle-right"

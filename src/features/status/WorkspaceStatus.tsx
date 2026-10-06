@@ -49,26 +49,18 @@ function FirstOpenSettingsPrompt({ mlxStatus, onOpenSettings }: FirstOpenSetting
   );
 }
 
-export function FolioBrand({ versionInfo }: { versionInfo: VersionInfo | null }) {
-  const [updateState, setUpdateState] = useState<DesktopUpdateState | null>(null);
-  useEffect(() => {
-    let receivedEvent = false;
-    let mounted = true;
-    const unsubscribe = window.folio?.onUpdateState?.((state) => {
-      receivedEvent = true;
-      setUpdateState(state);
-    });
-    const getUpdateState = window.folio?.getUpdateState;
-    if (getUpdateState) {
-      void Promise.resolve().then(getUpdateState).then((state) => {
-        if (mounted && !receivedEvent && state) setUpdateState(state);
-      }).catch(() => {});
-    }
-    return () => {
-      mounted = false;
-      unsubscribe?.();
-    };
-  }, []);
+export function FolioBrand() {
+  return (
+    <div className="brand-group">
+      <a className="brand" href="#workspace" aria-label="Folio home">
+        <span className="brand-mark" aria-hidden="true">F</span>
+        <span>Folio</span>
+      </a>
+    </div>
+  );
+}
+
+export function DesktopUpdateControls({ versionInfo, updateState }: { versionInfo: VersionInfo | null; updateState: DesktopUpdateState | null }) {
 
   const startDesktopUpdate = updateState ? window.folio?.startUpdate : undefined;
   const updateVersion = updateState?.version ?? (versionInfo?.updateAvailable ? versionInfo.latest : null);
@@ -89,11 +81,7 @@ export function FolioBrand({ versionInfo }: { versionInfo: VersionInfo | null })
         : "Download update";
 
   return (
-    <div className="brand-group">
-      <a className="brand" href="#workspace" aria-label="Folio home">
-        <span className="brand-mark" aria-hidden="true">F</span>
-        <span>Folio</span>
-      </a>
+    <div className="desktop-update-controls">
       {versionInfo && <span className="app-version">v{versionInfo.version}</span>}
       {nativeUpdateAvailable && startDesktopUpdate ? (
           <button

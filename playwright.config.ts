@@ -13,7 +13,11 @@ const baseURL = `http://127.0.0.1:${port}`
 // and isn't something CI runners have.
 export default defineConfig({
   testDir: './e2e/ci',
-  fullyParallel: true,
+  // Every browser test talks to the same seeded server and mutable bundle.
+  // Parallel specs can edit, move, or delete one another's notes while the
+  // server is reindexing them, so keep this shared fixture single-writer.
+  fullyParallel: false,
+  workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
