@@ -44,12 +44,32 @@ test('opens a path-directed draft from a bundle directory context menu', async (
     const editor = page.getByRole('textbox', { name: 'Write a new note' })
     await expect(page.getByRole('textbox', { name: 'Filing guidance' })).toHaveValue(`path: /${folderName}`)
     await editor.fill(`${title}\nA note created through ordinary filing.`)
+    const filingResponse = page.waitForResponse((response) =>
+      response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/notes',
+    )
     await page.getByRole('button', { name: 'File note' }).click()
+    const created = await filingResponse
+    expect(created.status()).toBe(201)
+    const createdResult = await created.json() as { note: { id: string } }
+    createdId = createdResult.note.id
+
+    const confirmationResponse = page.waitForResponse((response) =>
+      response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/filing/confirm',
+    )
     await page.getByRole('dialog', { name: 'Filing confirmation' }).getByRole('button', { name: 'Accept' }).click()
+    const confirmed = await confirmationResponse
+    expect(confirmed.ok()).toBeTruthy()
+    const confirmationResult = await confirmed.json() as { note: { id: string }; newId: string }
+    expect(confirmationResult.newId).toBe(confirmationResult.note.id)
+    expect(confirmationResult.newId).toMatch(new RegExp(`^/${folderName}/`))
+    createdId = confirmationResult.newId
+    await expect(page.getByRole('dialog', { name: 'Filing confirmation' })).toHaveCount(0)
+
     const files = await request.get('/api/files')
     const createdFile = (await files.json()).find((file: { id: string }) => file.id.startsWith(`/${folderName}/`))
     expect(createdFile).toBeTruthy()
-    createdId = createdFile.id
+    expect(createdFile.id).toBe(createdId)
+    if (await folder.getAttribute('aria-expanded') !== 'true') await folder.click()
     await expect(page.locator('button.tree-file[aria-label]').filter({ hasText: title })).toBeVisible()
     const createdDocument = await request.get(`/api/file?path=${encodeURIComponent(createdId!)}`)
     expect(createdDocument.ok()).toBeTruthy()
@@ -313,39 +333,63 @@ test('creates a new local draft note from the editor', async ({ page }) => {
 })
 
 test('keeps filing guidance separate from the note body and files the full pasted note', async ({ page, request }, testInfo) => {
-  await page.getByTitle('New note (Cmd+T)').click()
-  const editor = page.getByLabel('Write a new note')
-  const body = 'Body starts here\nSecond body line'
-  await editor.fill(body)
+  let createdId: string | null = null
+  try {
+    await page.getByTitle('New note (Cmd+T)').click()
+    const editor = page.getByLabel('Write a new note')
+    const body = 'Body starts here\nSecond body line'
+    await editor.fill(body)
 
-  const guidance = page.getByRole('textbox', { name: 'Filing guidance' })
-  await guidance.fill('Project ')
-  await guidance.pressSequentially('notes')
-  await expect(guidance).toHaveValue('Project notes')
-  await guidance.press('Escape')
-  await expect(editor).toBeFocused()
+    const guidance = page.getByRole('textbox', { name: 'Filing guidance' })
+    await guidance.fill('Project ')
+    await guidance.pressSequentially('notes')
+    await expect(guidance).toHaveValue('Project notes')
+    await guidance.press('Escape')
+    await expect(editor).toBeFocused()
 
-  await expect(editor).toContainText('Body starts here')
-  await expect(editor).toContainText('Second body line')
-  await page.screenshot({ path: testInfo.outputPath('draft-guidance.png') })
+    await expect(editor).toContainText('Body starts here')
+    await expect(editor).toContainText('Second body line')
+    await page.screenshot({ path: testInfo.outputPath('draft-guidance.png') })
 
-  await expect.poll(async () => {
-    const drafts = await (await request.get('/api/drafts')).json() as Array<{ content: string }>
-    return drafts.some((draft) => draft.content === `Project notes\n${body}`)
-  }).toBeTruthy()
+    await expect.poll(async () => {
+      const drafts = await (await request.get('/api/drafts')).json() as Array<{ content: string }>
+      return drafts.some((draft) => draft.content === `Project notes\n${body}`)
+    }).toBeTruthy()
 
-  const filingRequest = page.waitForRequest((request) =>
-    request.method() === 'POST' && new URL(request.url()).pathname === '/api/notes',
-  )
-  const filingResponse = page.waitForResponse((response) =>
-    response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/notes',
-  )
-  await page.getByRole('button', { name: 'File note' }).click()
-  await page.getByRole('dialog', { name: 'Filing confirmation' }).getByRole('button', { name: 'Accept' }).click()
-  const [requestPayload, response] = await Promise.all([filingRequest, filingResponse])
-  expect(requestPayload.postDataJSON().filedContent).toBe(body)
-  const result = await response.json()
-  if (result.note?.id) await request.delete(`/api/note?id=${encodeURIComponent(result.note.id)}`)
+    const filingRequest = page.waitForRequest((request) =>
+      request.method() === 'POST' && new URL(request.url()).pathname === '/api/notes',
+    )
+    const filingResponse = page.waitForResponse((response) =>
+      response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/notes',
+    )
+    await page.getByRole('button', { name: 'File note' }).click()
+    const [requestPayload, response] = await Promise.all([filingRequest, filingResponse])
+    expect(requestPayload.postDataJSON().filedContent).toBe(body)
+    expect(response.status()).toBe(201)
+    const result = await response.json() as { note: { id: string } }
+    createdId = result.note.id
+
+    const confirmationResponse = page.waitForResponse((response) =>
+      response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/filing/confirm',
+    )
+    await page.getByRole('dialog', { name: 'Filing confirmation' }).getByRole('button', { name: 'Accept' }).click()
+    const confirmed = await confirmationResponse
+    expect(confirmed.ok()).toBeTruthy()
+    const confirmationResult = await confirmed.json() as { note: { id: string; content: string }; newId: string }
+    expect(confirmationResult.newId).toBe(confirmationResult.note.id)
+    createdId = confirmationResult.newId
+
+    const filedNote = await request.get(`/api/note?id=${encodeURIComponent(createdId)}`)
+    expect(filedNote.ok()).toBeTruthy()
+    const filedResult = await filedNote.json() as { content: string }
+    expect(filedResult.content).toContain('Body starts here')
+    expect(filedResult.content).toContain('Second body line')
+  } finally {
+    if (createdId) {
+      const cleanupResponse = await request.delete(`/api/note?id=${encodeURIComponent(createdId)}`)
+      expect(cleanupResponse.ok()).toBeTruthy()
+    }
+  }
 })
 
 test('exports the current draft as an exact Markdown download', async ({ page }) => {
