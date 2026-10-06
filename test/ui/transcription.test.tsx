@@ -8,6 +8,7 @@ import type {
 } from "../../src/features/transcription/hooks/useTranscription.ts";
 import { useTranscription } from "../../src/features/transcription/hooks/useTranscription.ts";
 import { useAudioRecorder } from "../../src/features/transcription/hooks/useAudioRecorder.ts";
+import { audioDuration } from "../../src/features/transcription/model/audio-duration.ts";
 
 const { apiMock, apiForBundleMock } = vi.hoisted(() => ({ apiMock: vi.fn(), apiForBundleMock: vi.fn() }));
 vi.mock("../../src/lib/api.ts", () => ({ api: apiMock, apiForBundle: apiForBundleMock }));
@@ -72,6 +73,106 @@ const session: TranscriptionSession = {
 
 describe("transcription UI", () => {
   beforeEach(() => { apiMock.mockReset(); apiForBundleMock.mockReset(); });
+
+  it("detaches failed metadata handlers before clearing the audio source", async () => {
+    const assignedSources: string[] = [];
+    let deliveredErrorHandlers = 0;
+    class ErroringAudio {
+      preload = "";
+      duration = Number.NaN;
+      onloadedmetadata: ((event: Event) => unknown) | null = null;
+      onerror: ((event: Event) => unknown) | null = null;
+      private source = "";
+
+      set src(value: string) {
+        this.source = value;
+        assignedSources.push(value);
+        queueMicrotask(() => {
+          if (!this.onerror || deliveredErrorHandlers >= 3) return;
+          deliveredErrorHandlers += 1;
+          this.onerror(new Event("error"));
+        });
+      }
+
+      get src() { return this.source; }
+    }
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:metadata");
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    vi.stubGlobal("Audio", ErroringAudio);
+    try {
+      await expect(audioDuration(new File(["bad audio"], "bad.m4a"))).resolves.toBeNull();
+      expect(assignedSources).toEqual(["blob:metadata", ""]);
+      expect(deliveredErrorHandlers).toBe(1);
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith("blob:metadata");
+    } finally {
+      vi.unstubAllGlobals();
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+    }
+  });
+
+  it("cleans audio metadata handlers after a successful read", async () => {
+    class MetadataAudio {
+      static handlersClearedOnSourceReset = false;
+      preload = "";
+      duration = 12.345;
+      onloadedmetadata: ((event: Event) => unknown) | null = null;
+      onerror: ((event: Event) => unknown) | null = null;
+      private source = "";
+      set src(value: string) {
+        this.source = value;
+        if (value) queueMicrotask(() => this.onloadmetadata?.(new Event("loadedmetadata")));
+        else MetadataAudio.handlersClearedOnSourceReset = this.onloadedmetadata === null && this.onerror === null;
+      }
+      get src() { return this.source; }
+      private onloadmetadata(event: Event) { this.onloadedmetadata?.(event); }
+    }
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:metadata-success");
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    vi.stubGlobal("Audio", MetadataAudio);
+    try {
+      await expect(audioDuration(new File(["valid audio"], "valid.m4a"))).resolves.toBe(12_345);
+      expect(MetadataAudio.handlersClearedOnSourceReset).toBe(true);
+      expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith("blob:metadata-success");
+    } finally {
+      vi.unstubAllGlobals();
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+    }
+  });
+
+  it("cleans audio metadata handlers when the metadata timeout expires", async () => {
+    class SilentAudio {
+      static handlersClearedOnSourceReset = false;
+      preload = "";
+      duration = Number.NaN;
+      onloadedmetadata: ((event: Event) => unknown) | null = null;
+      onerror: ((event: Event) => unknown) | null = null;
+      private source = "";
+      set src(value: string) {
+        this.source = value;
+        if (!value) SilentAudio.handlersClearedOnSourceReset = this.onloadedmetadata === null && this.onerror === null;
+      }
+      get src() { return this.source; }
+    }
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:metadata-timeout");
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    vi.stubGlobal("Audio", SilentAudio);
+    vi.useFakeTimers();
+    try {
+      const result = audioDuration(new File(["silent audio"], "silent.m4a"));
+      await vi.advanceTimersByTimeAsync(2_500);
+      await expect(result).resolves.toBeNull();
+      expect(SilentAudio.handlersClearedOnSourceReset).toBe(true);
+      expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith("blob:metadata-timeout");
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+    }
+  });
 
   it("builds an editable Markdown transcript with source details", () => {
     expect(mergeTranscriptionDraft(session, {
