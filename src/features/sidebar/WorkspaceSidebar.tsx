@@ -15,6 +15,8 @@ import { MLX_GENERATION_MODEL } from "../../domain/types.ts";
 import { readStorageItem, writeStorageItem } from "../../lib/storage.ts";
 import type { Bundle } from "../../domain/types.ts";
 import { WorkspaceExplorer } from "../workspace/components/WorkspaceExplorer.tsx";
+import { PanelHeightHandle } from "../workspace/components/PanelHeightHandle.tsx";
+import { usePanelHeightResize } from "../workspace/hooks/usePanelHeightResize.ts";
 import type { ExplorerFileActions } from "../workspace/model/explorer.ts";
 
 type OpenDocument = (
@@ -81,6 +83,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
   const [recentCollapsed, setRecentCollapsed] = useState(
     () => readStorageItem("folio:recent-concepts-collapsed") === "true",
   );
+  const { height: recentPanelHeight, minHeight: recentPanelMinHeight, maxHeight: recentPanelMaxHeight, panelRef: recentPanelRef, onPointerDown: onRecentPointerDown, onPointerMove: onRecentPointerMove, onPointerUp: onRecentPointerUp, onKeyDown: onRecentKeyDown } = usePanelHeightResize(recentCollapsed);
   const {
     sidebarMode, setSidebarMode, openDocument, notes, searchInputRef, searchQuery,
     setSearchQuery, selectedTag, searching, searchNotes, availableTags,
@@ -283,10 +286,21 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
         )}
       </section>
 
-      <section className="recent-panel">
+      <section className={`recent-panel${recentPanelHeight !== null ? " is-resized" : ""}`} ref={recentPanelRef} style={{ height: recentPanelHeight ?? undefined }} aria-label="Recent concepts">
+        <PanelHeightHandle
+          label="Resize Recent concepts panel"
+          value={recentPanelHeight}
+          minHeight={recentPanelMinHeight}
+          maxHeight={recentPanelMaxHeight}
+          onPointerDown={onRecentPointerDown}
+          onPointerMove={onRecentPointerMove}
+          onPointerUp={onRecentPointerUp}
+          onKeyDown={onRecentKeyDown}
+        />
         <button
           type="button"
-          className="sidebar-heading recent-heading"
+          className="recent-heading"
+          aria-label={recentCollapsed ? "Expand Recent concepts" : "Collapse Recent concepts"}
           aria-expanded={!recentCollapsed}
           aria-controls="recent-concepts-list"
           onClick={() => {
@@ -295,11 +309,11 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
             writeStorageItem("folio:recent-concepts-collapsed", String(nextCollapsed));
           }}
         >
-          <span className="recent-heading-label">
-            <span className={`sidebar-disclosure-chevron${recentCollapsed ? " collapsed" : ""}`} aria-hidden="true">›</span>
-            Recent concepts
+          <span className="model-status-summary" role="heading" aria-level={2}>Recent concepts</span>
+          <span className="recent-heading-controls">
+            <small>{notes.length}</small>
+            <svg aria-hidden="true" viewBox="0 0 16 16"><path d={recentCollapsed ? "m4 10 4-4 4 4" : "m4 6 4 4 4-4"} /></svg>
           </span>
-          <small>{notes.length}</small>
         </button>
         <div className="recent-list" id="recent-concepts-list" hidden={recentCollapsed}>
           {notes.slice(0, 7).map((note) => (

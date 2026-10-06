@@ -1,4 +1,4 @@
-import type { MlxModelId, MlxStatus } from "../../../domain/types.ts";
+import { MLX_GENERATION_MODEL, type MlxModelId, type MlxStatus } from "../../../domain/types.ts";
 
 export const modelCatalog: { id: MlxModelId; name: string; gridName?: string; purpose: string; description: string; bytes: number; generation: boolean; transcription?: boolean }[] = [
   { id: "gemma4", name: "Gemma 4 E4B", purpose: "Filing & Ask", description: "4-bit · about 5.2 GB", bytes: 5_180_000_000, generation: true },
@@ -22,6 +22,17 @@ export function orderedModelCatalog(status: MlxStatus | null, actionModel?: MlxM
     return available && active ? 0 : 1;
   };
   return modelCatalog.toSorted((left, right) => priority(left.id) - priority(right.id));
+}
+
+/** Models shown in the workspace panel follow configured choices plus the fixed embedding model. */
+export function selectedWorkspaceModelCatalog(status: MlxStatus | null, actionModel?: MlxModelId | null, action?: string | null) {
+  const selectedModels = new Set<MlxModelId>([
+    status?.selectedGenerationModel ?? MLX_GENERATION_MODEL.id,
+    status?.selectedTranscriptionModel ?? "whisper",
+    "embeddinggemma",
+  ]);
+  return orderedModelCatalog(status, actionModel, action)
+    .filter((definition) => selectedModels.has(definition.id));
 }
 
 export function formatModelBytes(bytes: number) {

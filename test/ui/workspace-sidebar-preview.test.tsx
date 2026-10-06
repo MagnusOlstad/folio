@@ -164,7 +164,7 @@ describe("WorkspaceSidebar preview navigation", () => {
     const disclosure = container.querySelector<HTMLButtonElement>(".recent-heading")!;
 
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
-    fireEvent.click(disclosure);
+    fireEvent.click(disclosure.querySelector(".model-status-summary")!);
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
     expect(container.querySelector(".recent-list")).not.toBeVisible();
     expect(window.localStorage.getItem("folio:recent-concepts-collapsed")).toBe("true");

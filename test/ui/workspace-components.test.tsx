@@ -217,12 +217,12 @@ describe("workspace editor components", () => {
     expect(header).toContainElement(toggle);
     expect(header).toHaveClass("right-pane-header");
     expect(screen.getByText("Gemma 4 E4B")).toBeInTheDocument();
-    expect(screen.getByText("Qwen 3.5 4B")).toBeInTheDocument();
-    expect(screen.getByText("Llama 3.2 3B")).toBeInTheDocument();
+    expect(screen.queryByText("Qwen 3.5 4B")).not.toBeInTheDocument();
+    expect(screen.queryByText("Llama 3.2 3B")).not.toBeInTheDocument();
     expect(screen.getByText("EmbeddingGemma")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /^Manage / })).toHaveLength(6);
+    expect(screen.getAllByRole("button", { name: /^Manage / })).toHaveLength(3);
     expect(screen.getByRole("button", { name: "Manage Whisper Large v3 Turbo" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Manage Whisper Large v3" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Manage Whisper Large v3" })).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /^Manage / }).every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
     expect(props.onInstallMlxModel).not.toHaveBeenCalled();
     expect(screen.getByText("History timeline")).toBeInTheDocument();
@@ -266,10 +266,9 @@ describe("workspace editor components", () => {
     expect(screen.getByText("About 5.18 GB download")).toBeInTheDocument();
     expect(screen.getByText("About 212 MB download")).toBeInTheDocument();
     expect(screen.getByText("About 1.61 GB download")).toBeInTheDocument();
-    expect(screen.getByText("About 3.10 GB download")).toBeInTheDocument();
   });
 
-  it("marks the selected generation model while keeping every model visible", () => {
+  it("marks selected models and keeps only configured models visible", () => {
     const onInstallMlxModel = vi.fn();
     const onOpenSettings = vi.fn();
     render(
@@ -299,11 +298,11 @@ describe("workspace editor components", () => {
     );
 
     expect(screen.getByText("Qwen 3.5 4B")).toBeInTheDocument();
-    expect(screen.getByText("Gemma 4 E4B")).toBeInTheDocument();
-    expect(screen.getByText("Llama 3.2 3B")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /^Manage / })).toHaveLength(6);
+    expect(screen.queryByText("Gemma 4 E4B")).not.toBeInTheDocument();
+    expect(screen.queryByText("Llama 3.2 3B")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^Manage / })).toHaveLength(3);
     expect(screen.getByRole("button", { name: "Manage Whisper Large v3 Turbo" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Manage Whisper Large v3" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Manage Whisper Large v3" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Manage Qwen 3.5 4B" }));
     expect(onOpenSettings).toHaveBeenCalledWith("models");
     expect(onInstallMlxModel).not.toHaveBeenCalled();
@@ -335,7 +334,7 @@ describe("workspace editor components", () => {
     );
     const settingsLink = await screen.findByRole("button", { name: "Open model settings" });
     expect(screen.getByText("MLX available")).toBeInTheDocument();
-    expect(screen.getAllByText("Not installed")).toHaveLength(6);
+    expect(screen.getAllByText("Not installed")).toHaveLength(3);
     expect(settingsLink.closest(".mlx-status")).not.toBeNull();
     expect(screen.queryByText(/helper|choose install|features load installed models/i)).not.toBeInTheDocument();
     fireEvent.click(settingsLink);
@@ -368,7 +367,7 @@ describe("workspace editor components", () => {
       />,
     );
     expect(screen.getByText("Running")).toBeInTheDocument();
-    expect(screen.getByText("1.07 GB active memory")).toHaveAttribute("title", "Memory 1.07 GB active · 537 MB allocator cache · 2.15 GB peak process");
+    expect(screen.getByText("1.07 GB active")).toHaveAttribute("title", "Active memory 1.07 GB · 537 MB allocator cache · 2.15 GB peak process");
     fireEvent.click(screen.getByRole("button", { name: "Stop Gemma 4" }));
     fireEvent.click(screen.getByRole("button", { name: "Start EmbeddingGemma" }));
     expect(onToggleMlxModel).toHaveBeenNthCalledWith(1, "gemma4", true);
