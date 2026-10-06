@@ -256,7 +256,9 @@ jobs:
           verify_app "$zip_extract_dir/FolioNotes.app"
           rm -rf "$verification_dir"
           trap - EXIT
-          gh release upload "$TAG" "$dmg_path" "$zip_path" release/latest-mac.yml --clobber
+          stable_dmg="release/FolioNotes-arm64.dmg"
+          cp "$dmg_path" "$stable_dmg"
+          gh release upload "$TAG" "$dmg_path" "$stable_dmg" "$zip_path" release/latest-mac.yml --clobber
           gh release view "$TAG" --json body -q .body > "$RECOVERY_DIR/notes.md"
           node scripts/macos-notarization.mjs notes \
             --input "$RECOVERY_DIR/notes.md" \
@@ -467,7 +469,9 @@ jobs:
           verify_app "$zip_extract_dir/FolioNotes.app"
           rm -rf "$verification_dir"
           trap - EXIT
-          gh release upload "$TAG" "$dmg_path" "$zip_path" release/latest-mac.yml --clobber
+          stable_dmg="release/FolioNotes-arm64.dmg"
+          cp "$dmg_path" "$stable_dmg"
+          gh release upload "$TAG" "$dmg_path" "$stable_dmg" "$zip_path" release/latest-mac.yml --clobber
           gh release view "$TAG" --json body -q .body > "$RECOVERY_DIR/notes.md"
           node scripts/macos-notarization.mjs notes \
             --input "$RECOVERY_DIR/notes.md" \

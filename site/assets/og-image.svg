@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#161816"/>
+  <rect x="0" y="0" width="1200" height="630" fill="url(#g)"/>
+  <defs><radialGradient id="g" cx="0.2" cy="0" r="1"><stop offset="0" stop-color="#b7d892" stop-opacity="0.16"/><stop offset="1" stop-color="#b7d892" stop-opacity="0"/></radialGradient></defs>
+  <g transform="translate(90 150) scale(0.34)">
+    <rect width="1024" height="1024" rx="220" fill="#20231f"/>
+    <rect x="190" y="190" width="644" height="644" fill="none" stroke="#b7d892" stroke-width="28"/>
+    <g transform="translate(85 0) skewX(-8)" fill="none" stroke="#b7d892" stroke-width="46" stroke-linecap="square" stroke-linejoin="miter">
+      <path d="M290 700V330H500M290 510H460"/><path d="M580 700V470M580 545C580 495 615 468 660 468C710 468 740 500 740 552V700"/>
+    </g>
+  </g>
+  <text x="90" y="430" font-family="Iowan Old Style, Georgia, serif" font-size="92" font-weight="600" fill="#b7d892">FolioNotes</text>
+  <text x="90" y="500" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="38" fill="#e9e5d9">Local AI notes for your Mac.</text>
+  <text x="90" y="555" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="26" fill="#918f87">Plain Markdown. On-device models. Yours.</text>
+</svg>
