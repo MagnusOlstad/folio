@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { Bundle, TreeDirectory, ViewerDocument } from "../../../domain/types.ts";
 import type { ExplorerContextMenuState, ExplorerContextTarget, ExplorerFileActions } from "../model/explorer.ts";
@@ -38,6 +38,7 @@ export type WorkspaceExplorerProps = {
 export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
   const [collapsedBundleId, setCollapsedBundleId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ExplorerContextMenuState | null>(null);
+  const treeScrollRef = useRef<HTMLDivElement>(null);
   const {
     explorerScrollTop,
     onExplorerScroll,
@@ -68,6 +69,16 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
     setMessage,
   } = props;
   const activeBundle = bundles.find((bundle) => bundle.id === activeBundleId);
+  useEffect(() => {
+    const element = treeScrollRef.current;
+    if (
+      element &&
+      !filesLoading &&
+      activeBundleId !== collapsedBundleId &&
+      element.scrollTop !== explorerScrollTop
+    )
+      element.scrollTop = explorerScrollTop;
+  }, [activeBundleId, collapsedBundleId, explorerScrollTop, filesLoading]);
 
   const closeContextMenu = useCallback((restoreFocus = true) => {
     const anchor = contextMenu?.anchor;
@@ -146,10 +157,7 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
                       className="tree-scroll"
                       style={{ overflowAnchor: "none" }}
                       onScroll={(event) => onExplorerScroll(event.currentTarget.scrollTop)}
-                      ref={(element) => {
-                        if (element && element.scrollTop !== explorerScrollTop)
-                          element.scrollTop = explorerScrollTop;
-                      }}
+                      ref={treeScrollRef}
                     >
                       {filesLoading ? (
                         <p className="sidebar-empty">Reading bundle...</p>

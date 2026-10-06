@@ -51,6 +51,9 @@ test("closing a nonempty new draft preserves its server copy", async ({ page, re
   await expect(close).toHaveCount(0);
   const drafts = await (await request.get("/api/drafts")).json();
   expect(drafts).toContainEqual(expect.objectContaining({ id, content: `\n${content}` }));
+  if (!id) throw new Error("Expected the newly created draft to have an id");
+  const cleanupResponse = await request.delete(`/api/draft?id=${encodeURIComponent(id)}`);
+  expect(cleanupResponse.ok()).toBeTruthy();
 });
 
 test("Cmd/Ctrl+F searches the open read-only bundle file", async ({ page }) => {

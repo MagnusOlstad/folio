@@ -541,33 +541,44 @@ test('opens sidebar notes as a replaceable preview until the editor is focused',
   await expect(todoTab).not.toHaveClass(/preview/)
 })
 
-test('marks the prospective right-strip tab slot and reorders tabs within a group', async ({ page }) => {
-  await page.getByRole('button', { name: 'Start Here', exact: true }).dblclick()
-  await page.getByRole('button', { name: 'Todo List', exact: true }).dblclick()
+test('marks the prospective right-strip tab slot and reorders tabs within a group with saved drafts in the explorer', async ({ page, request }) => {
+  const draftId = `untitled:tab-reorder-${Date.now()}`
+  const draftResponse = await request.put(`/api/draft?id=${encodeURIComponent(draftId)}`, {
+    data: { content: 'Saved draft keeps the explorer tree scrollable.' },
+  })
+  expect(draftResponse.ok()).toBeTruthy()
+  try {
+    await page.reload()
+    await page.getByRole('button', { name: 'Start Here', exact: true }).dblclick()
+    await page.getByRole('button', { name: 'Todo List', exact: true }).dblclick()
 
-  const startHereTab = page.locator('.editor-tab').filter({ hasText: 'Start Here' })
-  const todoTab = page.locator('.editor-tab').filter({ hasText: 'Todo List' })
-  const startBox = await startHereTab.boundingBox()
-  const todoBox = await todoTab.boundingBox()
-  const tabStripBox = await page.locator('.tab-strip').boundingBox()
-  expect(startBox).not.toBeNull()
-  expect(todoBox).not.toBeNull()
-  expect(tabStripBox).not.toBeNull()
+    const startHereTab = page.locator('.editor-tab').filter({ hasText: 'Start Here' })
+    const todoTab = page.locator('.editor-tab').filter({ hasText: 'Todo List' })
+    const startBox = await startHereTab.boundingBox()
+    const todoBox = await todoTab.boundingBox()
+    const tabStripBox = await page.locator('.tab-strip').boundingBox()
+    expect(startBox).not.toBeNull()
+    expect(todoBox).not.toBeNull()
+    expect(tabStripBox).not.toBeNull()
 
-  await page.mouse.move(startBox!.x + startBox!.width / 2, startBox!.y + startBox!.height / 2)
-  await page.mouse.down()
-  await page.mouse.move(
-    Math.min(todoBox!.x + todoBox!.width + 8, tabStripBox!.x + tabStripBox!.width - 4),
-    todoBox!.y + todoBox!.height / 2,
-    { steps: 8 },
-  )
-  await expect(todoTab).toHaveClass(/drop-after/)
-  await page.mouse.up()
+    await page.mouse.move(startBox!.x + startBox!.width / 2, startBox!.y + startBox!.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(
+      Math.min(todoBox!.x + todoBox!.width + 8, tabStripBox!.x + tabStripBox!.width - 4),
+      todoBox!.y + todoBox!.height / 2,
+      { steps: 8 },
+    )
+    await expect(todoTab).toHaveClass(/drop-after/)
+    await page.mouse.up()
 
-  await expect(todoTab).not.toHaveClass(/drop-after/)
-  expect(await page.locator('.editor-tab').evaluateAll((tabs) =>
-    tabs.map((tab) => tab.getAttribute('title')),
-  )).toEqual(['Todo List', 'Start Here'])
+    await expect(todoTab).not.toHaveClass(/drop-after/)
+    expect(await page.locator('.editor-tab').evaluateAll((tabs) =>
+      tabs.map((tab) => tab.getAttribute('title')),
+    )).toEqual(['Todo List', 'Start Here'])
+  } finally {
+    const cleanupResponse = await request.delete(`/api/draft?id=${encodeURIComponent(draftId)}`)
+    expect(cleanupResponse.ok()).toBeTruthy()
+  }
 })
 
 test('tab selection preserves each local draft cursor for mouse and Cmd/Ctrl+number', async ({ page }) => {
