@@ -87,7 +87,7 @@ describe("workspace editor components", () => {
 
     const header = container.querySelector(".sidebar-app-header");
     const toggle = screen.getByRole("button", { name: "Hide left sidebar" });
-    expect(header).toContainElement(screen.getByRole("link", { name: "Folio home" }));
+    expect(header).toContainElement(screen.getByRole("link", { name: "FolioNotes home" }));
     expect(header).toContainElement(screen.getByRole("button", { name: "Settings" }));
     expect(header).toContainElement(toggle);
     expect(toggle.parentElement).toBe(header);

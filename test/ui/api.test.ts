@@ -52,7 +52,7 @@ describe("API client error contract", () => {
         ),
     );
     await expect(api("/api/status")).rejects.toThrow(
-      "The local Folio service is not ready yet.",
+      "The local FolioNotes service is not ready yet.",
     );
 
     vi.stubGlobal(
@@ -60,7 +60,7 @@ describe("API client error contract", () => {
       vi.fn().mockRejectedValue(new TypeError("network failed")),
     );
     await expect(api("/api/status")).rejects.toThrow(
-      "The local Folio service is not ready yet.",
+      "The local FolioNotes service is not ready yet.",
     );
 
     vi.stubGlobal(

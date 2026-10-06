@@ -8,6 +8,10 @@ import { createUpdaterCoordinator } from './updater.js'
 const isMac = process.platform === 'darwin'
 const preloadPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'preload.cjs')
 
+// The product name changed from Folio to FolioNotes; keep the original userData
+// location so existing renderer storage and model downloads are still found.
+app.setPath('userData', path.join(app.getPath('appData'), 'Folio'))
+
 let mainWindow = null
 let localServer = null
 let localUrl = null
@@ -61,7 +65,7 @@ async function persistRendererStorage(snapshot, revision) {
       await fs.rm(tempPath, { force: true })
   } catch (error) {
     await fs.rm(tempPath, { force: true }).catch(() => {})
-    console.error('Failed to persist Folio renderer storage:', error)
+    console.error('Failed to persist FolioNotes renderer storage:', error)
   }
 }
 
@@ -75,7 +79,7 @@ function scheduleRendererStoragePersist() {
     rendererStorageWritePromise = rendererStorageWritePromise
       .catch(() => {})
       .then(() => persistRendererStorage(snapshot, revision))
-      .catch((error) => console.error('Failed to schedule Folio renderer storage:', error))
+      .catch((error) => console.error('Failed to schedule FolioNotes renderer storage:', error))
   }, 150)
 }
 
@@ -87,7 +91,7 @@ function flushRendererStorageSync() {
   try {
     saveRendererStorageSync()
   } catch (error) {
-    console.error('Failed to flush Folio renderer storage:', error)
+    console.error('Failed to flush FolioNotes renderer storage:', error)
   }
 }
 
@@ -254,11 +258,11 @@ function setApplicationMenu() {
       role: 'help',
       submenu: [
         {
-          label: 'Folio on GitHub',
+          label: 'FolioNotes on GitHub',
           click: () => {
             shell
               .openExternal('https://github.com/MagnusOlstad/folio')
-              .catch((error) => console.error('Failed to open Folio GitHub page:', error))
+              .catch((error) => console.error('Failed to open FolioNotes GitHub page:', error))
           },
         },
       ],
@@ -280,7 +284,7 @@ async function createWindow() {
     minWidth: 640,
     minHeight: 560,
     backgroundColor: '#161816',
-    title: 'Folio',
+    title: 'FolioNotes',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -318,7 +322,7 @@ async function initializeUpdater() {
     })
     await updaterCoordinator.start()
   } catch (error) {
-    console.error('Failed to initialize Folio updater:', error)
+    console.error('Failed to initialize FolioNotes updater:', error)
   }
 }
 

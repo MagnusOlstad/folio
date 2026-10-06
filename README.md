@@ -1,6 +1,6 @@
-# Folio: local OKF notetaker
+# FolioNotes (Fn): local OKF notetaker
 
-Folio is a local-first personal notetaker with one Markdown capture field. It preserves the original capture, uses a small local language model to structure it, writes [Open Knowledge Format v0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/main/SPEC.md) concepts, and lets you search or ask questions across your notes.
+FolioNotes is a local-first personal notetaker with one Markdown capture field. It preserves the original capture, uses a small local language model to structure it, writes [Open Knowledge Format v0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/main/SPEC.md) concepts, and lets you search or ask questions across your notes.
 
 ## What is implemented
 
@@ -25,13 +25,13 @@ Folio is a local-first personal notetaker with one Markdown capture field. It pr
 - Settings organized into Bundles, Models, Appearance, and Backup. Choose, download, and remove Qwen 3.5 4B 4-bit, Llama 3.2 3B Instruct 4-bit, or Gemma 4 for generation; EmbeddingGemma remains the fixed embedding model. Downloads show cache progress and can be retried.
 - Lifecycle controls for `draft`, `stable`, `deprecated`, and `stale_after`, with stale and deprecated concepts ranked lower in retrieval.
 - Local filesystem storage. No cloud service or account is required.
-- Import AAC, AIFF, FLAC, M4A, MP3, and WAV files from the Transcription tab in the right pane. Folio downloads pinned `mlx-community/whisper-large-v3-turbo` weights on request, transcribes locally on Apple Silicon, and opens an editable Markdown note with the source filename, import time, duration, and source-note link. Regenerate its concise summary with the selected local text model.
+- Import AAC, AIFF, FLAC, M4A, MP3, and WAV files from the Transcription tab in the right pane. FolioNotes downloads pinned `mlx-community/whisper-large-v3-turbo` weights on request, transcribes locally on Apple Silicon, and opens an editable Markdown note with the source filename, import time, duration, and source-note link. Regenerate its concise summary with the selected local text model.
 
 ## Keyboard shortcuts
 
 The macOS desktop app installs a native application menu, so standard editing
 shortcuts (copy, paste, undo, select all, minimize, quit, and so on) behave
-like any other Mac app. Folio also adds its own shortcuts, shown in the File,
+like any other Mac app. FolioNotes also adds its own shortcuts, shown in the File,
 Edit, Format, and Window menus and available while the app window is focused:
 
 | Shortcut | Action |
@@ -53,7 +53,7 @@ the desktop app.
 
 ## Prerequisites
 
-You need Node.js 22 or newer for development. MLX inference requires macOS 14 or newer on Apple Silicon. The desktop release bundles Folio's Swift MLX helper and framework; model files remain separate and are downloaded only when requested. Generation models are installed from Settings. Whisper large-v3-turbo is about 1.61 GB and can be installed from the Transcription tab in the right pane. Qwen 3.5 4B 4-bit is about 3.06 GB, Llama 3.2 3B Instruct 4-bit is about 1.81 GB, Gemma 4 E4B is about 5.18 GB, and EmbeddingGemma is about 212 MB. These are repository-size estimates; the actual download depends on files already cached by Hugging Face.
+You need Node.js 22 or newer for development. MLX inference requires macOS 14 or newer on Apple Silicon. The desktop release bundles FolioNotes's Swift MLX helper and framework; model files remain separate and are downloaded only when requested. Generation models are installed from Settings. Whisper large-v3-turbo is about 1.61 GB and can be installed from the Transcription tab in the right pane. Qwen 3.5 4B 4-bit is about 3.06 GB, Llama 3.2 3B Instruct 4-bit is about 1.81 GB, Gemma 4 E4B is about 5.18 GB, and EmbeddingGemma is about 212 MB. These are repository-size estimates; the actual download depends on files already cached by Hugging Face.
 
 ## One-time setup
 
@@ -89,11 +89,11 @@ npm run dev
 
 Open the local address printed by Vite, normally `http://localhost:5173`.
 
-Choose a generation model in Settings and download it along with EmbeddingGemma for semantic search. Folio does not silently download the runtime or model files. Settings shows each model's size, current selection, installation status, and download progress. A first-run prompt links to model settings when no generation model is installed.
+Choose a generation model in Settings and download it along with EmbeddingGemma for semantic search. FolioNotes does not silently download the runtime or model files. Settings shows each model's size, current selection, installation status, and download progress. A first-run prompt links to model settings when no generation model is installed.
 
 ## macOS desktop app
 
-Build and open Folio as a native desktop window:
+Build and open FolioNotes as a native desktop window:
 
 ```bash
 npm run desktop
@@ -105,8 +105,8 @@ Build a distributable macOS bundle (Apple Silicon):
 npm run dist:mac
 ```
 
-This writes `release/Folio-<version>-arm64.dmg`, a matching `.zip`, and the unpacked
-`release/mac-arm64/Folio.app`.
+This writes `release/FolioNotes-<version>-arm64.dmg`, a matching `.zip`, and the unpacked
+`release/mac-arm64/FolioNotes.app`.
 
 The packaged app stores its writable Markdown bundle and search index in `~/Documents/Folio`. On first launch it copies the notes bundled at build time into that folder. The Swift MLX runtime is bundled with the app; model files remain a separate, explicit install from Settings.
 
@@ -114,7 +114,7 @@ The packaged app stores its writable Markdown bundle and search index in `~/Docu
 
 Published macOS builds target Apple Silicon (`arm64`) and are signed with an Apple Developer
 ID certificate using the hardened runtime, then notarized by Apple. Download the `.dmg` from
-the public GitHub Release, open it, and drag Folio to Applications. Gatekeeper can verify
+the public GitHub Release, open it, and drag FolioNotes to Applications. Gatekeeper can verify
 the signed and notarized app normally; no quarantine bypass is required.
 
 Local `npm run dist:mac` builds intentionally fail when Developer ID signing credentials are
@@ -123,7 +123,7 @@ without those credentials.
 
 ## Versioning and releases
 
-Folio uses semantic versioning from `package.json`. The running version is shown as a badge
+FolioNotes uses semantic versioning from `package.json`. The running version is shown as a badge
 in the top bar and served by `GET /api/version`.
 
 Releases are automated with release-please, started manually via the `Release` workflow's
@@ -159,10 +159,10 @@ the artifacts attached and the notes read right before going live.
 
 ### In-app updates
 
-On a signed, packaged macOS launch, Folio checks the configured public GitHub Release once.
+On a signed, packaged macOS launch, FolioNotes checks the configured public GitHub Release once.
 When a newer arm64 release is available, click the version badge to download it in the
-background. The badge shows download progress and Folio restarts into the new version when
-macOS finishes staging it. Before restarting, Folio flushes pending note saves and pauses the
+background. The badge shows download progress and FolioNotes restarts into the new version when
+macOS finishes staging it. Before restarting, FolioNotes flushes pending note saves and pauses the
 restart if any save fails. Updater errors appear on the badge, where you can retry. Settings
 also has a manual stable-release check and a download/install action when an update is available.
 
@@ -225,7 +225,7 @@ The raw capture is written first to `data/bundle/references/inbox/`. A normal cl
 
 `data/` is gitignored so local notes are never committed. The packaged app ships an onboarding bundle in `seed-data/` with guides plus Todo and Daily examples, copied to `~/Documents/Folio` on first launch.
 
-`search-index.json` is a derived cache containing note text plus concept and overlapping chunk embeddings. The Markdown bundle remains the human-readable source of truth. Folio parses full YAML frontmatter and rebuilds the cache from Markdown at startup or from the Explorer's Reindex action. Existing embeddings are retained when their source content has not changed; missing or invalidated embeddings can be regenerated explicitly from Explorer when EmbeddingGemma is installed.
+`search-index.json` is a derived cache containing note text plus concept and overlapping chunk embeddings. The Markdown bundle remains the human-readable source of truth. FolioNotes parses full YAML frontmatter and rebuilds the cache from Markdown at startup or from the Explorer's Reindex action. Existing embeddings are retained when their source content has not changed; missing or invalidated embeddings can be regenerated explicitly from Explorer when EmbeddingGemma is installed.
 
 Concept types, directory paths, and tags are open-ended. The classifier prefers matching paths and types from a compact filing guide. For tags, it receives at most 24 candidates retrieved from lexically and semantically similar notes and reuses their exact spelling when they fit. It can still create a new category or tag when none is appropriate.
 
@@ -254,7 +254,7 @@ npm run build && npm run test:e2e:local      # e2e/local: broad, requires models
 - There is no UI yet for changing a concept's type or marking it human-reviewed.
 - Notes captured while required local models are unavailable are not automatically reprocessed.
 - Existing concepts are linked by normalized title mentions; embedding similarity is presented as a suggestion until the user confirms it. Richer named-entity resolution is not implemented.
-- Files edited outside Folio are discovered on startup or explicit reindex; there is no live filesystem watcher.
+- Files edited outside FolioNotes are discovered on startup or explicit reindex; there is no live filesystem watcher.
 
 ## Good next additions
 

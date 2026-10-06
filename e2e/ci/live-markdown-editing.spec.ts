@@ -21,7 +21,7 @@ async function openSeededNote(
   disposition: "preview" | "permanent" = "preview",
 ) {
   await page.goto("/");
-  await expect(page.getByRole("link", { name: "Folio home" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "FolioNotes home" })).toBeVisible();
   const note = page.getByRole("button", { name: title, exact: true });
   if (disposition === "permanent") await note.dblclick();
   else await note.click();
@@ -344,7 +344,7 @@ test("autosaves quickly and reembeds on blur and Cmd/Ctrl+S", async ({ page }) =
     return body.refreshEmbeddings === true && !("content" in body);
   });
   await editor.type(blurMarker);
-  await page.getByRole("link", { name: "Folio home" }).focus();
+  await page.getByRole("link", { name: "FolioNotes home" }).focus();
   expect((await blurSave).postDataJSON()).toMatchObject({
     refreshEmbeddings: false,
   });

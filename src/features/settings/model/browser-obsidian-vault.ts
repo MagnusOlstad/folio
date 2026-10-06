@@ -93,7 +93,7 @@ export function supportsBrowserVaultSelection() {
 
 export async function selectBrowserObsidianVault(): Promise<BrowserVaultSelection> {
   const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
-  if (!picker) throw new Error("Folder import requires Folio for desktop or a Chromium browser.");
+  if (!picker) throw new Error("Folder import requires FolioNotes for desktop or a Chromium browser.");
   const handle = await picker();
   const collected = await collect(handle);
   const descriptors = [];

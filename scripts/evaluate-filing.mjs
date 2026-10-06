@@ -160,7 +160,7 @@ async function main() {
       throw new Error(`Required pinned local model${missing.length === 1 ? '' : 's'} not installed under ${process.env.FOLIO_MODEL_ROOT}: ${missing.join(', ')}. This harness never downloads models.`)
     }
     if (!status.available || !status.helperAvailable) {
-      throw new Error('The native MLX helper is unavailable. Run this evaluator on supported Apple Silicon macOS with the Folio MLX helper built.')
+      throw new Error('The native MLX helper is unavailable. Run this evaluator on supported Apple Silicon macOS with the FolioNotes MLX helper built.')
     }
 
     for (const model of requiredModels) await runtime.mlxService.load(model)

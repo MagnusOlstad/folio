@@ -316,11 +316,11 @@ describe("theme settings", () => {
     expect(setupBundle).toHaveBeenCalledOnce();
   });
 
-  it("keeps Folio identity and Settings in the left pane header", () => {
+  it("keeps FolioNotes identity and Settings in the left pane header", () => {
     const onOpenSettings = vi.fn();
     render(<WorkspaceLeftPaneHeader versionInfo={null} onOpenSettings={onOpenSettings} sidebarOpen onToggleSidebar={() => {}} />);
 
-    expect(screen.getByRole("link", { name: "Folio home" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "FolioNotes home" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });

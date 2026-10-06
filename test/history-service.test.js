@@ -222,7 +222,7 @@ test('history rejects symlinked Folio storage paths without writing outside the 
   const outside = path.join(fixture.root, 'outside')
   await fsp.mkdir(outside)
   await fsp.symlink(outside, path.join(fixture.bundleRoot, '.folio'))
-  await assert.rejects(fixture.history.reconcile('Baseline'), /non-directory Folio history path/)
+  await assert.rejects(fixture.history.reconcile('Baseline'), /non-directory FolioNotes history path/)
   assert.deepEqual(await fsp.readdir(outside), [])
 })
 

@@ -27,14 +27,14 @@ const SOURCES = [
   {
     id: "existing",
     mark: "↗",
-    title: "Existing Folio bundle",
+    title: "Existing FolioNotes bundle",
     description: "Open an existing bundle in place",
   },
   {
     id: "obsidian",
     mark: "◇",
     title: "Obsidian vault",
-    description: "Bring your notes into Folio",
+    description: "Bring your notes into FolioNotes",
   },
 ] as const;
 
@@ -158,7 +158,7 @@ function BundleRow({
       {confirmDetach ? (
         <div className="bundle-detach-confirm">
           <p>
-            Remove <strong>{bundle.name}</strong> from Folio? Its files and
+            Remove <strong>{bundle.name}</strong> from FolioNotes? Its files and
             saved workspace will be kept.
           </p>
           <div>
@@ -357,7 +357,7 @@ export function BundleSettings({
           <div>
             <strong>Your first bundle starts here</strong>
             <p>
-              Create a space for new notes, or open an existing Folio bundle.
+              Create a space for new notes, or open an existing FolioNotes bundle.
             </p>
           </div>
         </div>
@@ -420,7 +420,7 @@ export function BundleSettings({
           <div className="bundle-setup-fields">
             {source === "existing" ? (
               <div className="bundle-field">
-                <label htmlFor={`${id}-folder`}>Existing Folio bundle</label>
+                <label htmlFor={`${id}-folder`}>Existing FolioNotes bundle</label>
                 <div className="bundle-path-control">
                   <input
                     id={`${id}-folder`}
@@ -439,12 +439,12 @@ export function BundleSettings({
                   </button>
                 </div>
                 <p>
-                  This existing Folio bundle stays in this folder. Other files
+                  This existing FolioNotes bundle stays in this folder. Other files
                   are left untouched.
                 </p>
                 {!nativePicker ? (
                   <p>
-                    Open Folio desktop to connect an existing Folio bundle.
+                    Open FolioNotes desktop to connect an existing FolioNotes bundle.
                   </p>
                 ) : null}
               </div>
@@ -475,7 +475,7 @@ export function BundleSettings({
                 </button>
                 {!obsidianImport.supported ? (
                   <p>
-                    Vault selection is unavailable in this browser. Use Folio
+                    Vault selection is unavailable in this browser. Use FolioNotes
                     desktop.
                   </p>
                 ) : null}
@@ -532,7 +532,7 @@ export function BundleSettings({
                     setCustomLocation(event.target.value === "custom")
                   }
                 >
-                  <option value="default">Default Folio location</option>
+                  <option value="default">Default FolioNotes location</option>
                   <option value="custom" disabled={!nativePicker}>
                     Custom folder{!nativePicker ? " · desktop only" : ""}
                   </option>
@@ -565,7 +565,7 @@ export function BundleSettings({
                     </p>
                   </>
                 ) : (
-                  <p>Folio manages this bundle’s folder for you.</p>
+                  <p>FolioNotes manages this bundle’s folder for you.</p>
                 )}
               </div>
             ) : null}
@@ -598,7 +598,7 @@ export function BundleSettings({
                 </div>
               </dl>
               <p>
-                Folio archives the originals before importing. Your source vault
+                FolioNotes archives the originals before importing. Your source vault
                 stays intact.
               </p>
             </div>
@@ -655,7 +655,7 @@ export function BundleSettings({
           <div className="bundle-setup-footer">
             <p>
               {source === "existing"
-                ? "Open this existing Folio bundle without moving any files."
+                ? "Open this existing FolioNotes bundle without moving any files."
                 : source === "obsidian"
                   ? "Review the preview, then start the import."
                   : "A fresh workspace, ready for your first note."}

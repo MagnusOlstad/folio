@@ -49,7 +49,7 @@ export function createUpdaterCoordinator({
         if (state.status === 'checking') publish({ status: result?.isUpdateAvailable ? 'available' : 'idle', version: result?.isUpdateAvailable ? version : null })
         return result
       } catch (error) {
-        report(logger, 'error', 'Folio updater check failed:', error)
+        report(logger, 'error', 'FolioNotes updater check failed:', error)
         publish({ status: 'error', error: 'Could not check for updates. Try again.' })
         return null
       } finally {
@@ -93,7 +93,7 @@ export function createUpdaterCoordinator({
       updater.quitAndInstall()
     } catch (error) {
       installStarted = false
-      report(logger, 'error', 'Folio updater could not stage the update:', error)
+      report(logger, 'error', 'FolioNotes updater could not stage the update:', error)
       publish({ status: 'error', error: 'Could not install the update. Try again.' })
     }
   }
@@ -120,7 +120,7 @@ export function createUpdaterCoordinator({
     try {
       nativeUpdater.checkForUpdates()
     } catch (error) {
-      report(logger, 'error', 'Folio native updater retry failed:', error)
+      report(logger, 'error', 'FolioNotes native updater retry failed:', error)
       finishNativeStageWithError('The update could not be staged. Click to retry.')
     }
   }
@@ -157,7 +157,7 @@ export function createUpdaterCoordinator({
         beginNativeStage()
         return getState()
       } catch (error) {
-        report(logger, 'error', 'Folio updater download failed:', error)
+        report(logger, 'error', 'FolioNotes updater download failed:', error)
         publish({ status: 'error', error: 'Could not download the update. Click to retry.' })
         return getState()
       } finally {
@@ -198,7 +198,7 @@ export function createUpdaterCoordinator({
       finishNativeStageWithError('The update could not be staged. Click to retry.')
     })
     updater.on('error', (error) => {
-      report(logger, 'error', 'Folio updater error:', error)
+      report(logger, 'error', 'FolioNotes updater error:', error)
       if (nativeStageActive) {
         finishNativeStageWithError('The update could not be staged. Click to retry.')
         return

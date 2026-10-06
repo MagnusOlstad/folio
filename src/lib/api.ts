@@ -32,7 +32,7 @@ export async function api<T>(url: string, options?: RequestInit): Promise<T> {
       },
     });
   } catch {
-    throw new Error("The local Folio service is not ready yet.");
+    throw new Error("The local FolioNotes service is not ready yet.");
   }
   const body = await response.text();
   let result: unknown = null;
@@ -44,7 +44,7 @@ export async function api<T>(url: string, options?: RequestInit): Promise<T> {
         response.ok
           ? "The server returned an invalid response."
           : [502, 503, 504].includes(response.status)
-            ? "The local Folio service is not ready yet."
+            ? "The local FolioNotes service is not ready yet."
             : `Request failed (${response.status}).`,
       );
     }
@@ -54,7 +54,7 @@ export async function api<T>(url: string, options?: RequestInit): Promise<T> {
       result && typeof result === "object" && "error" in result
         ? String(result.error)
         : [502, 503, 504].includes(response.status)
-          ? "The local Folio service is not ready yet."
+          ? "The local FolioNotes service is not ready yet."
           : `Request failed (${response.status}).`;
     throw new Error(error);
   }

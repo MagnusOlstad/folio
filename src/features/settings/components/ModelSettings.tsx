@@ -58,10 +58,10 @@ export function ModelSettings({ controls }: { controls: ModelSettingsControls })
     <section className="settings-section" aria-labelledby="settings-models-heading">
       <div className="settings-section-copy">
         <h2 id="settings-models-heading">Local models</h2>
-        <p>Choose models for text generation and transcription. Manage semantic search below. Model files stay in Folio’s local cache.</p>
+        <p>Choose models for text generation and transcription. Manage semantic search below. Model files stay in FolioNotes’s local cache.</p>
       </div>
       {!controls.status?.available ? <p className="settings-import-message">Local MLX models need Apple Silicon and macOS 14 or newer.</p> : null}
-      {controls.status?.available && !controls.status.helperAvailable ? <p className="settings-import-message">The local MLX helper is not ready. Rebuild or reinstall Folio, then retry the download.</p> : null}
+      {controls.status?.available && !controls.status.helperAvailable ? <p className="settings-import-message">The local MLX helper is not ready. Rebuild or reinstall FolioNotes, then retry the download.</p> : null}
       <fieldset className="model-settings-group" aria-label="Text generation">
         <legend>Text generation</legend>
         {modelCatalog.filter((definition) => definition.generation).map(renderModel)}

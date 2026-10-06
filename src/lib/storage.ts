@@ -8,7 +8,7 @@ import { isUntitledId, storedDraftDocument } from "./workspace.ts";
 /**
  * Electron serves the renderer from a random localhost port, so browser
  * localStorage would be scoped to a new origin after every restart. The
- * narrow preload bridge keeps the same API for browsers while moving Folio
+ * narrow preload bridge keeps the same API for browsers while moving FolioNotes
  * keys into an app-level store when the desktop shell is present.
  */
 export function readStorageItem(key: string): string | null {

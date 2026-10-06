@@ -27,7 +27,7 @@ test('semantic search finds a seeded note without matching its exact words', asy
 
 test('asking a question returns a grounded answer with a cited source', async ({ page }) => {
   await page.getByRole('navigation', { name: 'Sidebar tools' }).getByRole('button', { name: 'ask', exact: true }).click()
-  await page.getByLabel('Question for your notes').fill('What should I do to get started with Folio?')
+  await page.getByLabel('Question for your notes').fill('What should I do to get started with FolioNotes?')
   await page.getByRole('button', { name: 'Ask notes' }).click()
 
   await expect(page.locator('.answer-copy')).toBeVisible({ timeout: 60_000 })

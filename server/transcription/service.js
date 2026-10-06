@@ -159,7 +159,7 @@ export function createTranscriptionService(runtime) {
 
   async function installRaw(modelId) {
     const model = TRANSCRIPTION_MODELS[modelId]
-    if (!available) throw Object.assign(new Error('Local Whisper transcription requires Folio on an Apple Silicon Mac running macOS 14 or later.'), { status: 503 })
+    if (!available) throw Object.assign(new Error('Local Whisper transcription requires FolioNotes on an Apple Silicon Mac running macOS 14 or later.'), { status: 503 })
     if (installPromises.has(modelId)) return installPromises.get(modelId)
     installProgress.delete(modelId)
     installing.set(modelId, true)

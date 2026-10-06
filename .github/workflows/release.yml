@@ -84,7 +84,7 @@ jobs:
         run: |
           set -euo pipefail
           npm run dist:mac:staged
-          app_path="release/mac-arm64/Folio.app"
+          app_path="release/mac-arm64/FolioNotes.app"
           test -d "$app_path"
           node scripts/macos-update-config.mjs verify "$app_path"
           codesign --verify --deep --strict --verbose=2 "$app_path"
@@ -96,9 +96,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RECOVERY_DIR"
-          app_path="release/mac-arm64/Folio.app"
+          app_path="release/mac-arm64/FolioNotes.app"
           version=$(node -p "require('./package.json').version")
-          archive_name="Folio-${version}-arm64-notarization-${SOURCE_RUN_ID}.zip"
+          archive_name="FolioNotes-${version}-arm64-notarization-${SOURCE_RUN_ID}.zip"
           archive_path="$RECOVERY_DIR/$archive_name"
           ditto -c -k --sequesterRsrc --keepParent "$app_path" "$archive_path"
           commit=$(git rev-parse HEAD)
@@ -211,7 +211,7 @@ jobs:
           RECOVERY_DIR: ${{ runner.temp }}/folio-macos-recovery-${{ github.run_id }}
         run: |
           set -euo pipefail
-          app_path="release/mac-arm64/Folio.app"
+          app_path="release/mac-arm64/FolioNotes.app"
           xcrun stapler staple "$app_path"
           codesign --verify --deep --strict --verbose=2 "$app_path"
           xcrun stapler validate "$app_path"
@@ -249,11 +249,11 @@ jobs:
           hdiutil verify "$dmg_path"
           hdiutil attach "$dmg_path" -readonly -nobrowse -mountpoint "$mount_dir"
           dmg_mounted=1
-          verify_app "$mount_dir/Folio.app"
+          verify_app "$mount_dir/FolioNotes.app"
           hdiutil detach "$mount_dir"
           dmg_mounted=0
           ditto -x -k "$zip_path" "$zip_extract_dir"
-          verify_app "$zip_extract_dir/Folio.app"
+          verify_app "$zip_extract_dir/FolioNotes.app"
           rm -rf "$verification_dir"
           trap - EXIT
           gh release upload "$TAG" "$dmg_path" "$zip_path" release/latest-mac.yml --clobber
@@ -262,7 +262,7 @@ jobs:
             --input "$RECOVERY_DIR/notes.md" \
             --output "$RECOVERY_DIR/notes.updated.md" \
             --dmg "$(basename "$dmg_path")"
-          gh release edit "$TAG" --title "Folio $TAG" --notes-file "$RECOVERY_DIR/notes.updated.md"
+          gh release edit "$TAG" --title "FolioNotes $TAG" --notes-file "$RECOVERY_DIR/notes.updated.md"
 
       - name: Remove temporary notarization key
         if: always()
@@ -420,7 +420,7 @@ jobs:
           extract_dir="$RECOVERY_DIR/extracted"
           rm -rf "$extract_dir"
           ditto -x -k "$archive_path" "$extract_dir"
-          app_path="$extract_dir/Folio.app"
+          app_path="$extract_dir/FolioNotes.app"
           test -d "$app_path"
           node scripts/macos-update-config.mjs verify "$app_path"
           xcrun stapler staple "$app_path"
@@ -460,11 +460,11 @@ jobs:
           hdiutil verify "$dmg_path"
           hdiutil attach "$dmg_path" -readonly -nobrowse -mountpoint "$mount_dir"
           dmg_mounted=1
-          verify_app "$mount_dir/Folio.app"
+          verify_app "$mount_dir/FolioNotes.app"
           hdiutil detach "$mount_dir"
           dmg_mounted=0
           ditto -x -k "$zip_path" "$zip_extract_dir"
-          verify_app "$zip_extract_dir/Folio.app"
+          verify_app "$zip_extract_dir/FolioNotes.app"
           rm -rf "$verification_dir"
           trap - EXIT
           gh release upload "$TAG" "$dmg_path" "$zip_path" release/latest-mac.yml --clobber
@@ -473,7 +473,7 @@ jobs:
             --input "$RECOVERY_DIR/notes.md" \
             --output "$RECOVERY_DIR/notes.updated.md" \
             --dmg "$(basename "$dmg_path")"
-          gh release edit "$TAG" --title "Folio $TAG" --notes-file "$RECOVERY_DIR/notes.updated.md"
+          gh release edit "$TAG" --title "FolioNotes $TAG" --notes-file "$RECOVERY_DIR/notes.updated.md"
 
       - name: Remove temporary notarization key
         if: always()

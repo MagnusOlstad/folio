@@ -54,9 +54,9 @@ function FirstOpenSettingsPrompt({ mlxStatus, onOpenSettings }: FirstOpenSetting
 export function FolioBrand() {
   return (
     <div className="brand-group">
-      <a className="brand" href="#workspace" aria-label="Folio home">
-        <span className="brand-mark" aria-hidden="true">F</span>
-        <span>Folio</span>
+      <a className="brand" href="#workspace" aria-label="FolioNotes home">
+        <span className="brand-mark" aria-hidden="true">Fn</span>
+        <span>FolioNotes</span>
       </a>
     </div>
   );
@@ -193,7 +193,7 @@ export function MlxModelStatusPanel({
                 aria-pressed={installed && available ? loaded : undefined}
                 aria-describedby={`model-details-${id}`}
                 disabled={disabled}
-                title={busy ? "This model is processing requests. Wait until it is idle to stop it." : installed && available ? `${loaded ? "Unload from" : "Load into"} memory. Folio also loads installed models when needed.` : "Open Models settings to download or manage this model."}
+                title={busy ? "This model is processing requests. Wait until it is idle to stop it." : installed && available ? `${loaded ? "Unload from" : "Load into"} memory. FolioNotes also loads installed models when needed.` : "Open Models settings to download or manage this model."}
                 onClick={() => installed && available ? onToggleMlxModel(id, loaded) : onOpenSettings?.("models")}
               >
                 <span className="model-orbit" aria-hidden="true"><span className="model-blob" /><span className="model-blob-core" /></span>

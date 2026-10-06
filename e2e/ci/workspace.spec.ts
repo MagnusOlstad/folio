@@ -10,14 +10,14 @@ test.beforeEach(async ({ page }, testInfo) => {
   await page.goto('/')
   // Keyboard-shortcut tests dispatch keys with no element to auto-wait on, so make
   // sure React has mounted and attached its window keydown listener first.
-  await expect(page.getByRole('link', { name: 'Folio home' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'FolioNotes home' })).toBeVisible()
   // The logo only proves the shell mounted. Wait for registry resolution and the
   // active bundle tree before dispatching shortcuts or interacting with workspace state.
   await expect(page.getByRole('button', { name: 'Todo List', exact: true })).toBeVisible()
 })
 
 test('loads the workspace shell with the seeded bundle', async ({ page }) => {
-  await expect(page.getByRole('link', { name: 'Folio home' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'FolioNotes home' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Todo List', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Start Here', exact: true })).toBeVisible()
   await expect(page.getByText('todo-list.md')).toHaveCount(0)
@@ -386,7 +386,7 @@ test('keeps a new bundle draft isolated across legacy bundle switches', async ({
   await expect(page.locator('.draft-tree-open', { hasText: draftContent })).toBeVisible()
 
   await page.getByRole('button', { name: 'Settings' }).click()
-  const legacyRow = page.getByRole('listitem').filter({ hasText: 'Folio bundle' })
+  const legacyRow = page.getByRole('listitem').filter({ hasText: 'FolioNotes bundle' })
   await legacyRow.locator('.bundle-select').click()
   await expect(page.getByRole('button', { name: 'Todo List', exact: true })).toBeVisible()
   await expect(page.locator('.draft-tree-open', { hasText: draftContent })).toHaveCount(0)

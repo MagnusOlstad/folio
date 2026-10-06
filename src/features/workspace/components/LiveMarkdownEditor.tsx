@@ -189,7 +189,7 @@ export function LiveMarkdownEditor({
           EditorView.editable.of(!readOnly),
           markdown({
             base: markdownLanguage,
-            // Keep Markdown commands in the explicit keymap below so Folio's
+            // Keep Markdown commands in the explicit keymap below so FolioNotes’s
             // list continuation handler wins over the implicit high-priority
             // Enter binding.
             addKeymap: false,

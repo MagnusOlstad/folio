@@ -12,7 +12,7 @@ export const THEME_OPTIONS: readonly ThemeOption[] = [
   {
     id: "original",
     label: "Original",
-    description: "Folio's original earthy dark palette.",
+    description: "FolioNotes’s original earthy dark palette.",
     colorScheme: "dark",
     swatches: ["#161816", "#20231f", "#b7d892"],
   },
