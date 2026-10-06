@@ -2,15 +2,23 @@ import { useEffect, useId, useRef, useState } from "react";
 import { THEME_OPTIONS, type ThemeId } from "../model/themes.ts";
 import type { SettingsCategory } from "../model/settings-category.ts";
 import type { ObsidianImportSettings } from "../model/obsidian-import.ts";
+import {
+  DEFAULT_NOTE_FONT_SIZE,
+  MAX_NOTE_FONT_SIZE,
+  MIN_NOTE_FONT_SIZE,
+} from "../model/note-appearance.ts";
 import { ModelSettings, type ModelSettingsControls } from "./ModelSettings.tsx";
 import {
   BundleSettings,
   type BundleSettingsControls,
 } from "./BundleSettings.tsx";
+import { UpdateSettings } from "./UpdateSettings.tsx";
 
 export type SettingsDialogProps = {
   themeId: ThemeId;
   onSelectTheme: (themeId: ThemeId) => void;
+  noteFontSize?: number;
+  onSelectNoteFontSize?: (fontSize: number) => void;
   obsidianImport: ObsidianImportSettings;
   onClose: () => void;
   bundleSetup?: BundleSettingsControls;
@@ -25,6 +33,7 @@ const CATEGORIES = [
   ["models", "Models"],
   ["appearance", "Appearance"],
   ["backup", "Backup"],
+  ["updates", "Updates"],
 ] as const satisfies ReadonlyArray<readonly [SettingsCategory, string]>;
 const UNAVAILABLE_SETUP: BundleSettingsControls = {
   bundles: [],
@@ -41,6 +50,8 @@ const UNAVAILABLE_SETUP: BundleSettingsControls = {
 export function SettingsDialog({
   themeId,
   onSelectTheme,
+  noteFontSize = DEFAULT_NOTE_FONT_SIZE,
+  onSelectNoteFontSize,
   obsidianImport,
   onClose,
   bundleSetup,
@@ -170,7 +181,20 @@ export function SettingsDialog({
           </div>
           <div id="settings-panel-appearance" hidden={category !== "appearance"} aria-labelledby="settings-category-appearance">
             <section className="settings-section" aria-labelledby={`${titleId}-appearance`}>
-              <div className="settings-section-copy"><h2 id={`${titleId}-appearance`}>Appearance</h2><p>A color palette for your workspace.</p></div>
+              <div className="settings-section-copy"><h2 id={`${titleId}-appearance`}>Appearance</h2><p>Choose a color palette and a comfortable size for note text.</p></div>
+              <label className="note-font-size-control">
+                <span>Note font size</span>
+                <input
+                  type="range"
+                  min={MIN_NOTE_FONT_SIZE}
+                  max={MAX_NOTE_FONT_SIZE}
+                  step={1}
+                  value={noteFontSize}
+                  onChange={(event) => onSelectNoteFontSize?.(Number(event.currentTarget.value))}
+                  aria-label="Note font size"
+                />
+                <output>{noteFontSize}px</output>
+              </label>
               <div className="theme-options">
                 {THEME_OPTIONS.map((theme) => (
                   <label className={`theme-option ${theme.id === themeId ? "selected" : ""}`} key={theme.id}>
@@ -187,6 +211,9 @@ export function SettingsDialog({
               <div className="settings-section-copy"><h2 id={`${titleId}-backup`}>Backup</h2><p>Download all attached bundles as one ZIP file, including their Markdown and attachments.</p></div>
               {hasAttachedBundles ? <a className="settings-action" href="/api/backup">Download all bundle backups <span aria-hidden="true">↓</span></a> : <p className="settings-import-message">Add a bundle to download a backup.</p>}
             </section>
+          </div>
+          <div id="settings-panel-updates" hidden={category !== "updates"} aria-labelledby="settings-category-updates">
+            <UpdateSettings />
           </div>
         </div>
       </aside>

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { Bundle, TreeDirectory, ViewerDocument } from "../../../domain/types.ts";
 import type { ExplorerContextMenuState, ExplorerContextTarget, ExplorerFileActions } from "../model/explorer.ts";
@@ -8,8 +8,6 @@ import { FileTree } from "./FileTree.tsx";
 export type WorkspaceExplorerProps = {
   explorerScrollTop: number;
   onExplorerScroll: (scrollTop: number) => void;
-  reindexing: boolean;
-  reindexBundle: () => Promise<void>;
   filesLoading: boolean;
   localDraftDocuments: ViewerDocument[];
   drafts: Record<string, string>;
@@ -40,11 +38,10 @@ export type WorkspaceExplorerProps = {
 export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
   const [collapsedBundleId, setCollapsedBundleId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ExplorerContextMenuState | null>(null);
+  const treeScrollRef = useRef<HTMLDivElement>(null);
   const {
     explorerScrollTop,
     onExplorerScroll,
-    reindexing,
-    reindexBundle,
     filesLoading,
     localDraftDocuments,
     drafts,
@@ -72,6 +69,16 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
     setMessage,
   } = props;
   const activeBundle = bundles.find((bundle) => bundle.id === activeBundleId);
+  useEffect(() => {
+    const element = treeScrollRef.current;
+    if (
+      element &&
+      !filesLoading &&
+      activeBundleId !== collapsedBundleId &&
+      element.scrollTop !== explorerScrollTop
+    )
+      element.scrollTop = explorerScrollTop;
+  }, [activeBundleId, collapsedBundleId, explorerScrollTop, filesLoading]);
 
   const closeContextMenu = useCallback((restoreFocus = true) => {
     const anchor = contextMenu?.anchor;
@@ -105,17 +112,6 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
 
   return (
     <>
-      <div className="sidebar-heading">
-        <span>Explorer</span>
-        <button
-          type="button"
-          onClick={() => void reindexBundle()}
-          disabled={reindexing}
-          title="Reread Markdown and rebuild search and relationships"
-        >
-          {reindexing ? "..." : "Reindex"}
-        </button>
-      </div>
       {bundles.length > 0 ? (
         <div className="bundle-explorer-list" aria-label="Bundles">
           {bundles.map((bundle) => {
@@ -161,10 +157,7 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
                       className="tree-scroll"
                       style={{ overflowAnchor: "none" }}
                       onScroll={(event) => onExplorerScroll(event.currentTarget.scrollTop)}
-                      ref={(element) => {
-                        if (element && element.scrollTop !== explorerScrollTop)
-                          element.scrollTop = explorerScrollTop;
-                      }}
+                      ref={treeScrollRef}
                     >
                       {filesLoading ? (
                         <p className="sidebar-empty">Reading bundle...</p>

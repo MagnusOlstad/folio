@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('folio', {
     return () => ipcRenderer.removeListener('folio:menu-action', listener)
   },
   getUpdateState: () => ipcRenderer.invoke('folio:get-update-state'),
+  checkForUpdates: () => ipcRenderer.invoke('folio:check-for-updates'),
   startUpdate: () => ipcRenderer.invoke('folio:start-update'),
   onUpdateState: (handler) => {
     const listener = (_event, state) => handler(state)

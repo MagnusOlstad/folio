@@ -1,5 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useState } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type {
   AskResult,
@@ -11,8 +12,11 @@ import type {
   ViewerDocument,
 } from "../../domain/types.ts";
 import { MLX_GENERATION_MODEL } from "../../domain/types.ts";
+import { readStorageItem, writeStorageItem } from "../../lib/storage.ts";
 import type { Bundle } from "../../domain/types.ts";
 import { WorkspaceExplorer } from "../workspace/components/WorkspaceExplorer.tsx";
+import { PanelHeightHandle } from "../workspace/components/PanelHeightHandle.tsx";
+import { usePanelHeightResize } from "../workspace/hooks/usePanelHeightResize.ts";
 import type { ExplorerFileActions } from "../workspace/model/explorer.ts";
 
 type OpenDocument = (
@@ -27,8 +31,6 @@ export type WorkspaceSidebarProps = {
   setSidebarMode: Dispatch<SetStateAction<SidebarMode>>;
   explorerScrollTop: number;
   onExplorerScroll: (scrollTop: number) => void;
-  reindexing: boolean;
-  reindexBundle: () => Promise<void>;
   filesLoading: boolean;
   localDraftDocuments: ViewerDocument[];
   drafts: Record<string, string>;
@@ -78,6 +80,10 @@ export type WorkspaceSidebarProps = {
 };
 
 export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
+  const [recentCollapsed, setRecentCollapsed] = useState(
+    () => readStorageItem("folio:recent-concepts-collapsed") === "true",
+  );
+  const { height: recentPanelHeight, minHeight: recentPanelMinHeight, maxHeight: recentPanelMaxHeight, panelRef: recentPanelRef, onPointerDown: onRecentPointerDown, onPointerMove: onRecentPointerMove, onPointerUp: onRecentPointerUp, onKeyDown: onRecentKeyDown } = usePanelHeightResize(recentCollapsed);
   const {
     sidebarMode, setSidebarMode, openDocument, notes, searchInputRef, searchQuery,
     setSearchQuery, selectedTag, searching, searchNotes, availableTags,
@@ -87,7 +93,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
   } = props;
 
   return (
-    <aside className="workbench-sidebar">
+    <aside className={`workbench-sidebar${recentCollapsed ? " recent-collapsed" : ""}`}>
       <nav className="sidebar-tabs" aria-label="Sidebar tools">
         {(["explore", "search", "ask"] as SidebarMode[]).map((mode) => (
           <button
@@ -280,12 +286,36 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
         )}
       </section>
 
-      <section className="recent-panel">
-        <div className="sidebar-heading">
-          <span>Recent concepts</span>
-          <small>{notes.length}</small>
-        </div>
-        <div className="recent-list">
+      <section className={`recent-panel${recentPanelHeight !== null ? " is-resized" : ""}`} ref={recentPanelRef} style={{ height: recentPanelHeight ?? undefined }} aria-label="Recent concepts">
+        <PanelHeightHandle
+          label="Resize Recent concepts panel"
+          value={recentPanelHeight}
+          minHeight={recentPanelMinHeight}
+          maxHeight={recentPanelMaxHeight}
+          onPointerDown={onRecentPointerDown}
+          onPointerMove={onRecentPointerMove}
+          onPointerUp={onRecentPointerUp}
+          onKeyDown={onRecentKeyDown}
+        />
+        <button
+          type="button"
+          className="recent-heading"
+          aria-label={recentCollapsed ? "Expand Recent concepts" : "Collapse Recent concepts"}
+          aria-expanded={!recentCollapsed}
+          aria-controls="recent-concepts-list"
+          onClick={() => {
+            const nextCollapsed = !recentCollapsed;
+            setRecentCollapsed(nextCollapsed);
+            writeStorageItem("folio:recent-concepts-collapsed", String(nextCollapsed));
+          }}
+        >
+          <span className="model-status-summary" role="heading" aria-level={2}>Recent concepts</span>
+          <span className="recent-heading-controls">
+            <small>{notes.length}</small>
+            <svg aria-hidden="true" viewBox="0 0 16 16"><path d={recentCollapsed ? "m4 10 4-4 4 4" : "m4 6 4 4 4-4"} /></svg>
+          </span>
+        </button>
+        <div className="recent-list" id="recent-concepts-list" hidden={recentCollapsed}>
           {notes.slice(0, 7).map((note) => (
             <button
               type="button"

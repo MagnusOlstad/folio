@@ -359,6 +359,7 @@ app.whenReady().then(async () => {
 
   setApplicationMenu()
   ipcMain.handle('folio:get-update-state', () => updaterCoordinator?.getState() ?? null)
+  ipcMain.handle('folio:check-for-updates', () => updaterCoordinator?.checkForUpdates() ?? null)
   ipcMain.handle('folio:start-update', () => updaterCoordinator?.startDownload() ?? null)
   ipcMain.on('folio:update-save-result', (_event, requestId, saved) => {
     if (requestId !== updateFlushRequestId || !resolveUpdateFlush) return
@@ -441,6 +442,7 @@ app.on('before-quit', () => {
     resolve(false)
   }
   ipcMain.removeHandler('folio:get-update-state')
+  ipcMain.removeHandler('folio:check-for-updates')
   ipcMain.removeHandler('folio:start-update')
   ipcMain.removeAllListeners('folio:update-save-result')
   ipcMain.removeHandler('folio:save-markdown-export')

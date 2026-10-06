@@ -13,6 +13,8 @@ export type BundleSettingsControls = {
   setupBundle: (input: BundleSetupInput) => Promise<Bundle>;
   renameBundle: (id: string, name: string) => Promise<void>;
   detachBundle: (id: string) => Promise<void>;
+  reindexing?: boolean;
+  reindexBundle?: () => Promise<void>;
 };
 
 const SOURCES = [
@@ -320,6 +322,22 @@ export function BundleSettings({
         <p className="settings-import-error" role="alert">
           {controls.error || error}
         </p>
+      ) : null}
+      {controls.activeBundleId && controls.reindexBundle ? (
+        <div className="bundle-reindex-control">
+          <div>
+            <strong>Refresh search and relationships</strong>
+            <p>Reread Markdown files in the active bundle and rebuild the index.</p>
+          </div>
+          <button
+            type="button"
+            className="settings-action"
+            onClick={() => void controls.reindexBundle?.()}
+            disabled={controls.reindexing}
+          >
+            {controls.reindexing ? "Reindexing…" : "Reindex active bundle"}
+          </button>
+        </div>
       ) : null}
       {controls.bundles.length ? (
         <div className="bundle-list" role="list" aria-label="Bundles">

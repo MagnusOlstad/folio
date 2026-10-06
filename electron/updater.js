@@ -65,6 +65,16 @@ export function createUpdaterCoordinator({
     void check()
   }
 
+  async function checkForUpdates() {
+    if (!isPackaged || platform !== 'darwin') return null
+    if (downloadPromise || nativeStageActive || installStarted || hasDownloadedUpdate || nativeUpdateReady
+      || ['downloading', 'downloaded', 'staging', 'installing'].includes(state.status)) {
+      return getState()
+    }
+    await check()
+    return getState()
+  }
+
   async function requestInstall() {
     if (installStarted) return
     installStarted = true
@@ -205,5 +215,5 @@ export function createUpdaterCoordinator({
     pollingTimer = null
   }
 
-  return { start, startDownload, getState, dispose }
+  return { start, startDownload, checkForUpdates, getState, dispose }
 }

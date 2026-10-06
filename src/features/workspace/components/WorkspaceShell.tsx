@@ -169,6 +169,8 @@ export function WorkspaceShell({
         <SettingsDialog
           themeId={settings.themeId}
           onSelectTheme={settings.onSelectTheme}
+          noteFontSize={settings.noteFontSize}
+          onSelectNoteFontSize={settings.onSelectNoteFontSize}
           obsidianImport={settings.obsidianImport}
           bundleSetup={settings.bundleSetup}
           modelSettings={settings.modelSettings}

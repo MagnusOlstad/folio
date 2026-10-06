@@ -612,7 +612,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
     openSettings,
   });
 
-  const { sidebar, moveBundleFile } = useWorkspaceSidebarProps({
+  const { sidebar, moveBundleFile, reindexBundle } = useWorkspaceSidebarProps({
     explorer,
     documents,
     groups: tabs.groups,
@@ -642,6 +642,11 @@ export function useWorkspaceController(): WorkspaceShellProps {
     bundleSetup: settingsBundleSetup,
     openSettings: () => openSettings(),
   });
+  const settingsBundleSetupWithReindex = {
+    ...settingsBundleSetup,
+    reindexing: explorer.reindexing,
+    reindexBundle,
+  };
 
   return {
     exportPreview: noteExport.preview,
@@ -663,8 +668,10 @@ export function useWorkspaceController(): WorkspaceShellProps {
       initialCategory: settingsCategory,
       themeId: themeSettings.themeId,
       onSelectTheme: themeSettings.selectTheme,
+      noteFontSize: themeSettings.noteFontSize,
+      onSelectNoteFontSize: themeSettings.selectNoteFontSize,
       obsidianImport,
-      bundleSetup: settingsBundleSetup,
+      bundleSetup: settingsBundleSetupWithReindex,
       modelSettings: {
         status: models.mlxStatus,
         actionModel: models.mlxActionModel,

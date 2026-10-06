@@ -5,6 +5,9 @@ import type { WorkspaceStatusProps } from "../../status/WorkspaceStatus.tsx";
 import type { DesktopUpdateState, VersionInfo } from "../../../domain/types.ts";
 import { TranscriptionDock } from "../../transcription/components/TranscriptionDock.tsx";
 import type { TranscriptionDockProps } from "../../transcription/components/TranscriptionDock.tsx";
+import { useModelPanelCollapse } from "../hooks/useModelPanelCollapse.ts";
+import { usePanelHeightResize } from "../hooks/usePanelHeightResize.ts";
+import { PanelHeightHandle } from "./PanelHeightHandle.tsx";
 
 type WorkspaceRightPaneProps = WorkspaceStatusProps & {
   onHide: () => void;
@@ -16,6 +19,8 @@ type WorkspaceRightPaneProps = WorkspaceStatusProps & {
 
 export function WorkspaceRightPane({ onHide, historyContent, transcription, versionInfo = null, updateState = null, ...props }: WorkspaceRightPaneProps) {
   const [activeTab, setActiveTab] = useState<"history" | "transcription">("history");
+  const { collapsed, toggleCollapsed } = useModelPanelCollapse();
+  const { height: statusPanelHeight, minHeight, maxHeight, panelRef, onPointerDown, onPointerMove, onPointerUp, onKeyDown } = usePanelHeightResize(collapsed);
   return (
     <aside className="workspace-right-pane" aria-label="Workspace tools">
       <header className="right-pane-header">
@@ -40,7 +45,19 @@ export function WorkspaceRightPane({ onHide, historyContent, transcription, vers
       <div className="right-pane-content" role="tabpanel" aria-label={activeTab === "history" ? "History" : "Transcription"}>
         {activeTab === "history" ? historyContent : <TranscriptionDock {...transcription} />}
       </div>
-      <footer className="right-pane-status"><MlxModelStatusPanel {...props} /></footer>
+      <footer className={`right-pane-status${statusPanelHeight !== null ? " is-resized" : ""}`} ref={panelRef} style={{ height: statusPanelHeight ?? undefined }}>
+        <PanelHeightHandle
+          label="Resize MLX panel"
+          value={statusPanelHeight}
+          minHeight={minHeight}
+          maxHeight={maxHeight}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onKeyDown={onKeyDown}
+        />
+        <MlxModelStatusPanel {...props} collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />
+      </footer>
     </aside>
   );
 }

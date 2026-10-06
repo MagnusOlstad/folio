@@ -393,3 +393,29 @@ test('daily polling skips checks while a check is active or a downloaded update 
   callback()
   assert.equal(checks, 2)
 })
+
+test('manual stable checks are deduplicated and do not switch an update during staging', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let checks = 0
+  let finishCheck
+  updater.checkForUpdates = () => {
+    checks += 1
+    if (checks === 1) return Promise.resolve({ isUpdateAvailable: false })
+    if (checks === 3) return Promise.resolve({ isUpdateAvailable: true, updateInfo: { version: '1.2.3' } })
+    return new Promise((resolve) => { finishCheck = resolve })
+  }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({ updater, nativeUpdater }))
+
+  await coordinator.start()
+  const first = coordinator.checkForUpdates()
+  const second = coordinator.checkForUpdates()
+  assert.equal(checks, 2)
+  finishCheck({ isUpdateAvailable: true, updateInfo: { version: '1.2.3' } })
+  const [firstState, secondState] = await Promise.all([first, second])
+  assert.deepEqual(firstState, secondState)
+  assert.equal(firstState.status, 'available')
+
+  await coordinator.startDownload()
+  assert.equal((await coordinator.checkForUpdates()).status, 'staging')
+  assert.equal(checks, 3)
+})

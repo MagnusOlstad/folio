@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import type { DesktopUpdateState, MlxModelId, MlxStatus, VersionInfo } from "../../domain/types.ts";
-import { orderedModelCatalog, formatModelBytes } from "../workspace/model/model-catalog.ts";
+import { selectedWorkspaceModelCatalog, formatModelBytes } from "../workspace/model/model-catalog.ts";
 import type { SettingsCategory } from "../settings/model/settings-category.ts";
 import { useModelPanelCollapse } from "../workspace/hooks/useModelPanelCollapse.ts";
 import { ModelDownloadProgress } from "../workspace/components/ModelDownloadProgress.tsx";
@@ -13,6 +13,8 @@ export type WorkspaceStatusProps = {
   onInstallMlxModel: (id: MlxModelId) => void;
   onToggleMlxModel: (id: MlxModelId, loaded: boolean) => void;
   onOpenSettings?: (category?: SettingsCategory) => void;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 };
 
 const FIRST_OPEN_SETTINGS_KEY = "folio:model-setup-prompt-seen";
@@ -118,32 +120,45 @@ export function MlxModelStatusPanel({
   modelError,
   onToggleMlxModel,
   onOpenSettings,
+  collapsed: controlledCollapsed,
+  onToggleCollapsed,
 }: WorkspaceStatusProps) {
-  const { collapsed, toggleCollapsed } = useModelPanelCollapse();
+  const localCollapse = useModelPanelCollapse();
+  const collapsed = controlledCollapsed ?? localCollapse.collapsed;
+  const toggleCollapsed = onToggleCollapsed ?? localCollapse.toggleCollapsed;
   const bodyId = useId();
   const available = Boolean(mlxStatus?.available && mlxStatus.helperAvailable);
   const stateText = !mlxStatus ? "Checking" : available ? "Available" : "Unavailable";
-  const runningModels = available ? mlxStatus?.models.filter((model) => model.loaded) ?? [] : [];
+  const visibleModelCatalog = selectedWorkspaceModelCatalog(mlxStatus, mlxActionModel, mlxAction);
+  const visibleModelIds = new Set(visibleModelCatalog.map(({ id }) => id));
+  const runningModels = available ? mlxStatus?.models.filter((model) => visibleModelIds.has(model.id) && model.loaded) ?? [] : [];
   const runningSummary = available ? `${runningModels.length} running` : stateText.toLowerCase();
   const runningDetails = runningModels.map((model) => `${model.name}${model.busy || model.requestCount ? " (in use)" : ""}`).join(", ");
   return (
     <section className={`mlx-status${collapsed ? " is-collapsed" : ""}`} aria-label="MLX model management">
       <div className="model-status-header">
-        <div className={`model-status ${available ? "online" : ""}`}>
-          <span className="status-dot" aria-hidden="true" />
-          {collapsed ? <span className="model-status-summary" role="status" title={runningDetails || stateText} aria-label={`MLX ${runningSummary}${runningDetails ? `: ${runningDetails}` : ""}`}>MLX · {runningSummary}</span> : <span>MLX {stateText.toLowerCase()}</span>}
-        </div>
+        <button
+          className="model-status-disclosure"
+          type="button"
+          aria-label={collapsed ? "Expand models" : "Collapse models"}
+          aria-expanded={!collapsed}
+          aria-controls={bodyId}
+          onClick={toggleCollapsed}
+        >
+          <span className={`model-status ${available ? "online" : ""}`}>
+            <span className="status-dot" aria-hidden="true" />
+            {collapsed ? <span className="model-status-summary" role="status" title={runningDetails || stateText} aria-label={`MLX ${runningSummary}${runningDetails ? `: ${runningDetails}` : ""}`}>MLX · {runningSummary}</span> : <span>MLX {stateText.toLowerCase()}</span>}
+          </span>
+          <svg className="model-disclosure-chevron" aria-hidden="true" viewBox="0 0 16 16"><path d={collapsed ? "m4 10 4-4 4 4" : "m4 6 4 4 4-4"} /></svg>
+        </button>
         <div className="model-status-controls">
           {onOpenSettings ? <button className="model-manage-link" type="button" onClick={() => onOpenSettings("models")}>Manage</button> : null}
-          <button className="model-collapse-toggle" type="button" aria-label={collapsed ? "Expand models" : "Collapse models"} aria-expanded={!collapsed} aria-controls={bodyId} title={collapsed ? "Expand models" : "Collapse models"} onClick={toggleCollapsed}>
-            <svg aria-hidden="true" viewBox="0 0 16 16"><path d={collapsed ? "m4 10 4-4 4 4" : "m4 6 4 4 4-4"} /></svg>
-          </button>
         </div>
       </div>
       <div className="mlx-model-panel-body" id={bodyId} hidden={collapsed}>
         <FirstOpenSettingsPrompt mlxStatus={mlxStatus} onOpenSettings={onOpenSettings} />
         <div className="mlx-model-list" role="group" aria-label="Models, active first" tabIndex={0}>
-          {orderedModelCatalog(mlxStatus, mlxActionModel, mlxAction).map((definition) => {
+          {visibleModelCatalog.map((definition) => {
             const { id } = definition;
             const model = mlxStatus?.models.find((item) => item.id === id);
             const download = mlxStatus?.downloads.find((item) => item.id === id)?.progress;
@@ -154,6 +169,7 @@ export function MlxModelStatusPanel({
             const busy = Boolean(model?.busy || model?.requestCount);
             const loaded = Boolean(model?.loaded && available);
             const installed = Boolean(model?.installed);
+            const launchMemory = formatModelBytes(model?.downloadSizeBytes ?? definition.bytes);
             const name = model?.name || definition.name;
             const modelState = !mlxStatus ? "Checking status"
               : loading ? download?.phase === "loading" ? "Loading" : download?.phase === "downloading" || (acting && mlxAction === "install") ? "Downloading" : acting && mlxAction === "unload" ? "Unloading" : acting && mlxAction === "remove" ? "Removing" : acting && (mlxAction === "select" || mlxAction === "select-transcription") ? "Selecting" : "Loading"
@@ -184,10 +200,11 @@ export function MlxModelStatusPanel({
                 <span className="mlx-model-heading"><strong title={name}>{definition.gridName ?? name}</strong><span>{definition.purpose}{model?.selected ? " · Selected" : ""}</span></span>
                 <span className={`mlx-model-state${loaded ? " online" : ""}`}><span className="model-state-mark" aria-hidden="true">{loaded || loading ? "▶" : installed ? "■" : "↓"}</span>{modelState}{downloadPercent}</span>
                 <span className="mlx-model-details" id={`model-details-${id}`}>
-                  {memory ? <span title={`Memory ${formatModelBytes(memory.activeBytes)} active · ${formatModelBytes(memory.cacheBytes)} allocator cache · ${formatModelBytes(memory.peakResidentBytes)} peak process`}>{formatModelBytes(memory.activeBytes)} active memory</span>
+                  {memory ? <span title={`Active memory ${formatModelBytes(memory.activeBytes)} · ${formatModelBytes(memory.cacheBytes)} allocator cache · ${formatModelBytes(memory.peakResidentBytes)} peak process`}>{formatModelBytes(memory.activeBytes)} active</span>
+                    : <span title={`Estimated launch memory, based on the approximate download size (${launchMemory}).`}>~{launchMemory} on launch</span>}
+                  {!installed ? <span>{model?.downloadSizeIsEstimate ?? true ? "About " : ""}{launchMemory} download</span>
                     : busy ? <span>Processing locally</span>
-                    : installed ? <span>{!available ? "Manage in settings" : loaded ? "Ready on device" : "Click to load"}</span>
-                    : <span>{model?.downloadSizeIsEstimate ?? true ? "About " : ""}{formatModelBytes(model?.downloadSizeBytes ?? definition.bytes)} download</span>}
+                    : <span>{!available ? "Manage in settings" : loaded ? "Ready on device" : "Click to load"}</span>}
                   {busy ? <span>{model?.requestCount ? `${model.requestCount} active request${model.requestCount === 1 ? "" : "s"}` : "Request in progress"}</span> : null}
                 </span>
                 {downloading ? <ModelDownloadProgress modelName={name} progress={download} /> : null}

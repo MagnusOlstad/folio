@@ -130,16 +130,21 @@ test('deletes only empty folders from the explorer context menu', async ({ page,
   }
 })
 
-test('shows controls for all six supported local models', async ({ page }) => {
+test('shows only selected local models in the workspace and keeps the full catalog in settings', async ({ page }) => {
   const models = page.getByRole('region', { name: 'MLX model management' })
   await expect(models).toBeVisible()
   await expect(models.getByText(/Gemma 4/)).toBeVisible()
-  await expect(models.getByText(/Qwen 3.5/)).toBeVisible()
-  await expect(models.getByText(/Llama 3.2/)).toBeVisible()
+  await expect(models.getByText(/Qwen 3.5/)).toHaveCount(0)
+  await expect(models.getByText(/Llama 3.2/)).toHaveCount(0)
   await expect(models.getByText('EmbeddingGemma', { exact: true })).toBeVisible()
   await expect(models.getByRole('button', { name: /Whisper Large v3 Turbo/ })).toBeVisible()
-  await expect(models.getByRole('button', { name: /Whisper Large v3$/ })).toBeVisible()
-  await expect(models.locator('.mlx-model')).toHaveCount(6)
+  await expect(models.getByRole('button', { name: /Whisper Large v3$/ })).toHaveCount(0)
+  await expect(models.locator('.mlx-model')).toHaveCount(3)
+  await models.getByRole('button', { name: 'Manage', exact: true }).click()
+  const settingsModels = page.getByRole('region', { name: 'Local models' })
+  await expect(settingsModels.getByRole('radio', { name: /Qwen 3\.5 4B/ })).toBeVisible()
+  await expect(settingsModels.getByRole('radio', { name: /Llama 3\.2 3B/ })).toBeVisible()
+  await expect(settingsModels.locator('.model-settings-row')).toHaveCount(6)
 })
 
 test('first-open model setup opens the real model settings controls', async ({ page }) => {
@@ -173,6 +178,114 @@ test('changes and restores the color theme from browser settings', async ({ page
   await page.reload()
 
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'editorial')
+})
+
+test('persists note font size across rendered notes, editors, and reloads', async ({ page }, testInfo) => {
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  const editor = page.getByRole('textbox', { name: 'Edit Start Here' })
+  await expect(editor).toBeVisible()
+  const editorContent = page.locator('.live-markdown-editor .cm-content').first()
+  await expect.poll(() => editorContent.evaluate(element => element.ownerDocument.defaultView?.getComputedStyle(element).fontSize)).toBe('18px')
+  await page.getByRole('button', { name: 'index.md', exact: true }).click()
+  await expect(page.locator('[data-readonly-markdown]')).toBeVisible()
+  const viewer = page.locator('.document-content').first()
+  await expect.poll(() => viewer.evaluate(element => element.ownerDocument.defaultView?.getComputedStyle(element).fontSize)).toBe('18px')
+
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await settings.getByRole('button', { name: 'Appearance' }).click()
+  const slider = settings.getByRole('slider', { name: 'Note font size' })
+  await slider.focus()
+  for (let step = 0; step < 6; step += 1) await slider.press('ArrowRight')
+  await expect(settings.locator('.note-font-size-control output')).toHaveText('24px')
+  await expect.poll(() => viewer.evaluate(element => element.ownerDocument.defaultView?.getComputedStyle(element).fontSize)).toBe('24px')
+  await page.screenshot({ path: testInfo.outputPath('appearance-settings.png') })
+  await settings.getByRole('button', { name: 'Close' }).click()
+
+  await page.reload()
+  await expect(page.locator('html')).toHaveCSS('--note-font-size', '24px')
+  await page.getByRole('button', { name: 'Start Here', exact: true }).click()
+  await expect.poll(() => page.locator('.live-markdown-editor .cm-content').first().evaluate(element => element.ownerDocument.defaultView?.getComputedStyle(element).fontSize)).toBe('24px')
+  await page.getByTitle('New note (Cmd+T)').click()
+  await expect.poll(() => page.locator('.draft-note-editor .cm-content').first().evaluate(element => element.ownerDocument.defaultView?.getComputedStyle(element).fontSize)).toBe('24px')
+})
+
+test('collapses Recent concepts and restores the saved state after reload', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.locator('html').evaluate((element) => element.setAttribute('data-theme', 'dark'))
+  const disclosure = page.getByRole('button', { name: 'Collapse Recent concepts' })
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'true')
+  const recent = page.locator('.recent-panel')
+  const mlxPanel = page.getByRole('region', { name: 'MLX model management' })
+  const mlxFooter = page.locator('.right-pane-status')
+  const expandedBounds = await recent.boundingBox()
+  expect(expandedBounds!.height).toBeLessThanOrEqual(450)
+  expect(await recent.evaluate((element) => element.ownerDocument.defaultView!.getComputedStyle(element).backgroundColor)).toBe(await mlxFooter.evaluate((element) => element.ownerDocument.defaultView!.getComputedStyle(element).backgroundColor))
+  const expandedScreenshot = testInfo.outputPath('recent-concepts-expanded-dark-wide.png')
+  await page.screenshot({ path: expandedScreenshot })
+  await testInfo.attach('recent-concepts-expanded-dark-wide', { path: expandedScreenshot, contentType: 'image/png' })
+  await mlxPanel.getByRole('button', { name: 'Collapse models' }).click()
+  await disclosure.click()
+  const collapsed = page.getByRole('button', { name: 'Expand Recent concepts' })
+  await expect(collapsed).toHaveAttribute('aria-expanded', 'false')
+  const collapsedBounds = await recent.boundingBox()
+  expect(collapsedBounds!.height).toBeLessThanOrEqual(36)
+  const collapsedModelBounds = await mlxFooter.boundingBox()
+  expect(Math.abs(collapsedBounds!.height - collapsedModelBounds!.height)).toBeLessThanOrEqual(1)
+  expect(await recent.evaluate((element) => element.ownerDocument.defaultView!.getComputedStyle(element).backgroundColor)).toBe(await mlxFooter.evaluate((element) => element.ownerDocument.defaultView!.getComputedStyle(element).backgroundColor))
+  const collapsedScreenshot = testInfo.outputPath('recent-concepts-collapsed-dark-wide.png')
+  await page.screenshot({ path: collapsedScreenshot })
+  await testInfo.attach('recent-concepts-collapsed-dark-wide', { path: collapsedScreenshot, contentType: 'image/png' })
+
+  await page.locator('html').evaluate((element) => element.setAttribute('data-theme', 'light'))
+  const resizeHandle = page.getByRole('separator', { name: 'Resize sidebar' })
+  const handleBounds = await resizeHandle.boundingBox()
+  expect(handleBounds).not.toBeNull()
+  await page.mouse.move(handleBounds!.x + 3, handleBounds!.y + handleBounds!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(220, handleBounds!.y + handleBounds!.height / 2, { steps: 8 })
+  await page.mouse.up()
+  await expect(resizeHandle).toHaveAttribute('aria-valuenow', '220')
+  await collapsed.click()
+  await expect(page.locator('#recent-concepts-list')).toBeVisible()
+  const narrowRecent = await recent.evaluate((element) => ({ width: element.clientWidth, scrollWidth: element.scrollWidth, height: element.clientHeight }))
+  expect(narrowRecent.width).toBeLessThanOrEqual(230)
+  expect(narrowRecent.scrollWidth).toBeLessThanOrEqual(narrowRecent.width)
+  expect(narrowRecent.height).toBeLessThanOrEqual(450)
+  const lightScreenshot = testInfo.outputPath('recent-concepts-expanded-light-narrow.png')
+  await page.screenshot({ path: lightScreenshot })
+  await testInfo.attach('recent-concepts-expanded-light-narrow', { path: lightScreenshot, contentType: 'image/png' })
+  await page.setViewportSize({ width: 1280, height: 560 })
+  const shortRecent = await recent.boundingBox()
+  expect(shortRecent!.height).toBeLessThanOrEqual(280)
+  const shortHeader = await page.locator('.recent-heading').boundingBox()
+  expect(shortHeader).not.toBeNull()
+  expect(shortHeader!.y).toBeGreaterThanOrEqual(shortRecent!.y)
+  const shortList = await page.locator('#recent-concepts-list').evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }))
+  expect(shortList.scrollHeight).toBeGreaterThanOrEqual(shortList.clientHeight)
+  await page.getByRole('button', { name: 'Collapse Recent concepts' }).click()
+  await expect(page.locator('#recent-concepts-list')).toBeHidden()
+
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Expand Recent concepts' })).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.locator('#recent-concepts-list')).toBeHidden()
+})
+
+test('reindexes the active bundle from settings', async ({ page }) => {
+  const activeBundleId = await page.evaluate(() => localStorage.getItem('folio:bundle-active:v1'))
+  expect(activeBundleId).toBeTruthy()
+  await expect(page.locator('.sidebar-heading').filter({ hasText: 'Explorer' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Reindex', exact: true })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  const responsePromise = page.waitForResponse(response =>
+    response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/reindex',
+  )
+  await settings.getByRole('button', { name: 'Reindex active bundle' }).click()
+  const response = await responsePromise
+  expect(response.ok()).toBeTruthy()
+  expect(response.request().headers()['x-folio-bundle-id']).toBe(activeBundleId)
 })
 
 test('keeps the settings category sidebar stationary while model content scrolls', async ({ page }) => {
@@ -214,6 +327,7 @@ test('keeps every settings category inside a fixed-height dialog on wide and sho
       ['Models', 'models'],
       ['Appearance', 'appearance'],
       ['Backup', 'backup'],
+      ['Updates', 'updates'],
     ]) {
       await nav.getByRole('button', { name: category, exact: true }).click()
       await expect(settings.locator(`#settings-panel-${panel}`)).toBeVisible()
@@ -427,33 +541,44 @@ test('opens sidebar notes as a replaceable preview until the editor is focused',
   await expect(todoTab).not.toHaveClass(/preview/)
 })
 
-test('marks the prospective right-strip tab slot and reorders tabs within a group', async ({ page }) => {
-  await page.getByRole('button', { name: 'Start Here', exact: true }).dblclick()
-  await page.getByRole('button', { name: 'Todo List', exact: true }).dblclick()
+test('marks the prospective right-strip tab slot and reorders tabs within a group with saved drafts in the explorer', async ({ page, request }) => {
+  const draftId = `untitled:tab-reorder-${Date.now()}`
+  const draftResponse = await request.put(`/api/draft?id=${encodeURIComponent(draftId)}`, {
+    data: { content: 'Saved draft keeps the explorer tree scrollable.' },
+  })
+  expect(draftResponse.ok()).toBeTruthy()
+  try {
+    await page.reload()
+    await page.getByRole('button', { name: 'Start Here', exact: true }).dblclick()
+    await page.getByRole('button', { name: 'Todo List', exact: true }).dblclick()
 
-  const startHereTab = page.locator('.editor-tab').filter({ hasText: 'Start Here' })
-  const todoTab = page.locator('.editor-tab').filter({ hasText: 'Todo List' })
-  const startBox = await startHereTab.boundingBox()
-  const todoBox = await todoTab.boundingBox()
-  const tabStripBox = await page.locator('.tab-strip').boundingBox()
-  expect(startBox).not.toBeNull()
-  expect(todoBox).not.toBeNull()
-  expect(tabStripBox).not.toBeNull()
+    const startHereTab = page.locator('.editor-tab').filter({ hasText: 'Start Here' })
+    const todoTab = page.locator('.editor-tab').filter({ hasText: 'Todo List' })
+    const startBox = await startHereTab.boundingBox()
+    const todoBox = await todoTab.boundingBox()
+    const tabStripBox = await page.locator('.tab-strip').boundingBox()
+    expect(startBox).not.toBeNull()
+    expect(todoBox).not.toBeNull()
+    expect(tabStripBox).not.toBeNull()
 
-  await page.mouse.move(startBox!.x + startBox!.width / 2, startBox!.y + startBox!.height / 2)
-  await page.mouse.down()
-  await page.mouse.move(
-    Math.min(todoBox!.x + todoBox!.width + 8, tabStripBox!.x + tabStripBox!.width - 4),
-    todoBox!.y + todoBox!.height / 2,
-    { steps: 8 },
-  )
-  await expect(todoTab).toHaveClass(/drop-after/)
-  await page.mouse.up()
+    await page.mouse.move(startBox!.x + startBox!.width / 2, startBox!.y + startBox!.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(
+      Math.min(todoBox!.x + todoBox!.width + 8, tabStripBox!.x + tabStripBox!.width - 4),
+      todoBox!.y + todoBox!.height / 2,
+      { steps: 8 },
+    )
+    await expect(todoTab).toHaveClass(/drop-after/)
+    await page.mouse.up()
 
-  await expect(todoTab).not.toHaveClass(/drop-after/)
-  expect(await page.locator('.editor-tab').evaluateAll((tabs) =>
-    tabs.map((tab) => tab.getAttribute('title')),
-  )).toEqual(['Todo List', 'Start Here'])
+    await expect(todoTab).not.toHaveClass(/drop-after/)
+    expect(await page.locator('.editor-tab').evaluateAll((tabs) =>
+      tabs.map((tab) => tab.getAttribute('title')),
+    )).toEqual(['Todo List', 'Start Here'])
+  } finally {
+    const cleanupResponse = await request.delete(`/api/draft?id=${encodeURIComponent(draftId)}`)
+    expect(cleanupResponse.ok()).toBeTruthy()
+  }
 })
 
 test('tab selection preserves each local draft cursor for mouse and Cmd/Ctrl+number', async ({ page }) => {

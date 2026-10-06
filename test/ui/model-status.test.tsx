@@ -146,6 +146,8 @@ describe("model status", () => {
     const template = status.models.find((model) => model.id === "gemma4")!;
     const installingStatus: MlxStatus = {
       ...status,
+      selectedGenerationModel: id === "qwen35" ? "qwen35" : status.selectedGenerationModel,
+      selectedTranscriptionModel: id === "whisperlarge" ? "whisperlarge" : status.selectedTranscriptionModel,
       installing: [id],
       downloads: [{ id, progress: null }],
       models: [...status.models, { ...template, id, name, purpose, installed: false, loaded: false, selected: false, memory: null }],
@@ -182,6 +184,7 @@ describe("model status", () => {
     const template = status.models.find((model) => model.id === "gemma4")!;
     const installingStatus: MlxStatus = {
       ...status,
+      selectedGenerationModel: "qwen35",
       installing: ["qwen35"],
       downloads: [{ id: "qwen35", progress: { downloadedBytes: 500_000_000, totalBytes: 2_000_000_000, percent: 25, phase: "downloading" } }],
       models: [...status.models, { ...template, id: "qwen35", name: "Qwen 3.5 4B", installed: false, loaded: false, selected: false, memory: null }],
@@ -202,7 +205,7 @@ describe("model status", () => {
     expect(collapse).toHaveAttribute("aria-expanded", "true");
     const bodyId = collapse.getAttribute("aria-controls")!;
     expect(document.getElementById(bodyId)).not.toHaveAttribute("hidden");
-    fireEvent.click(collapse);
+    fireEvent.click(collapse.querySelector(".model-status")!);
     expect(screen.getByRole("button", { name: "Expand models" })).toHaveAttribute("aria-expanded", "false");
     expect(document.getElementById(bodyId)).toHaveAttribute("hidden");
     expect(screen.queryByRole("button", { name: "Start Gemma 4 E4B" })).not.toBeInTheDocument();
@@ -212,6 +215,7 @@ describe("model status", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Could not stop this model");
     fireEvent.click(screen.getByRole("button", { name: "Manage", exact: true }));
     expect(open).toHaveBeenCalledWith("models");
+    expect(screen.getByRole("button", { name: "Expand models" })).toHaveAttribute("aria-expanded", "false");
     rerender(<MlxModelStatusPanel {...props} mlxStatus={{ ...status, models: status.models.map((model) => ({ ...model, loaded: false, busy: false, requestCount: 0 })) }} />);
     expect(screen.getByRole("status")).toHaveTextContent("MLX · 0 running");
     rerender(<MlxModelStatusPanel {...props} mlxStatus={{ ...status, helperAvailable: false }} />);
@@ -219,6 +223,24 @@ describe("model status", () => {
     fireEvent.click(screen.getByRole("button", { name: "Expand models" }));
     expect(document.getElementById(bodyId)).not.toHaveAttribute("hidden");
     expect(screen.getByRole("group", { name: "Models, active first" })).toBeInTheDocument();
+  });
+
+  it("shows a launch-memory estimate for unloaded models and actual memory when running", () => {
+    const props = { mlxStatus: status, mlxActionModel: null, onInstallMlxModel: vi.fn(), onToggleMlxModel: vi.fn() };
+    const { rerender } = render(<MlxModelStatusPanel {...props} />);
+    expect(screen.getByText("~5.18 GB on launch")).toHaveAttribute("title", expect.stringContaining("Estimated launch memory"));
+    expect(screen.getByText("About 212 MB download")).toBeInTheDocument();
+
+    const loadedStatus: MlxStatus = {
+      ...status,
+      models: status.models.map((model) => model.id === "gemma4" ? {
+        ...model,
+        loaded: true,
+        memory: { activeBytes: 3_210_000_000, cacheBytes: 420_000_000, peakResidentBytes: 3_760_000_000 },
+      } : model),
+    };
+    rerender(<MlxModelStatusPanel {...props} mlxStatus={loadedStatus} />);
+    expect(screen.getByText("3.21 GB active")).toHaveAttribute("title", expect.stringContaining("Active memory"));
   });
 
   it("remembers collapse across mounts without changing existing preferences", () => {
@@ -249,7 +271,8 @@ describe("model status", () => {
     const { rerender } = render(<MlxModelStatusPanel mlxStatus={{ ...status, models: status.models.map((model) => ({ ...model, busy: false, requestCount: 0 })) }} mlxActionModel={null} onInstallMlxModel={vi.fn()} onToggleMlxModel={vi.fn()} onOpenSettings={vi.fn()} />);
     const running = screen.getByRole("button", { name: "Stop Whisper Large v3 Turbo" });
     const stopped = screen.getByRole("button", { name: "Start Gemma 4 E4B" });
-    const missing = screen.getByRole("button", { name: "Manage Qwen 3.5 4B" });
+    expect(screen.queryByRole("button", { name: "Manage Qwen 3.5 4B" })).not.toBeInTheDocument();
+    const missing = screen.getByRole("button", { name: "Manage EmbeddingGemma" });
     expect(running).toHaveClass("is-loaded");
     expect(running).toHaveTextContent("▶Running");
     expect(stopped).toHaveClass("is-stopped");
@@ -269,7 +292,7 @@ describe("model status", () => {
 
   it("orders active models before stopped models and missing downloads with stable ties", () => {
     const generationModel = status.models.find((model) => model.id === "gemma4")!;
-    const loadingStatus: MlxStatus = { ...status, installing: ["qwen35"], models: [
+    const loadingStatus: MlxStatus = { ...status, selectedGenerationModel: "llama32", installing: ["qwen35"], models: [
       ...status.models,
       { ...generationModel, id: "llama32", name: "Llama 3.2 3B Instruct", selected: false, loaded: false, loading: true },
       { ...generationModel, id: "embeddinggemma", name: "EmbeddingGemma", purpose: "embeddings", selected: false, loaded: false },
@@ -279,10 +302,38 @@ describe("model status", () => {
     const { rerender } = render(<MlxModelStatusPanel {...props} />);
     const grid = screen.getByRole("group", { name: "Models, active first" });
     const names = () => Array.from(grid.querySelectorAll("button")).map((button) => button.getAttribute("aria-label"));
-    expect(names()).toEqual(["Start Llama 3.2 3B Instruct", "Stop Whisper Large v3 Turbo", "Start Gemma 4 E4B", "Start EmbeddingGemma", "Manage Qwen 3.5 4B", "Manage Whisper Large v3"]);
+    expect(names()).toEqual(["Start Llama 3.2 3B Instruct", "Stop Whisper Large v3 Turbo", "Start EmbeddingGemma"]);
     rerender(<MlxModelStatusPanel {...props} mlxActionModel="gemma4" mlxAction="load" />);
-    expect(names()).toEqual(["Start Gemma 4 E4B", "Start Llama 3.2 3B Instruct", "Stop Whisper Large v3 Turbo", "Start EmbeddingGemma", "Manage Qwen 3.5 4B", "Manage Whisper Large v3"]);
+    expect(names()).toEqual(["Start Llama 3.2 3B Instruct", "Stop Whisper Large v3 Turbo", "Start EmbeddingGemma"]);
     expect(grid).toHaveAttribute("tabindex", "0");
+  });
+
+  it("shows only configured models, keeps fixed embeddings, and excludes hidden busy or installing models from the collapsed summary", () => {
+    const qwenSelected: MlxStatus = {
+      ...status,
+      selectedGenerationModel: "qwen35",
+      selectedTranscriptionModel: "whisperlarge",
+      installing: ["llama32"],
+      models: [
+        ...status.models.filter((model) => model.id === "gemma4" || model.id === "whisper").map((model) => model.id === "whisper" ? { ...model, loaded: true } : model),
+        { ...status.models[2]!, id: "qwen35", name: "Qwen 3.5 4B", purpose: "generation", installed: true, loaded: true, busy: true, requestCount: 2 },
+        { ...status.models[2]!, id: "llama32", name: "Llama 3.2 3B Instruct", purpose: "generation", installed: false, loaded: false, selected: false },
+        { ...status.models[1]!, id: "whisperlarge", name: "Whisper Large v3", purpose: "transcription", installed: true, loaded: false, selected: true },
+        { ...status.models[2]!, id: "embeddinggemma", name: "EmbeddingGemma", purpose: "embeddings", installed: true, loaded: true, selected: false },
+      ],
+    };
+    const { rerender } = render(<MlxModelStatusPanel mlxStatus={qwenSelected} mlxActionModel={null} onInstallMlxModel={vi.fn()} onToggleMlxModel={vi.fn()} />);
+    expect(screen.getAllByRole("button", { name: /^(Stop|Start|Manage) / })).toHaveLength(3);
+    expect(screen.getByRole("button", { name: "Stop Qwen 3.5 4B" })).toHaveTextContent("2 active requests");
+    expect(screen.getByRole("button", { name: "Start Whisper Large v3" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop EmbeddingGemma" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Llama 3.2/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Whisper Large v3 Turbo/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse models" }));
+    expect(screen.getByRole("status")).toHaveAccessibleName("MLX 2 running: Qwen 3.5 4B (in use), EmbeddingGemma");
+
+    rerender(<MlxModelStatusPanel mlxStatus={{ ...qwenSelected, selectedGenerationModel: "gemma4" }} mlxActionModel={null} onInstallMlxModel={vi.fn()} onToggleMlxModel={vi.fn()} />);
+    expect(screen.getByRole("status")).toHaveAccessibleName("MLX 1 running: EmbeddingGemma");
   });
 
   it("keeps busy models visible but prevents unloading an active request", () => {

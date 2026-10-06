@@ -7,12 +7,18 @@ import {
 } from "../../src/features/settings/hooks/useThemeSettings.ts";
 import { WorkspaceLeftPaneHeader } from "../../src/features/workspace/components/WorkspaceLeftPaneHeader.tsx";
 import { useObsidianImport } from "../../src/features/settings/hooks/useObsidianImport.ts";
+import {
+  DEFAULT_NOTE_FONT_SIZE,
+  loadStoredNoteFontSize,
+  normalizeNoteFontSize,
+} from "../../src/features/settings/model/note-appearance.ts";
 
 describe("theme settings", () => {
   afterEach(() => {
     window.localStorage.clear();
     delete document.documentElement.dataset.theme;
     document.documentElement.style.colorScheme = "";
+    document.documentElement.style.removeProperty("--note-font-size");
     vi.restoreAllMocks();
     vi.useRealTimers();
     delete window.folio;
@@ -60,6 +66,46 @@ describe("theme settings", () => {
 
     expect(result.current.themeId).toBe("editorial");
     expect(document.documentElement.dataset.theme).toBe("editorial");
+  });
+
+  it("loads a valid note font size, defaults corrupted storage, and clamps out-of-range values", () => {
+    expect(loadStoredNoteFontSize()).toBe(DEFAULT_NOTE_FONT_SIZE);
+    window.localStorage.setItem("folio:note-font-size", "23");
+    expect(loadStoredNoteFontSize()).toBe(23);
+    window.localStorage.setItem("folio:note-font-size", "not-a-size");
+    expect(loadStoredNoteFontSize()).toBe(DEFAULT_NOTE_FONT_SIZE);
+    window.localStorage.setItem("folio:note-font-size", "   ");
+    expect(loadStoredNoteFontSize()).toBe(DEFAULT_NOTE_FONT_SIZE);
+    expect(normalizeNoteFontSize(1)).toBe(12);
+    expect(normalizeNoteFontSize(100)).toBe(28);
+  });
+
+  it("applies and persists note font size independently of the color theme", () => {
+    window.localStorage.setItem("folio:theme", "light");
+    const { result } = renderHook(() => useThemeSettings());
+
+    expect(result.current.noteFontSize).toBe(DEFAULT_NOTE_FONT_SIZE);
+    act(() => result.current.selectNoteFontSize(22));
+
+    expect(document.documentElement.style.getPropertyValue("--note-font-size")).toBe("22px");
+    expect(window.localStorage.getItem("folio:note-font-size")).toBe("22");
+    expect(window.localStorage.getItem("folio:theme")).toBe("light");
+  });
+
+  it("keeps font size usable when browser storage is unavailable", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("Storage disabled");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("Storage disabled");
+    });
+    const { result } = renderHook(() => useThemeSettings());
+
+    expect(result.current.noteFontSize).toBe(DEFAULT_NOTE_FONT_SIZE);
+    act(() => result.current.selectNoteFontSize(21));
+
+    expect(result.current.noteFontSize).toBe(21);
+    expect(document.documentElement.style.getPropertyValue("--note-font-size")).toBe("21px");
   });
 
   it("renders four swatch choices and reports immediate selections", () => {
@@ -153,6 +199,67 @@ describe("theme settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Bundles" }));
 
     expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Research notes");
+  });
+
+  it("runs the active-bundle reindex from bundle settings and shows its busy state", async () => {
+    let finishReindex: (() => void) | undefined;
+    const reindexBundle = vi.fn(() => new Promise<void>((resolve) => { finishReindex = resolve; }));
+    const bundleSetup = {
+      bundles: [{ id: "work", name: "Work", markdownPath: "/notes/work", managed: false, detached: false }],
+      activeBundleId: "work",
+      error: "",
+      selectBundle: () => {},
+      setupBundle: async () => ({ id: "work", name: "Work", markdownPath: "/notes/work", managed: false, detached: false }),
+      renameBundle: async () => {},
+      detachBundle: async () => {},
+      reindexing: false,
+      reindexBundle,
+    };
+    const props = {
+      themeId: "original" as const,
+      onSelectTheme: () => {},
+      noteFontSize: 18,
+      onSelectNoteFontSize: () => {},
+      obsidianImport: { supported: false, busy: false, scan: null, job: null, error: "", selectVault: () => {}, confirmImport: () => {}, cancelImport: () => {}, clearScan: () => {} },
+      onClose: () => {},
+      bundleSetup,
+    };
+    const { rerender } = render(
+      <SettingsDialog
+        {...props}
+      />,
+    );
+
+    const reindex = screen.getByRole("button", { name: "Reindex active bundle" });
+    fireEvent.click(reindex);
+    expect(reindexBundle).toHaveBeenCalledOnce();
+    rerender(<SettingsDialog {...props} bundleSetup={{ ...bundleSetup, reindexing: true }} />);
+    expect(screen.getByRole("button", { name: "Reindexing…" })).toBeDisabled();
+    finishReindex?.();
+  });
+
+  it("hides reindex until a bundle is active", () => {
+    render(
+      <SettingsDialog
+        themeId="original"
+        onSelectTheme={() => {}}
+        obsidianImport={{ supported: false, busy: false, scan: null, job: null, error: "", selectVault: () => {}, confirmImport: () => {}, cancelImport: () => {}, clearScan: () => {} }}
+        onClose={() => {}}
+        bundleSetup={{
+          bundles: [],
+          activeBundleId: null,
+          error: "",
+          selectBundle: () => {},
+          setupBundle: async () => { throw new Error("Not used."); },
+          renameBundle: async () => {},
+          detachBundle: async () => {},
+          reindexing: false,
+          reindexBundle: vi.fn().mockResolvedValue(undefined),
+        }}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: /Reindex active bundle|Reindexing/ })).not.toBeInTheDocument();
   });
 
   it("summarizes a vault and requires one explicit import confirmation", async () => {
