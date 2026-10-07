@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FolioNotes — local AI notes for your Mac</title>
+<meta name="description" content="FolioNotes is a local-first Mac notetaker. One capture field, an on-device model files your notes as plain Markdown (Open Knowledge Format) that stay on your Mac.">
+<meta name="robots" content="noindex">
+<link rel="canonical" href="https://folionotes.no/paper/">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#f7f4ec">
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="FolioNotes">
+<meta property="og:title" content="FolioNotes — local AI notes for your Mac">
+<meta property="og:description" content="Capture in one field. A local model files it as plain Markdown that lives on your Mac.">
+<meta property="og:url" content="https://folionotes.no/paper/">
+<meta property="og:image" content="https://folionotes.no/assets/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="FolioNotes — local AI notes for your Mac">
+<meta name="twitter:description" content="Capture in one field. A local model files it as plain Markdown that lives on your Mac.">
+<meta name="twitter:image" content="https://folionotes.no/assets/og-image.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+<script src="main.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="nav">
+  <div class="nav-in">
+    <a class="nav-brand" href="#top" aria-label="FolioNotes home"><svg class="mark" viewBox="0 0 1024 1024" width="28" height="28" aria-hidden="true"><rect width="1024" height="1024" rx="220" fill="#161816"/><rect x="190" y="190" width="644" height="644" fill="none" stroke="#b7d892" stroke-width="28"/><g transform="translate(85 0) skewX(-8)" fill="none" stroke="#b7d892" stroke-width="46" stroke-linecap="square" stroke-linejoin="miter"><path d="M290 700V330H500M290 510H460"/><path d="M580 700V470M580 545C580 495 615 468 660 468C710 468 740 500 740 552V700"/></g></svg><span>FolioNotes</span></a>
+    <nav aria-label="Primary"><ul><li><a href="#features">index</a></li><li><a href="#gallery">contact sheet</a></li><li><a href="#privacy">privacy</a></li><li><a href="#needs">requirements</a></li><li><a href="#faq">faq</a></li></ul></nav>
+    <a class="stamp" href="https://github.com/MagnusOlstad/folio/releases/latest/download/FolioNotes-arm64.dmg">Download</a>
+  </div>
+</header>
+<main id="main">
+<section class="hero" id="top">
+  <div class="wrap hero-grid">
+    <div class="hero-text">
+      <p class="fm hero-fm"><span class="k">type:</span> product<br><span class="k">platform:</span> macOS 14+ · Apple Silicon<br><span class="k">status:</span> filed locally</p>
+      <h1>Write it down.<br>Your Mac <span class="hl">files it</span>.</h1>
+      <p class="sub">One Markdown capture field. A model running on your Mac decides where each note goes. Everything stays as plain files in a folder you own.</p>
+      <div class="cta"><a class="btn" href="https://github.com/MagnusOlstad/folio/releases/latest/download/FolioNotes-arm64.dmg">Download for Mac</a><a class="srclink" href="https://github.com/MagnusOlstad/folio">source on GitHub <span aria-hidden="true">↗</span></a></div>
+      <p class="fine"><span id="release-info" hidden></span> <a href="https://github.com/MagnusOlstad/folio/releases">all releases</a></p>
+      <p class="fine note" id="platform-note" role="note" hidden>FolioNotes is a Mac app for Apple Silicon. Open this page on your Mac to download.</p>
+    </div>
+    <div class="filing" id="filing-demo" aria-label="Animated example: a note is captured and filed into a folder">
+      <div class="fcard">
+        <span class="tab" aria-hidden="true">capture</span>
+        <p class="raw"><b>Lumen usability test findings, round 1</b><br>Five moderated sessions with first-time users on the checklist prototype.</p>
+        <p class="fm prop"><span class="k">path:</span> <span class="typ">/project/lumen-onboarding</span><br><span class="k">title:</span> <span class="typ">Lumen usability test findings, round 1</span><br><span class="k">tags:</span> [<span class="typ">lumen, onboarding, usability</span>]</p>
+        <p class="hint"><kbd>Cmd</kbd> <kbd>Enter</kbd> to accept</p>
+      </div>
+      <div class="tree" role="img" aria-label="Folder tree: project, lumen-onboarding, containing three notes including the newly filed usability test findings">
+        <p class="root">~/Documents/Folio</p>
+        <ul>
+          <li class="dir">design-theory/</li>
+          <li class="dir open">project/
+            <ul><li class="dir open">lumen-onboarding/
+              <ul><li class="file">checklist-component-states-design-review-2026-10-06.md</li>
+              <li class="file">lumen-onboarding-redesign-kickoff-meeting-notes-2026-10-06.md</li>
+              <li class="file new">lumen-usability-test-findings-round-1-2026-10-06.md</li></ul></li></ul></li>
+        </ul>
+        <span class="filed-stamp" aria-hidden="true">filed</span>
+      </div>
+      <button type="button" class="replay" id="replay" hidden>↻ replay</button>
+    </div>
+  </div>
+  <div class="hero-shot"><div class="hero-img" id="hero-img"><img src="../assets/screenshots/hero-light.webp" alt="The FolioNotes window with a note being captured, a file explorer on the left and filing suggestions" width="2880" height="1782" fetchpriority="high"></div></div>
+</section>
+
+<section class="band b statement" id="overview" aria-labelledby="st-h">
+  <div class="wrap">
+    <div class="st-grid">
+      <div class="reveal"><h2 id="st-h" class="big">Your notes.<br>Your folder.<br>Nothing in between.</h2>
+      <p class="lead">Filing, search and answers use models stored on your machine. There is no account, no cloud service and no analytics.</p></div>
+      <pre class="ledger reveal" aria-label="Summary of what FolioNotes needs from you"><code><span class="c">---</span>
+<span class="k">account:</span>   none
+<span class="k">cloud:</span>     none
+<span class="k">analytics:</span> none
+<span class="k">format:</span>    Markdown + OKF frontmatter
+<span class="k">location:</span>  ~/Documents/Folio
+<span class="c">---</span></code></pre>
+    </div>
+  </div>
+</section>
+
+<section class="band a" id="features" aria-labelledby="feat-h">
+  <div class="wrap">
+    <div class="sec-head reveal"><p class="fm"><span class="k">type:</span> index<br><span class="k">tags:</span> [capture, storage, search, links]</p>
+    <h2 id="feat-h" class="section-h">The folio, card by card.</h2></div>
+    <ul class="bento"><li class="tile t-wide reveal"><span class="tab" aria-hidden="true">01 · capture</span><div class="tile-text"><h3>One field, one keypress.</h3><p>Write in plain Markdown. A local model proposes where the note belongs, and you confirm with a keypress.</p></div><div class="tile-shot"><img src="../assets/screenshots/capture-filing-light.webp" alt="A draft note with a filing proposal ready to confirm" width="2880" height="1782" loading="lazy" decoding="async"></div></li><li class="tile  reveal"><span class="tab" aria-hidden="true">02 · storage</span><div class="tile-text"><h3>A folder, not a database.</h3><p>Notes are Markdown with frontmatter in a normal folder. No lock-in.</p></div><div class="tile-shot"><img src="../assets/screenshots/explorer-light.webp" alt="The FolioNotes Explorer showing notes organised in a folder hierarchy" width="618" height="1260" loading="lazy" decoding="async"></div></li><li class="tile  reveal"><span class="tab" aria-hidden="true">03 · ask</span><div class="tile-text"><h3>Search it. Or just ask.</h3><p>Search combines keywords and embeddings. Ask writes a grounded answer with citations.</p></div><div class="tile-shot"><img src="../assets/screenshots/ask-light.webp" alt="An Ask answer with citations linking to local notes" width="2880" height="1782" loading="lazy" decoding="async"></div></li><li class="tile  reveal"><span class="tab" aria-hidden="true">04 · links</span><div class="tile-text"><h3>Notes that connect.</h3><p>Links and backlinks are indexed automatically from Markdown links and source provenance.</p></div><div class="tile-shot"><img src="../assets/screenshots/links-light.webp" alt="Backlinks and suggested related notes for a note" width="2880" height="1782" loading="lazy" decoding="async"></div></li><li class="tile  reveal"><span class="tab" aria-hidden="true">05 · history</span><div class="tile-text"><h3>Every version kept.</h3><p>Edit freely and restore older content whenever you need it.</p></div><div class="tile-shot"><img src="../assets/screenshots/history-light.webp" alt="The version history of a note" width="2880" height="1782" loading="lazy" decoding="async"></div></li><li class="tile t-wide reveal"><span class="tab" aria-hidden="true">06 · refile</span><div class="tile-text"><h3>Refile, with review.</h3><p>Move a saved note through a review dialog that proposes a path and metadata. Discard leaves it unchanged.</p></div><div class="tile-shot"><img src="../assets/screenshots/refile-light.webp" alt="The refile review dialog proposing a new path for a saved note" width="2880" height="1782" loading="lazy" decoding="async"></div></li><li class="tile t-text reveal"><span class="tab" aria-hidden="true">07 · misc</span><div class="tile-text"><h3>And the small things.</h3><p>Export, lifecycle states, tag filters, bundles, backup and familiar shortcuts.</p><a class="tlink" href="#more">see the list →</a></div></li></ul>
+  </div>
+</section>
+
+<section class="band b" id="okf" aria-labelledby="okf-h"><div class="wrap look split flip">
+<div class="look-text"><div class="look-head reveal"><p class="fm"><span class="k">type:</span> feature<br><span class="k">path:</span> /storage/okf<br><span class="k">tags:</span> [local, plain-text]</p><h2 id="okf-h">Your notes are an open knowledge base.</h2></div><div class="look-copy reveal"><p>FolioNotes writes <a href="https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/main/SPEC.md">Open Knowledge Format v0.2</a>: Markdown with frontmatter that records provenance, lifecycle state and generation metadata, plus generated indexes and logs. Every capture is also kept as an immutable raw note, so the original words are never rewritten.</p><p>Because it is just a folder of files, any AI agent, script or editor can read it without an API.</p></div></div>
+<div class="look-media reveal"><div class="code-wrap"><div class="code-label"><span>a real filed note</span><span>Markdown + OKF frontmatter</span></div><pre class="code" tabindex="0"><code>---
+type: Usability Testing Report
+title: Lumen usability test findings, round 1
+description: Findings from five moderated sessions on the checklist prototype, indicating success with the signup flow but issues with step placement and terminology.
+tags: &amp;a1
+  - lumen
+  - onboarding
+  - usability
+status: draft
+generated:
+  by: human:local
+  at: 2026-10-06T20:14:33.701Z
+filing:
+  by: okf-notetaker/mlx-community/gemma-4-e4b-it-4bit
+  at: 2026-10-06T20:07:48.109Z
+sources:
+  - id: raw-capture
+    resource: /references/inbox/20261006T200748Z-lumen-usability-test-findings-round-1-e675.md
+    title: Raw inbox capture
+    author: human:local
+    capture_id: confirmation:0903013b84f0bb8bcfd9ea6c
+    filing_by: okf-notetaker/mlx-community/gemma-4-e4b-it-4bit
+    capture_content: |-
+      Lumen usability test findings, round 1
+
+      Five moderated sessions with first-time users on the checklist prototype.
+
+      ## What worked
+      - 4 of 5 completed the three-step signup without help
+      - The progress ring made people want to finish the checklist
+
+      ## Problems
+      - Two people missed the &quot;Invite a teammate&quot; step because it sat below the fold
+      - The word &quot;workspace&quot; confused everyone; &quot;team space&quot; tested better
+      - Nobody noticed the skip link, which is fine, but it should stay quiet
+
+      ## Quote
+      &quot;I like that it tells me what to do first instead of showing me a blank page.&quot;
+
+      ## Next steps
+      Move the invite step higher, rename workspace to team space, rerun with three users.
+    confirmation:
+      id: confirmation:0903013b84f0bb8bcfd9ea6c
+      draftId: null
+      mode: new
+      destinationId: /project/lumen-onboarding/lumen-usability-test-findings-round-1-2026-10-06.md
+      destination:
+        id: /project/lumen-onboarding/lumen-usability-test-findings-round-1-2026-10-06.md
+        directory: /project/lumen-onboarding
+        filename: lumen-usability-test-findings-round-1-2026-10-06.md
+      actor: okf-notetaker/mlx-community/gemma-4-e4b-it-4bit
+      proposal:
+        directory: /project/lumen-onboarding
+        filename: lumen-usability-test-findings-round-1-2026-10-06.md
+        title: Lumen usability test findings, round 1
+        description: Findings from five moderated sessions on the checklist prototype, indicating success with the signup flow but issues with step placement and terminology.
+        tags:
+          - lumen
+          - onboarding
+          - usability
+      finalId: /project/lumen-onboarding/lumen-usability-test-findings-round-1-2026-10-06.md
+      finalFields:
+        directory: /project/lumen-onboarding
+        filename: lumen-usability-test-findings-round-1-2026-10-06.md
+        title: Lumen usability test findings, round 1
+        description: Findings from five moderated sessions on the checklist prototype, indicating success with the signup flow but issues with step placement and terminology.
+        tags: *a1
+      confirmedAt: 2026-10-06T20:08:01.674Z
+      oldId: /project/lumen-onboarding/lumen-usability-test-findings-round-1-2026-10-06.md
+---
+
+# Captured note
+
+Five moderated 45-minute sessions with first-time users on the checklist prototype.
+
+## What worked
+- 4 of 5 completed the three-step signup without help
+- The progress ring made people want to finish the checklist
+
+## Problems
+- Two people missed the &quot;Invite a teammate&quot; step because it sat below the fold
+- The word &quot;workspace&quot; confused everyone; &quot;team space&quot; tested better
+- Nobody noticed the skip link, which is fine, but it should stay quiet
+
+## Quote
+&quot;I like that it tells me what to do first instead of showing me a blank page.&quot;
+
+## Next steps
+Move the invite step higher, rename workspace to team space, rerun with three users next Tuesday.
+
+## Follow-up
+- [x] Share the highlights reel with Jonas
+
+## Related
+- [Lumen onboarding redesign kickoff](/project/lumen-onboarding/lumen-onboarding-redesign-kickoff-meeting-notes-2026-10-06.md)
+- [Checklist component design review](/project/lumen-onboarding/checklist-component-states-design-review-2026-10-06.md)
+- [Notes on The Design of Everyday Things](/design-theory/reading-notes-the-design-of-everyday-things-don-norman-2026-10-06.md)</code></pre></div></div></div></section>
+<section class="band a" id="filing" aria-labelledby="filing-h"><div class="wrap look">
+<div class="look-text"><div class="look-head reveal"><p class="fm"><span class="k">type:</span> feature<br><span class="k">path:</span> /capture/filing<br><span class="k">tags:</span> [local, llm]</p><h2 id="filing-h">One field. The model files it. You confirm.</h2></div><div class="look-copy reveal"><p>Press <kbd>Cmd</kbd> <kbd>Enter</kbd> and the selected local model reads the whole note and proposes a path, title, type and tags. Every capture stays one note; it is never split apart.</p><ul class="ticks"><li>Reuses your existing folders and tags instead of inventing new ones</li><li>Todos append to one todo list, daily notes to a note per day</li><li>Nothing is saved until you accept the proposal</li></ul></div></div>
+<div class="look-media reveal"><p class="margin-note"><span>nothing is saved until you accept</span><svg class="arr" viewBox="0 0 60 44" width="60" height="44" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6C26 2 46 12 50 34"/><path d="M42 28l8 8 6-10"/></svg></p><img src="../assets/screenshots/filing-dialog-light.webp" alt="The filing dialog proposing a path, title, type and tags for a note" width="1176" height="842" loading="lazy" decoding="async"></div></div></section>
+<section class="band b" id="models" aria-labelledby="models-h"><div class="wrap look">
+<div class="look-text"><div class="look-head reveal"><p class="fm"><span class="k">type:</span> feature<br><span class="k">path:</span> /models/mlx<br><span class="k">tags:</span> [local, mlx]</p><h2 id="models-h">Small models, run through MLX.</h2></div><div class="look-copy reveal"><p>Pick a generation model in Settings: Qwen 3.5 4B, Llama 3.2 3B Instruct or Gemma 4 E4B. EmbeddingGemma handles semantic search. Models are downloaded only when you ask, with progress and retry, and can be removed again.</p><ul class="sizes"><li><span>Llama 3.2 3B Instruct 4-bit</span><b>~1.81 GB</b></li><li><span>Qwen 3.5 4B 4-bit</span><b>~3.06 GB</b></li><li><span>Gemma 4 E4B</span><b>~5.18 GB</b></li><li><span>EmbeddingGemma</span><b>~212 MB</b></li></ul></div></div>
+<div class="look-media reveal"><p class="margin-note"><span>downloaded only when you ask</span><svg class="arr" viewBox="0 0 60 44" width="60" height="44" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6C26 2 46 12 50 34"/><path d="M42 28l8 8 6-10"/></svg></p><img src="../assets/screenshots/settings-models-light.webp" alt="Model settings listing installed and downloadable local models" width="1800" height="1442" loading="lazy" decoding="async"></div></div></section>
+<section class="band a" id="search" aria-labelledby="search-h"><div class="wrap look split">
+<div class="look-text"><div class="look-head reveal"><p class="fm"><span class="k">type:</span> feature<br><span class="k">path:</span> /retrieval/search-ask<br><span class="k">tags:</span> [search, ask]</p><h2 id="search-h">Find it, or ask it.</h2></div><div class="look-copy reveal"><p>Search combines metadata, lifecycle, relationships, keywords and EmbeddingGemma embeddings. It never loads the larger answer model.</p><p>When you want an answer, Ask uses the model you selected and writes a grounded response with links to the notes it cites.</p></div></div>
+<div class="look-media reveal"><p class="margin-note"><span>search never loads the answer model</span><svg class="arr" viewBox="0 0 60 44" width="60" height="44" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6C26 2 46 12 50 34"/><path d="M42 28l8 8 6-10"/></svg></p><div class="duo"><img src="../assets/screenshots/search-pane-light.webp" alt="Hybrid search results across notes" width="618" height="1706" loading="lazy" decoding="async"><img src="../assets/screenshots/ask-pane-light.webp" alt="An Ask answer with citations linking to local notes" width="618" height="1706" loading="lazy" decoding="async"></div></div></div></section>
+<section class="band b" id="transcripts" aria-labelledby="transcripts-h"><div class="wrap look">
+<div class="look-text"><div class="look-head reveal"><p class="fm"><span class="k">type:</span> feature<br><span class="k">path:</span> /audio/transcripts<br><span class="k">tags:</span> [whisper, local]</p><h2 id="transcripts-h">Turn recordings into editable notes.</h2></div><div class="look-copy reveal"><p>Import AAC, AIFF, FLAC, M4A, MP3 or WAV files. FolioNotes transcribes them on your Mac with Whisper large-v3-turbo (about 1.61 GB, downloaded on request) and opens an editable Markdown note with the source filename, duration and a link back to the source note. Regenerate a concise summary with your local text model.</p></div></div>
+<div class="look-media reveal"><p class="margin-note"><span>transcribed on your Mac</span><svg class="arr" viewBox="0 0 60 44" width="60" height="44" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6C26 2 46 12 50 34"/><path d="M42 28l8 8 6-10"/></svg></p><img src="../assets/screenshots/transcription-crop-light.webp" alt="The Transcription tab with an imported audio file and its transcript" width="2248" height="1782" loading="lazy" decoding="async"></div></div></section>
+<section class="band a" id="history" aria-labelledby="history-h"><div class="wrap look split flip">
+<div class="look-text"><div class="look-head reveal"><p class="fm"><span class="k">type:</span> feature<br><span class="k">path:</span> /versions/history<br><span class="k">tags:</span> [history, restore]</p><h2 id="history-h">Every note keeps its history.</h2></div><div class="look-copy reveal"><p>Edit freely. Each note records its earlier versions, and you can restore older content whenever you need it. Refiling moves a note to a new path without losing that history.</p></div></div>
+<div class="look-media reveal"><p class="margin-note"><span>restore any earlier version</span><svg class="arr" viewBox="0 0 60 44" width="60" height="44" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6C26 2 46 12 50 34"/><path d="M42 28l8 8 6-10"/></svg></p><img src="../assets/screenshots/history-crop-light.webp" alt="The history list of a note with restore actions" width="618" height="1032" loading="lazy" decoding="async"></div></div></section>
+<section class="band b" id="links" aria-labelledby="links-h"><div class="wrap look">
+<div class="look-text"><div class="look-head reveal"><p class="fm"><span class="k">type:</span> feature<br><span class="k">path:</span> /graph/links<br><span class="k">tags:</span> [links, backlinks]</p><h2 id="links-h">Notes that connect themselves.</h2></div><div class="look-copy reveal"><p>Links and backlinks are indexed automatically from Markdown links and source provenance. FolioNotes also suggests semantically related notes. A suggestion becomes a link only after you confirm it.</p></div></div>
+<div class="look-media reveal"><p class="margin-note"><span>suggestions become links only when you confirm</span><svg class="arr" viewBox="0 0 60 44" width="60" height="44" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6C26 2 46 12 50 34"/><path d="M42 28l8 8 6-10"/></svg></p><img src="../assets/screenshots/links-crop-light.webp" alt="Backlinks and suggested related notes for a note" width="1592" height="1200" loading="lazy" decoding="async"></div></div></section>
+
+<section class="band table" id="gallery" aria-labelledby="gal-h">
+  <div class="wrap">
+    <div class="gal-head reveal"><div><p class="fm"><span class="k">type:</span> contact-sheet<br><span class="k">frames:</span> 8</p><h2 id="gal-h" class="section-h">Contact sheet.</h2></div>
+    <div class="gal-btns"><button type="button" class="arrow" data-dir="-1" aria-label="Previous screenshots">←</button><button type="button" class="arrow" data-dir="1" aria-label="Next screenshots">→</button></div></div>
+  </div>
+  <div class="gallery" id="gallery-strip" role="region" aria-label="Screenshot contact sheet" tabindex="0"><ul><li class="slide" tabindex="-1"><figure><div class="print"><img src="../assets/screenshots/capture-filing-light.webp" alt="FolioNotes: Capture and file" width="2880" height="1782" loading="lazy" decoding="async"></div><figcaption><span>01</span> Capture and file</figcaption></figure></li><li class="slide" tabindex="-1"><figure><div class="print"><img src="../assets/screenshots/models-light.webp" alt="FolioNotes: Models" width="2880" height="1782" loading="lazy" decoding="async"></div><figcaption><span>02</span> Models</figcaption></figure></li><li class="slide" tabindex="-1"><figure><div class="print"><img src="../assets/screenshots/search-light.webp" alt="FolioNotes: Search" width="2880" height="1782" loading="lazy" decoding="async"></div><figcaption><span>03</span> Search</figcaption></figure></li><li class="slide" tabindex="-1"><figure><div class="print"><img src="../assets/screenshots/ask-light.webp" alt="FolioNotes: Ask" width="2880" height="1782" loading="lazy" decoding="async"></div><figcaption><span>04</span> Ask</figcaption></figure></li><li class="slide" tabindex="-1"><figure><div class="print"><img src="../assets/screenshots/transcription-light.webp" alt="FolioNotes: Transcription" width="2880" height="1782" loading="lazy" decoding="async"></div><figcaption><span>05</span> Transcription</figcaption></figure></li><li class="slide" tabindex="-1"><figure><div class="print"><img src="../assets/screenshots/history-light.webp" alt="FolioNotes: History" width="2880" height="1782" loading="lazy" decoding="async"></div><figcaption><span>06</span> History</figcaption></figure></li><li class="slide" tabindex="-1"><figure><div class="print"><img src="../assets/screenshots/links-light.webp" alt="FolioNotes: Links" width="2880" height="1782" loading="lazy" decoding="async"></div><figcaption><span>07</span> Links</figcaption></figure></li><li class="slide" tabindex="-1"><figure><div class="print"><img src="../assets/screenshots/refile-light.webp" alt="FolioNotes: Refile" width="2880" height="1782" loading="lazy" decoding="async"></div><figcaption><span>08</span> Refile</figcaption></figure></li></ul></div>
+</section>
+
+<section class="band a" id="more" aria-labelledby="more-h">
+  <div class="wrap narrow-l">
+    <div class="sec-head reveal"><p class="fm"><span class="k">type:</span> list<br><span class="k">tags:</span> [small-things]</p><h2 id="more-h" class="section-h">The small things.</h2></div>
+    <ul class="more reveal"><li><h3>Markdown and PDF export</h3><p>Export filed notes and local drafts.</p></li><li><h3>Lifecycle states</h3><p>Draft, stable or deprecated, with a stale-after date.</p></li><li><h3>Tag filters</h3><p>Click a tag to filter exactly.</p></li><li><h3>Multiple bundles</h3><p>Separate note collections, switchable in Settings.</p></li><li><h3>Backup</h3><p>Back up from Settings, or just copy the folder.</p></li><li><h3>Familiar shortcuts</h3><p>Cmd+B, Cmd+I, Cmd+K, Cmd+Shift+F and more.</p></li></ul>
+  </div>
+</section>
+
+<section class="band b" id="privacy" aria-labelledby="privacy-h">
+  <div class="wrap priv">
+    <div class="reveal"><p class="fm"><span class="k">type:</span> policy<br><span class="k">path:</span> /privacy<br><span class="k">tags:</span> [local, no-account]</p>
+    <h2 id="privacy-h" class="big">Private by design.</h2>
+    <p class="lead">Everything runs on your Mac. There is no account, no cloud service and no analytics.</p></div>
+    <ul class="ticks reveal">
+      <li>Filing, search and answers use models stored on your machine.</li>
+      <li>The network is used only for model downloads you request (from Hugging Face) and for update checks against GitHub Releases.</li>
+      <li>Notes and the search index live as plain files in <code>~/Documents/Folio</code>.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="band a" id="needs" aria-labelledby="req-h">
+  <div class="wrap narrow">
+    <div class="catalog reveal">
+      <div class="cat-head"><span>FN · REQUIREMENTS</span><span>card 1 of 1</span></div>
+      <h2 id="req-h">What you need.</h2>
+      <dl class="specs"><div><dt>Mac</dt><dd>Apple Silicon (M1 or later)</dd></div><div><dt>System</dt><dd>macOS 14 Sonoma or newer</dd></div><div><dt>Disk space</dt><dd>About 2–7 GB for models, depending on your choice. EmbeddingGemma is about 212 MB; the generation models range from about 1.81 GB to 5.18 GB; Whisper is about 1.61 GB.</dd></div><div><dt>Generation models</dt><dd>Qwen 3.5 4B, Llama 3.2 3B Instruct, Gemma 4 E4B, run with MLX</dd></div><div><dt>Search model</dt><dd>EmbeddingGemma</dd></div><div><dt>Transcription</dt><dd>Whisper large-v3-turbo. Imports AAC, AIFF, FLAC, M4A, MP3 and WAV.</dd></div><div><dt>Storage</dt><dd>Plain Markdown with OKF frontmatter in <code>~/Documents/Folio</code></dd></div><div><dt>Distribution</dt><dd>Signed with a Developer ID and notarized by Apple. Updates install automatically.</dd></div><div><dt>License</dt><dd>Open source under the MIT License</dd></div></dl>
+    </div>
+  </div>
+</section>
+
+<section class="band b" id="faq" aria-labelledby="faq-h">
+  <div class="wrap narrow">
+    <div class="sec-head reveal"><p class="fm"><span class="k">type:</span> faq<br><span class="k">count:</span> 7</p><h2 id="faq-h" class="section-h">Questions, answered.</h2></div>
+    <div class="faq reveal"><details><summary><span class="fq" aria-hidden="true">Q</span>Does it work on an Intel Mac?</summary><p><span class="fa" aria-hidden="true">A</span><span>No. FolioNotes runs its models with MLX, which requires Apple Silicon (M1 or later).</span></p></details><details><summary><span class="fq" aria-hidden="true">Q</span>Is there a Windows or Linux version?</summary><p><span class="fa" aria-hidden="true">A</span><span>No. FolioNotes is a macOS app for Apple Silicon.</span></p></details><details><summary><span class="fq" aria-hidden="true">Q</span>Where are my notes stored?</summary><p><span class="fa" aria-hidden="true">A</span><span>In <code>~/Documents/Folio</code>, as Markdown files with OKF frontmatter, along with the search index. Open the folder in Finder or any editor.</span></p></details><details><summary><span class="fq" aria-hidden="true">Q</span>Can I take my notes with me?</summary><p><span class="fa" aria-hidden="true">A</span><span>Yes. Nothing is locked in. Your notes are plain Markdown in an open format, so you can copy the folder, open it in another tool, or point an AI agent at it.</span></p></details><details><summary><span class="fq" aria-hidden="true">Q</span>Does it need an internet connection?</summary><p><span class="fa" aria-hidden="true">A</span><span>Not for everyday use. The network is used only when you choose to download a model, and to check for updates.</span></p></details><details><summary><span class="fq" aria-hidden="true">Q</span>Is it free?</summary><p><span class="fa" aria-hidden="true">A</span><span>Yes. FolioNotes is open source under the MIT License.</span></p></details><details><summary><span class="fq" aria-hidden="true">Q</span>How do updates work?</summary><p><span class="fa" aria-hidden="true">A</span><span>The app checks GitHub Releases and installs signed updates. You can also download the latest version from the Releases page.</span></p></details></div>
+  </div>
+</section>
+
+<section class="band a final" aria-labelledby="final-h">
+  <div class="wrap final-in">
+    <div class="reveal"><h2 id="final-h" class="big">Give your notes a <span class="hl">home</span>.</h2>
+    <p class="lead">Free and open source. Download, open the DMG and drag it to Applications.</p></div>
+    <div class="reveal"><div class="cta"><a class="btn" href="https://github.com/MagnusOlstad/folio/releases/latest/download/FolioNotes-arm64.dmg">Download for Mac</a><a class="srclink" href="https://github.com/MagnusOlstad/folio">source on GitHub <span aria-hidden="true">↗</span></a></div><p class="fine">Apple Silicon · macOS 14 or later</p></div>
+  </div>
+</section>
+
+<section class="band b disc" id="disclaimer" aria-labelledby="disc-h">
+  <div class="wrap narrow">
+    <aside class="disclaimer">
+      <h2 id="disc-h">A note on how this is made</h2>
+      <p>FolioNotes is developed agentically: it is largely written by AI coding agents under human direction, as a personal project. It is provided as is under the MIT License, without warranty, and may not be actively maintained.</p>
+      <p>Keep backups of anything important. Your notes are plain files, so that is easy.</p>
+    </aside>
+  </div>
+</section>
+</main>
+<footer class="foot">
+  <div class="wrap foot-in">
+    <p class="colophon"><strong>Colophon.</strong> Set in Fraunces, Inter and JetBrains Mono. Filed locally. MIT licensed.</p>
+    <ul>
+      <li><a href="https://github.com/MagnusOlstad/folio">GitHub</a></li>
+      <li><a href="https://github.com/MagnusOlstad/folio/releases">Releases</a></li>
+      <li><a href="https://github.com/MagnusOlstad/folio/blob/main/CHANGELOG.md">Changelog</a></li>
+      <li><a href="https://github.com/MagnusOlstad/folio/issues">Report an issue</a></li>
+      <li><a href="https://github.com/MagnusOlstad/folio/blob/main/LICENSE">License</a></li>
+    </ul>
+    <p class="copy">© 2026 Magnus Olstad</p>
+  </div>
+</footer>
+</body>
+</html>

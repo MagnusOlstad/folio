@@ -40,3 +40,6 @@ seed-data/**/.DS_Store
 /playwright-report
 /blob-report
 /playwright/.cache
+
+# Screenshot PNGs are capture intermediates; the site ships WebP.
+site/assets/screenshots/*.png

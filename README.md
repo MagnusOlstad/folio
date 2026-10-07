@@ -263,3 +263,7 @@ npm run build && npm run test:e2e:local      # e2e/local: broad, requires models
 3. Duplicate detection, concept merging, and richer entity resolution.
 4. Background file watching and automatic reindexing after external Markdown edits.
 5. Importers for existing Markdown directories and Apple Notes exports.
+
+## License
+
+FolioNotes is released under the [MIT License](LICENSE).
