@@ -37,7 +37,7 @@ export type WorkspaceExplorerProps = {
 
 export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
   const [collapsedBundleId, setCollapsedBundleId] = useState<string | null>(null);
-  const [contextMenu, setContextMenu] = useState<ExplorerContextMenuState | null>(null);
+  const [contextMenu, setContextMenu] = useState<(ExplorerContextMenuState & { bundleId: string | null }) | null>(null);
   const treeScrollRef = useRef<HTMLDivElement>(null);
   const {
     explorerScrollTop,
@@ -68,6 +68,7 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
     actions,
     setMessage,
   } = props;
+  if (contextMenu && contextMenu.bundleId !== activeBundleId) setContextMenu(null);
   const activeBundle = bundles.find((bundle) => bundle.id === activeBundleId);
   useEffect(() => {
     const element = treeScrollRef.current;
@@ -92,7 +93,7 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
     y: number,
     anchor: HTMLElement,
   ) {
-    setContextMenu({ target, x, y, anchor });
+    setContextMenu({ target, x, y, anchor, bundleId: activeBundleId });
   }
 
   function handleBundleClick(bundleId: string) {
@@ -100,6 +101,7 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
       setCollapsedBundleId((current) => current === bundleId ? null : bundleId);
       return;
     }
+    setContextMenu(null);
     setCollapsedBundleId(null);
     selectBundle(bundleId);
   }
@@ -233,8 +235,9 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
           <button type="button" className="bundle-setup-cta" onClick={openSettings}>Add or import bundle</button>
         </div>
       )}
-      {contextMenu && activeBundle ? (
+      {contextMenu && activeBundle && contextMenu.bundleId === activeBundleId ? (
         <ExplorerContextMenu
+          key={`${activeBundleId}:${contextMenu.target.kind}:${contextMenu.target.path}`}
           state={contextMenu}
           bundlePath={activeBundle.markdownPath}
           actions={actions}

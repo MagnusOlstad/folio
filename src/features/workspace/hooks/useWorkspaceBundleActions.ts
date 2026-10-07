@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, SetStateAction, RefObject } from "react";
 import type {
   BundleFile,
   BundleDirectory,
@@ -18,6 +18,7 @@ type BundleActionState = {
   movingFileId: string | null;
   savingDocuments: Set<string>;
   loadingDocuments: Set<string>;
+  deletingDirectories?: RefObject<Set<string>>;
 };
 
 type BundleActionSetters = {
@@ -49,6 +50,7 @@ export function useWorkspaceBundleActions(
     movingFileId,
     savingDocuments,
     loadingDocuments,
+    deletingDirectories,
   } = state;
   const {
     setReindexing,
@@ -149,6 +151,7 @@ export function useWorkspaceBundleActions(
   }
 
   async function moveBundleFile(id: string, directory: string) {
+    if ([...(deletingDirectories?.current || [])].some((path) => id.startsWith(`${path}/`) || directory === path || directory.startsWith(`${path}/`))) return;
     const file = files.find((item) => item.id === id);
     const isEditing = groups.some(
       (group) => editingKey === `${group.id}:${id}`,

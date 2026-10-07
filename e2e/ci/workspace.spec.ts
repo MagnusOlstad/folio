@@ -80,7 +80,7 @@ test('opens a path-directed draft from a bundle directory context menu', async (
   }
 })
 
-test('deletes only empty folders from the explorer context menu', async ({ page, request }) => {
+test('recursively deletes folders and closes descendant previews from the explorer context menu', async ({ page, request }) => {
   const token = Date.now().toString(36)
   const emptyFolderName = `empty-${token}`
   const nonemptyFolderName = `kept-${token}`
@@ -98,7 +98,7 @@ test('deletes only empty folders from the explorer context menu', async ({ page,
     await page.getByRole('menuitem', { name: 'Delete', exact: true }).click()
     const emptyDeleteDialog = page.getByRole('dialog', { name: 'Confirm delete' })
     await expect(emptyDeleteDialog).toContainText(`Delete ${emptyFolderName}?`)
-    await expect(emptyDeleteDialog).toContainText('Only an empty folder can be deleted')
+    await expect(emptyDeleteDialog).toContainText('all its contents, including nested folders, hidden files, and non-Markdown files')
     await emptyDeleteDialog.getByRole('button', { name: 'Delete' }).click()
     await expect(emptyFolder).toHaveCount(0)
 
@@ -108,8 +108,10 @@ test('deletes only empty folders from the explorer context menu', async ({ page,
     await page.getByRole('button', { name: 'Save', exact: true }).click()
     const nonemptyFolder = page.locator('.tree-directory').filter({ hasText: nonemptyFolderName })
     await expect(nonemptyFolder).toBeVisible()
+    const nestedFolder = await request.post('/api/file/folder', { data: { directory: `/${nonemptyFolderName}`, name: 'child' } })
+    expect(nestedFolder.ok()).toBeTruthy()
     const createFileResponse = await request.post('/api/file/create', {
-      data: { directory: `/${nonemptyFolderName}`, name: 'keep.md' },
+      data: { directory: `/${nonemptyFolderName}/child`, name: 'keep.md' },
     })
     expect(createFileResponse.ok()).toBeTruthy()
     nonemptyFileId = (await createFileResponse.json()).id
@@ -117,12 +119,18 @@ test('deletes only empty folders from the explorer context menu', async ({ page,
     await expect(page.getByRole('button', { name: 'Todo List', exact: true })).toBeVisible()
     const reloadedNonemptyFolder = page.locator('.tree-directory').filter({ hasText: nonemptyFolderName })
     await expect(reloadedNonemptyFolder).toBeVisible()
+    if (await reloadedNonemptyFolder.getAttribute('aria-expanded') !== 'true') await reloadedNonemptyFolder.click()
+    const childFolder = reloadedNonemptyFolder.locator('..').locator('.tree-directory').filter({ hasText: 'child' })
+    if (await childFolder.getAttribute('aria-expanded') !== 'true') await childFolder.click()
+    await page.getByRole('button', { name: 'keep', exact: true }).click()
+    await expect(page.locator('.editor-tab').filter({ hasText: 'keep' })).toBeVisible()
     await reloadedNonemptyFolder.click({ button: 'right' })
     await page.getByRole('menuitem', { name: 'Delete', exact: true }).click()
     const nonemptyDeleteDialog = page.getByRole('dialog', { name: 'Confirm delete' })
     await nonemptyDeleteDialog.getByRole('button', { name: 'Delete' }).click()
-    await expect(page.locator('.workspace-message')).toContainText('Only an empty folder can be deleted.')
-    await expect(reloadedNonemptyFolder).toBeVisible()
+    await expect(reloadedNonemptyFolder).toHaveCount(0)
+    await expect(page.locator('.editor-tab').filter({ hasText: 'keep' })).toHaveCount(0)
+    expect((await request.get(`/api/file?path=${encodeURIComponent(nonemptyFileId!)}`)).status()).toBe(404)
   } finally {
     if (nonemptyFileId) await request.delete(`/api/note?id=${encodeURIComponent(nonemptyFileId)}`)
     await request.delete(`/api/file/folder?path=${encodeURIComponent(`/${emptyFolderName}`)}`).catch(() => {})

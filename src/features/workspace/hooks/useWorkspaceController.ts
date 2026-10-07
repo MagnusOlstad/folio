@@ -408,6 +408,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
   const previousBundleIdRef = useRef<string | null>(null);
   const switchBundle = useCallback(async (bundleId: string, previousBundleId: string | null) => {
     const revision = ++bundleSwitchRevisionRef.current;
+    documents.deletingDirectories.current = new Set();
+    for (const id of Object.keys(documents.documentRequests.current)) documents.documentRequests.current[id] += 1;
     setHistoryCheckpoint(null);
     explorer.setFilesLoading(true);
     explorer.discovery.clearDiscovery();
@@ -629,7 +631,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
       tabs.openLocalDraft(id);
     },
     deleteLocalDraft: navigation.deleteLocalDraft,
-    deleteFiledNote: navigation.deleteFiledNote,
+    deleteFiledNote: (file) => navigation.deleteFiledNote(file, true),
+    isDocumentDirty: autosave.isDirty,
     exportFile: async (file, format) => {
       const document = await api<ViewerDocument>(`/api/file?path=${encodeURIComponent(file.id)}`);
       await noteExport.exportDocument(document, documents.drafts[file.id], format);
@@ -767,6 +770,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
         },
         closeTab: closeDocumentTab,
         changeDraftContent: (document, content) => {
+          if ([...documents.deletingDirectories.current].some((directory) => document.id.startsWith(`${directory}/`))) return;
           documents.changeDraftContent(document, content);
           if (!isUntitledId(document.id)) {
             checkpointEditedNote(document.id, persistenceBundleId);

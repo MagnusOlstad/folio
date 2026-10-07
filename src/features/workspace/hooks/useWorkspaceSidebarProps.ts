@@ -31,6 +31,7 @@ type Options = {
   exportFile: (file: import("../../../domain/types.ts").BundleFile, format: NoteExportFormat) => Promise<void>;
   bundleSetup: ReturnType<typeof useBundleSetup>;
   openSettings: () => void;
+  isDocumentDirty: (id: string) => boolean;
 };
 
 export function useWorkspaceSidebarProps({
@@ -49,6 +50,7 @@ export function useWorkspaceSidebarProps({
   exportFile,
   bundleSetup,
   openSettings,
+  isDocumentDirty,
 }: Options): {
   sidebar: WorkspaceSidebarProps;
   moveBundleFile: ReturnType<typeof useWorkspaceBundleActions>["moveBundleFile"];
@@ -63,6 +65,7 @@ export function useWorkspaceSidebarProps({
       movingFileId: explorer.movingFileId,
       savingDocuments: documents.savingDocuments,
       loadingDocuments: documents.loadingDocuments,
+      deletingDirectories: documents.deletingDirectories,
     },
     {
       setReindexing: explorer.setReindexing,
@@ -84,6 +87,8 @@ export function useWorkspaceSidebarProps({
   const blockedFileIds = new Set([
     ...documents.savingDocuments,
     ...documents.loadingDocuments,
+    ...(explorer.movingFileId ? [explorer.movingFileId] : []),
+    ...Object.keys(documents.documents).filter(isDocumentDirty),
   ]);
   for (const group of groups) {
     if (documents.editingKey?.startsWith(`${group.id}:`))
@@ -101,6 +106,17 @@ export function useWorkspaceSidebarProps({
     groups,
     editingKey: documents.editingKey,
     savingDocuments: documents.savingDocuments,
+    movingFileId: explorer.movingFileId,
+    documentRequests: documents.documentRequests,
+    documentsRef: documents.documentsRef,
+    draftsRef: documents.draftsRef,
+    deletingDirectories: documents.deletingDirectories,
+    directoryDeletions: documents.directoryDeletions,
+    documentMutationSequence: documents.documentMutationSequence,
+    isDocumentDirty,
+    removeDiscoveryDirectory: discovery.removeDirectory,
+    setLoadingDocuments: documents.setLoadingDocuments,
+    setEditingKey: documents.setEditingKey,
     setFiles: explorer.setFiles,
     setDirectories: explorer.setDirectories,
     setNotes: explorer.setNotes,

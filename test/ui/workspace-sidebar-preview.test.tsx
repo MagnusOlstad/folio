@@ -452,7 +452,7 @@ describe("WorkspaceSidebar preview navigation", () => {
     expect(actions.deleteFile).toHaveBeenCalledWith(expect.objectContaining({ id: "/projects/plan.md" }));
   });
 
-  it("requires confirmation before deleting an empty directory", () => {
+  it("requires confirmation before permanently deleting a directory and its contents", () => {
     const actions: ExplorerFileActions = {
       renameFile: vi.fn().mockResolvedValue(undefined),
       createFile: vi.fn().mockResolvedValue(undefined),
@@ -481,7 +481,7 @@ describe("WorkspaceSidebar preview navigation", () => {
     fireEvent.click(getByRole("menuitem", { name: "Delete" }));
     const dialog = getByRole("dialog", { name: "Confirm delete" });
     expect(dialog).toHaveTextContent("Delete empty?");
-    expect(dialog).toHaveTextContent("Only an empty folder can be deleted");
+    expect(dialog).toHaveTextContent("This permanently deletes this folder and all its contents");
     expect(actions.deleteDirectory).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
     expect(actions.deleteDirectory).toHaveBeenCalledWith("/projects/empty");

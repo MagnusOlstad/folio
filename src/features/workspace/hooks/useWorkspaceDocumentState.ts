@@ -50,6 +50,9 @@ export function useWorkspaceDocumentState({
   const [filingQueues, setFilingQueues] = useState<
     Record<string, FilingQueueEntry[]>
   >({});
+  const directoryDeletions = useRef<Record<string, number>>({});
+  const documentMutationSequence = useRef(0);
+  const deletingDirectories = useRef(new Set<string>());
   const documentRequests = useRef<Record<string, number>>({});
   const saveQueues = useRef<Record<string, Promise<unknown>>>({});
   const draftSyncQueues = useRef<Record<string, Promise<void>>>({});
@@ -191,6 +194,9 @@ export function useWorkspaceDocumentState({
     filingQueues,
     setFilingQueues,
     documentRequests,
+    deletingDirectories,
+    directoryDeletions,
+    documentMutationSequence,
     saveQueues,
     draftSyncQueues,
     filingDraftIds,
