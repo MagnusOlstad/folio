@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.6](https://github.com/MagnusOlstad/folio/compare/v0.7.5...v0.7.6) (2026-10-07)
+
+
+### Bug Fixes
+
+* improve workspace panels and settings ([#112](https://github.com/MagnusOlstad/folio/issues/112)) ([06a7c1d](https://github.com/MagnusOlstad/folio/commit/06a7c1d92997683ea4af369343337826b0158965))
+* use lowercase Fn mark and mixed-case brand name ([#116](https://github.com/MagnusOlstad/folio/issues/116)) ([d43b3f3](https://github.com/MagnusOlstad/folio/commit/d43b3f35f16bfa0c9052b74456f904943ad97cae))
+
 ## [0.7.5](https://github.com/MagnusOlstad/folio/compare/v0.7.4...v0.7.5) (2026-10-06)
 
 
