@@ -25,7 +25,7 @@ export function DocumentPane({
         children
       ) : (
         <div className="editor-placeholder">
-          <span className="empty-mark">F</span>
+          <span className="empty-mark">Fn</span>
           <h1>Open a note.</h1>
           <p>
             Explore the bundle, search by meaning, or ask a question. Every file

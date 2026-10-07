@@ -56,7 +56,7 @@ export function FolioBrand() {
     <div className="brand-group">
       <a className="brand" href="#workspace" aria-label="FolioNotes home">
         <span className="brand-mark" aria-hidden="true">Fn</span>
-        <span>FolioNotes</span>
+        <span>Folio notes</span>
       </a>
     </div>
   );
