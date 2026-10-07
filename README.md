@@ -2,6 +2,8 @@
 
 FolioNotes is a local-first personal notetaker with one Markdown capture field. It preserves the original capture, uses a small local language model to structure it, writes [Open Knowledge Format v0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/main/SPEC.md) concepts, and lets you search or ask questions across your notes.
 
+The [FolioNotes product site](https://folionotes.no) is deployed from `site/` with the GitHub Pages workflow. Before its first deployment, a repository administrator must open [Settings > Pages](https://github.com/MagnusOlstad/folio/settings/pages) and set **Build and deployment > Source** to **GitHub Actions**. After saving that one-time setting, rerun the failed Pages workflow or start it manually from the repository's Actions tab.
+
 ## What is implemented
 
 - Plain Markdown capture with `Cmd/Ctrl + Enter` filing proposals and an in-note confirmation.

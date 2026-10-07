@@ -25,6 +25,33 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
+      - name: Check GitHub Pages configuration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set +e
+          build_type="$(gh api "repos/${GITHUB_REPOSITORY}/pages" --jq '.build_type' 2>&1)"
+          api_status=$?
+          set -e
+
+          if (( api_status != 0 )); then
+            if [[ "$build_type" == *"HTTP 404"* ]]; then
+              echo "::error::GitHub Pages configuration was not found or is not accessible."
+              echo "A repository administrator must verify Pages is enabled and set Build and deployment > Source to GitHub Actions at ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/settings/pages, then rerun this workflow."
+              printf '%s\n' "$build_type"
+            else
+              echo "::error::Could not check the GitHub Pages configuration; the GitHub API request failed."
+              printf '%s\n' "$build_type"
+            fi
+            exit "$api_status"
+          fi
+
+          if [[ "$build_type" != "workflow" ]]; then
+            echo "::error::GitHub Pages Build and deployment > Source must be GitHub Actions (API build_type: ${build_type:-unknown})."
+            echo "Open ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/settings/pages, choose GitHub Actions as the source, then rerun this workflow."
+            exit 1
+          fi
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
