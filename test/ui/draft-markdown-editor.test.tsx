@@ -133,6 +133,8 @@ describe("DraftMarkdownEditor", () => {
     act(() => view.dispatch({ changes: { from: 11, insert: "!" } }));
     expect(onChange).toHaveBeenLastCalledWith("\nLegacy note!");
     expect(onSelectionChange).toHaveBeenLastCalledWith(7, 7);
+    act(() => view.dispatch({ selection: { anchor: 2 } }));
+    expect(onSelectionChange).toHaveBeenLastCalledWith(3, 3);
   });
 
   it("translates saved body selections after filing guidance changes", () => {
@@ -224,6 +226,71 @@ describe("DraftMarkdownEditor", () => {
     );
 
     fireEvent.click(screen.getByLabelText("Toggle task on line 1"));
+    expect(onToggleTask).toHaveBeenCalledWith(2, true);
+  });
+});
+
+describe("draft synchronization and composition", () => {
+  it("keeps unacknowledged body edits when filing guidance changes", () => {
+    const onChange = vi.fn();
+    const onSelectionChange = vi.fn();
+    const { rerender } = render(
+      <DraftMarkdownEditor onSelectionChange={onSelectionChange} value={"Hint\nBody"} onChange={onChange} onFile={vi.fn()} ariaLabel="Delayed draft" />,
+    );
+    const view = EditorView.findFromDOM(screen.getByLabelText("Delayed draft"));
+    act(() => view.dispatch({ changes: { from: 4, insert: " latest" } }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Filing guidance" }), { target: { value: "New hint" } });
+    expect(onChange).toHaveBeenLastCalledWith("New hint\nBody latest");
+    act(() => view.dispatch({ selection: { anchor: 2 } }));
+    expect(onSelectionChange).toHaveBeenLastCalledWith(11, 11);
+    act(() => view.dispatch({ changes: { from: view.state.doc.length, insert: "!" } }));
+    expect(onChange).toHaveBeenLastCalledWith("New hint\nBody latest!");
+
+    rerender(<DraftMarkdownEditor value={"External hint\nReplacement"} onChange={onChange} onSelectionChange={onSelectionChange} onFile={vi.fn()} ariaLabel="Delayed draft" />);
+    expect(onSelectionChange).toHaveBeenLastCalledWith(16, 16);
+    fireEvent.change(screen.getByRole("textbox", { name: "Filing guidance" }), { target: { value: "Updated external hint" } });
+    expect(onChange).toHaveBeenLastCalledWith("Updated external hint\nReplacement");
+  });
+
+  it("leaves IME confirmation keys in filing guidance", () => {
+    const onFile = vi.fn();
+    render(<DraftMarkdownEditor value={"Hint\nBody"} onChange={vi.fn()} onFile={onFile} ariaLabel="Composed draft" />);
+    const guidance = screen.getByRole("textbox", { name: "Filing guidance" });
+    guidance.focus();
+    fireEvent.keyDown(guidance, { key: "Enter", metaKey: true, isComposing: true });
+    fireEvent.keyDown(guidance, { key: "Enter", keyCode: 229 });
+    fireEvent.keyDown(guidance, { key: "Escape", isComposing: true });
+    expect(onFile).not.toHaveBeenCalled();
+    expect(guidance).toHaveFocus();
+  });
+});
+
+describe("delayed draft serialization offsets", () => {
+  it("keeps pending guidance through delayed echoes and accepts acknowledged guidance restores", () => {
+    const onChange = vi.fn();
+    const onSelectionChange = vi.fn();
+    const props = { onChange, onSelectionChange, onFile: vi.fn(), ariaLabel: "Draft echoes" };
+    const { rerender } = render(<DraftMarkdownEditor {...props} value={"Hint\nBody"} />);
+    const view = EditorView.findFromDOM(screen.getByLabelText("Draft echoes"));
+    const guidance = screen.getByRole("textbox", { name: "Filing guidance" });
+    fireEvent.change(guidance, { target: { value: "First hint" } });
+    fireEvent.change(guidance, { target: { value: "Newest hint" } });
+    rerender(<DraftMarkdownEditor {...props} value={"First hint\nBody"} />);
+    act(() => view.dispatch({ selection: { anchor: 2 } }));
+    expect(onSelectionChange).toHaveBeenLastCalledWith(14, 14);
+    rerender(<DraftMarkdownEditor {...props} value={"Newest hint\nBody"} />);
+    rerender(<DraftMarkdownEditor {...props} value={"First hint\nBody"} />);
+    expect(onSelectionChange).toHaveBeenLastCalledWith(13, 13);
+    expect(onChange).toHaveBeenCalledTimes(2);
+    act(() => view.dispatch({ changes: { from: 4, insert: "!" } }));
+    expect(onChange).toHaveBeenLastCalledWith("First hint\nBody!");
+  });
+
+  it("translates legacy task lines after the first local serialization", () => {
+    const onToggleTask = vi.fn();
+    render(<DraftMarkdownEditor value="- [ ] Task" onChange={vi.fn()} onFile={vi.fn()} onToggleTask={onToggleTask} ariaLabel="Legacy task" />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Filing guidance" }), { target: { value: "Hint" } });
+    fireEvent.click(screen.getByRole("checkbox"));
     expect(onToggleTask).toHaveBeenCalledWith(2, true);
   });
 });

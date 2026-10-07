@@ -124,3 +124,24 @@ describe("numbered list editing", () => {
     )).toBe("1. first\n  1. first subpoint\n  2. second subpoint\n2. second\n  1. first subpoint under second");
   });
 });
+
+describe("ordered list syntax boundaries", () => {
+  it("leaves fenced, quoted fenced, and indented code unchanged", () => {
+    const value = "1. one\n4. two\n\n```md\n1. example\n8. example\n```\n\n> ~~~\n> 1. example\n> 8. example\n> ~~~\n\n    1. example\n    8. example";
+    expect(normalizeLiveMarkdownOrderedLists(value)).toBe(value.replace("4. two", "2. two"));
+  });
+
+  it("preserves independent starting numbers after prose and a different delimiter", () => {
+    const value = "10. tenth\n14. next\n\nA new paragraph\n\n20. restart\n25. next\n1) another list\n5) next";
+    expect(normalizeLiveMarkdownOrderedLists(value)).toBe("10. tenth\n11. next\n\nA new paragraph\n\n20. restart\n21. next\n1) another list\n2) next");
+  });
+
+  it.each([[-1, -1], [0, 100], [Number.NaN, Number.NaN], [2.5, 2.5], [5, 2]])(
+    "rejects invalid edit ranges %s through %s",
+    (from, to) => {
+      expect(continueLiveMarkdownList("1. first", from, to)).toBeNull();
+      expect(insertLiveMarkdownListLineBreak("1. first", from, to)).toBeNull();
+      expect(changeLiveMarkdownListIndentation("1. first", { from, to }, "indent")).toBeNull();
+    },
+  );
+});
