@@ -1,5 +1,4 @@
 import {
-  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -11,10 +10,12 @@ import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import type { PluggableList } from "unified";
 import type { ViewerDocument } from "../../../domain/types.ts";
 import { conceptUrl, resolveBundleLink } from "../../../lib/paths.ts";
 import { sourcePosition } from "../../../lib/workspace.ts";
 import { folioMarkdown } from "../model/folio-markdown.ts";
+import { readonlyMarkdownSearch } from "../model/readonly-markdown-search.ts";
 
 type RenderedMarkdownProps = {
   document: ViewerDocument;
@@ -41,27 +42,27 @@ export function RenderedMarkdown({
 }: RenderedMarkdownProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
-  const findResultRef = useRef<HTMLSpanElement>(null);
   const findScrollTopRef = useRef(0);
   const matchesRef = useRef<HTMLElement[]>([]);
-  const activeMatchRef = useRef(0);
+  const [findResult, setFindResult] = useState({
+    index: 0,
+    count: 0,
+    content: document.content,
+    query: "",
+  });
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [findLayer, setFindLayer] = useState<HTMLElement | null>(null);
 
-  const updateActiveMatch = useCallback((index: number) => {
-    const matches = matchesRef.current;
-    for (const [matchIndex, match] of matches.entries())
-      match.classList.toggle("active", matchIndex === index);
-    const result = findResultRef.current;
-    if (result)
-      result.textContent = matches.length
-        ? `${index + 1} of ${matches.length}`
-        : findQuery
-          ? "No matches"
-          : "";
-    matches[index]?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [findQuery]);
+  const searchQuery = findOpen ? findQuery : "";
+  const activeIndex =
+    findResult.content === document.content && findResult.query === searchQuery
+      ? findResult.index
+      : 0;
+  const searchPlugins = useMemo<PluggableList>(
+    () => [[readonlyMarkdownSearch, { query: searchQuery, activeIndex }]],
+    [searchQuery, activeIndex],
+  );
 
   useEffect(() => {
     const content = contentRef.current;
@@ -91,57 +92,48 @@ export function RenderedMarkdown({
   }, [findOpen]);
 
   useLayoutEffect(() => {
-    const content = contentRef.current;
-    if (!content) return;
-    for (const mark of content.querySelectorAll("mark.readonly-search-match")) {
-      const parent = mark.parentElement;
-      mark.replaceWith(window.document.createTextNode(mark.textContent ?? ""));
-      parent?.normalize();
-    }
-    matchesRef.current = [];
-    activeMatchRef.current = 0;
-    if (!findQuery) {
-      updateActiveMatch(0);
-      return;
-    }
-
-    const query = findQuery.toLocaleLowerCase();
-    const textNodes: Text[] = [];
-    const walker = window.document.createTreeWalker(
-      content,
-      NodeFilter.SHOW_TEXT,
+    matchesRef.current = Array.from(
+      contentRef.current?.querySelectorAll<HTMLElement>(
+        "mark.readonly-search-match",
+      ) ?? [],
     );
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      if (node.nodeValue?.toLocaleLowerCase().includes(query))
-        textNodes.push(node as Text);
-    }
-    for (const node of textNodes) {
-      const text = node.nodeValue ?? "";
-      const lowercase = text.toLocaleLowerCase();
-      const fragment = window.document.createDocumentFragment();
-      let offset = 0;
-      for (let match = lowercase.indexOf(query, offset); match !== -1; ) {
-        fragment.append(text.slice(offset, match));
-        const highlight = window.document.createElement("mark");
-        highlight.className = "readonly-search-match";
-        highlight.textContent = text.slice(match, match + findQuery.length);
-        fragment.append(highlight);
-        matchesRef.current.push(highlight);
-        offset = match + findQuery.length;
-        match = lowercase.indexOf(query, offset);
-      }
-      fragment.append(text.slice(offset));
-      node.replaceWith(fragment);
-    }
-    updateActiveMatch(0);
-  }, [document.content, findOpen, findQuery, updateActiveMatch]);
+  });
+
+  useLayoutEffect(() => {
+    const count = matchesRef.current.length;
+    setFindResult((previous) => {
+      const index =
+        previous.content === document.content && previous.query === searchQuery
+          ? previous.index
+          : 0;
+      if (
+        previous.count === count &&
+        previous.content === document.content &&
+        previous.query === searchQuery
+      )
+        return previous;
+      return { index, count, content: document.content, query: searchQuery };
+    });
+  }, [document.content, searchQuery]);
+
+  useLayoutEffect(() => {
+    if (findOpen)
+      matchesRef.current[activeIndex]?.scrollIntoView({
+        block: "center",
+        behavior: "smooth",
+      });
+  }, [document.content, searchQuery, findOpen, activeIndex]);
 
   function moveMatch(direction: 1 | -1) {
     const count = matchesRef.current.length;
     if (!count) return;
-    activeMatchRef.current =
-      (activeMatchRef.current + direction + count) % count;
-    updateActiveMatch(activeMatchRef.current);
+    setFindResult((previous) => ({
+      ...previous,
+      count,
+      content: document.content,
+      query: searchQuery,
+      index: (previous.index + direction + count) % count,
+    }));
   }
 
   const components = useMemo<Components>(
@@ -213,7 +205,6 @@ export function RenderedMarkdown({
         ref={findInputRef}
         value={findQuery}
         onChange={(event) => {
-          activeMatchRef.current = 0;
           setFindQuery(event.target.value);
         }}
         onKeyDown={(event) => {
@@ -227,7 +218,13 @@ export function RenderedMarkdown({
           }
         }}
       />
-      <span ref={findResultRef} aria-live="polite" />
+      <span aria-live="polite">
+        {findResult.count
+          ? `${activeIndex + 1} of ${findResult.count}`
+          : findQuery
+            ? "No matches"
+            : ""}
+      </span>
       <button type="button" onClick={() => moveMatch(-1)}>
         Previous
       </button>
@@ -242,6 +239,7 @@ export function RenderedMarkdown({
       {findPanel && findLayer ? createPortal(findPanel, findLayer) : findPanel}
       <ReactMarkdown
         remarkPlugins={[folioMarkdown, remarkGfm, remarkBreaks]}
+        rehypePlugins={searchPlugins}
         components={components}
       >
         {document.content}

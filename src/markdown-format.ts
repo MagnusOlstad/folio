@@ -17,6 +17,16 @@ export function applyFormatMarker(
   selectionEnd: number,
   marker: FormatMarker,
 ): FormatResult {
+  // Selection offsets can originate in restored state rather than the current
+  // document. Clamp and order them before slicing so no text is duplicated.
+  const clamp = (position: number) => Number.isFinite(position)
+    ? Math.max(0, Math.min(Math.trunc(position), value.length))
+    : 0
+  const first = clamp(selectionStart)
+  const last = clamp(selectionEnd)
+  selectionStart = Math.min(first, last)
+  selectionEnd = Math.max(first, last)
+
   if (marker === 'link') {
     if (selectionStart === selectionEnd) {
       const insertion = '[]()'

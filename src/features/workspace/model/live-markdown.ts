@@ -5,6 +5,8 @@ import {
   StateField,
 } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
+import { markdownLanguage } from "@codemirror/lang-markdown";
+import { defaultUrlTransform } from "react-markdown";
 import {
   Decoration,
   EditorView,
@@ -29,10 +31,10 @@ export type LiveMarkdownListIndentChange = {
 
 type LiveMarkdownConfiguration = {
   callbacks: MutableRefObject<LiveMarkdownCallbacks>;
-  readOnly?: boolean;
 };
 
 type SourceLink = { from: number; to: number; href: string };
+type MarkdownLink = SourceLink & { textFrom: number; textTo: number };
 type SourceRange = { from: number; to: number };
 
 const inlineSyntaxClasses: Readonly<Record<string, string>> = {
@@ -48,7 +50,7 @@ const inlineMarkerNodes = new Set([
   "CodeMark",
 ]);
 
-const setLiveMarkdownFocus = StateEffect.define<boolean>();
+export const setLiveMarkdownFocus = StateEffect.define<boolean>();
 
 function isClosingCodeFence(line: string, openingMarker: string) {
   const closingMarker = /^\s*(`+|~+)\s*$/.exec(line)?.[1];
@@ -90,7 +92,8 @@ class TaskCheckboxWidget extends WidgetType {
   }
 
   eq(other: TaskCheckboxWidget) {
-    return other.checked === this.checked && other.lineNumber === this.lineNumber;
+    return other.checked === this.checked && other.lineNumber === this.lineNumber &&
+      other.readOnly === this.readOnly && other.callbacks === this.callbacks;
   }
 
   toDOM() {
@@ -129,7 +132,8 @@ class ListMarkerWidget extends WidgetType {
   }
 
   eq(other: ListMarkerWidget) {
-    return other.marker === this.marker && other.nested === this.nested;
+    return other.marker === this.marker && other.nested === this.nested &&
+      other.contentStart === this.contentStart;
   }
 
   toDOM() {
@@ -173,21 +177,71 @@ function orderedListLetter(number: number) {
 
 function addLinkDecorations(
   ranges: Array<Range<Decoration>>,
-  line: string,
-  offset: number,
+  links: MarkdownLink[],
   reveal: (from: number, to: number) => boolean,
 ) {
-  for (const match of line.matchAll(/\[([^\]]+)\]\(([^)\s]+)(?:\s+[^)]*)?\)/g)) {
-    const start = offset + (match.index ?? 0);
-    const textStart = start + 1;
-    const textEnd = textStart + match[1].length;
-    const markersAreHidden = !reveal(start, start + match[0].length);
-    addHidden(ranges, start, textStart, markersAreHidden);
-    addHidden(ranges, textEnd, start + match[0].length, markersAreHidden);
-    ranges.push(
-      Decoration.mark({ class: "cm-live-markdown-link" }).range(textStart, textEnd),
-    );
+  for (const link of links) {
+    const markersAreHidden = !reveal(link.from, link.to);
+    addHidden(ranges, link.from, link.textFrom, markersAreHidden);
+    addHidden(ranges, link.textTo, link.to, markersAreHidden);
+    if (link.textFrom < link.textTo)
+      ranges.push(
+        Decoration.mark({ class: "cm-live-markdown-link" }).range(link.textFrom, link.textTo),
+      );
   }
+}
+
+function decodeMarkdownLinkText(value: string) {
+  return value.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~])|&(?:#[xX][\da-fA-F]+|#\d+|[a-zA-Z][a-zA-Z\d]+);/g, (entity, escaped: string | undefined) => {
+    if (escaped !== undefined) return escaped;
+    // Decode only an entity token, never arbitrary markup from a destination.
+    const decoder = document.createElement("textarea");
+    decoder.innerHTML = entity;
+    return decoder.value;
+  });
+}
+
+function normalizeLinkLabel(value: string) {
+  return decodeMarkdownLinkText(value).trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function markdownLinks(state: EditorState): MarkdownLink[] {
+  const tree = syntaxTree(state);
+  const references = new Map<string, string>();
+  const destination = (from: number, to: number) => {
+    let href = state.sliceDoc(from, to);
+    if (href.startsWith("<") && href.endsWith(">")) href = href.slice(1, -1);
+    return defaultUrlTransform(decodeMarkdownLinkText(href));
+  };
+  tree.iterate({
+    enter(node) {
+      if (node.name !== "LinkReference") return;
+      const label = node.node.getChild("LinkLabel");
+      const url = node.node.getChild("URL");
+      if (!label || !url) return;
+      const key = normalizeLinkLabel(state.sliceDoc(label.from + 1, label.to - 1));
+      if (!references.has(key)) references.set(key, destination(url.from, url.to));
+    },
+  });
+  const links: MarkdownLink[] = [];
+  tree.iterate({
+    enter(node) {
+      if (node.name !== "Link" || isCodeOrMarkdownLink(node.node)) return;
+      const opening = node.node.firstChild;
+      let closing = opening?.nextSibling;
+      while (closing && !(closing.name === "LinkMark" && state.sliceDoc(closing.from, closing.to) === "]"))
+        closing = closing.nextSibling;
+      if (!opening || !closing) return;
+      const url = node.node.getChild("URL");
+      const reference = node.node.getChild("LinkLabel");
+      const label = reference && reference.to - reference.from > 2
+        ? state.sliceDoc(reference.from + 1, reference.to - 1)
+        : state.sliceDoc(opening.to, closing.from);
+      const href = url ? destination(url.from, url.to) : references.get(normalizeLinkLabel(label));
+      if (href) links.push({ from: node.from, to: node.to, textFrom: opening.to, textTo: closing.from, href });
+    },
+  });
+  return links;
 }
 
 type MarkdownSyntaxNode = {
@@ -200,7 +254,7 @@ type MarkdownSyntaxNode = {
 function isCodeOrMarkdownLink(node: MarkdownSyntaxNode) {
   let current = node.parent;
   while (current) {
-    if (current.name === "Link" || current.name === "InlineCode" || current.name === "FencedCode")
+    if (current.name === "Link" || current.name === "Image" || current.name === "InlineCode" || current.name === "FencedCode" || current.name === "CodeBlock")
       return true;
     current = current.parent;
   }
@@ -219,7 +273,7 @@ function buildDecorations(
   focused: boolean,
 ): DecorationSet {
   const reveal = (from: number, to: number) => {
-    if (configuration.readOnly) return false;
+    if (state.readOnly) return false;
     if (!focused) return false;
     return state.selection.ranges.some((range) => {
       if (range.empty) return range.from >= from && range.from <= to;
@@ -228,10 +282,14 @@ function buildDecorations(
   };
   const ranges: Array<Range<Decoration>> = [];
   const fencedCodeRanges: SourceRange[] = [];
+  const indentedCodeRanges: SourceRange[] = [];
   const headingLevels = new Map<number, number>();
   const horizontalRuleLines = new Set<number>();
   syntaxTree(state).iterate({
     enter: (node) => {
+      if (node.name === "CodeBlock")
+        indentedCodeRanges.push({ from: node.from, to: node.to });
+
       if (node.name === "FencedCode")
         fencedCodeRanges.push({ from: node.from, to: node.to });
 
@@ -301,6 +359,10 @@ function buildDecorations(
       addHidden(ranges, line.from, line.to, fenceHidden);
       continue;
     }
+    if (indentedCodeRanges.some((range) => line.to >= range.from && line.from <= range.to)) {
+      ranges.push(Decoration.line({ class: "cm-live-markdown-code-block" }).range(line.from));
+      continue;
+    }
     const headingLevel = headingLevels.get(lineNumber);
     const horizontalRule = horizontalRuleLines.has(lineNumber);
     const quote = /^(\s*>\s?)+/.exec(text);
@@ -351,7 +413,7 @@ function buildDecorations(
                 task[1].toLowerCase() === "x",
                 lineNumber,
                 configuration.callbacks,
-                Boolean(configuration.readOnly),
+                state.readOnly,
               ),
               side: 1,
             }).range(markerStart, line.from + task[0].length),
@@ -386,8 +448,8 @@ function buildDecorations(
       );
     }
     if (/^```/.test(text)) addHidden(ranges, line.from, line.to, !reveal(line.from, line.to));
-    addLinkDecorations(ranges, text, line.from, reveal);
   }
+  addLinkDecorations(ranges, markdownLinks(state), reveal);
   return Decoration.set(ranges, true);
 }
 
@@ -395,13 +457,8 @@ type DecorationFieldValue = { decorations: DecorationSet; focused: boolean };
 
 function sourceLinkAt(view: EditorView, position: number): SourceLink | null {
   const documentText = view.state.doc.toString();
-  const lineStart = documentText.lastIndexOf("\n", Math.max(0, position - 1)) + 1;
-  const lineEnd = documentText.indexOf("\n", position);
-  const line = documentText.slice(lineStart, lineEnd === -1 ? documentText.length : lineEnd);
-  for (const match of line.matchAll(/\[([^\]]+)\]\(([^)\s]+)(?:\s+[^)]*)?\)/g)) {
-    const from = lineStart + (match.index ?? 0);
-    const to = from + match[0].length;
-    if (position >= from && position <= to) return { from, to, href: match[2] };
+  for (const link of markdownLinks(view.state)) {
+    if (position >= link.from && position < link.to) return link;
   }
   for (const resolveDirection of [-1, 1] as const) {
     let node: MarkdownSyntaxNode | null = syntaxTree(view.state).resolveInner(
@@ -427,9 +484,9 @@ export function liveMarkdownExtensions(configuration: LiveMarkdownConfiguration)
     update(value, transaction) {
       let focused = value.focused;
       for (const effect of transaction.effects) {
-        if (effect.is(setLiveMarkdownFocus)) focused = configuration.readOnly ? false : effect.value;
+        if (effect.is(setLiveMarkdownFocus)) focused = transaction.state.readOnly ? false : effect.value;
       }
-      if (focused === value.focused && !transaction.docChanged && !transaction.selection)
+      if (focused === value.focused && !transaction.docChanged && !transaction.selection && !transaction.reconfigured)
         return value;
       return {
         focused,
@@ -443,11 +500,11 @@ export function liveMarkdownExtensions(configuration: LiveMarkdownConfiguration)
     decorations,
     EditorView.domEventHandlers({
       focus: (_event, view) => {
-        if (!configuration.readOnly) view.dispatch({ effects: setLiveMarkdownFocus.of(true) });
+        if (!view.state.readOnly) view.dispatch({ effects: setLiveMarkdownFocus.of(true) });
         return false;
       },
       blur: (_event, view) => {
-        if (!configuration.readOnly) view.dispatch({ effects: setLiveMarkdownFocus.of(false) });
+        if (!view.state.readOnly) view.dispatch({ effects: setLiveMarkdownFocus.of(false) });
         return false;
       },
       mousedown: (event, view) => {
@@ -464,12 +521,16 @@ export function liveMarkdownExtensions(configuration: LiveMarkdownConfiguration)
   ];
 }
 
+function validSelection(value: string, from: number, to: number) {
+  return Number.isInteger(from) && Number.isInteger(to) && from >= 0 && to >= from && to <= value.length;
+}
+
 export function continueLiveMarkdownList(
   value: string,
   selectionStart: number,
   selectionEnd: number,
 ) {
-  if (selectionStart !== selectionEnd) return null;
+  if (!validSelection(value, selectionStart, selectionEnd) || selectionStart !== selectionEnd) return null;
   const lineStart = value.lastIndexOf("\n", selectionStart - 1) + 1;
   const nextBreak = value.indexOf("\n", selectionStart);
   const lineEnd = nextBreak === -1 ? value.length : nextBreak;
@@ -532,6 +593,7 @@ export function insertLiveMarkdownListLineBreak(
   selectionStart: number,
   selectionEnd: number,
 ) {
+  if (!validSelection(value, selectionStart, selectionEnd)) return null;
   const lineStart = value.lastIndexOf("\n", selectionStart - 1) + 1;
   const lineEnd = value.indexOf("\n", selectionStart);
   const line = value.slice(lineStart, lineEnd === -1 ? value.length : lineEnd);
@@ -570,10 +632,26 @@ export type LiveMarkdownOrderedListChange = {
  * Nested sequences are tracked independently and may contain bullet sublists.
  */
 export function liveMarkdownOrderedListChanges(value: string) {
+  // Folio uses two-space nesting. Preserve that convention, while relying on
+  // Markdown syntax to identify actual list markers and their containing blocks.
+  const contexts = new Map<number, number>();
+  markdownLanguage.parser.parse(value).iterate({
+    enter(node) {
+      if (node.name !== "ListMark" || node.node.parent?.name !== "ListItem") return;
+      let parent: typeof node.node.parent = node.node.parent;
+      let context = parent.from;
+      while (parent) {
+        if (parent.name === "OrderedList" || parent.name === "BulletList") context = parent.from;
+        parent = parent.parent;
+      }
+      contexts.set(node.from, context);
+    },
+  });
   const lines = value.split("\n");
   const sequences = new Map<string, OrderedListSequence>();
   const changes: LiveMarkdownOrderedListChange[] = [];
   let lineStart = 0;
+  let currentContext: number | undefined;
 
   for (const line of lines) {
     if (!line.trim()) {
@@ -582,10 +660,13 @@ export function liveMarkdownOrderedListChanges(value: string) {
       continue;
     }
     const item = parseListItem(line);
-    if (!item) {
+    const context = item ? contexts.get(lineStart + item.prefix.length) : undefined;
+    if (!item || context === undefined) {
       lineStart += line.length + 1;
       continue;
     }
+    if (context !== currentContext) sequences.clear();
+    currentContext = context;
     const ordered = /^\d/.test(item.marker);
     const indentation = item.prefix.replace(/(?:[ \t]*>[ \t]*)+/g, "");
     const depth = Math.floor(indentation.replace(/\t/g, "  ").length / 2);
@@ -725,12 +806,7 @@ export function changeLiveMarkdownListIndentation(
   selection: LiveMarkdownSelection,
   direction: LiveMarkdownListIndentDirection,
 ): LiveMarkdownListIndentChange | null {
-  if (
-    selection.from < 0 ||
-    selection.to < selection.from ||
-    selection.to > value.length
-  )
-    return null;
+  if (!validSelection(value, selection.from, selection.to)) return null;
 
   const { indexes, starts } = selectedLineIndexes(value, selection);
   const edits: ListIndentEdit[] = [];

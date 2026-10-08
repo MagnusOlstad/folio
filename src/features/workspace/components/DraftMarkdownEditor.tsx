@@ -1,3 +1,5 @@
+import { Text } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 import { useId, useLayoutEffect, useRef } from "react";
 import {
   draftFilingGuidance,
@@ -36,7 +38,10 @@ export function DraftMarkdownEditor({
   const serializedGuidance = draftFilingGuidance(value);
   const body = filedDraftContent(value);
   const serializedOffset = hasSerializedGuidance ? serializedGuidance.length + 1 : 0;
-  const lineOffset = hasSerializedGuidance ? 1 : 0;
+  const guidanceRef = useRef(serializedGuidance);
+  const serializedRef = useRef(hasSerializedGuidance);
+  const receivedValueRef = useRef(value);
+  const pendingDraftsRef = useRef<Array<{ guidance: string; body: Text }>>([]);
   const id = useId();
   const shellRef = useRef<HTMLDivElement>(null);
   const guidanceInputRef = useRef<HTMLTextAreaElement>(null);
@@ -44,6 +49,31 @@ export function DraftMarkdownEditor({
     from: Math.max(0, (initialSelection?.from ?? serializedOffset) - serializedOffset),
     to: Math.max(0, (initialSelection?.to ?? serializedOffset) - serializedOffset),
   });
+
+  useLayoutEffect(() => {
+    if (receivedValueRef.current === value) return;
+    receivedValueRef.current = value;
+    const incomingBody = Text.of(body.split("\n"));
+    const pendingDrafts = pendingDraftsRef.current;
+    if (hasSerializedGuidance) {
+      for (let index = pendingDrafts.length - 1; index >= 0; index -= 1) {
+        const draft = pendingDrafts[index];
+        if (draft.guidance !== serializedGuidance || !draft.body.eq(incomingBody)) continue;
+        pendingDrafts.splice(0, index + 1);
+        return;
+      }
+    }
+    pendingDrafts.length = 0;
+    guidanceRef.current = serializedGuidance;
+    serializedRef.current = hasSerializedGuidance;
+    // Child reconciliation may have reported a selection before this layout
+    // effect refreshed the guidance. Publish the same range with the new offset.
+    const offset = hasSerializedGuidance ? serializedGuidance.length + 1 : 0;
+    onSelectionChange?.(
+      noteSelectionRef.current.from + offset,
+      noteSelectionRef.current.to + offset,
+    );
+  }, [value, body, hasSerializedGuidance, serializedGuidance, onSelectionChange]);
 
   useLayoutEffect(() => {
     const input = guidanceInputRef.current;
@@ -59,9 +89,27 @@ export function DraftMarkdownEditor({
     return () => observer.disconnect();
   }, [serializedGuidance]);
 
+  function currentBodyDocument() {
+    const content = shellRef.current?.querySelector<HTMLElement>(".cm-content");
+    return content ? EditorView.findFromDOM(content)?.state.doc ?? Text.of(body.split("\n"))
+      : Text.of(body.split("\n"));
+  }
+
+  function rememberDraft(guidance: string, document: Text) {
+    guidanceRef.current = guidance;
+    serializedRef.current = true;
+    // Body snapshots share CodeMirror's immutable document structure.
+    pendingDraftsRef.current.push({ guidance, body: document });
+    if (pendingDraftsRef.current.length > 128) pendingDraftsRef.current.shift();
+  }
+
   function updateGuidance(nextValue: string) {
     const nextGuidance = nextValue.replace(/[\r\n]+/g, " ");
-    onChange(serializeDraft(nextGuidance, body));
+    // The editor can be ahead of a delayed parent echo. Serialize its current
+    // document rather than replacing that work with the older body prop.
+    const document = currentBodyDocument();
+    rememberDraft(nextGuidance, document);
+    onChange(serializeDraft(nextGuidance, document.toString()));
     const nextOffset = nextGuidance.length + 1;
     onSelectionChange?.(
       noteSelectionRef.current.from + nextOffset,
@@ -104,6 +152,7 @@ export function DraftMarkdownEditor({
             placeholder="Optional: title, folder, or filing context…"
             onChange={(event) => updateGuidance(event.currentTarget.value)}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing || event.keyCode === 229) return;
               if ((event.metaKey || event.ctrlKey) && (event.key === "Enter" || event.key.toLowerCase() === "s")) {
                 event.preventDefault();
                 onFile();
@@ -118,8 +167,9 @@ export function DraftMarkdownEditor({
       <LiveMarkdownEditor
         value={body}
         onChange={(nextBody) => {
-          onChange(serializeDraft(serializedGuidance, nextBody));
-          const nextOffset = serializedGuidance.length + 1;
+          rememberDraft(guidanceRef.current, currentBodyDocument());
+          onChange(serializeDraft(guidanceRef.current, nextBody));
+          const nextOffset = guidanceRef.current.length + 1;
           onSelectionChange?.(
             noteSelectionRef.current.from + nextOffset,
             noteSelectionRef.current.to + nextOffset,
@@ -127,7 +177,7 @@ export function DraftMarkdownEditor({
         }}
         onFile={onFile}
         onOpenLink={onOpenLink}
-        onToggleTask={(lineNumber, checked) => onToggleTask?.(lineNumber + lineOffset, checked)}
+        onToggleTask={(lineNumber, checked) => onToggleTask?.(lineNumber + (serializedRef.current ? 1 : 0), checked)}
         initialSelection={initialSelection
           ? {
               from: Math.max(0, initialSelection.from - serializedOffset),
@@ -136,7 +186,8 @@ export function DraftMarkdownEditor({
           : undefined}
         onSelectionChange={(from, to) => {
           noteSelectionRef.current = { from, to };
-          onSelectionChange?.(from + serializedOffset, to + serializedOffset);
+          const currentOffset = serializedRef.current ? guidanceRef.current.length + 1 : 0;
+          onSelectionChange?.(from + currentOffset, to + currentOffset);
         }}
         focusRequestId={focusRequestId}
         onFocusRequestConsumed={onFocusRequestConsumed}

@@ -62,3 +62,15 @@ test('wraps selections that span line breaks', () => {
   assert.equal(result.value, '**one\ntwo**')
   assert.deepEqual([result.selectionStart, result.selectionEnd], [2, 9])
 })
+
+test('clamps stale, reversed, and non-finite selections without duplicating text', () => {
+  assert.deepEqual(applyFormatMarker('hello', -10, 50, 'bold'), {
+    value: '**hello**', selectionStart: 2, selectionEnd: 7,
+  })
+  assert.deepEqual(applyFormatMarker('hello', 5, 0, 'italic'), {
+    value: '*hello*', selectionStart: 1, selectionEnd: 6,
+  })
+  assert.deepEqual(applyFormatMarker('hello', Number.NaN, Number.POSITIVE_INFINITY, 'link'), {
+    value: '[]()hello', selectionStart: 1, selectionEnd: 1,
+  })
+})

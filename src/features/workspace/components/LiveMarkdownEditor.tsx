@@ -7,9 +7,18 @@ import {
   historyKeymap,
   indentLess,
   indentMore,
+  isolateHistory,
   selectAll,
 } from "@codemirror/commands";
-import { Compartment, EditorSelection, EditorState } from "@codemirror/state";
+import {
+  Annotation,
+  Compartment,
+  EditorSelection,
+  EditorState,
+  Text,
+  Transaction,
+  type Extension,
+} from "@codemirror/state";
 import { EditorView, keymap, panels, placeholder as editorPlaceholder } from "@codemirror/view";
 import {
   useEffect,
@@ -23,9 +32,21 @@ import {
   insertLiveMarkdownListLineBreak,
   liveMarkdownOrderedListChanges,
   liveMarkdownExtensions,
+  setLiveMarkdownFocus,
   type LiveMarkdownCallbacks,
 } from "../model/live-markdown.ts";
 import { createNoteSearchPanel } from "../model/note-search-panel.ts";
+
+// Prop replacements are authoritative snapshots, not user edits.
+const externalMarkdownUpdate = Annotation.define<boolean>();
+// Task callbacks own persistence. Record the user edit in history without sending
+// a second onChange notification for the same click or keyboard command.
+const localTaskUpdate = Annotation.define<boolean>();
+const MAX_LOCAL_ECHOES = 128;
+
+function clampPosition(position: number, length: number) {
+  return Number.isFinite(position) ? Math.max(0, Math.min(Math.trunc(position), length)) : 0;
+}
 
 export type LiveMarkdownEditorProps = {
   value: string;
@@ -92,14 +113,14 @@ function changeIndentation(
   return direction === "indent" ? indentMore(view) : indentLess(view);
 }
 
-function isInsideMarkdownCode(view: EditorView) {
+function isInsideMarkdownCode(view: EditorView, position = view.state.selection.main.from) {
   const initialNode = syntaxTree(view.state).resolveInner(
-    view.state.selection.main.from,
+    position,
     -1,
   );
   let node: typeof initialNode | null = initialNode;
   while (node) {
-    if (node.name === "FencedCode" || node.name === "InlineCode") return true;
+    if (node.name === "FencedCode" || node.name === "CodeBlock" || node.name === "InlineCode") return true;
     node = node.parent;
   }
   return false;
@@ -133,7 +154,22 @@ export function LiveMarkdownEditor({
   const onToggleTaskRef = useRef(onToggleTask);
   const onSelectionChangeRef = useRef(onSelectionChange);
   const initialSelectionRef = useRef(initialSelection);
-  const pendingLocalValuesRef = useRef<string[]>([]);
+  // CodeMirror Text shares unchanged document structure between edits. Keep a
+  // bounded window of unacknowledged edits so delayed echoes cannot erase typing.
+  const pendingLocalDocsRef = useRef<Text[]>([]);
+  const controlledValueRef = useRef(value);
+  const readOnlyRef = useRef(readOnly);
+  const placeholderRef = useRef(placeholder);
+  const compositionActiveRef = useRef(false);
+  const compositionChangedRef = useRef(false);
+  const deferredControlledValueRef = useRef(false);
+  const compositionFrameRef = useRef<number | null>(null);
+  const findFramesRef = useRef(new Set<number>());
+  const readOnlyCompartment = useRef(new Compartment());
+  const keymapCompartment = useRef(new Compartment());
+  const editingKeymapRef = useRef<Extension>([]);
+  const placeholderCompartment = useRef(new Compartment());
+  const historyCompartment = useRef(new Compartment());
   const focusRequestFrameRef = useRef<number | null>(null);
   const ariaLabelRef = useRef(ariaLabel);
   const onFocusRequestConsumedRef = useRef(onFocusRequestConsumed);
@@ -144,6 +180,9 @@ export function LiveMarkdownEditor({
   });
 
   useLayoutEffect(() => {
+    controlledValueRef.current = value;
+    readOnlyRef.current = readOnly;
+    placeholderRef.current = placeholder;
     onChangeRef.current = onChange;
     onBlurRef.current = onBlur;
     onFocusRef.current = onFocus;
@@ -154,7 +193,7 @@ export function LiveMarkdownEditor({
     ariaLabelRef.current = ariaLabel;
     callbacksRef.current = {
       onOpenLink: readOnly ? undefined : onOpenLink,
-      onToggleTask: readOnly ? undefined : onToggleTask,
+      onToggleTask: readOnly || !onToggleTask ? undefined : performTaskToggle,
     };
   }, [
     ariaLabel,
@@ -167,26 +206,108 @@ export function LiveMarkdownEditor({
     onToggleTask,
     onSelectionChange,
     readOnly,
+    placeholder,
+    value,
   ]);
 
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    const findFrames = findFramesRef.current;
     const findLayer = host
       .closest(".document-view")
       ?.querySelector<HTMLElement>("[data-document-find-layer]");
+    editingKeymapRef.current = keymap.of([
+      { key: "Mod-a", run: selectAll },
+      {
+        key: "Shift-Space",
+        run: (editor) => {
+          if (editor.composing || compositionActiveRef.current) return false;
+          if (isInsideMarkdownCode(editor)) return false;
+          const selection = editor.state.selection.main;
+          const line = editor.state.doc.lineAt(selection.head);
+          const task = /^(?:\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+)\[([ xX])\](?=\s|$)/.exec(line.text);
+          if (!task || !onToggleTaskRef.current) return false;
+          void performTaskToggle(line.number, task[1].toLowerCase() !== "x");
+          return true;
+        },
+      },
+      {
+        key: "Tab",
+        run: (editor) => !editor.composing && !compositionActiveRef.current && changeIndentation(editor, "indent"),
+      },
+      {
+        key: "Shift-Tab",
+        run: (editor) => !editor.composing && !compositionActiveRef.current && changeIndentation(editor, "outdent"),
+      },
+      {
+        key: "Mod-Enter",
+        run: (editor) => {
+          if (editor.composing || compositionActiveRef.current) return false;
+          if (!onFileRef.current) return false;
+          onFileRef.current();
+          return true;
+        },
+      },
+      {
+        key: "Shift-Enter",
+        run: (editor) => {
+          if (editor.composing || compositionActiveRef.current) return false;
+          if (isInsideMarkdownCode(editor)) return false;
+          const selection = editor.state.selection.main;
+          const edit = insertLiveMarkdownListLineBreak(
+            editor.state.doc.toString(),
+            selection.from,
+            selection.to,
+          );
+          if (!edit) return false;
+          editor.dispatch({
+            changes: { from: 0, to: editor.state.doc.length, insert: edit.value },
+            selection: { anchor: edit.caret },
+            scrollIntoView: true,
+          });
+          return true;
+        },
+      },
+      {
+        key: "Enter",
+        run: (editor) => {
+          if (editor.composing || compositionActiveRef.current) return false;
+          if (isInsideMarkdownCode(editor)) return false;
+          const selection = editor.state.selection.main;
+          const edit = continueLiveMarkdownList(
+            editor.state.doc.toString(),
+            selection.from,
+            selection.to,
+          );
+          if (!edit) return false;
+          editor.dispatch({
+            changes: { from: 0, to: editor.state.doc.length, insert: edit.value },
+            selection: { anchor: edit.caret },
+            scrollIntoView: true,
+          });
+          return true;
+        },
+      },
+      ...markdownKeymap,
+      ...defaultKeymap,
+      ...historyKeymap,
+      ...searchKeymap,
+    ]);
     const view = new EditorView({
       state: EditorState.create({
         doc: valueRef.current,
         selection: initialSelectionRef.current
           ? EditorSelection.range(
-              Math.min(initialSelectionRef.current.from, valueRef.current.length),
-              Math.min(initialSelectionRef.current.to, valueRef.current.length),
+              clampPosition(initialSelectionRef.current.from, valueRef.current.length),
+              clampPosition(initialSelectionRef.current.to, valueRef.current.length),
             )
           : undefined,
         extensions: [
-          EditorState.readOnly.of(readOnly),
-          EditorView.editable.of(!readOnly),
+          readOnlyCompartment.current.of([
+            EditorState.readOnly.of(readOnlyRef.current),
+            EditorView.editable.of(!readOnlyRef.current),
+          ]),
           markdown({
             base: markdownLanguage,
             // Keep Markdown commands in the explicit keymap below so FolioNotes’s
@@ -199,14 +320,18 @@ export function LiveMarkdownEditor({
             // typed, and also take precedence over `---` as a rule.
             extensions: { remove: ["SetextHeading"] },
           }),
-          ...(placeholder ? [editorPlaceholder(placeholder)] : []),
-          history(),
+          placeholderCompartment.current.of(placeholderRef.current ? editorPlaceholder(placeholderRef.current) : []),
+          historyCompartment.current.of(history()),
           search({ top: true, createPanel: createNoteSearchPanel }),
           panels(findLayer ? { topContainer: findLayer } : undefined),
           EditorView.scrollMargins.of(() => ({ bottom: 80 })),
           EditorView.lineWrapping,
-          ...(!readOnly ? [EditorState.transactionFilter.of((transaction) => {
-            if (!transaction.docChanged) return transaction;
+          EditorState.transactionFilter.of((transaction) => {
+            if (!transaction.docChanged || transaction.state.readOnly ||
+                transaction.annotation(externalMarkdownUpdate) || transaction.annotation(localTaskUpdate) ||
+                transaction.isUserEvent("undo") || transaction.isUserEvent("redo") ||
+                transaction.isUserEvent("input.type.compose") || compositionActiveRef.current)
+              return transaction;
             const value = transaction.newDoc.toString();
             const changes = liveMarkdownOrderedListChanges(value);
             if (!changes.length) return transaction;
@@ -217,124 +342,64 @@ export function LiveMarkdownEditor({
                 sequential: true,
               },
             ];
-          })] : []),
+          }),
           ariaLabelCompartment.current.of(
             EditorView.contentAttributes.of({ "aria-label": ariaLabelRef.current }),
           ),
-          keymap.of(readOnly ? [] : [
-            { key: "Mod-a", run: selectAll },
-            {
-              key: "Shift-Space",
-              run: (editor) => {
-                if (isInsideMarkdownCode(editor)) return false;
-                const selection = editor.state.selection.main;
-                const line = editor.state.doc.lineAt(selection.head);
-                const task = /^(?:\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+)\[([ xX])\](?=\s|$)/.exec(line.text);
-                if (!task || !onToggleTaskRef.current) return false;
-                void onToggleTaskRef.current(line.number, task[1].toLowerCase() !== "x");
-                return true;
-              },
-            },
-            {
-              key: "Tab",
-              run: (editor) => changeIndentation(editor, "indent"),
-            },
-            {
-              key: "Shift-Tab",
-              run: (editor) => changeIndentation(editor, "outdent"),
-            },
-            {
-              key: "Mod-Enter",
-              run: () => {
-                if (!onFileRef.current) return false;
-                onFileRef.current();
-                return true;
-              },
-            },
-            {
-              key: "Shift-Enter",
-              run: (editor) => {
-                if (isInsideMarkdownCode(editor)) return false;
-                const selection = editor.state.selection.main;
-                const edit = insertLiveMarkdownListLineBreak(
-                  editor.state.doc.toString(),
-                  selection.from,
-                  selection.to,
-                );
-                if (!edit) return false;
-                editor.dispatch({
-                  changes: { from: 0, to: editor.state.doc.length, insert: edit.value },
-                  selection: { anchor: edit.caret },
-                  scrollIntoView: true,
-                });
-                return true;
-              },
-            },
-            {
-              key: "Enter",
-              run: (editor) => {
-                if (isInsideMarkdownCode(editor)) return false;
-                const selection = editor.state.selection.main;
-                const edit = continueLiveMarkdownList(
-                  editor.state.doc.toString(),
-                  selection.from,
-                  selection.to,
-                );
-                if (!edit) return false;
-                editor.dispatch({
-                  changes: { from: 0, to: editor.state.doc.length, insert: edit.value },
-                  selection: { anchor: edit.caret },
-                  scrollIntoView: true,
-                });
-                return true;
-              },
-            },
-            ...markdownKeymap,
-            ...defaultKeymap,
-            ...historyKeymap,
-            ...searchKeymap,
-          ]),
-          liveMarkdownExtensions({ callbacks: callbacksRef, readOnly }),
-          ...(!readOnly ? [EditorView.updateListener.of((update) => {
-            if (update.selectionSet)
+          keymapCompartment.current.of(readOnlyRef.current ? [] : editingKeymapRef.current),
+          liveMarkdownExtensions({ callbacks: callbacksRef }),
+          EditorView.updateListener.of((update) => {
+            if (update.selectionSet && !update.state.readOnly)
               onSelectionChangeRef.current?.(
                 update.state.selection.main.from,
                 update.state.selection.main.to,
               );
-            if (!update.docChanged) return;
+            if (!update.docChanged || update.state.readOnly ||
+                update.transactions.some((transaction) => transaction.annotation(externalMarkdownUpdate))) return;
             const nextValue = update.state.doc.toString();
             if (nextValue === valueRef.current) return;
             valueRef.current = nextValue;
-            pendingLocalValuesRef.current.push(nextValue);
-            onChangeRef.current(nextValue);
-          })] : []),
+            if (compositionActiveRef.current) compositionChangedRef.current = true;
+            pendingLocalDocsRef.current.push(update.state.doc);
+            if (pendingLocalDocsRef.current.length > MAX_LOCAL_ECHOES)
+              pendingLocalDocsRef.current.shift();
+            if (!update.transactions.some((transaction) => transaction.annotation(localTaskUpdate)))
+              onChangeRef.current(nextValue);
+          }),
         ],
       }),
       parent: host,
     });
     view.scrollDOM.dataset.liveMarkdownScroll = "";
     const format = (event: Event) => {
-      if (readOnly) return;
+      if (view.state.readOnly || view.composing || compositionActiveRef.current) return;
       const marker = (event as CustomEvent<FormatMarker>).detail;
       if (marker !== "bold" && marker !== "italic" && marker !== "link") return;
       event.preventDefault();
       applyFormat(view, marker);
     };
     const blur = () => {
-      if (readOnly) return;
+      if (view.state.readOnly) return;
       onBlurRef.current?.(
         host.closest<HTMLElement>("[data-document-scroll]")?.scrollTop ?? 0,
       );
     };
     const focus = () => {
-      if (!readOnly) onFocusRef.current?.();
+      if (!view.state.readOnly) onFocusRef.current?.();
     };
     const selectListContent = (event: Event) => {
       const contentStart = (event as CustomEvent<number>).detail;
-      if (typeof contentStart !== "number") return;
+      if (typeof contentStart !== "number" || !Number.isFinite(contentStart)) return;
       event.preventDefault();
-      view.dispatch({ selection: EditorSelection.cursor(contentStart) });
+      view.dispatch({ selection: EditorSelection.cursor(clampPosition(contentStart, view.state.doc.length)) });
       view.focus();
+    };
+    const scheduleFindFrame = (callback: () => void) => {
+      const frame = window.requestAnimationFrame(() => {
+        findFrames.delete(frame);
+        callback();
+      });
+      findFrames.add(frame);
     };
     const find = () => {
       const documentScroll = host.closest<HTMLElement>("[data-document-scroll]");
@@ -345,27 +410,60 @@ export function LiveMarkdownEditor({
       };
       openSearchPanel(view);
       restoreDocumentScroll();
-      window.requestAnimationFrame(() => {
+      scheduleFindFrame(() => {
         view.dom
           .closest(".document-view")
           ?.querySelector<HTMLInputElement>("[main-field]")
           ?.focus({ preventScroll: true });
         restoreDocumentScroll();
-        window.requestAnimationFrame(restoreDocumentScroll);
+        scheduleFindFrame(restoreDocumentScroll);
       });
     };
-    if (!readOnly) view.contentDOM.addEventListener("folio-format", format);
+    const compositionStart = () => {
+      if (compositionFrameRef.current !== null) {
+        window.cancelAnimationFrame(compositionFrameRef.current);
+        compositionFrameRef.current = null;
+      } else {
+        compositionChangedRef.current = false;
+      }
+      compositionActiveRef.current = true;
+    };
+    const compositionEnd = () => {
+      if (compositionFrameRef.current !== null)
+        window.cancelAnimationFrame(compositionFrameRef.current);
+      // CodeMirror reads the final composed DOM before this frame. Do not replace
+      // its DOM or renumber syntax while the native composition owns it.
+      const frame = window.requestAnimationFrame(() => {
+        if (compositionFrameRef.current !== frame) return;
+        compositionFrameRef.current = null;
+        compositionActiveRef.current = false;
+        const replaced = deferredControlledValueRef.current ? reconcileControlledValue() : false;
+        deferredControlledValueRef.current = false;
+        if (!replaced && compositionChangedRef.current && !view.state.readOnly) {
+          const changes = liveMarkdownOrderedListChanges(view.state.doc.toString());
+          if (changes.length) view.dispatch({ changes, userEvent: "input" });
+        }
+        compositionChangedRef.current = false;
+      });
+      compositionFrameRef.current = frame;
+    };
+    view.contentDOM.addEventListener("compositionstart", compositionStart);
+    view.contentDOM.addEventListener("compositionend", compositionEnd);
+    view.contentDOM.addEventListener("folio-format", format);
     view.contentDOM.addEventListener("folio-select-list-content", selectListContent);
     view.contentDOM.addEventListener("blur", blur);
     view.contentDOM.addEventListener("focus", focus);
     host.addEventListener("folio-find", find);
     viewRef.current = view;
-    const focusFrame = autoFocus && !readOnly
-      ? window.requestAnimationFrame(() => view.focus())
-      : null;
     return () => {
-      if (focusFrame !== null) window.cancelAnimationFrame(focusFrame);
-      if (!readOnly) view.contentDOM.removeEventListener("folio-format", format);
+      if (compositionFrameRef.current !== null) window.cancelAnimationFrame(compositionFrameRef.current);
+      compositionFrameRef.current = null;
+      compositionActiveRef.current = false;
+      for (const frame of findFrames) window.cancelAnimationFrame(frame);
+      findFrames.clear();
+      view.contentDOM.removeEventListener("compositionstart", compositionStart);
+      view.contentDOM.removeEventListener("compositionend", compositionEnd);
+      view.contentDOM.removeEventListener("folio-format", format);
       view.contentDOM.removeEventListener("folio-select-list-content", selectListContent);
       view.contentDOM.removeEventListener("blur", blur);
       view.contentDOM.removeEventListener("focus", focus);
@@ -373,7 +471,35 @@ export function LiveMarkdownEditor({
       view.destroy();
       viewRef.current = null;
     };
-  }, [autoFocus, placeholder, readOnly]);
+  }, []);
+
+  useLayoutEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: [
+        readOnlyCompartment.current.reconfigure([
+          EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly),
+        ]),
+        keymapCompartment.current.reconfigure(readOnly ? [] : editingKeymapRef.current),
+        setLiveMarkdownFocus.of(view.hasFocus),
+      ],
+    });
+  }, [readOnly]);
+
+  useLayoutEffect(() => {
+    viewRef.current?.dispatch({
+      effects: placeholderCompartment.current.reconfigure(
+        placeholder ? editorPlaceholder(placeholder) : [],
+      ),
+    });
+  }, [placeholder]);
+
+  useLayoutEffect(() => {
+    if (!autoFocus || readOnly) return;
+    const frame = window.requestAnimationFrame(() => viewRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [autoFocus, readOnly]);
 
   useLayoutEffect(() => {
     if (readOnly || focusRequestId === undefined) return;
@@ -403,31 +529,70 @@ export function LiveMarkdownEditor({
     });
   }, [ariaLabel]);
 
-  useEffect(() => {
+  function performTaskToggle(lineNumber: number, checked: boolean) {
     const view = viewRef.current;
-    if (!view) return;
-    const pendingValues = pendingLocalValuesRef.current;
-    const localValueIndex = pendingValues.lastIndexOf(value);
-    if (localValueIndex !== -1) {
-      pendingValues.splice(0, localValueIndex + 1);
-      return;
+    const callback = onToggleTaskRef.current;
+    if (!view || !callback || view.state.readOnly || view.composing || compositionActiveRef.current ||
+        !Number.isInteger(lineNumber) || lineNumber < 1 || lineNumber > view.state.doc.lines) return;
+    const line = view.state.doc.line(lineNumber);
+    const task = /^(?:\s*(?:>\s*)*(?:[-+*]|\d+[.)])\s+)\[([ xX])\](?=\s|$)/.exec(line.text);
+    if (!task) return;
+    const position = line.from + task[0].length - 2;
+    if (isInsideMarkdownCode(view, position)) return;
+    if ((task[1].toLowerCase() === "x") !== checked) {
+      view.dispatch({
+        changes: { from: position, to: position + 1, insert: checked ? "x" : " " },
+        annotations: [localTaskUpdate.of(true), isolateHistory.of("full")],
+        userEvent: "input.task",
+      });
     }
-    if (view.state.doc.toString() === value) {
-      pendingValues.length = 0;
-      valueRef.current = value;
-      return;
+    return callback(lineNumber, checked);
+  }
+
+  // This bridge reads only stable refs so the mounted editor can call it safely.
+  function reconcileControlledValue() {
+    const view = viewRef.current;
+    if (!view) return false;
+    if (view.composing || compositionActiveRef.current) {
+      deferredControlledValueRef.current = true;
+      return false;
     }
-    pendingValues.length = 0;
-    valueRef.current = value;
+    const nextValue = controlledValueRef.current;
+    const nextDoc = Text.of(nextValue.split("\n"));
+    const pendingDocs = pendingLocalDocsRef.current;
+    for (let index = pendingDocs.length - 1; index >= 0; index -= 1) {
+      if (!pendingDocs[index].eq(nextDoc)) continue;
+      // Acknowledge this edit and every preceding one. Once acknowledged, the
+      // same value may be an authoritative history restore and must be applied.
+      pendingDocs.splice(0, index + 1);
+      return false;
+    }
+    if (view.state.doc.eq(nextDoc)) {
+      pendingDocs.length = 0;
+      valueRef.current = nextValue;
+      return false;
+    }
+    pendingDocs.length = 0;
+    valueRef.current = nextValue;
     const selection = view.state.selection.main;
-    const maxPosition = value.length;
     view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: value },
+      changes: { from: 0, to: view.state.doc.length, insert: nextValue },
       selection: EditorSelection.range(
-        Math.min(selection.from, maxPosition),
-        Math.min(selection.to, maxPosition),
+        clampPosition(selection.anchor, nextValue.length),
+        clampPosition(selection.head, nextValue.length),
       ),
+      // A genuine replacement starts a new undo document. Merely excluding it
+      // from history would leave edits for the old document mapped into the new one.
+      effects: historyCompartment.current.reconfigure([]),
+      annotations: [externalMarkdownUpdate.of(true), Transaction.addToHistory.of(false)],
+      filter: false,
     });
+    view.dispatch({ effects: historyCompartment.current.reconfigure(history()) });
+    return true;
+  }
+
+  useLayoutEffect(() => {
+    reconcileControlledValue();
   }, [value]);
 
   return (
