@@ -24,6 +24,7 @@ export function useWorkspaceDiscovery({
   const [answer, setAnswer] = useState<AskResult | null>(null);
   const [asking, setAsking] = useState(false);
   const searchRequest = useRef(0);
+  const askRequest = useRef(0);
 
   async function searchNotes(query = searchQuery, tag = selectedTag) {
     if (!query.trim() && !tag) return;
@@ -55,36 +56,51 @@ export function useWorkspaceDiscovery({
 
   async function askNotes(selectedModel: string) {
     if (!question.trim() || asking || !selectedModel) return;
+    const requestId = ++askRequest.current;
     setAsking(true);
     setMessage("");
     setAnswer(null);
     try {
-      setAnswer(
-        await api<AskResult>("/api/ask", {
-          method: "POST",
-          body: JSON.stringify({
-            question,
-            model: selectedModel,
-            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          }),
+      const result = await api<AskResult>("/api/ask", {
+        method: "POST",
+        body: JSON.stringify({
+          question,
+          model: selectedModel,
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),
-      );
+      });
+      if (requestId === askRequest.current) setAnswer(result);
     } catch (error) {
-      setMessage(
+      if (requestId === askRequest.current) setMessage(
         error instanceof Error ? error.message : "Could not ask your notes",
       );
     } finally {
-      setAsking(false);
+      if (requestId === askRequest.current) setAsking(false);
     }
   }
 
+  function invalidateRequests() {
+    searchRequest.current += 1;
+    askRequest.current += 1;
+    setSearching(false);
+    setAsking(false);
+  }
+
   function clearDiscovery() {
+    invalidateRequests();
     setSearchResults([]);
     setAnswer(null);
   }
 
   function removeDocument(id: string) {
+    invalidateRequests();
     setSearchResults((current) => current.filter((note) => note.id !== id));
+    setAnswer(null);
+  }
+
+  function removeDirectory(directory: string) {
+    invalidateRequests();
+    setSearchResults((current) => current.filter((note) => !note.id.startsWith(`${directory}/`)));
     setAnswer(null);
   }
 
@@ -130,6 +146,7 @@ export function useWorkspaceDiscovery({
     askNotes,
     clearDiscovery,
     removeDocument,
+    removeDirectory,
     replaceDocument,
   };
 }

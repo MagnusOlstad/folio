@@ -4,7 +4,7 @@ import YAML from 'yaml'
 
 export function createMarkdownMoves(runtime) {
   const { bundleRoot, markdownLinkTarget, resolveBundleMarkdownPath, normalizeMoveDirectory, parseMarkdownFile,
-    readOptionalFile, bundleFileId, readRecords, writeRecords } = runtime
+    readOptionalFile, bundleFileId, readRecords, writeRecords, assertNoBundleSymlinks } = runtime
   const readBundleDocuments = (...args) => runtime.readBundleDocuments(...args)
   const indexedConceptContent = (...args) => runtime.indexedConceptContent(...args)
   const embeddingInputHash = (...args) => runtime.embeddingInputHash(...args)
@@ -205,7 +205,12 @@ async function resolveCurrentConceptId(requestedId) {
   const requestedPath = resolveBundleMarkdownPath(requestedId)
   if (!requestedPath) return null
   try {
-    await fs.access(requestedPath)
+    await assertNoBundleSymlinks(requestedPath)
+    if (!(await fs.lstat(requestedPath)).isFile()) {
+      const error = new Error('The requested path is not a Markdown file.')
+      error.status = 400
+      throw error
+    }
     return requestedId
   } catch (error) {
     if (error.code !== 'ENOENT') throw error
@@ -242,10 +247,12 @@ async function moveConceptMarkdown(oldId, directory, movedAt, options = {}) {
     error.status = 400
     throw error
   }
+  await assertNoBundleSymlinks(oldPath)
+  await assertNoBundleSymlinks(newPath, { allowMissing: true })
   if (newId === oldId) return { newId, rollback: async () => {} }
 
   try {
-    await fs.access(newPath)
+    await fs.lstat(newPath)
     const error = new Error('That path already contains a conflicting note. Choose another path.')
     error.status = 409
     throw error

@@ -131,6 +131,11 @@ function resolveBundlePath(value, { allowRoot = false } = {}) {
 
 async function assertNoBundleSymlinks(filePath, { allowMissing = false } = {}) {
   const relative = path.relative(bundleRoot, filePath)
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    const error = new Error('Invalid bundle path.')
+    error.status = 400
+    throw error
+  }
   let current = bundleRoot
   if (!relative) return
   for (const segment of relative.split(path.sep)) {
@@ -144,6 +149,10 @@ async function assertNoBundleSymlinks(filePath, { allowMissing = false } = {}) {
       }
     } catch (error) {
       if (allowMissing && error.code === 'ENOENT') return
+      if (error.code === 'ENOENT' || error.code === 'ENOTDIR') {
+        error.status = error.code === 'ENOENT' ? 404 : 400
+        error.message = error.code === 'ENOENT' ? 'Bundle path not found.' : 'A bundle path component is not a folder.'
+      }
       throw error
     }
   }
@@ -165,9 +174,11 @@ async function listBundleDirectories(directory = bundleRoot, prefix = '') {
 }
 
 function resolveBundleMarkdownPath(fileId) {
-  const relativePath = String(fileId).replaceAll('\\', '/').replace(/^[/\\]+/, '')
+  const input = String(fileId || '')
+  if (!input.startsWith('/') || input.includes('\\') || input.includes('\0')) return null
+  const relativePath = input.slice(1)
   const parts = relativePath.split('/')
-  if (parts.some((part) => part === '.' || part === '..' || part === '.git') || parts[0] === '.folio') return null
+  if (parts.some((part) => !part || part === '.' || part === '..' || part === '.git') || parts[0] === '.folio') return null
   const filePath = path.resolve(bundleRoot, relativePath)
   const isInsideBundle = filePath.startsWith(`${bundleRoot}${path.sep}`)
   return isInsideBundle && path.extname(filePath) === '.md' ? filePath : null

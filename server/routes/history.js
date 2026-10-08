@@ -14,12 +14,14 @@ export function registerRoutes(app, runtime) {
     const filePath = runtime.resolveBundleMarkdownPath(id)
     if (!filePath) return response.status(400).json({ error: 'Invalid note path.' })
     try {
+      await runtime.assertNoBundleSymlinks(filePath)
       const stat = await fs.stat(filePath)
       if (!stat.isFile()) return response.status(404).json({ error: 'Note not found.' })
       await runtime.history.reconcile(`Checkpoint ${id}`, [id])
       response.json({ checkpointed: true })
     } catch (error) {
       if (error.code === 'ENOENT') return response.status(404).json({ error: 'Note not found.' })
+      if (error.status) return response.status(error.status).json({ error: error.message })
       console.error(`Could not checkpoint note history for ${id}: ${error.message}`)
       return response.status(503).json({ error: 'Could not save a history checkpoint. Your note remains saved.' })
     }
@@ -62,6 +64,7 @@ export function registerRoutes(app, runtime) {
         diff: result.diff,
       })
     } catch (error) {
+      if (error.status) return response.status(error.status).json({ error: error.message })
       if (/Invalid note version/i.test(error.message)) return response.status(400).json({ error: error.message })
       if (/not found|missing|blob/i.test(error.message)) return response.status(404).json({ error: 'Note version not found.' })
       next(error)
@@ -76,7 +79,9 @@ export function registerRoutes(app, runtime) {
       const filePath = runtime.resolveBundleMarkdownPath(id)
       if (!filePath) return response.status(400).json({ error: 'Invalid note path.' })
       const historic = await runtime.history.version(id, revision)
-      const currentNote = runtime.parseMarkdownFile(await fs.readFile(filePath, 'utf8'), filePath)
+      await runtime.assertNoBundleSymlinks(filePath)
+      const currentMarkdown = await fs.readFile(filePath, 'utf8')
+      const currentNote = runtime.parseMarkdownFile(currentMarkdown, filePath)
       const historicNote = runtime.parseMarkdownFile(historic.markdown, filePath)
       try {
         await runtime.history.reconcile(`Before restore ${id}`, [id])
@@ -98,7 +103,20 @@ export function registerRoutes(app, runtime) {
         'human:local',
         new Date().toISOString(),
       )
-      await runtime.queueMarkdownMutation(() => fs.writeFile(filePath, runtime.markdownDocument(currentNote.frontmatter, currentNote.content)))
+      await runtime.queueMarkdownMutation(async () => {
+        await runtime.assertNoBundleSymlinks(filePath)
+        if (await fs.readFile(filePath, 'utf8') !== currentMarkdown) {
+          const error = new Error('This note changed while restoring history. Review the current note and try again.')
+          error.status = 409
+          throw error
+        }
+        const markdown = runtime.markdownDocument(currentNote.frontmatter, currentNote.content)
+        const file = await fs.open(filePath, 'r+')
+        try {
+          await file.writeFile(markdown)
+          await file.truncate(Buffer.byteLength(markdown))
+        } finally { await file.close() }
+      })
       let reindexed = null
       let restoreWarning = null
       try {
@@ -129,6 +147,7 @@ export function registerRoutes(app, runtime) {
         warning: restoreWarning || historyWarning,
       })
     } catch (error) {
+      if (error.status) return response.status(error.status).json({ error: error.message })
       if (/Invalid note (path|version)/i.test(error.message)) return response.status(400).json({ error: error.message })
       if (/not found|missing|blob/i.test(error.message)) return response.status(404).json({ error: 'Note version not found.' })
       next(error)

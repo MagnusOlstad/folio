@@ -327,6 +327,7 @@ export function useWorkspaceDocumentMutations({
     field: "title" | "description",
     value: string,
   ) {
+    if ([...state.deletingDirectories.current].some((path) => document.id.startsWith(`${path}/`))) return;
     const normalized = value.trim();
     if (field === "title" && !normalized) {
       setMessage("A note title cannot be empty.");
@@ -385,6 +386,7 @@ export function useWorkspaceDocumentMutations({
     baseContent = document.content,
     options: { includeTags?: boolean } = {},
   ) {
+    if ([...state.deletingDirectories.current].some((path) => document.id.startsWith(`${path}/`))) return Promise.resolve();
     if (!document.deletable || !nextContent.trim()) return Promise.resolve();
     const id = document.id;
     const filedContent = isUntitledId(id)

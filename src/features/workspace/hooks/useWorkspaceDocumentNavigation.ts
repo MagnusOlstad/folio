@@ -6,7 +6,7 @@ import type {
   TabGroup,
   ViewerDocument,
 } from "../../../domain/types.ts";
-import { api } from "../../../lib/api.ts";
+import { api, apiForBundle, getActiveBundleId } from "../../../lib/api.ts";
 import { isUntitledId } from "../../../lib/workspace.ts";
 import type { WorkspaceDocumentState } from "./useWorkspaceDocumentState.ts";
 import {
@@ -96,7 +96,7 @@ export function useWorkspaceDocumentNavigation({
     }
   }
 
-  async function deleteFiledNote(document: Pick<ViewerDocument, "id" | "title" | "deletable">) {
+  async function deleteFiledNote(document: Pick<ViewerDocument, "id" | "title" | "deletable">, propagateError = false) {
     if (
       !document.deletable ||
       isUntitledId(document.id) ||
@@ -104,18 +104,22 @@ export function useWorkspaceDocumentNavigation({
       state.savingDocuments.has(document.id)
     )
       return;
+    if ([...state.deletingDirectories.current].some((path) => document.id.startsWith(`${path}/`))) return;
+    const bundleId = getActiveBundleId();
     state.setDeletingNoteId(document.id);
     setMessage("");
     try {
       await (state.saveQueues.current[document.id] || Promise.resolve());
-      const result = await api<{ deletedId: string; rawId: string | null }>(
-        `/api/note?id=${encodeURIComponent(document.id)}`,
+      const result = await apiForBundle<{ deletedId: string; rawId: string | null }>(
+        bundleId, `/api/note?id=${encodeURIComponent(document.id)}`,
         { method: "DELETE" },
       );
+      if (getActiveBundleId() !== bundleId) return;
       const [notesResult, filesResult] = await Promise.allSettled([
-        api<Note[]>("/api/notes"),
-        api<BundleFile[]>("/api/files"),
+        apiForBundle<Note[]>(bundleId, "/api/notes"),
+        apiForBundle<BundleFile[]>(bundleId, "/api/files"),
       ]);
+      if (getActiveBundleId() !== bundleId) return;
       setNotes((current) =>
         notesResult.status === "fulfilled"
           ? notesResult.value
@@ -157,7 +161,7 @@ export function useWorkspaceDocumentNavigation({
         current?.endsWith(`:${result.deletedId}`) ? null : current,
       );
       removeDiscoveryDocument(result.deletedId);
-      delete state.documentRequests.current[result.deletedId];
+      state.documentRequests.current[result.deletedId] = (state.documentRequests.current[result.deletedId] || 0) + 1;
       setMessage(
         `Deleted ${document.title}.${result.rawId ? " The raw capture was retained." : ""}`,
       );
@@ -165,6 +169,7 @@ export function useWorkspaceDocumentNavigation({
       setMessage(
         error instanceof Error ? error.message : "Could not delete note",
       );
+      if (propagateError) throw error;
     } finally {
       state.setDeletingNoteId(null);
     }
@@ -176,6 +181,7 @@ export function useWorkspaceDocumentNavigation({
     targetGroupId = activeGroupId,
     disposition: "preview" | "permanent" = "permanent",
   ) {
+    if ([...state.deletingDirectories.current].some((directory) => id.startsWith(`${directory}/`))) return;
     const existingGroup = groups.find((group) => group.tabs.includes(id));
     const openGroupId = existingGroup?.id ?? targetGroupId;
     setActiveGroupId(openGroupId);
@@ -210,6 +216,8 @@ export function useWorkspaceDocumentNavigation({
 
   async function loadDocument(id: string, source: "note" | "file" = "file") {
     if (state.documents[id] || state.loadingDocuments.has(id)) return;
+    const bundleId = getActiveBundleId();
+    const mutationSequence = state.documentMutationSequence.current;
     const requestId = (state.documentRequests.current[id] || 0) + 1;
     state.documentRequests.current[id] = requestId;
     state.setLoadingDocuments((current) => new Set(current).add(id));
@@ -223,7 +231,19 @@ export function useWorkspaceDocumentNavigation({
           : await api<ViewerDocument>(
               `/api/file?path=${encodeURIComponent(id)}`,
             );
-      if (state.documentRequests.current[id] !== requestId) return;
+      if (state.documentRequests.current[id] !== requestId || getActiveBundleId() !== bundleId) return;
+      if (Object.entries(state.directoryDeletions.current).some(([directory, sequence]) =>
+        sequence > mutationSequence && document.id.startsWith(`${directory}/`))) {
+        setGroups((current) => current.map((group) => {
+          const tabs = group.tabs.filter((tabId) => tabId !== id);
+          return {
+            ...group, tabs,
+            activeId: group.activeId === id ? tabs.at(-1) || null : group.activeId,
+            previewId: group.previewId === id ? null : group.previewId,
+          };
+        }));
+        return;
+      }
       state.setDocuments((current) => ({ ...current, [document.id]: document }));
       if (document.id !== id) {
         setGroups((current) =>
@@ -239,7 +259,7 @@ export function useWorkspaceDocumentNavigation({
         );
       }
     } finally {
-      state.setLoadingDocuments((current) => {
+      if (state.documentRequests.current[id] === requestId && getActiveBundleId() === bundleId) state.setLoadingDocuments((current) => {
         const next = new Set(current);
         next.delete(id);
         return next;

@@ -47,3 +47,8 @@ export function canDeleteExplorerDirectory(directory: string) {
     && directory !== "/references"
     && !directory.startsWith("/references/");
 }
+
+/** Matches whole path segments so /notes does not also match /notes-old. */
+export function isExplorerDescendant(id: string, directory: string) {
+  return id === directory || id.startsWith(`${directory}/`);
+}

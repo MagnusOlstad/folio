@@ -4,8 +4,8 @@ import { createHash } from 'node:crypto'
 import { normalizeAggregateBaseContent, prepareAggregateContentForSave } from '../filing/aggregate-editing.js'
 
 export function registerRoutes(app, runtime) {
-  const { embedModel, embeddingSchemaVersion, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, resolveBundleMarkdownPath, listBundleMarkdownFiles, bundleFileId, parseMarkdownFile,
-    resolveCurrentConceptId, isMovableConceptId, queueMarkdownMutation, moveConceptMarkdown, migrateIndexedRecordsAfterMove, reindexBundle, writeRecords, publicSearchRecord,
+  const { assertNoBundleSymlinks, embedModel, embeddingSchemaVersion, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, resolveBundleMarkdownPath, listBundleMarkdownFiles, bundleFileId, parseMarkdownFile,
+    isMovableConceptId, queueMarkdownMutation, moveConceptMarkdown, migrateIndexedRecordsAfterMove, reindexBundle, writeRecords, publicSearchRecord,
     rankedRecords, normalizeInlineText, normalizeTag, normalizeMoveDirectory, normalizeMarkdownBreaks, markdownDocument, updatedGenerated,
     replaceIndexedConceptContent, indexedConceptContent, embeddingInputHash, refreshRecordEmbeddings, queueIndexOperation,
     performReindexBundle, persistEmbeddingUpdatesNow, relationshipIndex, recordIsStale,
@@ -150,6 +150,7 @@ app.post('/api/file/refile/propose', async (request, response, next) => {
     const id = String(request.body?.id || '')
     const filePath = resolveBundleMarkdownPath(id)
     if (!filePath || !isMovableConceptId(id)) return response.status(400).json({ error: 'This note cannot be refiled.' })
+    await assertNoBundleSymlinks(filePath)
     const markdown = await fs.readFile(filePath, 'utf8')
     const parsed = parseMarkdownFile(markdown, filePath)
     const records = (await readRecords()).filter((record) => record.id !== id)
@@ -167,6 +168,7 @@ app.post('/api/file/refile/propose', async (request, response, next) => {
       },
     })
   } catch (error) {
+    if (error.status) return response.status(error.status).json({ error: error.message })
     next(error)
   }
 })
@@ -194,6 +196,7 @@ app.post('/api/file/refile', async (request, response, next) => {
 
     const outcome = await queueIndexOperation(() => queueMarkdownMutation(async () => {
       const currentPath = resolveBundleMarkdownPath(id)
+      await assertNoBundleSymlinks(currentPath)
       const markdown = await fs.readFile(currentPath, 'utf8')
       const currentHash = createHash('sha256').update(markdown).digest('hex')
       if (currentHash !== expectedHash) return { conflict: true }
@@ -278,63 +281,6 @@ app.post('/api/file/refile', async (request, response, next) => {
   }
 })
 
-app.get('/api/file', async (request, response, next) => {
-  try {
-    const requestedId = String(request.query.path || '')
-    if (!resolveBundleMarkdownPath(requestedId)) return response.status(400).json({ error: 'Invalid file path.' })
-    const id = await resolveCurrentConceptId(requestedId)
-    if (!id) return response.status(404).json({ error: 'File not found.' })
-    const filePath = resolveBundleMarkdownPath(id)
-
-    const [markdown, fileStat, records] = await Promise.all([
-      fs.readFile(filePath, 'utf8'),
-      fs.stat(filePath),
-      readRecords(),
-    ])
-    const parsed = parseMarkdownFile(markdown, filePath)
-    const record = records.find((item) => item.id === id)
-    const graph = await relationshipIndex()
-    response.json({
-      id,
-      title: record?.title || parsed.title,
-      type: record?.type || parsed.type,
-      description: record?.description || parsed.description || `Markdown file at ${id}`,
-      tags: record?.tags || parsed.tags,
-      status: record?.status || parsed.status,
-      staleAfter: record?.staleAfter || parsed.staleAfter,
-      stale: record ? recordIsStale(record) : recordIsStale({ staleAfter: parsed.staleAfter }),
-      createdAt: record?.createdAt || parsed.generatedAt || fileStat.mtime.toISOString(),
-      content: record?.content || normalizeMarkdownBreaks(parsed.content),
-      deletable: Boolean(record),
-      movable: Boolean(record) && isMovableConceptId(id),
-      filedBy: record?.filedBy || parsed.filedBy,
-      filedAt: record?.filedAt || parsed.filedAt,
-      links: graph.outgoing.get(id) || [],
-      backlinks: graph.incoming.get(id) || [],
-      suggestions: semanticSuggestionSummaries(record, records),
-    })
-  } catch (error) {
-    if (error.code === 'ENOENT') return response.status(404).json({ error: 'File not found.' })
-    next(error)
-  }
-})
-
-app.get('/api/concepts', async (request, response, next) => {
-  try {
-    const requestedId = String(request.query.path || '')
-    if (!resolveBundleMarkdownPath(requestedId)) return response.status(400).send('Invalid concept path.')
-    const conceptId = await resolveCurrentConceptId(requestedId)
-    if (!conceptId) return response.status(404).send('Concept not found.')
-    const conceptPath = resolveBundleMarkdownPath(conceptId)
-
-    await fs.access(conceptPath)
-    response.type('text/markdown').sendFile(conceptPath)
-  } catch (error) {
-    if (error.code === 'ENOENT') return response.status(404).send('Concept not found.')
-    next(error)
-  }
-})
-
 app.post('/api/reindex', async (_request, response, next) => {
   try {
     const result = await reindexBundle({ refreshEmbeddings: true })
@@ -392,6 +338,7 @@ app.patch('/api/note', async (request, response, next) => {
     const updateResult = await queueIndexOperation(async () => {
       const previousRecords = await readRecords()
       const mutationError = await queueMarkdownMutation(async () => {
+        await assertNoBundleSymlinks(filePath)
         const markdown = await fs.readFile(filePath, 'utf8')
         const parsed = parseMarkdownFile(markdown, filePath)
         if (parsed.type === 'Raw Capture') return { status: 400, error: 'Raw captures cannot be edited.' }
@@ -489,6 +436,7 @@ app.patch('/api/note', async (request, response, next) => {
     })
   } catch (error) {
     if (error.code === 'ENOENT') return response.status(404).json({ error: 'Note not found.' })
+    if (error.status) return response.status(error.status).json({ error: error.message })
     next(error)
   }
 })

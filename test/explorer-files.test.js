@@ -124,10 +124,6 @@ test('explorer folders persist and file operations validate, index, and rename p
   const deleteFolder = (folderPath) => fetch(`${baseUrl}/api/file/folder?path=${encodeURIComponent(folderPath)}`, {
     method: 'DELETE', headers,
   })
-  assert.equal((await deleteFolder('/archive')).status, 409)
-  assert.equal((await deleteFolder('/archive/non-markdown')).status, 409)
-  assert.equal((await deleteFolder('/archive/hidden-contents')).status, 409)
-  assert.equal((await deleteFolder('/archive/nested')).status, 409)
   assert.equal((await deleteFolder('/archive/new folder/Meeting plan.md')).status, 400)
   assert.equal((await deleteFolder('/archive/new folder/Meeting plan.md/child')).status, 400)
   assert.equal((await deleteFolder('/linked-folder')).status, 400)
@@ -139,8 +135,120 @@ test('explorer folders persist and file operations validate, index, and rename p
 
   const deletedEmptyFolderResponse = await deleteFolder('/archive/empty')
   assert.equal(deletedEmptyFolderResponse.status, 200)
-  assert.deepEqual(await deletedEmptyFolderResponse.json(), { path: '/archive/empty' })
+  assert.deepEqual(await deletedEmptyFolderResponse.json(), { path: '/archive/empty', deletedIds: [], warning: null })
   assert.ok((await fs.stat(path.join(bundleRoot, 'archive'))).isDirectory())
   await assert.rejects(fs.stat(path.join(bundleRoot, 'archive', 'empty')), { code: 'ENOENT' })
   assert.equal((await deleteFolder('/archive/empty')).status, 404)
+  const outsideFile = path.join(dataRoot, 'outside', 'secret.md')
+  await fs.writeFile(outsideFile, '# Outside content')
+  await fs.symlink(outsideFile, path.join(bundleRoot, 'outside-link.md'))
+  await fs.symlink(path.join(dataRoot, 'outside'), path.join(nestedDirectory, 'outside-link'))
+  await fs.symlink(path.join(dataRoot, 'missing'), path.join(nestedDirectory, 'dangling'))
+  for (const endpoint of ['/api/file?path=%2Foutside-link.md', '/api/concepts?path=%2Foutside-link.md', '/api/file?path=%2Flinked-folder%2Fsecret.md'])
+    assert.equal((await fetch(`${baseUrl}${endpoint}`, { headers })).status, 400, endpoint)
+  assert.equal((await fetch(`${baseUrl}/api/note?id=%2Foutside-link.md`, {
+    method: 'PATCH', headers, body: JSON.stringify({ content: '# Changed' }),
+  })).status, 400)
+  assert.equal((await fetch(`${baseUrl}/api/file/refile/propose`, {
+    method: 'POST', headers, body: JSON.stringify({ id: '/outside-link.md' }),
+  })).status, 400)
+  assert.equal((await fetch(`${baseUrl}/api/file/move`, {
+    method: 'POST', headers, body: JSON.stringify({ id: renamed.newId, directory: '/linked-folder' }),
+  })).status, 400)
+  for (const alias of ['//daily/secret.md', 'daily/secret.md', '/daily//secret.md', '/daily/../secret.md'])
+    assert.equal((await fetch(`${baseUrl}/api/file?path=${encodeURIComponent(alias)}`, { headers })).status, 400)
+  assert.equal((await fetch(`${baseUrl}/api/file/create`, {
+    method: 'POST', headers, body: JSON.stringify({ directory: '/missing', name: 'note' }),
+  })).status, 404)
+  assert.equal((await fetch(`${baseUrl}/api/file/folder`, {
+    method: 'POST', headers, body: JSON.stringify({ directory: '/missing', name: 'child' }),
+  })).status, 404)
+
+  const restoredPath = path.join(bundleRoot, renamed.newId.slice(1))
+  const restoredMarkdown = await fs.readFile(restoredPath, 'utf8')
+  const queueMarkdown = bundleRuntime.queueMarkdownMutation
+  for (const change of ['edit', 'delete']) {
+    bundleRuntime.queueMarkdownMutation = async (operation) => {
+      if (change === 'edit') await fs.writeFile(restoredPath, `${restoredMarkdown}\nConcurrent edit`)
+      else await fs.unlink(restoredPath)
+      return queueMarkdown(operation)
+    }
+    try {
+      const restore = await fetch(`${baseUrl}/api/note/history/restore`, {
+        method: 'POST', headers, body: JSON.stringify({ id: renamed.newId, revision: renamedHistory.entries[0].revision }),
+      })
+      assert.equal(restore.status, change === 'edit' ? 409 : 404)
+      const result = await restore.json()
+      assert.match(result.error, change === 'edit' ? /changed while restoring history/ : /not found/)
+      if (change === 'edit') assert.match(await fs.readFile(restoredPath, 'utf8'), /Concurrent edit/)
+      else await assert.rejects(fs.lstat(restoredPath), { code: 'ENOENT' })
+    } finally {
+      bundleRuntime.queueMarkdownMutation = queueMarkdown
+      await fs.writeFile(restoredPath, restoredMarkdown)
+    }
+  }
+
+  // A rebuild can mutate relationships and records before failing. Restore
+  // both the staged folder and those changes without deleting binary entries.
+  const originalIndex = await fs.readFile(bundleRuntime.indexPath)
+  const originalRootIndex = await fs.readFile(path.join(bundleRoot, 'index.md'))
+  const performReindex = bundleRuntime.performReindexBundle
+  bundleRuntime.performReindexBundle = async () => {
+    await performReindex({ markdownLocked: true })
+    throw new Error('simulated index failure')
+  }
+  try {
+    const failedDelete = await deleteFolder('/archive')
+    assert.equal(failedDelete.status, 500)
+    assert.match((await failedDelete.json()).error, /simulated index failure/)
+    assert.equal(await fs.readFile(path.join(nonMarkdownDirectory, 'asset.bin'), 'utf8'), 'preserve')
+    assert.equal(await fs.readFile(path.join(hiddenContentsDirectory, '.keep'), 'utf8'), 'preserve')
+    assert.deepEqual(await fs.readFile(bundleRuntime.indexPath), originalIndex)
+    assert.deepEqual(await fs.readFile(path.join(bundleRoot, 'index.md')), originalRootIndex)
+    assert.equal((await fetch(`${baseUrl}/api/file?path=${encodeURIComponent(renamed.newId)}`, { headers })).status, 200)
+    await fs.unlink(path.join(bundleRoot, 'index.md'))
+    await fs.unlink(path.join(bundleRoot, 'log.md'))
+    assert.equal((await deleteFolder('/archive')).status, 500)
+    await assert.rejects(fs.lstat(path.join(bundleRoot, 'index.md')), { code: 'ENOENT' })
+    await assert.rejects(fs.lstat(path.join(bundleRoot, 'log.md')), { code: 'ENOENT' })
+    await assert.rejects(fs.lstat(path.join(bundleRoot, 'archive', 'missing')), { code: 'ENOENT' })
+  } finally {
+    bundleRuntime.performReindexBundle = performReindex
+  }
+  assert.deepEqual((await fs.readdir(path.join(bundleRoot, '.folio'))).filter((name) => name.startsWith('folder-delete-')), [])
+
+  const noteBeforeDelete = await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(renamed.newId)}`, { headers }).then((response) => response.json())
+  // A folder deletion must wait for queued index work, then perform its
+  // filesystem and index mutations together.
+  const queueIndex = bundleRuntime.queueIndexOperation
+  let releaseIndex
+  let deletionQueued
+  const heldIndex = queueIndex(() => new Promise((resolve) => { releaseIndex = resolve }))
+  const queued = new Promise((resolve) => { deletionQueued = resolve })
+  bundleRuntime.queueIndexOperation = (operation) => { deletionQueued(); return queueIndex(operation) }
+  const deleting = deleteFolder('/archive')
+  await queued
+  assert.ok((await fs.lstat(path.join(bundleRoot, 'archive'))).isDirectory())
+  releaseIndex()
+  await heldIndex
+  const deletedFolder = await deleting
+  bundleRuntime.queueIndexOperation = queueIndex
+  assert.equal(deletedFolder.status, 200)
+  const deleted = await deletedFolder.json()
+  assert.equal(deleted.path, '/archive')
+  assert.ok(deleted.deletedIds.includes(renamed.newId))
+  assert.equal(deleted.warning, null)
+  await assert.rejects(fs.lstat(path.join(bundleRoot, 'archive')), { code: 'ENOENT' })
+  assert.equal(await fs.readFile(outsideFile, 'utf8'), '# Outside content')
+  assert.ok(!(await fetch(`${baseUrl}/api/notes`, { headers }).then((response) => response.json())).some((note) => note.id.startsWith('/archive/')))
+  assert.ok(!(await fetch(`${baseUrl}/api/search?q=Meeting`, { headers }).then((response) => response.json())).some((note) => note.id.startsWith('/archive/')))
+  assert.doesNotMatch(await fs.readFile(path.join(bundleRoot, 'index.md'), 'utf8'), /archive/)
+  assert.doesNotMatch(await fs.readFile(path.join(bundleRoot, 'log.md'), 'utf8'), /archive/)
+  const noteAfterDelete = await fetch(`${baseUrl}/api/note/history?id=${encodeURIComponent(renamed.newId)}`, { headers }).then((response) => response.json())
+  assert.equal(noteAfterDelete.entries[0].title, 'Deleted folder /archive')
+  assert.ok(noteAfterDelete.entries.some((entry) => entry.revision === noteBeforeDelete.entries[0].revision))
+  assert.equal((await fetch(`${baseUrl}/api/note/history/version?id=${encodeURIComponent(renamed.newId)}&revision=${noteBeforeDelete.entries[0].revision}`, { headers })).status, 200)
+  assert.equal(await bundleRuntime.history.reconcile("After deletion"), null)
+  assert.equal((await deleteFolder('/archive')).status, 404)
+
 })

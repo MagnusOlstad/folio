@@ -3,8 +3,8 @@ import path from 'node:path'
 
 export function registerRoutes(app, runtime) {
   const {
-    assertNoBundleSymlinks, isMovableConceptId, listBundleDirectories, markdownDocument,
-    migrateIndexedRecordsAfterMove, moveConceptMarkdown, normalizeBundlePath, performReindexBundle,
+    assertNoBundleSymlinks, getBundleRoot, bundleFileId, isMovableConceptId, listBundleDirectories, listBundleMarkdownFiles, markdownDocument,
+    migrateIndexedRecordsAfterMove, moveConceptMarkdown, normalizeBundlePath, parseMarkdownFile, performReindexBundle,
     publicRecord, queueIndexOperation, queueMarkdownMutation, readRecords, recordIsStale,
     refreshMissingEmbeddingsInBackground, relationshipIndex, resolveBundlePath,
     semanticSuggestionSummaries, writeRecords,
@@ -81,36 +81,114 @@ export function registerRoutes(app, runtime) {
       const id = normalizeBundlePath(String(request.query.path || ''))
       const target = id && !isReservedId(id) ? resolveBundlePath(id) : null
       if (!target) return response.status(400).json({ error: 'Invalid or reserved folder path.' })
-      await queueMarkdownMutation(async () => {
-        try {
-          await assertNoBundleSymlinks(target.path)
-          const stat = await fs.lstat(target.path)
-          if (!stat.isDirectory()) {
-            const error = new Error('The requested path is not a folder.')
-            error.status = 400
-            throw error
-          }
-          await fs.rmdir(target.path)
-        } catch (error) {
-          if (error.code === 'ENOENT') {
-            const missing = new Error('Folder not found.')
-            missing.status = 404
-            throw missing
-          }
-          if (error.code === 'ENOTDIR') {
-            const invalid = new Error('The requested path is not a folder.')
-            invalid.status = 400
-            throw invalid
-          }
-          if (error.code === 'ENOTEMPTY' || error.code === 'EEXIST') {
-            const nonempty = new Error('Only an empty folder can be deleted.')
-            nonempty.status = 409
-            throw nonempty
-          }
+      const bundleRoot = typeof getBundleRoot === 'function' ? getBundleRoot() : runtime.bundleRoot
+      const result = await queueIndexOperation(() => queueMarkdownMutation(async () => {
+        try { await assertNoBundleSymlinks(target.path) }
+        catch (error) {
+          if (error.code === 'ENOENT') error.message = 'Folder not found.'
+          if (error.code === 'ENOTDIR') error.message = 'The requested path is not a folder.'
           throw error
         }
-      })
-      response.json({ path: id })
+        if (!(await fs.lstat(target.path)).isDirectory()) {
+          const error = new Error('The requested path is not a folder.')
+          error.status = 400
+          throw error
+        }
+        // The staging directory is on the bundle filesystem and excluded from
+        // indexing. Rename retains every hidden/non-Markdown entry for rollback.
+        const metadataPath = path.join(bundleRoot, '.folio')
+        await assertNoBundleSymlinks(metadataPath, { allowMissing: true })
+        await fs.mkdir(metadataPath, { recursive: true })
+        const stage = await fs.mkdtemp(path.join(metadataPath, 'folder-delete-'))
+        const stagedPath = path.join(stage, 'contents')
+        let staged = false
+        let committed = false
+        let restored = false
+        const snapshots = []
+        try {
+          const records = await readRecords()
+          const markdownPaths = new Set(await listBundleMarkdownFiles())
+          // Reindex also creates these files when they were absent.
+          markdownPaths.add(path.join(bundleRoot, 'index.md'))
+          markdownPaths.add(path.join(bundleRoot, 'log.md'))
+          for (const filePath of markdownPaths) {
+            if (filePath.startsWith(`${target.path}${path.sep}`)) continue
+            await assertNoBundleSymlinks(filePath, { allowMissing: true })
+            snapshots.push({ path: filePath, content: await runtime.readOptionalFile(filePath) })
+          }
+          const deletedIds = [...markdownPaths].filter((filePath) => filePath.startsWith(`${target.path}${path.sep}`)).map(bundleFileId)
+          await fs.rename(target.path, stagedPath)
+          staged = true
+          try {
+            await performReindexBundle({ markdownLocked: true })
+          } catch (error) {
+            // Do not overwrite a folder recreated by an external editor.
+            try {
+              await fs.lstat(target.path)
+              throw new Error(`The deleted path was recreated. Recover the original contents from ${stagedPath}.`)
+            } catch (restoreError) {
+              if (restoreError.code !== 'ENOENT') throw restoreError
+            }
+            await fs.rename(stagedPath, target.path)
+            staged = false
+            restored = true
+            const recoveryErrors = []
+            for (const snapshot of snapshots) {
+              try {
+                await assertNoBundleSymlinks(snapshot.path, { allowMissing: true })
+                const current = await runtime.readOptionalFile(snapshot.path)
+                if (current === null && snapshot.content === null || snapshot.content && current?.equals(snapshot.content)) continue
+                // Reindex owns generated relationship blocks and folio_related;
+                // refuse to undo any other edit made by an external editor.
+                if (snapshot.content && ![path.join(bundleRoot, 'index.md'), path.join(bundleRoot, 'log.md')].includes(snapshot.path)) {
+                  const comparable = (buffer) => {
+                    const parsed = parseMarkdownFile(buffer.toString('utf8'), snapshot.path)
+                    const { folio_related: _related, ...frontmatter } = parsed.frontmatter
+                    return JSON.stringify({ frontmatter, content: parsed.content.replace(/<!-- folio:generated-related:start -->[\s\S]*?<!-- folio:generated-related:end -->/gi, '').trim() })
+                  }
+                  if (!current || comparable(current) !== comparable(snapshot.content))
+                    throw new Error(`A concurrent edit at ${bundleFileId(snapshot.path)} was retained.`)
+                }
+                if (snapshot.content === null) await fs.rm(snapshot.path, { force: true })
+                else await fs.writeFile(snapshot.path, snapshot.content)
+              } catch (restoreError) { recoveryErrors.push(restoreError.message) }
+            }
+            await writeRecords(records)
+            if (recoveryErrors.length) throw new Error(`The folder was restored, but index recovery was incomplete. Reindex the bundle. ${recoveryErrors.join(' ')}`)
+            throw error
+          }
+          committed = true
+          const warnings = []
+          try {
+            await runtime.history.reconcile(`Deleted folder ${id}`)
+          } catch (error) {
+            console.error(`Folder deletion history checkpoint failed: ${error.message}`)
+            warnings.push('The folder was deleted, but its history checkpoint could not be saved.')
+          }
+          try {
+            // fs.rm removes nested symlinks themselves; it never follows their targets.
+            await fs.rm(stage, { recursive: true })
+          } catch (error) {
+            console.error(`Could not remove staged folder contents: ${error.message}`)
+            warnings.push(`The folder was removed from the bundle, but its contents remain in ${stage}.`)
+          }
+          return { path: id, deletedIds, warning: warnings.join(' ') || null }
+        } catch (error) {
+          if (staged && !committed) {
+            const recovery = new Error(`Folder deletion could not be completed. Original contents remain in ${stagedPath}. ${error.message}`)
+            recovery.status = 500
+            throw recovery
+          }
+          if (restored) {
+            error.status = 500
+            error.message = `Folder deletion failed and the original folder was restored. ${error.message}`
+          }
+          throw error
+        } finally {
+          if (!staged) await fs.rm(stage, { recursive: true, force: true }).catch(() => {})
+        }
+      }))
+      response.json(result)
     } catch (error) {
       if (error.status) return response.status(error.status).json({ error: error.message })
       next(error)
@@ -184,9 +262,9 @@ export function registerRoutes(app, runtime) {
       if (!target || isReservedId(newId) || !isMovableConceptId(oldId)) {
         return response.status(400).json({ error: 'This bundle file has a fixed OKF path and cannot be renamed.' })
       }
-      await assertNoBundleSymlinks(resolveBundlePath(oldId).path)
-      await assertNoBundleSymlinks(target.path, { allowMissing: true })
       const moveResult = await queueIndexOperation(() => queueMarkdownMutation(async () => {
+        await assertNoBundleSymlinks(resolveBundlePath(oldId).path)
+        await assertNoBundleSymlinks(target.path, { allowMissing: true })
         const records = await readRecords()
         if (!records.some((record) => record.id === oldId)) {
           const error = new Error('Note not found.')

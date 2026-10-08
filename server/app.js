@@ -21,6 +21,7 @@ import { createHistoryService } from './history/service.js'
 import { registerRoutes as registerMlxRoutes } from './routes/mlx.js'
 import { registerRoutes as registerSystemRoutes } from './routes/system.js'
 import { registerRoutes as registerFileRoutes } from './routes/files.js'
+import { registerRoutes as registerFileContentRoutes } from './routes/file-content.js'
 import { registerRoutes as registerExplorerRoutes } from './routes/explorer.js'
 import { registerRoutes as registerCaptureRoutes } from './routes/capture.js'
 import { registerRoutes as registerConfirmationRoutes } from './routes/confirmation.js'
@@ -120,6 +121,7 @@ export async function createApp(runtime = createRuntime()) {
   registerSystemRoutes(app, scopedRuntime)
   registerExplorerRoutes(app, scopedRuntime)
   registerFileRoutes(app, scopedRuntime)
+  registerFileContentRoutes(app, scopedRuntime)
   registerHistoryRoutes(app, scopedRuntime)
   registerTranscriptionRoutes(app, scopedRuntime)
   registerCaptureRoutes(app, scopedRuntime)

@@ -31,6 +31,12 @@ export function ExplorerContextMenu({
   const inputRef = useRef<HTMLInputElement>(null);
   const [formMode, setFormMode] = useState<FormMode>(null);
   const [name, setName] = useState("");
+  const workingRef = useRef(false);
+  const activeRef = useRef(true);
+  useEffect(() => {
+    activeRef.current = true;
+    return () => { activeRef.current = false; };
+  }, []);
   const [working, setWorking] = useState(false);
   const target = state.target;
   const canRename = target.kind === "directory"
@@ -40,7 +46,8 @@ export function ExplorerContextMenu({
     && target.file.deletable
     && target.file.movable
     && !blockedFileIds.has(target.file.id);
-  const canDeleteDirectory = target.kind === "directory" && canDeleteExplorerDirectory(target.path);
+  const canDeleteDirectory = target.kind === "directory" && canDeleteExplorerDirectory(target.path)
+    && ![...blockedFileIds].some((id) => id.startsWith(`${target.path}/`));
   const canDeleteTarget = canDelete || canDeleteDirectory;
   const targetPath = explorerTargetPath(target);
   const absolutePath = `${bundlePath.replace(/[\\/]$/, "")}${targetPath}`;
@@ -74,13 +81,16 @@ export function ExplorerContextMenu({
   }, [onDismiss]);
 
   async function run(action: () => Promise<void>) {
+    if (workingRef.current) return;
+    workingRef.current = true;
     setWorking(true);
     try {
       await action();
-      onDismiss();
+      if (activeRef.current) onDismiss();
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Explorer action failed.");
+      if (activeRef.current) onError(error instanceof Error ? error.message : "Explorer action failed.");
     } finally {
+      workingRef.current = false;
       setWorking(false);
     }
   }
@@ -127,7 +137,7 @@ export function ExplorerContextMenu({
           {formMode === "delete" ? (
             <>
               <strong>Delete {explorerTargetName(target)}?</strong>
-              <p>{target.kind === "file" ? "This permanently deletes the Markdown file from this bundle." : "Only an empty folder can be deleted from this bundle."}</p>
+              <p>{target.kind === "file" ? "This permanently deletes the Markdown file from this bundle." : "This permanently deletes this folder and all its contents, including nested folders, hidden files, and non-Markdown files."}</p>
               <div className="explorer-context-actions">
                 <button type="button" onClick={() => onDismiss(true)} disabled={working}>Cancel</button>
                 <button
@@ -166,20 +176,20 @@ export function ExplorerContextMenu({
         </form>
       ) : (
         <div role="menu" aria-label={`${explorerTargetName(target)} actions`} onKeyDown={moveMenuFocus}>
-          <button role="menuitem" type="button" onClick={() => void run(() => actions.createFile(explorerTargetParent(target)))}>New note</button>
-          <button role="menuitem" type="button" onClick={() => openForm("create-folder")}>New folder</button>
+          <button role="menuitem" type="button" disabled={working} onClick={() => void run(() => actions.createFile(explorerTargetParent(target)))}>New note</button>
+          <button role="menuitem" type="button" disabled={working} onClick={() => openForm("create-folder")}>New folder</button>
           {target.kind === "file" ? (
-            <button role="menuitem" type="button" disabled={!canRename} onClick={() => openForm("rename")}>Rename file</button>
+            <button role="menuitem" type="button" disabled={working || !canRename} onClick={() => openForm("rename")}>Rename file</button>
           ) : null}
-          <button role="menuitem" type="button" onClick={() => void run(() => actions.copyText(absolutePath))}>Copy absolute path</button>
-          <button role="menuitem" type="button" onClick={() => void run(() => actions.copyText(relativePath))}>Copy relative path</button>
+          <button role="menuitem" type="button" disabled={working} onClick={() => void run(() => actions.copyText(absolutePath))}>Copy absolute path</button>
+          <button role="menuitem" type="button" disabled={working} onClick={() => void run(() => actions.copyText(relativePath))}>Copy relative path</button>
           {target.kind === "file" ? (
             <>
-              <button role="menuitem" type="button" onClick={() => void run(() => actions.exportFile(target.file, "markdown"))}>Export Markdown</button>
-              <button role="menuitem" type="button" onClick={() => void run(() => actions.exportFile(target.file, "pdf"))}>Export PDF</button>
-              <button role="menuitem" type="button" className="danger" disabled={!canDelete} onClick={() => setFormMode("delete")}>Delete</button>
+              <button role="menuitem" type="button" disabled={working} onClick={() => void run(() => actions.exportFile(target.file, "markdown"))}>Export Markdown</button>
+              <button role="menuitem" type="button" disabled={working} onClick={() => void run(() => actions.exportFile(target.file, "pdf"))}>Export PDF</button>
+              <button role="menuitem" type="button" className="danger" disabled={working || !canDelete} onClick={() => setFormMode("delete")}>Delete</button>
             </>
-          ) : canDeleteDirectory ? <button role="menuitem" type="button" className="danger" onClick={() => setFormMode("delete")}>Delete</button> : null}
+          ) : canDeleteExplorerDirectory(target.path) ? <button role="menuitem" type="button" className="danger" disabled={working || !canDeleteDirectory} onClick={() => setFormMode("delete")}>Delete</button> : null}
         </div>
       )}
     </div>
