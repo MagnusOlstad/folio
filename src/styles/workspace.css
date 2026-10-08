@@ -148,6 +148,12 @@
   background: rgba(var(--highlight-rgb), 0.035);
 }
 
+.tree-file.active {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--blue) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--blue);
+}
+
 .tree-directory.drop-target {
   color: var(--acid);
   background: rgba(var(--acid-rgb), 0.1);

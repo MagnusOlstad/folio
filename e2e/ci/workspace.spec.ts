@@ -549,6 +549,65 @@ test('opens sidebar notes as a replaceable preview until the editor is focused',
   await expect(todoTab).not.toHaveClass(/preview/)
 })
 
+test('keeps explorer highlighting in sync with editor tab activation', async ({ page }) => {
+  const startRow = page.locator('.tree-file[aria-label="Start Here"]')
+  const todoRow = page.locator('.tree-file[aria-label="Todo List"]')
+  await startRow.click()
+  await expect(startRow).toHaveAttribute('aria-current', 'true')
+  const html = page.locator('html')
+  const startingTheme = await html.getAttribute('data-theme')
+  try {
+    for (const theme of ['original', 'light', 'dark', 'editorial']) {
+      await html.evaluate((element, selectedTheme) => element.setAttribute('data-theme', selectedTheme), theme)
+      await page.mouse.move(0, 0)
+      const activeBackground = await startRow.evaluate((row) => row.ownerDocument.defaultView?.getComputedStyle(row).backgroundColor)
+      const inactiveBackground = await todoRow.evaluate((row) => row.ownerDocument.defaultView?.getComputedStyle(row).backgroundColor)
+      await startRow.hover()
+      const hoveredActiveBackground = await startRow.evaluate((row) => row.ownerDocument.defaultView?.getComputedStyle(row).backgroundColor)
+      expect(activeBackground, `${theme} active row`).not.toBe(inactiveBackground)
+      expect(hoveredActiveBackground, `${theme} hovered active row`).not.toBe(inactiveBackground)
+      expect(hoveredActiveBackground, `${theme} hovered active row`).not.toBe('rgba(0, 0, 0, 0)')
+    }
+  } finally {
+    await html.evaluate((element, previousTheme) => {
+      if (previousTheme) element.setAttribute('data-theme', previousTheme)
+      else element.removeAttribute('data-theme')
+    }, startingTheme)
+  }
+  const startTab = page.locator('.editor-tab').filter({ hasText: 'Start Here' })
+  await expect(startTab).toBeVisible()
+  await page.getByRole('heading', { name: 'Start Here', exact: true }).click()
+
+  await todoRow.click()
+  await expect(todoRow).toHaveAttribute('aria-current', 'true')
+  const todoTab = page.locator('.editor-tab').filter({ hasText: 'Todo List' })
+  await expect(todoTab).toBeVisible()
+
+  await startTab.click()
+  await expect(startRow).toHaveAttribute('aria-current', 'true')
+  const folder = page.locator('.tree-directory').filter({ hasText: 'getting-started' })
+  await expect(folder).toHaveAttribute('aria-expanded', 'true')
+  await folder.click()
+  await expect(startRow).toHaveCount(0)
+
+  await page.getByRole('heading', { name: 'Start Here', exact: true }).click()
+  await expect(folder).toHaveAttribute('aria-expanded', 'false')
+  await startTab.click()
+  await expect(folder).toHaveAttribute('aria-expanded', 'true')
+  await expect(startRow).toHaveAttribute('aria-current', 'true')
+
+  await todoTab.click()
+  await expect(todoRow).toHaveAttribute('aria-current', 'true')
+  await expect(startRow).not.toHaveAttribute('aria-current', 'true')
+
+  const bundleHeading = page.locator('.bundle-explorer-heading.active')
+  await bundleHeading.click()
+  await expect(page.locator('.tree-scroll')).toHaveCount(0)
+  await todoTab.click()
+  await expect(page.locator('.tree-scroll')).toBeVisible()
+  await expect(todoRow).toHaveAttribute('aria-current', 'true')
+})
+
 test('marks the prospective right-strip tab slot and reorders tabs within a group with saved drafts in the explorer', async ({ page, request }) => {
   const draftId = `untitled:tab-reorder-${Date.now()}`
   const draftResponse = await request.put(`/api/draft?id=${encodeURIComponent(draftId)}`, {
@@ -584,8 +643,12 @@ test('marks the prospective right-strip tab slot and reorders tabs within a grou
       tabs.map((tab) => tab.getAttribute('title')),
     )).toEqual(['Todo List', 'Start Here'])
   } finally {
-    const cleanupResponse = await request.delete(`/api/draft?id=${encodeURIComponent(draftId)}`)
-    expect(cleanupResponse.ok()).toBeTruthy()
+    try {
+      const cleanupResponse = await request.delete(`/api/draft?id=${encodeURIComponent(draftId)}`)
+      expect(cleanupResponse.ok()).toBeTruthy()
+    } catch {
+      expect(page.isClosed()).toBeTruthy()
+    }
   }
 })
 

@@ -22,6 +22,9 @@ export type WorkspaceExplorerProps = {
   dropDirectoryPath: string | null;
   movingFileId: string | null;
   blockedFileIds: Set<string>;
+  activeFileId: string | null;
+  activeFileDirectory: string | null;
+  activeFileRevealRequest: number;
   setExpandedDirectories: Dispatch<SetStateAction<Set<string>>>;
   openDocument: (id: string, source?: "note" | "file", targetGroupId?: string, disposition?: "preview" | "permanent") => Promise<void>;
   setDraggedFileId: Dispatch<SetStateAction<string | null>>;
@@ -36,9 +39,13 @@ export type WorkspaceExplorerProps = {
 };
 
 export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
-  const [collapsedBundleId, setCollapsedBundleId] = useState<string | null>(null);
+  const [collapsedBundle, setCollapsedBundle] = useState<{
+    bundleId: string;
+    revealRequest: number;
+  } | null>(null);
   const [contextMenu, setContextMenu] = useState<(ExplorerContextMenuState & { bundleId: string | null }) | null>(null);
   const treeScrollRef = useRef<HTMLDivElement>(null);
+  const activeFileRevealFrameRef = useRef<number | null>(null);
   const {
     explorerScrollTop,
     onExplorerScroll,
@@ -56,6 +63,9 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
     dropDirectoryPath,
     movingFileId,
     blockedFileIds,
+    activeFileId,
+    activeFileDirectory,
+    activeFileRevealRequest,
     setExpandedDirectories,
     openDocument,
     setDraggedFileId,
@@ -69,17 +79,56 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
     setMessage,
   } = props;
   if (contextMenu && contextMenu.bundleId !== activeBundleId) setContextMenu(null);
+  const cancelPendingActiveFileReveal = useCallback(() => {
+    if (activeFileRevealFrameRef.current === null) return;
+    window.cancelAnimationFrame(activeFileRevealFrameRef.current);
+    activeFileRevealFrameRef.current = null;
+  }, []);
   const activeBundle = bundles.find((bundle) => bundle.id === activeBundleId);
+  const collapsedForActiveBundle = collapsedBundle?.bundleId === activeBundleId &&
+    collapsedBundle.revealRequest === activeFileRevealRequest;
   useEffect(() => {
     const element = treeScrollRef.current;
     if (
       element &&
       !filesLoading &&
-      activeBundleId !== collapsedBundleId &&
+      !collapsedForActiveBundle &&
       element.scrollTop !== explorerScrollTop
     )
       element.scrollTop = explorerScrollTop;
-  }, [activeBundleId, collapsedBundleId, explorerScrollTop, filesLoading]);
+  }, [activeBundleId, collapsedForActiveBundle, explorerScrollTop, filesLoading]);
+
+  useEffect(() => {
+    if (!activeFileId || !activeFileDirectory || filesLoading) return;
+    const ancestors = new Set<string>(["/"]);
+    let currentPath = "";
+    for (const segment of activeFileDirectory.split("/").filter(Boolean)) {
+      currentPath += `/${segment}`;
+      ancestors.add(currentPath);
+    }
+    setExpandedDirectories((current) => {
+      if ([...ancestors].every((path) => current.has(path))) return current;
+      return new Set([...current, ...ancestors]);
+    });
+    const frame = window.requestAnimationFrame(() => {
+      activeFileRevealFrameRef.current = null;
+      const tree = treeScrollRef.current;
+      const row = tree && Array.from(tree.querySelectorAll<HTMLButtonElement>(".tree-file[data-file-id]"))
+        .find((candidate) => candidate.dataset.fileId === activeFileId);
+      if (!tree || !row) return;
+      const treeBounds = tree.getBoundingClientRect();
+      const rowBounds = row.getBoundingClientRect();
+      if (rowBounds.top < treeBounds.top)
+        tree.scrollTop += rowBounds.top - treeBounds.top;
+      else if (rowBounds.bottom > treeBounds.bottom)
+        tree.scrollTop += rowBounds.bottom - treeBounds.bottom;
+    });
+    activeFileRevealFrameRef.current = frame;
+    return () => {
+      if (activeFileRevealFrameRef.current === frame)
+        cancelPendingActiveFileReveal();
+    };
+  }, [activeFileDirectory, activeFileId, activeFileRevealRequest, cancelPendingActiveFileReveal, filesLoading, setExpandedDirectories]);
 
   const closeContextMenu = useCallback((restoreFocus = true) => {
     const anchor = contextMenu?.anchor;
@@ -98,11 +147,15 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
 
   function handleBundleClick(bundleId: string) {
     if (bundleId === activeBundleId) {
-      setCollapsedBundleId((current) => current === bundleId ? null : bundleId);
+      setCollapsedBundle((current) =>
+        current?.bundleId === bundleId && current.revealRequest === activeFileRevealRequest
+          ? null
+          : { bundleId, revealRequest: activeFileRevealRequest },
+      );
       return;
     }
     setContextMenu(null);
-    setCollapsedBundleId(null);
+    setCollapsedBundle(null);
     selectBundle(bundleId);
   }
 
@@ -118,7 +171,9 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
         <div className="bundle-explorer-list" aria-label="Bundles">
           {bundles.map((bundle) => {
             const active = bundle.id === activeBundleId;
-            const expanded = active && bundle.id !== collapsedBundleId;
+            const collapsedForCurrentActivation = collapsedBundle?.bundleId === bundle.id &&
+              collapsedBundle.revealRequest === activeFileRevealRequest;
+            const expanded = active && !collapsedForCurrentActivation;
             return (
               <div
                 className={`bundle-explorer-root${active ? " active" : ""}${expanded ? " expanded" : ""}`}
@@ -159,6 +214,9 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
                       className="tree-scroll"
                       style={{ overflowAnchor: "none" }}
                       onScroll={(event) => onExplorerScroll(event.currentTarget.scrollTop)}
+                      onPointerDown={cancelPendingActiveFileReveal}
+                      onWheel={cancelPendingActiveFileReveal}
+                      onKeyDown={cancelPendingActiveFileReveal}
                       ref={treeScrollRef}
                     >
                       {filesLoading ? (
@@ -202,6 +260,7 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
                             dropDirectoryPath={dropDirectoryPath}
                             movingFileId={movingFileId}
                             blockedFileIds={blockedFileIds}
+                            activeFileId={activeFileId}
                             onToggle={(path) => setExpandedDirectories((current) => {
                               const next = new Set(current);
                               if (next.has(path)) next.delete(path);
