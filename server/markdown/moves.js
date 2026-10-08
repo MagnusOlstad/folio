@@ -334,9 +334,25 @@ async function moveConceptMarkdown(oldId, directory, movedAt, options = {}) {
 
   let destinationLinked = false
   let sourceRemoved = false
+  let destinationStat = null
   const rollback = async () => {
     if (destinationLinked) {
       const movedRewrite = rewrites.find((rewrite) => rewrite.originalPath === oldPath)
+      await assertNoBundleSymlinks(oldPath, { allowMissing: true })
+      await assertNoBundleSymlinks(newPath, { allowMissing: true })
+      // Validate the destination before linking it back or deleting it. Another
+      // editor can replace the destination even if the source was recreated.
+      const currentDestinationStat = await fs.lstat(newPath).catch((error) => {
+        if (error.code === 'ENOENT') return null
+        throw error
+      })
+      const destinationMarkdown = (await readOptionalFile(newPath))?.toString('utf8')
+      if (currentDestinationStat && (currentDestinationStat.dev !== destinationStat.dev
+        || currentDestinationStat.ino !== destinationStat.ino
+        || !movedRewrite
+        || ![movedRewrite.originalMarkdown, movedRewrite.nextMarkdown].includes(destinationMarkdown))) {
+        throw new Error(`Refusing to replace a concurrent file at ${newId} while rolling back its move.`)
+      }
       await fs.mkdir(path.dirname(oldPath), { recursive: true })
       if (sourceRemoved) {
         try {
@@ -359,6 +375,7 @@ async function moveConceptMarkdown(oldId, directory, movedAt, options = {}) {
     for (const rewrite of rewrites) {
       if (!rewrite.changed) continue
       const rollbackPath = rewrite.originalPath === oldPath ? oldPath : rewrite.nextPath
+      await assertNoBundleSymlinks(rollbackPath, { allowMissing: true })
       const current = await readOptionalFile(rollbackPath)
       const currentMarkdown = current?.toString('utf8')
       if (currentMarkdown === rewrite.originalMarkdown) continue
@@ -373,6 +390,7 @@ async function moveConceptMarkdown(oldId, directory, movedAt, options = {}) {
   try {
     await fs.mkdir(path.dirname(newPath), { recursive: true })
     try {
+      destinationStat = await fs.lstat(oldPath)
       await fs.link(oldPath, newPath)
       destinationLinked = true
     } catch (error) {
@@ -387,6 +405,7 @@ async function moveConceptMarkdown(oldId, directory, movedAt, options = {}) {
     sourceRemoved = true
     for (const rewrite of rewrites) {
       if (!rewrite.changed) continue
+      await assertNoBundleSymlinks(rewrite.nextPath)
       const current = await fs.readFile(rewrite.nextPath, 'utf8')
       if (current !== rewrite.originalMarkdown) {
         throw new Error(`The file changed while moving ${rewrite.originalPath}.`)

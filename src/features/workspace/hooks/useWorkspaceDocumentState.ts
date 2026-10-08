@@ -52,6 +52,7 @@ export function useWorkspaceDocumentState({
   >({});
   const directoryDeletions = useRef<Record<string, number>>({});
   const documentMutationSequence = useRef(0);
+  const documentPathChanges = useRef<Record<string, { sequence: number; newId: string | null }>>({});
   const deletingDirectories = useRef(new Set<string>());
   const documentRequests = useRef<Record<string, number>>({});
   const saveQueues = useRef<Record<string, Promise<unknown>>>({});
@@ -62,6 +63,20 @@ export function useWorkspaceDocumentState({
   const filingDraftIds = useRef<Set<string>>(new Set());
   const documentsRef = useRef(documents);
   const draftSnapshotRef = useRef<StoredDraft[]>([]);
+
+  function recordDocumentPathChange(oldId: string, newId: string | null) {
+    const sequence = ++documentMutationSequence.current;
+    documentPathChanges.current[oldId] = { sequence, newId };
+    documentRequests.current[oldId] = (documentRequests.current[oldId] || 0) + 1;
+    if (newId && newId !== oldId) {
+      documentPathChanges.current[newId] = { sequence, newId };
+      documentRequests.current[newId] = (documentRequests.current[newId] || 0) + 1;
+    }
+  }
+
+  function recordExplorerMutation() {
+    documentMutationSequence.current += 1;
+  }
 
   useEffect(() => {
     draftsRef.current = drafts;
@@ -197,6 +212,9 @@ export function useWorkspaceDocumentState({
     deletingDirectories,
     directoryDeletions,
     documentMutationSequence,
+    documentPathChanges,
+    recordDocumentPathChange,
+    recordExplorerMutation,
     saveQueues,
     draftSyncQueues,
     filingDraftIds,

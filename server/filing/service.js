@@ -8,7 +8,7 @@ export function createFilingService(runtime) {
     captureMarker, captureContribution,
     captureMetadata, updatedGenerated, filingActor, stripGeneratedRelatedSection, indexedConceptContent,
     searchTerms, reuseExistingClassificationPath,
-    isMovableConceptId, bundleFileId, dateKeyInTimeZone, cosineSimilarity, lexicalScore } = runtime
+    isMovableConceptId, bundleFileId, dateKeyInTimeZone, cosineSimilarity, lexicalScore, assertNoBundleSymlinks } = runtime
 function openingSpecialKind(content) {
   const firstLine = content.split('\n').find((line) => line.trim())?.trim() || ''
   const normalized = firstLine.replace(/^#{1,6}\s*/, '').toLowerCase()
@@ -216,6 +216,7 @@ async function recalculateGeneratedRelationships(records, documents) {
     let markdown
     let parsed
     try {
+      await assertNoBundleSymlinks(document.filePath)
       markdown = await fs.readFile(document.filePath, 'utf8')
       parsed = parseMarkdownFile(markdown, document.filePath)
     } catch (error) {
@@ -249,7 +250,10 @@ async function recalculateGeneratedRelationships(records, documents) {
     if (!hadGeneratedSection && !generated && !frontmatterChanged) continue
     const nextContent = generated ? `${content}\n\n${generated}` : content
     const nextMarkdown = markdownDocument(parsed.frontmatter, nextContent)
-    if (nextMarkdown !== markdown) await fs.writeFile(document.filePath, nextMarkdown)
+    if (nextMarkdown !== markdown) {
+      await assertNoBundleSymlinks(document.filePath)
+      await fs.writeFile(document.filePath, nextMarkdown)
+    }
   }
 }
 
@@ -423,7 +427,7 @@ async function appendAggregateDocument({ filePath, id, kind, rawId, content, sou
   return { id, appended: Boolean(parsed) }
 }
 
-async function rebuildBundleFiles(records) {
+function bundleFileContents(records) {
   const grouped = new Map()
   for (const record of records) {
     if (!grouped.has(record.type)) grouped.set(record.type, [])
@@ -438,8 +442,6 @@ async function rebuildBundleFiles(records) {
     }
     indexLines.push('')
   }
-  await fs.writeFile(path.join(bundleRoot, 'index.md'), indexLines.join('\n'))
-
   const byDate = new Map()
   for (const record of records) {
     const date = record.createdAt.slice(0, 10)
@@ -454,10 +456,20 @@ async function rebuildBundleFiles(records) {
     }
     logLines.push('')
   }
-  await fs.writeFile(path.join(bundleRoot, 'log.md'), logLines.join('\n'))
+  return new Map([
+    [path.join(bundleRoot, 'index.md'), indexLines.join('\n')],
+    [path.join(bundleRoot, 'log.md'), logLines.join('\n')],
+  ])
+}
+
+async function rebuildBundleFiles(records) {
+  for (const [filePath, content] of bundleFileContents(records)) {
+    await assertNoBundleSymlinks(filePath, { allowMissing: true })
+    await fs.writeFile(filePath, content)
+  }
 }
 
   return { openingSpecialKind, aggregateEntryContent, normalizeClassification, rawDocument, mentionedRecordIds, creationRelationships,
     generatedRelatedSection, recalculateGeneratedRelationships, conceptDocument, findExactConceptFile,
-    availableConceptFilename, appendConceptDocument, localTimeLabel, appendAggregateDocument, rebuildBundleFiles }
+    availableConceptFilename, appendConceptDocument, localTimeLabel, appendAggregateDocument, bundleFileContents, rebuildBundleFiles }
 }

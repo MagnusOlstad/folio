@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from "react";
 import type { Dispatch, SetStateAction, RefObject } from "react";
 import type {
   BundleFile,
@@ -7,8 +8,9 @@ import type {
   TabGroup,
   ViewerDocument,
 } from "../../../domain/types.ts";
-import { api } from "../../../lib/api.ts";
+import { apiForBundle, getActiveBundleId, getActiveBundleRevision } from "../../../lib/api.ts";
 import { isUntitledId } from "../../../lib/workspace.ts";
+import { replaceDocumentPath, replaceDocumentTabs } from "../model/document-path.ts";
 
 type BundleActionState = {
   reindexing: boolean;
@@ -19,6 +21,13 @@ type BundleActionState = {
   savingDocuments: Set<string>;
   loadingDocuments: Set<string>;
   deletingDirectories?: RefObject<Set<string>>;
+  documentsRef: RefObject<Record<string, ViewerDocument>>;
+  draftsRef: RefObject<Record<string, string>>;
+  documentRequests: RefObject<Record<string, number>>;
+  documentPathChanges: RefObject<Record<string, { sequence: number; newId: string | null }>>;
+  documentMutationSequence: RefObject<number>;
+  recordDocumentPathChange: (oldId: string, newId: string | null) => void;
+  isDocumentDirty: (id: string) => boolean;
 };
 
 type BundleActionSetters = {
@@ -36,6 +45,7 @@ type BundleActionSetters = {
   setExpandedDirectories: Dispatch<SetStateAction<Set<string>>>;
   setDraggedFileId: Dispatch<SetStateAction<string | null>>;
   setDropDirectoryPath: Dispatch<SetStateAction<string | null>>;
+  setLoadingDocuments: Dispatch<SetStateAction<Set<string>>>;
 };
 
 export function useWorkspaceBundleActions(
@@ -51,6 +61,13 @@ export function useWorkspaceBundleActions(
     savingDocuments,
     loadingDocuments,
     deletingDirectories,
+    documentsRef,
+    draftsRef,
+    documentRequests,
+    documentPathChanges,
+    documentMutationSequence,
+    recordDocumentPathChange,
+    isDocumentDirty,
   } = state;
   const {
     setReindexing,
@@ -67,65 +84,98 @@ export function useWorkspaceBundleActions(
     setExpandedDirectories,
     setDraggedFileId,
     setDropDirectoryPath,
+    setLoadingDocuments,
   } = setters;
+  const pendingReindex = useRef<number | null>(null);
+  const pendingMove = useRef<number | null>(null);
+  const latest = useRef(state);
+  useLayoutEffect(() => { latest.current = state; }, [state]);
 
   async function reindexBundle() {
-    if (reindexing) return;
+    const bundleId = getActiveBundleId();
+    const revision = getActiveBundleRevision();
+    if (reindexing || pendingReindex.current === revision || movingFileId) return;
+    pendingReindex.current = revision;
+    const isCurrent = () => getActiveBundleRevision() === revision;
+    const reindexMutationSequence = documentMutationSequence.current;
     setReindexing(true);
     setMessage("");
     try {
-      const result = await api<{
+      const result = await apiForBundle<{
         notes: Note[];
         errors: { id: string; error: string }[];
-      }>("/api/reindex", { method: "POST" });
-      const [refreshedFiles, refreshedDirectories] = await Promise.all([
-        api<BundleFile[]>("/api/files"),
-        api<BundleDirectory[]>("/api/directories"),
+      }>(bundleId, "/api/reindex", { method: "POST" });
+      if (!isCurrent()) return;
+      const [refreshedFiles, refreshedDirectories] = await Promise.allSettled([
+        apiForBundle<BundleFile[]>(bundleId, "/api/files"),
+        apiForBundle<BundleDirectory[]>(bundleId, "/api/directories"),
       ]);
+      if (!isCurrent()) return;
       const openIds = Array.from(
         new Set(groups.flatMap((group) => group.tabs)),
       ).filter((id) => !isUntitledId(id));
+      const beforeRefresh = documentsRef.current;
+      const beforeRequests = { ...documentRequests.current };
+      const mutationSequence = documentMutationSequence.current;
       const refreshedDocuments = await Promise.allSettled(
         openIds.map(async (id) => ({
           oldId: id,
-          document: await api<ViewerDocument>(
-            `/api/file?path=${encodeURIComponent(id)}`,
+          document: await apiForBundle<ViewerDocument>(
+            bundleId, `/api/file?path=${encodeURIComponent(id)}`,
           ),
         })),
       );
+      if (!isCurrent()) return;
+      if (documentMutationSequence.current !== reindexMutationSequence) {
+        setMessage("Reindexed the bundle. Files changed during the refresh; the newer explorer state was retained.");
+        return;
+      }
       const refreshedByOldId = new Map(
         refreshedDocuments.flatMap((refresh) =>
-          refresh.status === "fulfilled"
+          refresh.status === "fulfilled" && !latest.current.isDocumentDirty(refresh.value.oldId)
+            && !latest.current.isDocumentDirty(refresh.value.document.id)
+            && !latest.current.savingDocuments.has(refresh.value.oldId)
+            && !latest.current.savingDocuments.has(refresh.value.document.id)
+            && !latest.current.movingFileId
+            && documentsRef.current[refresh.value.oldId] === beforeRefresh[refresh.value.oldId]
+            && documentsRef.current[refresh.value.document.id] === beforeRefresh[refresh.value.document.id]
+            && documentRequests.current[refresh.value.oldId] === beforeRequests[refresh.value.oldId]
+            && documentRequests.current[refresh.value.document.id] === beforeRequests[refresh.value.document.id]
+            && (documentPathChanges.current[refresh.value.document.id]?.sequence ?? 0) <= mutationSequence
             ? [[refresh.value.oldId, refresh.value.document] as const]
             : [],
         ),
       );
       setNotes(result.notes);
-      setFiles(refreshedFiles);
-      setDirectories(refreshedDirectories);
-      setDocuments((current) => {
+      if (refreshedFiles.status === "fulfilled") setFiles(refreshedFiles.value);
+      if (refreshedDirectories.status === "fulfilled") setDirectories(refreshedDirectories.value);
+      const reconcileDocuments = (current: Record<string, ViewerDocument>) => {
         const next = { ...current };
         for (const [oldId, document] of refreshedByOldId) {
           if (document.id !== oldId) delete next[oldId];
           next[document.id] = document;
         }
         return next;
-      });
+      };
+      documentsRef.current = reconcileDocuments(documentsRef.current);
+      setDocuments(reconcileDocuments);
       if (
         [...refreshedByOldId].some(([oldId, document]) => oldId !== document.id)
       ) {
-        setGroups((current) =>
-          current.map((group) => ({
-            ...group,
-            tabs: group.tabs.map((id) => refreshedByOldId.get(id)?.id || id),
-            activeId: group.activeId
-              ? refreshedByOldId.get(group.activeId)?.id || group.activeId
-              : null,
-            previewId: group.previewId
-              ? refreshedByOldId.get(group.previewId)?.id || group.previewId
-              : null,
-          })),
-        );
+        const reconcileDrafts = (current: Record<string, string>) => {
+          let next = current;
+          for (const [oldId, document] of refreshedByOldId) {
+            if (oldId !== document.id) next = replaceDocumentPath(next, oldId, document.id);
+          }
+          return next;
+        };
+        draftsRef.current = reconcileDrafts(draftsRef.current);
+        setDrafts(reconcileDrafts);
+        setGroups((current) => {
+          let next = current;
+          for (const [oldId, document] of refreshedByOldId) next = replaceDocumentTabs(next, oldId, document.id);
+          return next;
+        });
         setEditingKey((current) => {
           if (!current) return current;
           const group = groups.find(({ id }) => current.startsWith(`${id}:`));
@@ -137,20 +187,25 @@ export function useWorkspaceBundleActions(
       }
       clearDiscovery();
       setMessage(
-        result.errors.length
+        refreshedFiles.status === "rejected" || refreshedDirectories.status === "rejected"
+          ? "Reindexed the bundle, but the explorer could not be refreshed. Reload the bundle to see it."
+          : result.errors.length
           ? `Reindexed with ${result.errors.length} invalid Markdown file${result.errors.length === 1 ? "" : "s"} skipped.`
           : `Reindexed ${result.notes.length} concepts.`,
       );
     } catch (error) {
+      if (!isCurrent()) return;
       setMessage(
         error instanceof Error ? error.message : "Could not reindex the bundle",
       );
     } finally {
-      setReindexing(false);
+      if (pendingReindex.current === revision) pendingReindex.current = null;
+      if (isCurrent()) setReindexing(false);
     }
   }
 
   async function moveBundleFile(id: string, directory: string) {
+    const revision = getActiveBundleRevision();
     if ([...(deletingDirectories?.current || [])].some((path) => id.startsWith(`${path}/`) || directory === path || directory.startsWith(`${path}/`))) return;
     const file = files.find((item) => item.id === id);
     const isEditing = groups.some(
@@ -159,95 +214,73 @@ export function useWorkspaceBundleActions(
     if (
       !file?.movable ||
       movingFileId ||
+      pendingMove.current === revision ||
+      reindexing ||
+      pendingReindex.current === revision ||
       file.directory === directory ||
       savingDocuments.has(id) ||
       loadingDocuments.has(id) ||
       isEditing
+      || isDocumentDirty(id)
     )
       return;
 
+    pendingMove.current = revision;
+    const bundleId = getActiveBundleId();
+    const isCurrent = () => getActiveBundleRevision() === revision;
     setMovingFileId(id);
     setMessage("");
     try {
-      const result = await api<FileMoveResult>("/api/file/move", {
+      const result = await apiForBundle<FileMoveResult>(bundleId, "/api/file/move", {
         method: "POST",
         body: JSON.stringify({ id, directory }),
       });
-      const [notesResult, filesResult, directoriesResult] = await Promise.allSettled([
-        api<Note[]>("/api/notes"),
-        api<BundleFile[]>("/api/files"),
-        api<BundleDirectory[]>("/api/directories"),
+      if (!isCurrent()) return;
+      recordDocumentPathChange(result.oldId, result.newId);
+      const mutationSequence = documentMutationSequence.current;
+      const destinationDirectory = result.newId.slice(0, result.newId.lastIndexOf("/")) || "/";
+      documentsRef.current = replaceDocumentPath(documentsRef.current, result.oldId, result.newId, result.note);
+      draftsRef.current = replaceDocumentPath(draftsRef.current, result.oldId, result.newId);
+      setDocuments((current) => replaceDocumentPath(current, result.oldId, result.newId, result.note));
+      setDrafts((current) => replaceDocumentPath(current, result.oldId, result.newId));
+      setGroups((current) => replaceDocumentTabs(current, result.oldId, result.newId));
+      setLoadingDocuments((current) => new Set([...current].filter((id) => id !== result.oldId && id !== result.newId)));
+      setNotes((current) => current.map((note) => note.id === result.oldId ? { ...note, ...result.note } : note));
+      setFiles((current) => current.map((item) => item.id === result.oldId
+        ? { ...item, id: result.newId, name: result.newId.split("/").at(-1) || item.name, title: result.note.title, directory: destinationDirectory }
+        : item));
+      const destinationPaths: string[] = [];
+      let destinationPath = "";
+      for (const segment of destinationDirectory.split("/").filter(Boolean)) {
+        destinationPath += `/${segment}`;
+        destinationPaths.push(destinationPath);
+      }
+      setDirectories((current) => [
+        ...current,
+        ...destinationPaths.filter((path) => !current.some((folder) => folder.path === path)).map((path) => ({ path })),
       ]);
-
-      setDocuments((current) => {
-        const next = { ...current };
-        delete next[result.oldId];
-        next[result.newId] = result.note;
-        return next;
-      });
-      setGroups((current) =>
-        current.map((group) => {
-          const tabs = group.tabs
-            .map((tabId) => (tabId === result.oldId ? result.newId : tabId))
-            .filter((tabId, index, allTabs) => allTabs.indexOf(tabId) === index);
-          return {
-            ...group,
-            tabs,
-            activeId:
-              group.activeId === result.oldId ? result.newId : group.activeId,
-            previewId:
-              group.previewId === result.oldId ? result.newId : group.previewId,
-          };
-        }),
-      );
-      setDrafts((current) => {
-        if (!(result.oldId in current)) return current;
-        const next = { ...current };
-        delete next[result.oldId];
-        next[result.newId] = result.note.content;
-        return next;
-      });
-      setNotes(
-        notesResult.status === "fulfilled"
-          ? notesResult.value
-          : (current) =>
-              current.map((note) =>
-                note.id === result.oldId ? { ...note, ...result.note } : note,
-              ),
-      );
-      setFiles(
-        filesResult.status === "fulfilled"
-          ? filesResult.value
-          : (current) =>
-              current.map((item) =>
-                item.id === result.oldId
-                  ? {
-                      ...item,
-                      id: result.newId,
-                      name: result.newId.split("/").at(-1) || item.name,
-                      directory,
-                    }
-                  : item,
-              ),
-      );
-      if (directoriesResult.status === "fulfilled") setDirectories(directoriesResult.value);
-      setExpandedDirectories((current) => {
-        const next = new Set(current).add("/");
-        let path = "";
-        for (const segment of directory.split("/").filter(Boolean)) {
-          path += `/${segment}`;
-          next.add(path);
-        }
-        return next;
-      });
+      setExpandedDirectories((current) => new Set([...current, "/", ...destinationPaths]));
       clearDiscovery();
-      setMessage(result.warning || `Moved ${file.title} to ${directory}.`);
+      setMessage(result.warning || `Moved ${file.title} to ${destinationDirectory}.`);
+      const [notesResult, filesResult, directoriesResult] = await Promise.allSettled([
+        apiForBundle<Note[]>(bundleId, "/api/notes"),
+        apiForBundle<BundleFile[]>(bundleId, "/api/files"),
+        apiForBundle<BundleDirectory[]>(bundleId, "/api/directories"),
+      ]);
+      if (!isCurrent() || documentMutationSequence.current !== mutationSequence) return;
+      if (notesResult.status === "fulfilled") setNotes(notesResult.value);
+      if (filesResult.status === "fulfilled") setFiles(filesResult.value);
+      if (directoriesResult.status === "fulfilled") setDirectories(directoriesResult.value);
     } catch (error) {
+      if (!isCurrent()) return;
       setMessage(error instanceof Error ? error.message : "Could not move note");
     } finally {
-      setMovingFileId(null);
-      setDraggedFileId(null);
-      setDropDirectoryPath(null);
+      if (pendingMove.current === revision) pendingMove.current = null;
+      if (isCurrent()) {
+        setMovingFileId(null);
+        setDraggedFileId(null);
+        setDropDirectoryPath(null);
+      }
     }
   }
 

@@ -410,6 +410,14 @@ export function useWorkspaceController(): WorkspaceShellProps {
     const revision = ++bundleSwitchRevisionRef.current;
     documents.deletingDirectories.current = new Set();
     for (const id of Object.keys(documents.documentRequests.current)) documents.documentRequests.current[id] += 1;
+    documents.setLoadingDocuments(new Set());
+    documents.setDeletingDraftIds(new Set());
+    documents.setDeletingNoteId(null);
+    documents.setEditingKey(null);
+    explorer.setMovingFileId(null);
+    explorer.setReindexing(false);
+    explorer.setDraggedFileId(null);
+    explorer.setDropDirectoryPath(null);
     setHistoryCheckpoint(null);
     explorer.setFilesLoading(true);
     explorer.discovery.clearDiscovery();
@@ -439,8 +447,10 @@ export function useWorkspaceController(): WorkspaceShellProps {
         content: draft.content, deletable: true, movable: false, status: "draft" as const, staleAfter: null, stale: false,
         filedBy: null, filedAt: null, links: [], backlinks: [], suggestions: [], updatedAt: draft.updatedAt,
       }]));
+      documents.documentsRef.current = nextDocuments;
+      documents.draftsRef.current = Object.fromEntries(drafts.map((draft) => [draft.id, draft.content]));
       documents.setDocuments(nextDocuments);
-      documents.setDrafts(Object.fromEntries(drafts.map((draft) => [draft.id, draft.content])));
+      documents.setDrafts(documents.draftsRef.current);
       }
       const stored = readStorageItem(`folio:workspace-state:v2:${bundleId}`);
       const parsedStored = stored ? JSON.parse(stored) as { state?: unknown; expandedDirectories?: string[]; splitPosition?: number } : null;

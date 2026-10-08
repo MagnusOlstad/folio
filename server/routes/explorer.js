@@ -133,6 +133,7 @@ export function registerRoutes(app, runtime) {
             staged = false
             restored = true
             const recoveryErrors = []
+            const generatedFiles = runtime.bundleFileContents(await readRecords())
             for (const snapshot of snapshots) {
               try {
                 await assertNoBundleSymlinks(snapshot.path, { allowMissing: true })
@@ -140,7 +141,10 @@ export function registerRoutes(app, runtime) {
                 if (current === null && snapshot.content === null || snapshot.content && current?.equals(snapshot.content)) continue
                 // Reindex owns generated relationship blocks and folio_related;
                 // refuse to undo any other edit made by an external editor.
-                if (snapshot.content && ![path.join(bundleRoot, 'index.md'), path.join(bundleRoot, 'log.md')].includes(snapshot.path)) {
+                if (generatedFiles.has(snapshot.path)) {
+                  if (!current || current.toString('utf8') !== generatedFiles.get(snapshot.path))
+                    throw new Error(`A concurrent edit at ${bundleFileId(snapshot.path)} was retained.`)
+                } else if (snapshot.content) {
                   const comparable = (buffer) => {
                     const parsed = parseMarkdownFile(buffer.toString('utf8'), snapshot.path)
                     const { folio_related: _related, ...frontmatter } = parsed.frontmatter
@@ -219,8 +223,20 @@ export function registerRoutes(app, runtime) {
           error.status = 400
           throw error
         }
+        const records = await readRecords()
+        const generatedSnapshots = new Map(await Promise.all([...runtime.bundleFileContents(records).keys()].map(async (filePath) => {
+          await assertNoBundleSymlinks(filePath, { allowMissing: true })
+          return [filePath, await runtime.readOptionalFile(filePath)]
+        })))
+        let createdStat
         try {
-          await fs.writeFile(target.path, markdown, { flag: 'wx' })
+          const file = await fs.open(target.path, 'wx')
+          try {
+            await file.writeFile(markdown)
+            createdStat = await file.stat()
+          } finally {
+            await file.close()
+          }
         } catch (error) {
           if (error.code === 'EEXIST') {
             const conflict = new Error('A file or folder already has that name.')
@@ -232,7 +248,28 @@ export function registerRoutes(app, runtime) {
         try {
           await performReindexBundle({ markdownLocked: true })
         } catch (error) {
-          await fs.unlink(target.path).catch(() => {})
+          try {
+            const generatedFiles = runtime.bundleFileContents(await readRecords())
+            await assertNoBundleSymlinks(target.path)
+            const currentStat = await fs.lstat(target.path)
+            const currentMarkdown = await fs.readFile(target.path, 'utf8')
+            if (currentStat.dev !== createdStat.dev || currentStat.ino !== createdStat.ino || currentMarkdown !== markdown)
+              throw new Error('The new note changed while it was being indexed and was retained.')
+            await fs.unlink(target.path)
+            await writeRecords(records)
+            for (const [filePath, generatedContent] of generatedFiles) {
+              await assertNoBundleSymlinks(filePath, { allowMissing: true })
+              const current = await runtime.readOptionalFile(filePath)
+              if (current && current.toString('utf8') !== generatedContent && !generatedSnapshots.get(filePath)?.equals(current))
+                throw new Error(`A concurrent edit at ${bundleFileId(filePath)} was retained.`)
+            }
+            // A failed rebuild may already have written generated links and
+            // index/log files. Reconcile them once after removing the new note.
+            await performReindexBundle({ markdownLocked: true })
+          } catch (rollbackError) {
+            error.status = 500
+            error.message = `${error.message} Creation recovery was incomplete. ${rollbackError.message} Reindex the bundle.`
+          }
           throw error
         }
         return id

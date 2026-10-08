@@ -6,7 +6,7 @@ export function registerRoutes(app, runtime) {
     readRecords, publicRecord, readDrafts, normalizeDraftId, draftFilePath, queueDraftMutation, readDraft,
     writeDraft, resolveBundleMarkdownPath, isMovableConceptId, queueMarkdownMutation, reindexBundle,
     relationshipIndex, recordIsStale, semanticSuggestionSummaries, removeEmptyBundleDirectories,
-    assertNoBundleSymlinks } = runtime
+    assertNoBundleSymlinks, parseMarkdownFile, indexedConceptContent } = runtime
 app.get('/api/status', async (_request, response) => {
   const modelStatus = await mlxService.status()
   const records = await readRecords()
@@ -115,18 +115,39 @@ app.get('/api/note', async (request, response, next) => {
     const records = await readRecords()
     const record = records.find((item) => item.id === id)
     if (!record) return response.status(404).json({ error: 'Note not found.' })
+    const filePath = resolveBundleMarkdownPath(id)
+    if (!filePath) return response.status(400).json({ error: 'Invalid concept path.' })
+    await assertNoBundleSymlinks(filePath)
+    const [markdown, fileStat] = await Promise.all([fs.readFile(filePath, 'utf8'), fs.stat(filePath)])
+    const parsed = parseMarkdownFile(markdown, filePath)
+    const current = {
+      ...record,
+      title: parsed.title,
+      type: parsed.type,
+      description: parsed.description,
+      tags: parsed.tags,
+      status: parsed.status,
+      staleAfter: parsed.staleAfter,
+      createdAt: parsed.generatedAt || record.createdAt,
+      updatedAt: fileStat.mtime.toISOString(),
+      filedBy: parsed.filedBy,
+      filedAt: parsed.filedAt,
+      content: indexedConceptContent(parsed.content),
+    }
     const graph = await relationshipIndex()
-    const publicNote = publicRecord(record)
+    const publicNote = publicRecord(current)
     response.json({
       ...publicNote,
-      content: record.content,
+      content: current.content,
       movable: isMovableConceptId(id),
-      stale: recordIsStale(record),
+      stale: recordIsStale(current),
       links: graph.outgoing.get(id) || [],
       backlinks: graph.incoming.get(id) || [],
       suggestions: semanticSuggestionSummaries(record, records),
     })
   } catch (error) {
+    if (error.code === 'ENOENT') return response.status(404).json({ error: 'Note not found.' })
+    if (error.status) return response.status(error.status).json({ error: error.message })
     next(error)
   }
 })
