@@ -554,6 +554,26 @@ test('keeps explorer highlighting in sync with editor tab activation', async ({ 
   const todoRow = page.locator('.tree-file[aria-label="Todo List"]')
   await startRow.click()
   await expect(startRow).toHaveAttribute('aria-current', 'true')
+  const html = page.locator('html')
+  const startingTheme = await html.getAttribute('data-theme')
+  try {
+    for (const theme of ['original', 'light', 'dark', 'editorial']) {
+      await html.evaluate((element, selectedTheme) => element.setAttribute('data-theme', selectedTheme), theme)
+      await page.mouse.move(0, 0)
+      const activeBackground = await startRow.evaluate((row) => row.ownerDocument.defaultView?.getComputedStyle(row).backgroundColor)
+      const inactiveBackground = await todoRow.evaluate((row) => row.ownerDocument.defaultView?.getComputedStyle(row).backgroundColor)
+      await startRow.hover()
+      const hoveredActiveBackground = await startRow.evaluate((row) => row.ownerDocument.defaultView?.getComputedStyle(row).backgroundColor)
+      expect(activeBackground, `${theme} active row`).not.toBe(inactiveBackground)
+      expect(hoveredActiveBackground, `${theme} hovered active row`).not.toBe(inactiveBackground)
+      expect(hoveredActiveBackground, `${theme} hovered active row`).not.toBe('rgba(0, 0, 0, 0)')
+    }
+  } finally {
+    await html.evaluate((element, previousTheme) => {
+      if (previousTheme) element.setAttribute('data-theme', previousTheme)
+      else element.removeAttribute('data-theme')
+    }, startingTheme)
+  }
   const startTab = page.locator('.editor-tab').filter({ hasText: 'Start Here' })
   await expect(startTab).toBeVisible()
   await page.getByRole('heading', { name: 'Start Here', exact: true }).click()

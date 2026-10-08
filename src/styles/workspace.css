@@ -150,7 +150,7 @@
 
 .tree-file.active {
   color: var(--ink);
-  background: rgba(var(--blue-rgb), 0.11);
+  background: color-mix(in srgb, var(--blue) 12%, transparent);
   box-shadow: inset 2px 0 0 var(--blue);
 }
 
