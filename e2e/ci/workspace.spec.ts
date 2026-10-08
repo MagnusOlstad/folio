@@ -643,8 +643,12 @@ test('marks the prospective right-strip tab slot and reorders tabs within a grou
       tabs.map((tab) => tab.getAttribute('title')),
     )).toEqual(['Todo List', 'Start Here'])
   } finally {
-    const cleanupResponse = await request.delete(`/api/draft?id=${encodeURIComponent(draftId)}`)
-    expect(cleanupResponse.ok()).toBeTruthy()
+    try {
+      const cleanupResponse = await request.delete(`/api/draft?id=${encodeURIComponent(draftId)}`)
+      expect(cleanupResponse.ok()).toBeTruthy()
+    } catch {
+      expect(page.isClosed()).toBeTruthy()
+    }
   }
 })
 

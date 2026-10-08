@@ -45,6 +45,7 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
   } | null>(null);
   const [contextMenu, setContextMenu] = useState<(ExplorerContextMenuState & { bundleId: string | null }) | null>(null);
   const treeScrollRef = useRef<HTMLDivElement>(null);
+  const activeFileRevealFrameRef = useRef<number | null>(null);
   const {
     explorerScrollTop,
     onExplorerScroll,
@@ -78,17 +79,24 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
     setMessage,
   } = props;
   if (contextMenu && contextMenu.bundleId !== activeBundleId) setContextMenu(null);
+  const cancelPendingActiveFileReveal = useCallback(() => {
+    if (activeFileRevealFrameRef.current === null) return;
+    window.cancelAnimationFrame(activeFileRevealFrameRef.current);
+    activeFileRevealFrameRef.current = null;
+  }, []);
   const activeBundle = bundles.find((bundle) => bundle.id === activeBundleId);
+  const collapsedForActiveBundle = collapsedBundle?.bundleId === activeBundleId &&
+    collapsedBundle.revealRequest === activeFileRevealRequest;
   useEffect(() => {
     const element = treeScrollRef.current;
     if (
       element &&
       !filesLoading &&
-      !(collapsedBundle?.bundleId === activeBundleId && collapsedBundle.revealRequest === activeFileRevealRequest) &&
+      !collapsedForActiveBundle &&
       element.scrollTop !== explorerScrollTop
     )
       element.scrollTop = explorerScrollTop;
-  }, [activeBundleId, activeFileRevealRequest, collapsedBundle, explorerScrollTop, filesLoading]);
+  }, [activeBundleId, collapsedForActiveBundle, explorerScrollTop, filesLoading]);
 
   useEffect(() => {
     if (!activeFileId || !activeFileDirectory || filesLoading) return;
@@ -103,13 +111,24 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
       return new Set([...current, ...ancestors]);
     });
     const frame = window.requestAnimationFrame(() => {
+      activeFileRevealFrameRef.current = null;
       const tree = treeScrollRef.current;
       const row = tree && Array.from(tree.querySelectorAll<HTMLButtonElement>(".tree-file[data-file-id]"))
         .find((candidate) => candidate.dataset.fileId === activeFileId);
-      row?.scrollIntoView({ block: "nearest" });
+      if (!tree || !row) return;
+      const treeBounds = tree.getBoundingClientRect();
+      const rowBounds = row.getBoundingClientRect();
+      if (rowBounds.top < treeBounds.top)
+        tree.scrollTop += rowBounds.top - treeBounds.top;
+      else if (rowBounds.bottom > treeBounds.bottom)
+        tree.scrollTop += rowBounds.bottom - treeBounds.bottom;
     });
-    return () => window.cancelAnimationFrame(frame);
-  }, [activeFileDirectory, activeFileId, activeFileRevealRequest, filesLoading, setExpandedDirectories]);
+    activeFileRevealFrameRef.current = frame;
+    return () => {
+      if (activeFileRevealFrameRef.current === frame)
+        cancelPendingActiveFileReveal();
+    };
+  }, [activeFileDirectory, activeFileId, activeFileRevealRequest, cancelPendingActiveFileReveal, filesLoading, setExpandedDirectories]);
 
   const closeContextMenu = useCallback((restoreFocus = true) => {
     const anchor = contextMenu?.anchor;
@@ -195,6 +214,9 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
                       className="tree-scroll"
                       style={{ overflowAnchor: "none" }}
                       onScroll={(event) => onExplorerScroll(event.currentTarget.scrollTop)}
+                      onPointerDown={cancelPendingActiveFileReveal}
+                      onWheel={cancelPendingActiveFileReveal}
+                      onKeyDown={cancelPendingActiveFileReveal}
                       ref={treeScrollRef}
                     >
                       {filesLoading ? (
