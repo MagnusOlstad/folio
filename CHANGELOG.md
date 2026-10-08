@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.7](https://github.com/MagnusOlstad/folio/compare/v0.7.6...v0.7.7) (2026-10-08)
+
+
+### Bug Fixes
+
+* **editor:** harden markdown state and interactions ([#121](https://github.com/MagnusOlstad/folio/issues/121)) ([4c2cd09](https://github.com/MagnusOlstad/folio/commit/4c2cd09408c43e89ec0081ed85ae12c42102f8c0))
+* **explorer:** harden recursive folder deletion and file handling ([#120](https://github.com/MagnusOlstad/folio/issues/120)) ([7f4c26d](https://github.com/MagnusOlstad/folio/commit/7f4c26d4ac714849fc1b819c2ff682c13cbf6257))
+* **explorer:** highlight the file for the active note tab ([#125](https://github.com/MagnusOlstad/folio/issues/125)) ([bb2d06f](https://github.com/MagnusOlstad/folio/commit/bb2d06fe5ac26fc30cbb1021479af20947a73a85))
+
 ## [0.7.6](https://github.com/MagnusOlstad/folio/compare/v0.7.5...v0.7.6) (2026-10-07)
 
 
