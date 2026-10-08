@@ -87,6 +87,91 @@ test('explorer folders persist and file operations validate, index, and rename p
   assert.equal(previousPathResponse.status, 200)
   assert.equal((await previousPathResponse.json()).id, renamed.newId)
 
+  const renamedPath = path.join(bundleRoot, renamed.newId.slice(1))
+  const indexedMarkdown = await fs.readFile(renamedPath, 'utf8')
+  const externalMarkdown = bundleRuntime.markdownDocument({
+    title: 'External title', type: 'Note', description: 'External description', tags: ['external'],
+    status: 'draft', stale_after: '2020-01-01T00:00:00.000Z',
+  }, '# Captured note\n\nExternal body\n\n<!-- folio:generated-related:start -->\n# Related\n<!-- folio:generated-related:end -->')
+  await fs.writeFile(renamedPath, externalMarkdown)
+  for (const endpoint of [`/api/file?path=${encodeURIComponent(renamed.newId)}`, `/api/note?id=${encodeURIComponent(renamed.newId)}`]) {
+    const current = await fetch(`${baseUrl}${endpoint}`, { headers }).then((response) => response.json())
+    assert.equal(current.title, 'External title')
+    assert.equal(current.description, 'External description')
+    assert.deepEqual(current.tags, ['external'])
+    assert.equal(current.status, 'draft')
+    assert.equal(current.stale, true)
+    assert.equal(current.content, 'External body')
+  }
+  await fs.unlink(renamedPath)
+  assert.equal((await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(renamed.newId)}`, { headers })).status, 404)
+  await fs.symlink(path.join(dataRoot, 'outside'), renamedPath)
+  assert.equal((await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(renamed.newId)}`, { headers })).status, 400)
+  await fs.unlink(renamedPath)
+  await fs.writeFile(renamedPath, indexedMarkdown)
+
+  const createReindex = bundleRuntime.performReindexBundle
+  for (const change of ['none', 'retry-failure', 'generated-edit', 'edit', 'replace', 'symlink']) {
+    const newPath = path.join(bundleRoot, 'Failed creation.md')
+    const outsidePath = path.join(dataRoot, 'outside', 'creation.md')
+    const originalRecords = await bundleRuntime.readRecords()
+    let indexAttempts = 0
+    await fs.writeFile(outsidePath, 'Outside creation content')
+    bundleRuntime.performReindexBundle = async () => {
+      const result = await createReindex({ markdownLocked: true })
+      indexAttempts += 1
+      if (change === 'none' && indexAttempts > 1) return result
+      if (change === 'generated-edit') {
+        await fs.appendFile(path.join(bundleRoot, 'index.md'), '\nConcurrent creation index edit')
+        await fs.appendFile(path.join(bundleRoot, 'log.md'), '\nConcurrent creation log edit')
+      }
+      if (change === 'edit') await fs.writeFile(newPath, 'Concurrent edit')
+      if (change === 'replace' || change === 'symlink') {
+        const markdown = await fs.readFile(newPath)
+        // Keep the original inode alive so replacement cannot reuse it.
+        await fs.rename(newPath, `${newPath}.original`)
+        if (change === 'replace') await fs.writeFile(newPath, markdown)
+        else await fs.symlink(outsidePath, newPath)
+      }
+      throw new Error('simulated creation index failure')
+    }
+    try {
+      const failed = await fetch(`${baseUrl}/api/file/create`, {
+        method: 'POST', headers, body: JSON.stringify({ directory: '/', name: 'Failed creation' }),
+      })
+      assert.equal(failed.status, 500)
+      const result = await failed.json()
+      if (change === 'none' || change === 'retry-failure' || change === 'generated-edit') {
+        if (change === 'none') assert.equal(result.error, 'Something went wrong while processing the note.')
+        else assert.match(result.error, /recovery was incomplete/)
+        await assert.rejects(fs.lstat(newPath), { code: 'ENOENT' })
+        const withoutUpdateTime = ({ updatedAt: _updatedAt, ...record }) => record
+        assert.deepEqual((await bundleRuntime.readRecords()).map(withoutUpdateTime), originalRecords.map(withoutUpdateTime))
+        if (change === 'generated-edit') {
+          assert.equal(indexAttempts, 1, 'ambiguous generated edits prevent the recovery rebuild')
+          assert.match(await fs.readFile(path.join(bundleRoot, 'index.md'), 'utf8'), /Concurrent creation index edit/)
+          assert.match(await fs.readFile(path.join(bundleRoot, 'log.md'), 'utf8'), /Concurrent creation log edit/)
+        } else {
+          assert.equal(indexAttempts, 2, 'creation recovery attempts one rebuild')
+          assert.doesNotMatch(await fs.readFile(path.join(bundleRoot, 'index.md'), 'utf8'), /Failed creation/)
+          assert.doesNotMatch(await fs.readFile(path.join(bundleRoot, 'log.md'), 'utf8'), /Failed creation/)
+        }
+      } else {
+        assert.match(result.error, /simulated creation index failure/)
+        assert.match(result.error, /recovery was incomplete/)
+        assert.ok(await fs.lstat(newPath))
+        if (change === 'edit') assert.equal(await fs.readFile(newPath, 'utf8'), 'Concurrent edit')
+        if (change === 'symlink') assert.ok((await fs.lstat(newPath)).isSymbolicLink())
+      }
+      assert.equal(await fs.readFile(outsidePath, 'utf8'), 'Outside creation content')
+    } finally {
+      bundleRuntime.performReindexBundle = createReindex
+      await fs.rm(newPath, { force: true })
+      await fs.rm(`${newPath}.original`, { force: true })
+      await bundleRuntime.reindexBundle()
+    }
+  }
+
   const reconcile = bundleRuntime.history.reconcile
   bundleRuntime.history.reconcile = async () => { throw new Error('history unavailable') }
   try {
@@ -214,6 +299,23 @@ test('explorer folders persist and file operations validate, index, and rename p
     await assert.rejects(fs.lstat(path.join(bundleRoot, 'archive', 'missing')), { code: 'ENOENT' })
   } finally {
     bundleRuntime.performReindexBundle = performReindex
+  }
+  bundleRuntime.performReindexBundle = async () => {
+    await performReindex({ markdownLocked: true })
+    await fs.appendFile(path.join(bundleRoot, 'index.md'), '\nConcurrent index edit')
+    await fs.appendFile(path.join(bundleRoot, 'log.md'), '\nConcurrent log edit')
+    throw new Error('simulated index failure after external edits')
+  }
+  try {
+    const failedDelete = await deleteFolder('/archive')
+    assert.equal(failedDelete.status, 500)
+    assert.match((await failedDelete.json()).error, /index recovery was incomplete/)
+    assert.match(await fs.readFile(path.join(bundleRoot, 'index.md'), 'utf8'), /Concurrent index edit/)
+    assert.match(await fs.readFile(path.join(bundleRoot, 'log.md'), 'utf8'), /Concurrent log edit/)
+    assert.ok((await fs.lstat(path.join(bundleRoot, 'archive'))).isDirectory())
+  } finally {
+    bundleRuntime.performReindexBundle = performReindex
+    await bundleRuntime.reindexBundle()
   }
   assert.deepEqual((await fs.readdir(path.join(bundleRoot, '.folio'))).filter((name) => name.startsWith('folder-delete-')), [])
 

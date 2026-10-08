@@ -1,7 +1,13 @@
 let activeBundleId: string | null = null;
+let activeBundleRevision = 0;
 
 export function setActiveBundleId(bundleId: string | null) {
+  if (activeBundleId !== bundleId) activeBundleRevision += 1;
   activeBundleId = bundleId;
+}
+
+export function getActiveBundleRevision() {
+  return activeBundleRevision;
 }
 
 export function getActiveBundleId() {
@@ -9,27 +15,26 @@ export function getActiveBundleId() {
 }
 
 export async function apiForBundle<T>(bundleId: string | null, url: string, options?: RequestInit): Promise<T> {
-  return api<T>(url, {
-    ...options,
-    headers: {
-      ...(options?.headers || {}),
-      ...(bundleId ? { "x-folio-bundle": bundleId, "x-folio-bundle-id": bundleId } : {}),
-    },
-  });
+  return requestApi<T>(bundleId, url, options, true);
 }
 
 /** Keeps the server's response and error semantics in one place for every feature. */
 export async function api<T>(url: string, options?: RequestInit): Promise<T> {
+  return requestApi<T>(activeBundleId, url, options);
+}
+
+async function requestApi<T>(bundleId: string | null, url: string, options?: RequestInit, explicitBundle = false): Promise<T> {
   let response: Response;
   try {
+    const headers = new Headers(options?.headers);
+    if (!headers.has("content-type")) headers.set("content-type", "application/json");
+    if (bundleId) {
+      if (explicitBundle || !headers.has("x-folio-bundle")) headers.set("x-folio-bundle", bundleId);
+      if (explicitBundle || !headers.has("x-folio-bundle-id")) headers.set("x-folio-bundle-id", bundleId);
+    }
     response = await fetch(url, {
       ...options,
-      headers: {
-        "content-type": "application/json",
-        ...(activeBundleId ? { "x-folio-bundle": activeBundleId } : {}),
-        ...(activeBundleId ? { "x-folio-bundle-id": activeBundleId } : {}),
-        ...options?.headers,
-      },
+      headers: Object.fromEntries(headers.entries()),
     });
   } catch {
     throw new Error("The local FolioNotes service is not ready yet.");

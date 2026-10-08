@@ -4,7 +4,7 @@ export function registerRoutes(app, runtime) {
   const {
     assertNoBundleSymlinks, resolveBundleMarkdownPath, resolveCurrentConceptId,
     readRecords, parseMarkdownFile, relationshipIndex, recordIsStale,
-    normalizeMarkdownBreaks, isMovableConceptId, semanticSuggestionSummaries,
+    normalizeMarkdownBreaks, indexedConceptContent, isMovableConceptId, semanticSuggestionSummaries,
   } = runtime
 
   app.get('/api/file', async (request, response, next) => {
@@ -26,19 +26,21 @@ export function registerRoutes(app, runtime) {
       const graph = await relationshipIndex()
       response.json({
         id,
-        title: record?.title || parsed.title,
-        type: record?.type || parsed.type,
-        description: record?.description || parsed.description || `Markdown file at ${id}`,
-        tags: record?.tags || parsed.tags,
-        status: record?.status || parsed.status,
-        staleAfter: record?.staleAfter || parsed.staleAfter,
-        stale: record ? recordIsStale(record) : recordIsStale({ staleAfter: parsed.staleAfter }),
-        createdAt: record?.createdAt || parsed.generatedAt || fileStat.mtime.toISOString(),
-        content: record?.content || normalizeMarkdownBreaks(parsed.content),
+        title: parsed.title,
+        type: parsed.type,
+        description: parsed.description || `Markdown file at ${id}`,
+        tags: parsed.tags,
+        status: parsed.status,
+        staleAfter: parsed.staleAfter,
+        stale: recordIsStale({ staleAfter: parsed.staleAfter }),
+        createdAt: parsed.generatedAt || record?.createdAt || fileStat.mtime.toISOString(),
+        // The search index may predate an edit made in an external editor.
+        // Preserve the indexed display format, but derive it from current disk data.
+        content: record ? indexedConceptContent(parsed.content) : normalizeMarkdownBreaks(parsed.content),
         deletable: Boolean(record),
         movable: Boolean(record) && isMovableConceptId(id),
-        filedBy: record?.filedBy || parsed.filedBy,
-        filedAt: record?.filedAt || parsed.filedAt,
+        filedBy: parsed.filedBy,
+        filedAt: parsed.filedAt,
         links: graph.outgoing.get(id) || [],
         backlinks: graph.incoming.get(id) || [],
         suggestions: semanticSuggestionSummaries(record, records),

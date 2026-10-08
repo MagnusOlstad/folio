@@ -1,15 +1,17 @@
 import { useLayoutEffect, useRef } from "react";
 import type { Dispatch, SetStateAction, RefObject } from "react";
 import type { BundleDirectory, BundleFile, Note, TabGroup, ViewerDocument } from "../../../domain/types.ts";
-import { apiForBundle, getActiveBundleId } from "../../../lib/api.ts";
+import { apiForBundle, getActiveBundleId, getActiveBundleRevision } from "../../../lib/api.ts";
 import { canDeleteExplorerDirectory, isExplorerDescendant, type ExplorerFileActions } from "../model/explorer.ts";
 import type { NoteExportFormat } from "../model/note-export.ts";
+import { replaceDocumentPath, replaceDocumentTabs } from "../model/document-path.ts";
 
 type ExplorerActionOptions = {
   files: BundleFile[];
   groups: TabGroup[];
   editingKey: string | null;
   savingDocuments: Set<string>;
+  loadingDocuments: Set<string>;
   movingFileId: string | null;
   documentRequests: RefObject<Record<string, number>>;
   documentsRef: RefObject<Record<string, ViewerDocument>>;
@@ -17,10 +19,13 @@ type ExplorerActionOptions = {
   deletingDirectories: RefObject<Set<string>>;
   directoryDeletions: RefObject<Record<string, number>>;
   documentMutationSequence: RefObject<number>;
+  recordDocumentPathChange: (oldId: string, newId: string | null) => void;
+  recordExplorerMutation: () => void;
   isDocumentDirty: (id: string) => boolean;
   removeDiscoveryDirectory: (directory: string) => void;
   setLoadingDocuments: Dispatch<SetStateAction<Set<string>>>;
   setEditingKey: Dispatch<SetStateAction<string | null>>;
+  setMovingFileId: Dispatch<SetStateAction<string | null>>;
   setFiles: Dispatch<SetStateAction<BundleFile[]>>;
   setDirectories: Dispatch<SetStateAction<BundleDirectory[]>>;
   setNotes: Dispatch<SetStateAction<Note[]>>;
@@ -36,31 +41,32 @@ type ExplorerActionOptions = {
 
 export function useWorkspaceExplorerActions(options: ExplorerActionOptions): ExplorerFileActions {
   const {
-    files, groups, editingKey, savingDocuments, movingFileId, documentRequests, documentsRef, draftsRef,
-    deletingDirectories, directoryDeletions, documentMutationSequence, isDocumentDirty, removeDiscoveryDirectory, setLoadingDocuments, setEditingKey,
+    files, groups, editingKey, savingDocuments, loadingDocuments, movingFileId, documentRequests, documentsRef, draftsRef,
+    deletingDirectories, directoryDeletions, documentMutationSequence, recordDocumentPathChange, recordExplorerMutation, isDocumentDirty, removeDiscoveryDirectory, setLoadingDocuments, setEditingKey,
     setFiles, setDirectories, setNotes, setDocuments, setDrafts, setGroups,
-    setExpandedDirectories, setMessage, deleteFiledNote, exportFile, createNewTab,
+    setExpandedDirectories, setMessage, deleteFiledNote, exportFile, createNewTab, setMovingFileId,
   } = options;
 
-  const pendingAction = useRef(false);
+  const pendingAction = useRef<number | null>(null);
   const latest = useRef({ savingDocuments, movingFileId, editingKey, groups });
   useLayoutEffect(() => { latest.current = { savingDocuments, movingFileId, editingKey, groups }; },
     [savingDocuments, movingFileId, editingKey, groups]);
 
-  async function refreshExplorer(bundleId = getActiveBundleId()) {
+  async function refreshExplorer(bundleId = getActiveBundleId(), revision = getActiveBundleRevision()) {
+    const mutationSequence = documentMutationSequence.current;
     try {
       const [nextFiles, nextDirectories, nextNotes] = await Promise.all([
         apiForBundle<BundleFile[]>(bundleId, "/api/files"),
         apiForBundle<BundleDirectory[]>(bundleId, "/api/directories"),
         apiForBundle<Note[]>(bundleId, "/api/notes"),
       ]);
-      if (getActiveBundleId() !== bundleId) return false;
+      if (getActiveBundleRevision() !== revision || documentMutationSequence.current !== mutationSequence) return false;
       setFiles(nextFiles);
       setDirectories(nextDirectories);
       setNotes(nextNotes);
       return true;
     } catch {
-      if (getActiveBundleId() !== bundleId) return false;
+      if (getActiveBundleRevision() !== revision || documentMutationSequence.current !== mutationSequence) return false;
       setMessage("The change succeeded, but the explorer could not be refreshed. Reload the bundle to see it.");
       return false;
     }
@@ -79,43 +85,44 @@ export function useWorkspaceExplorerActions(options: ExplorerActionOptions): Exp
   }
 
   function reconcileRenamedFile(oldId: string, newId: string, note: ViewerDocument) {
-    setDocuments((current) => {
-      const next = { ...current };
-      delete next[oldId];
-      next[newId] = note;
-      return next;
-    });
-    setDrafts((current) => {
-      if (!(oldId in current)) return current;
-      const next = { ...current };
-      delete next[oldId];
-      next[newId] = note.content;
-      return next;
-    });
-    setGroups((current) => current.map((group) => ({
-      ...group,
-      tabs: group.tabs.map((id) => id === oldId ? newId : id),
-      activeId: group.activeId === oldId ? newId : group.activeId,
-      previewId: group.previewId === oldId ? newId : group.previewId,
-    })));
+    recordDocumentPathChange(oldId, newId);
+    documentsRef.current = replaceDocumentPath(documentsRef.current, oldId, newId, note);
+    draftsRef.current = replaceDocumentPath(draftsRef.current, oldId, newId);
+    setDocuments((current) => replaceDocumentPath(current, oldId, newId, note));
+    setDrafts((current) => replaceDocumentPath(current, oldId, newId));
+    setGroups((current) => replaceDocumentTabs(current, oldId, newId));
+    setLoadingDocuments((current) => new Set([...current].filter((id) => id !== oldId && id !== newId)));
   }
 
   async function renameFile(id: string, name: string) {
     const file = files.find((item) => item.id === id);
     const editing = groups.some((group) => editingKey === `${group.id}:${id}`);
-    if (!file?.movable || savingDocuments.has(id) || editing)
+    if (!file?.movable || savingDocuments.has(id) || loadingDocuments.has(id) || movingFileId || editing || isDocumentDirty(id))
       throw new Error("Finish editing this file before renaming it.");
+    if ([...deletingDirectories.current].some((path) => isExplorerDescendant(id, path))) return;
     setMessage("");
     const bundleId = getActiveBundleId();
-    const result = await apiForBundle<{ oldId: string; newId: string; note: ViewerDocument; warning: string | null }>(
-      bundleId, "/api/file/rename",
-      { method: "POST", body: JSON.stringify({ id, name }) },
-    );
-    if (getActiveBundleId() !== bundleId) return;
-    reconcileRenamedFile(result.oldId, result.newId, result.note);
-    ensureExpanded(result.newId.slice(0, result.newId.lastIndexOf("/")) || "/");
-    if (await refreshExplorer(bundleId))
-      setMessage(result.warning || `Renamed ${file.name} to ${result.newId.split("/").at(-1)}.`);
+    const revision = getActiveBundleRevision();
+    setMovingFileId(id);
+    try {
+      const result = await apiForBundle<{ oldId: string; newId: string; note: ViewerDocument; warning: string | null }>(
+        bundleId, "/api/file/rename",
+        { method: "POST", body: JSON.stringify({ id, name }) },
+      );
+      if (getActiveBundleRevision() !== revision) return;
+      reconcileRenamedFile(result.oldId, result.newId, result.note);
+      setFiles((current) => current.map((item) => item.id === result.oldId
+        ? { ...item, id: result.newId, name: result.newId.split("/").at(-1) || item.name, title: result.note.title, directory: result.newId.slice(0, result.newId.lastIndexOf("/")) || "/" }
+        : item));
+      setNotes((current) => current.map((item) => item.id === result.oldId ? { ...item, ...result.note } : item));
+      ensureExpanded(result.newId.slice(0, result.newId.lastIndexOf("/")) || "/");
+      if (await refreshExplorer(bundleId, revision))
+        setMessage(result.warning || `Renamed ${file.name} to ${result.newId.split("/").at(-1)}.`);
+    } catch (error) {
+      if (getActiveBundleRevision() === revision) throw error;
+    } finally {
+      if (getActiveBundleRevision() === revision) setMovingFileId(null);
+    }
   }
 
   async function createFile(directory: string) {
@@ -125,21 +132,26 @@ export function useWorkspaceExplorerActions(options: ExplorerActionOptions): Exp
 
   async function createDirectory(directory: string, name: string) {
     const bundleId = getActiveBundleId();
+    const revision = getActiveBundleRevision();
     const result = await apiForBundle<{ path: string }>(bundleId, "/api/file/folder", {
       method: "POST",
       body: JSON.stringify({ directory, name }),
     });
-    if (getActiveBundleId() !== bundleId) return;
-    const refreshed = await refreshExplorer(bundleId);
-    if (getActiveBundleId() !== bundleId) return;
+    if (getActiveBundleRevision() !== revision) return;
+    recordExplorerMutation();
+    const refreshed = await refreshExplorer(bundleId, revision);
+    if (getActiveBundleRevision() !== revision) return;
     ensureExpanded(result.path);
     if (refreshed) setMessage(`Created folder ${result.path.split("/").at(-1)}.`);
   }
 
   async function deleteFile(file: BundleFile) {
     if (!file.deletable || !file.movable) throw new Error("This fixed OKF file cannot be deleted.");
+    if (isDocumentDirty(file.id)) throw new Error("Finish saving this file before deleting it.");
+    const bundleId = getActiveBundleId();
+    const revision = getActiveBundleRevision();
     await deleteFiledNote(file);
-    await refreshExplorer();
+    if (getActiveBundleRevision() === revision) await refreshExplorer(bundleId, revision);
   }
 
   async function deleteDirectory(directory: string) {
@@ -157,6 +169,7 @@ export function useWorkspaceExplorerActions(options: ExplorerActionOptions): Exp
       || [...knownIds].some((id) => contains(id) && (savingDocuments.has(id) || isDocumentDirty(id))))
       throw new Error("Finish editing, saving, or moving files in this folder before deleting it.");
     const bundleId = getActiveBundleId();
+    const revision = getActiveBundleRevision();
     const pendingDirectories = deletingDirectories.current;
     pendingDirectories.add(directory);
     setMessage("");
@@ -164,7 +177,7 @@ export function useWorkspaceExplorerActions(options: ExplorerActionOptions): Exp
       const result = await apiForBundle<{ path: string; deletedIds: string[]; warning: string | null }>(
         bundleId, `/api/file/folder?path=${encodeURIComponent(directory)}`, { method: "DELETE" },
       );
-      if (getActiveBundleId() !== bundleId) return;
+      if (getActiveBundleRevision() !== revision) return;
       directoryDeletions.current[directory] = ++documentMutationSequence.current;
       // Invalidate in-flight loads using monotonically increasing tokens. A
       // future note at the same path must never accept an older response.
@@ -198,8 +211,8 @@ export function useWorkspaceExplorerActions(options: ExplorerActionOptions): Exp
         return group && current && contains(current.slice(group.id.length + 1)) ? null : current;
       });
       removeDiscoveryDirectory(directory);
-      if (await refreshExplorer(bundleId)) setMessage(result.warning || `Deleted folder ${directory.split("/").at(-1)}.`);
-      else if (result.warning && getActiveBundleId() === bundleId) setMessage(`${result.warning} The explorer could not be refreshed.`);
+      if (await refreshExplorer(bundleId, revision)) setMessage(result.warning || `Deleted folder ${directory.split("/").at(-1)}.`);
+      else if (result.warning && getActiveBundleRevision() === revision) setMessage(`${result.warning} The explorer could not be refreshed.`);
     } finally {
       pendingDirectories.delete(directory);
     }
@@ -211,23 +224,23 @@ export function useWorkspaceExplorerActions(options: ExplorerActionOptions): Exp
     setMessage("Copied path to clipboard.");
   }
 
-  function exclusive<Args extends unknown[]>(action: (...args: Args) => Promise<void>) {
-    return async (...args: Args) => {
-      if (pendingAction.current) return;
-      pendingAction.current = true;
-      try { await action(...args); }
-      finally { pendingAction.current = false; }
-    };
+  async function exclusive(action: () => Promise<void>) {
+    const revision = getActiveBundleRevision();
+    if (pendingAction.current === revision) return;
+    pendingAction.current = revision;
+    try { await action(); }
+    catch (error) { if (getActiveBundleRevision() === revision) throw error; }
+    finally { if (pendingAction.current === revision) pendingAction.current = null; }
   }
 
   const actions: ExplorerFileActions = {
-    renameFile: exclusive(renameFile),
-    createFile: exclusive(createFile),
-    createDirectory: exclusive(createDirectory),
-    deleteFile: exclusive(deleteFile),
-    deleteDirectory: exclusive(deleteDirectory),
-    exportFile: exclusive(exportFile),
-    copyText: exclusive(copyText),
+    renameFile: (id, name) => exclusive(() => renameFile(id, name)),
+    createFile: (directory) => exclusive(() => createFile(directory)),
+    createDirectory: (directory, name) => exclusive(() => createDirectory(directory, name)),
+    deleteFile: (file) => exclusive(() => deleteFile(file)),
+    deleteDirectory: (directory) => exclusive(() => deleteDirectory(directory)),
+    exportFile: (file, format) => exclusive(() => exportFile(file, format)),
+    copyText: (value) => exclusive(() => copyText(value)),
   };
   return actions;
 }
