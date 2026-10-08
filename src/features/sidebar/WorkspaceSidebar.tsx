@@ -45,6 +45,9 @@ export type WorkspaceSidebarProps = {
   dropDirectoryPath: string | null;
   movingFileId: string | null;
   blockedFileIds: Set<string>;
+  activeFileId: string | null;
+  activeFileDirectory: string | null;
+  activeFileRevealRequest: number;
   setExpandedDirectories: Dispatch<SetStateAction<Set<string>>>;
   openDocument: OpenDocument;
   setDraggedFileId: Dispatch<SetStateAction<string | null>>;

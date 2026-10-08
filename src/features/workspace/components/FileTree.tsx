@@ -20,6 +20,7 @@ type FileTreeProps = {
   dropDirectoryPath: string | null;
   movingFileId: string | null;
   blockedFileIds: Set<string>;
+  activeFileId?: string | null;
   onToggle: (path: string) => void;
   onOpen: (id: string, disposition: "preview" | "permanent") => void;
   onFileDragStart: (id: string) => void;
@@ -90,6 +91,7 @@ function directoryMenuHandlers(
 
 function TreeFileRow({ file, depth, tree }: { file: BundleFile; depth: number; tree: TreeContext }) {
   const { draggedFileId, movingFileId, blockedFileIds, onOpen, onFileDragStart, onFileDragEnd, onContextMenu } = tree;
+  const active = tree.activeFileId === file.id;
   function openMenu(element: HTMLElement, x: number, y: number) {
     onContextMenu?.({ kind: "file", path: file.id, file }, x, y, element);
   }
@@ -108,7 +110,7 @@ function TreeFileRow({ file, depth, tree }: { file: BundleFile; depth: number; t
   return (
     <button
       type="button"
-      className={`tree-row tree-file ${draggedFileId === file.id ? "dragging" : ""} ${movingFileId === file.id ? "moving" : ""}`}
+      className={`tree-row tree-file ${active ? "active" : ""} ${draggedFileId === file.id ? "dragging" : ""} ${movingFileId === file.id ? "moving" : ""}`}
       style={{ "--tree-depth": depth } as CSSProperties}
       onClick={() => onOpen(file.id, "preview")}
       onDoubleClick={() => onOpen(file.id, "permanent")}
@@ -122,6 +124,8 @@ function TreeFileRow({ file, depth, tree }: { file: BundleFile; depth: number; t
       onContextMenu={handleContextMenu}
       onKeyDown={handleKeyDown}
       aria-label={file.title}
+      aria-current={active ? "true" : undefined}
+      data-file-id={file.id}
       aria-haspopup={onContextMenu ? "menu" : undefined}
       title={file.movable ? `${file.title} - drag onto a folder to move` : `${file.title} - fixed OKF path`}
     >

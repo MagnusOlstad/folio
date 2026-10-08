@@ -65,6 +65,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
     groupId: string;
     documentId: string;
   } | null>(null);
+  const [activeFileRevealRequest, setActiveFileRevealRequest] = useState(0);
   const editorFocusRequestIdRef = useRef(0);
   const embeddingRevisionsRef = useRef(new Map<string, number>());
   const embeddingFinalizationsRef = useRef(new Map<string, Promise<void>>());
@@ -591,6 +592,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       tabs.createNewTab();
     },
     activateTab: (groupId, documentId) => {
+      setActiveFileRevealRequest((request) => request + 1);
       const group = tabs.groups.find((candidate) => candidate.id === groupId);
       if (groupId !== tabs.activeGroupId || group?.activeId !== documentId)
         void finalizeAllFiledDocuments();
@@ -618,6 +620,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
     explorer,
     documents,
     groups: tabs.groups,
+    activeGroupId: tabs.activeGroupId,
+    activeFileRevealRequest,
     setGroups: tabs.setGroups,
     models,
     setMessage,
@@ -638,6 +642,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       await noteExport.exportDocument(document, documents.drafts[file.id], format);
     },
     openDocument: async (...args) => {
+      setActiveFileRevealRequest((request) => request + 1);
       setEditorFocusRequest(null);
       void finalizeAllFiledDocuments();
       return navigation.openDocument(...args);
@@ -728,6 +733,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
         resetSplit: () => layout.setSplitPosition(50),
         activateGroup: (groupId) => {
           if (groupId !== tabs.activeGroupId) {
+            setActiveFileRevealRequest((request) => request + 1);
             setEditorFocusRequest(null);
             void finalizeAllFiledDocuments();
           }
@@ -739,6 +745,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
         },
         titleForId: tabs.titleForId,
         activateTab: (groupId, documentId) => {
+          setActiveFileRevealRequest((request) => request + 1);
           const group = tabs.groups.find((candidate) => candidate.id === groupId);
           if (groupId !== tabs.activeGroupId || group?.activeId !== documentId)
             void finalizeAllFiledDocuments();
@@ -797,6 +804,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
             void finalizeFiledDocument(document.id);
         },
         openDocument: async (...args) => {
+          setActiveFileRevealRequest((request) => request + 1);
           setEditorFocusRequest(null);
           void finalizeAllFiledDocuments();
           return navigation.openDocument(...args);

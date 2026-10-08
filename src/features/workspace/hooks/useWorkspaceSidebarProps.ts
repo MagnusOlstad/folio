@@ -19,6 +19,8 @@ type Options = {
   explorer: WorkspaceExplorerState;
   documents: WorkspaceDocumentState;
   groups: TabGroup[];
+  activeGroupId: string;
+  activeFileRevealRequest: number;
   setGroups: Dispatch<SetStateAction<TabGroup[]>>;
   models: ReturnTypeOfWorkspaceModels;
   setMessage: Dispatch<SetStateAction<string>>;
@@ -38,6 +40,8 @@ export function useWorkspaceSidebarProps({
   explorer,
   documents,
   groups,
+  activeGroupId,
+  activeFileRevealRequest,
   setGroups,
   models,
   setMessage,
@@ -97,6 +101,10 @@ export function useWorkspaceSidebarProps({
   const localDraftDocuments = Object.values(documents.documents)
     .filter((document) => isUntitledId(document.id))
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  const activeFileId = groups.find((group) => group.id === activeGroupId)?.activeId ?? null;
+  const activeFileDirectory = activeFileId
+    ? explorer.files.find((file) => file.id === activeFileId)?.directory ?? null
+    : null;
   const availableTags = Array.from(
     new Set(explorer.notes.flatMap((note) => note.tags)),
   ).sort((left, right) => left.localeCompare(right));
@@ -147,6 +155,9 @@ export function useWorkspaceSidebarProps({
       deletingDraftIds: documents.deletingDraftIds,
       savingDocuments: documents.savingDocuments,
       fileTree: buildFileTree(explorer.files, explorer.directories),
+      activeFileId,
+      activeFileDirectory,
+      activeFileRevealRequest,
       expandedDirectories: explorer.expandedDirectories,
       draggedFileId: explorer.draggedFileId,
       dropDirectoryPath: explorer.dropDirectoryPath,
