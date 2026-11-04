@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { EditorView } from "@codemirror/view";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ViewerDocument } from "../../src/domain/types.ts";
 import { LiveMarkdownEditor } from "../../src/features/workspace/components/LiveMarkdownEditor.tsx";
 import { RenderedMarkdown } from "../../src/features/workspace/components/RenderedMarkdown.tsx";
@@ -16,7 +16,28 @@ import {
   resolveAssetHref,
 } from "../../src/lib/assets.ts";
 
-afterEach(() => vi.unstubAllGlobals());
+const rangeProto = Range.prototype as {
+  getClientRects?: Range["getClientRects"];
+  getBoundingClientRect?: Range["getBoundingClientRect"];
+};
+const originalRangeRects = { getClientRects: rangeProto.getClientRects, getBoundingClientRect: rangeProto.getBoundingClientRect };
+
+// jsdom lacks Range layout APIs that CodeMirror's scheduled measure frame calls.
+beforeAll(() => {
+  rangeProto.getClientRects ??= () =>
+    Object.assign([] as DOMRect[], { item: () => null }) as unknown as DOMRectList;
+  rangeProto.getBoundingClientRect ??= () => new DOMRect(0, 0, 0, 0);
+});
+
+afterAll(() => {
+  rangeProto.getClientRects = originalRangeRects.getClientRects;
+  rangeProto.getBoundingClientRect = originalRangeRects.getBoundingClientRect;
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const png = (name = "Screen Shot.png") => new File([new Uint8Array([1, 2, 3])], name, { type: "image/png" });
 
