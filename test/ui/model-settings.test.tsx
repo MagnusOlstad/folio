@@ -19,6 +19,7 @@ const status: MlxStatus = {
     { id: "embeddinggemma", name: "EmbeddingGemma", purpose: "embeddings", downloadSizeBytes: 212_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
     { id: "whisper", name: "Whisper Large v3 Turbo", purpose: "transcription", downloadSizeBytes: 1_610_000_000, downloadSizeIsEstimate: true, selected: true, installed: false, loaded: false, memory: null },
     { id: "whisperlarge", name: "Whisper Large v3", purpose: "transcription", downloadSizeBytes: 3_100_000_000, downloadSizeIsEstimate: true, selected: false, installed: false, loaded: false, memory: null },
+    { id: "lightonocr", name: "LightOnOCR 3 1B", purpose: "ocr", downloadSizeBytes: 2_020_000_000, downloadSizeIsEstimate: false, selected: false, installed: false, loaded: false, memory: null },
   ],
 };
 
@@ -41,10 +42,20 @@ function renderSettings(overrides: Partial<ModelSettingsControls> = {}) {
 }
 
 describe("model settings", () => {
+  it("lists LightOnOCR and installs it from settings", () => {
+    const { install } = renderSettings();
+    expect(screen.getByText("LightOnOCR 3 1B")).toBeInTheDocument();
+    const row = screen.getByText("LightOnOCR 3 1B").closest("article")!;
+    expect(within(row).getByText("BF16 · about 2.0 GB")).toBeInTheDocument();
+    fireEvent.click(within(row).getByRole("button", { name: "Download" }));
+    expect(install).toHaveBeenCalledWith("lightonocr");
+  });
+
   it.each([
     ["qwen35", "Qwen 3.5 4B"],
     ["embeddinggemma", "EmbeddingGemma"],
     ["whisperlarge", "Whisper Large v3"],
+    ["lightonocr", "LightOnOCR 3 1B"],
   ] as const)("shows advancing install progress for %s from request start through completion", (id, name) => {
     const started = { ...status, installing: [id], downloads: [{ id, progress: null }] };
     const { rerender } = render(

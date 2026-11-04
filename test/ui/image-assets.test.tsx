@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import type { ViewerDocument } from "../../src/domain/types.ts";
 import { LiveMarkdownEditor } from "../../src/features/workspace/components/LiveMarkdownEditor.tsx";
 import { RenderedMarkdown } from "../../src/features/workspace/components/RenderedMarkdown.tsx";
+import { cleanExtractedText } from "../../src/features/workspace/model/image-ocr.ts";
 import {
   createUploadPlaceholder,
   pendingImageUploads,
@@ -133,13 +134,13 @@ describe("LiveMarkdownEditor image paste", () => {
 describe("LiveMarkdownEditor image toolbar", () => {
   const label = (root: HTMLElement, name: string) => root.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`);
 
-  it("renders copy, remove and a disabled extract button", () => {
+  it("renders copy, remove and an enabled extract button", () => {
     render(<LiveMarkdownEditor value="![shot](/assets/a.png)" onChange={vi.fn()} ariaLabel="Bar note" />);
     const root = screen.getByLabelText("Bar note");
     expect(root.querySelectorAll(".cm-live-markdown-image-toolbar button")).toHaveLength(3);
     expect(label(root, "Copy image")).not.toBeNull();
     expect(label(root, "Remove image")).not.toBeNull();
-    expect(label(root, "Extract text (coming soon)")?.disabled).toBe(true);
+    expect(label(root, "Extract text")?.disabled).toBe(false);
   });
 
   it("omits remove when read-only", () => {
@@ -203,6 +204,94 @@ describe("LiveMarkdownEditor image toolbar", () => {
   });
 });
 
+describe("LiveMarkdownEditor image text extraction", () => {
+  const label = (root: HTMLElement, name: string) => root.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`);
+  const button = (root: HTMLElement, name: string) =>
+    Array.from(root.querySelectorAll<HTMLButtonElement>(".cm-live-markdown-ocr-button")).find((item) => item.textContent === name) ?? null;
+  const ocrResponse = (text = "# Title\n\nBody", cached = false) =>
+    new Response(JSON.stringify({ text, cached }), { status: 200 });
+
+  it("requests extraction and opens a preview with the text", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(ocrResponse("# Title\n\nBody", true));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<LiveMarkdownEditor value="![shot](/assets/a.png)" onChange={vi.fn()} ariaLabel="OCR note" />);
+    const root = screen.getByLabelText("OCR note");
+    const extract = label(root, "Extract text")!;
+    fireEvent.click(extract);
+    expect(extract.getAttribute("aria-busy")).toBe("true");
+    await waitFor(() => expect(root.querySelector(".cm-live-markdown-ocr-text")).not.toBeNull());
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/assets/ocr");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ path: "/assets/a.png" });
+    expect(root.querySelector(".cm-live-markdown-ocr-text")?.textContent).toBe("# Title\n\nBody");
+    expect(root.querySelector(".cm-live-markdown-ocr-note")?.textContent).toBe("(cached)");
+    expect(extract.hasAttribute("aria-busy")).toBe(false);
+    fireEvent.click(button(root, "Close")!);
+    expect(root.querySelector(".cm-live-markdown-ocr-preview")).toBeNull();
+  });
+
+  it("closes the preview with Escape", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ocrResponse()));
+    render(<LiveMarkdownEditor value="![shot](/assets/a.png)" onChange={vi.fn()} ariaLabel="Esc note" />);
+    const root = screen.getByLabelText("Esc note");
+    fireEvent.click(label(root, "Extract text")!);
+    await waitFor(() => expect(root.querySelector(".cm-live-markdown-ocr-preview")).not.toBeNull());
+    fireEvent.keyDown(root, { key: "Escape" });
+    expect(root.querySelector(".cm-live-markdown-ocr-preview")).toBeNull();
+  });
+
+  it("copies the extracted text", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ocrResponse("hello")));
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    render(<LiveMarkdownEditor value="![shot](/assets/a.png)" onChange={vi.fn()} ariaLabel="Copy ocr" />);
+    const root = screen.getByLabelText("Copy ocr");
+    fireEvent.click(label(root, "Extract text")!);
+    await waitFor(() => expect(button(root, "Copy")).not.toBeNull());
+    fireEvent.click(button(root, "Copy")!);
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("hello"));
+    await waitFor(() => expect(button(root, "Copied")).not.toBeNull());
+  });
+
+  it("inserts the text below the image line and supports undo", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ocrResponse("Line one\nLine two\n")));
+    const onChange = vi.fn();
+    render(<LiveMarkdownEditor value={"intro\na ![shot](/assets/a.png) tail\nafter"} onChange={onChange} ariaLabel="Insert ocr" />);
+    const root = screen.getByLabelText("Insert ocr");
+    fireEvent.click(label(root, "Extract text")!);
+    await waitFor(() => expect(button(root, "Insert below")).not.toBeNull());
+    fireEvent.click(button(root, "Insert below")!);
+    expect(onChange).toHaveBeenLastCalledWith("intro\na ![shot](/assets/a.png) tail\n\nLine one\nLine two\n\nafter");
+    expect(root.querySelector(".cm-live-markdown-ocr-preview")).toBeNull();
+    const view = EditorView.findFromDOM(root)!;
+    expect(undo(view)).toBe(true);
+    expect(view.state.doc.toString()).toBe("intro\na ![shot](/assets/a.png) tail\nafter");
+  });
+
+  it("reports extraction errors and resets the button", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "Install LightOnOCR in Settings → Models to extract text." }), { status: 409 }),
+    ));
+    const onError = vi.fn();
+    render(<LiveMarkdownEditor value="![shot](/assets/a.png)" onChange={vi.fn()} onError={onError} ariaLabel="Err ocr" />);
+    const root = screen.getByLabelText("Err ocr");
+    const extract = label(root, "Extract text")!;
+    fireEvent.click(extract);
+    await waitFor(() => expect(onError).toHaveBeenCalledWith("Install LightOnOCR in Settings → Models to extract text."));
+    expect(extract.hasAttribute("aria-busy")).toBe(false);
+    expect(extract.disabled).toBe(false);
+    expect(root.querySelector(".cm-live-markdown-ocr-preview")).toBeNull();
+  });
+
+  it("hides insert when read-only but keeps copy", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ocrResponse()));
+    render(<LiveMarkdownEditor value="![shot](/assets/a.png)" onChange={vi.fn()} readOnly ariaLabel="RO ocr" />);
+    const root = screen.getByLabelText("RO ocr");
+    fireEvent.click(label(root, "Extract text")!);
+    await waitFor(() => expect(button(root, "Copy")).not.toBeNull());
+    expect(button(root, "Insert below")).toBeNull();
+  });
+});
+
 describe("RenderedMarkdown images", () => {
   it("maps asset hrefs to the asset endpoint", () => {
     const note = {
@@ -212,5 +301,26 @@ describe("RenderedMarkdown images", () => {
     } as ViewerDocument;
     render(<RenderedMarkdown document={note} groupId="g" saving={false} onOpenDocument={vi.fn()} onToggleTask={vi.fn()} />);
     expect(screen.getByAltText("shot").getAttribute("src")).toContain("/api/assets?path=%2Fassets%2Fa.png");
+  });
+});
+
+describe("cleanExtractedText", () => {
+  it("strips the table wrapper and annotation header", () => {
+    const raw = "<table>\n### Table - Definisjoner\n*Type: listing*\n\n|  |  |\n|---|---|\n| 4 | Definisjoner |\n\n</table>\n";
+    expect(cleanExtractedText(raw)).toBe("|  |  |\n|---|---|\n| 4 | Definisjoner |");
+  });
+
+  it("strips other annotation headers", () => {
+    expect(cleanExtractedText("### Chart - Sales\n*Type: bar*\n\nbody")).toBe("body");
+    expect(cleanExtractedText("### Figure - X\n*Type: photo*\ncaption")).toBe("caption");
+  });
+
+  it("keeps real HTML tables untouched", () => {
+    const html = "<table>\n<tr><td>a</td></tr>\n</table>";
+    expect(cleanExtractedText(html)).toBe(html);
+  });
+
+  it("leaves plain text untouched", () => {
+    expect(cleanExtractedText("# Title\n\nBody text")).toBe("# Title\n\nBody text");
   });
 });

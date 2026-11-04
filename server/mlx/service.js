@@ -1,9 +1,10 @@
 import fs from 'node:fs/promises'
-import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createMlxWorker, terminateMlxWorker } from './worker.js'
 import { findModelSnapshot } from './snapshots.js'
+import { helperPath, nativeMlxAvailable } from './helper-path.js'
+import { OCR_MODELS, OCR_MODEL_ID, OCR_TIMEOUT_MS, cancellationError } from './ocr-models.js'
 import { installationProgress } from './progress.js'
 import { TRANSCRIPTION_MODELS,
   readTranscriptionModelPreference, writeTranscriptionModelPreference } from '../transcription/models.js'
@@ -30,14 +31,9 @@ const MODEL_DEFINITIONS = Object.freeze({
     repository: 'mlx-community/embeddinggemma-300m-4bit', revision: '5d9ef074df3957afc5c77127f208fddbc3c54187',
     task: 'embedding', downloadSizeBytes: 212_000_000,
   },
+  ...OCR_MODELS,
   ...TRANSCRIPTION_MODELS,
 })
-
-function helperPath(projectRoot, configuredPath = null) {
-  if (configuredPath || process.env.FOLIO_MLX_HELPER) return configuredPath || process.env.FOLIO_MLX_HELPER
-  if (process.resourcesPath) return path.join(process.resourcesPath, 'mlx', 'MacOS', 'folio-mlx')
-  return path.join(projectRoot, 'experiments', 'mlx-swift', '.cache', 'staged', 'Folio.app', 'Contents', 'MacOS', 'folio-mlx')
-}
 
 export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKeepAliveMs = KEEP_ALIVE_MS }) {
   const cacheRoot = path.join(modelRoot, 'hf-cache')
@@ -45,10 +41,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   const workers = new Map()
   const starting = new Map()
   const startingWorkers = new Map()
-  const installing = new Set()
-  const removing = new Set()
-  const unloading = new Set()
-  const stopping = new Set()
+  const [installing, removing, unloading, stopping] = [new Set(), new Set(), new Set(), new Set()]
   const stoppingJobs = new Map()
   const generationSelectionPath = path.join(modelRoot, 'generation-model.json')
   const idleTimers = new Map()
@@ -62,9 +55,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   let activeHeavyModel = null
   const loadingModels = new Set()
   let closed = false
-  const darwinMajorVersion = Number(os.release().split('.')[0])
-  const isAvailable = process.platform === 'darwin' && process.arch === 'arm64'
-    && Number.isFinite(darwinMajorVersion) && darwinMajorVersion >= 23
+  const isAvailable = nativeMlxAvailable()
 
   function modelDefinition(id) {
     const model = MODEL_DEFINITIONS[id]
@@ -234,14 +225,14 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
           else signal.addEventListener('abort', abortStartup, { once: true })
         }
         await worker.ready
-        if (signal?.aborted) throw Object.assign(new Error('Transcription was cancelled. Your audio file is saved and can be retried.'), { code: 'TRANSCRIPTION_CANCELLED' })
+        if (signal?.aborted) throw cancellationError(definition)
         if (closed) throw new Error('The MLX service is shutting down.')
         workers.set(id, worker)
         armIdleTimer(id, worker)
         return worker
       } catch (error) {
         if (worker) await terminateMlxWorker(worker)
-        if (signal?.aborted) throw Object.assign(new Error('Transcription was cancelled. Your audio file is saved and can be retried.'), { code: 'TRANSCRIPTION_CANCELLED' })
+        if (signal?.aborted) throw cancellationError(definition)
         throw error
       } finally {
         clearTimeout(abortTimer)
@@ -283,6 +274,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   }
 
   async function run(id, operation, payload, timeoutMs, signal = null, { onEvent = null, unloadAfter = false } = {}) {
+    const definition = modelDefinition(id)
     if (removing.has(id)) throw Object.assign(new Error('This model is being removed. Try again when it finishes.'), { statusCode: 409 })
     if (unloading.has(id)) throw Object.assign(new Error('This model is stopping. Try again when it finishes.'), { statusCode: 409 })
     if (stopping.has(id)) await stoppingJobs.get(id)
@@ -294,10 +286,10 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
       let abort
       let abortTimer
       try {
-        if (signal?.aborted) throw Object.assign(new Error('Transcription was cancelled. Your audio file is saved and can be retried.'), { code: 'TRANSCRIPTION_CANCELLED' })
+        if (signal?.aborted) throw cancellationError(definition)
         stopIdleTimer(id)
         worker = await startModel(id, { signal })
-        if (signal?.aborted) throw Object.assign(new Error('Transcription was cancelled. Your audio file is saved and can be retried.'), { code: 'TRANSCRIPTION_CANCELLED' })
+        if (signal?.aborted) throw cancellationError(definition)
         if (signal) {
           abort = () => {
             worker.child.kill('SIGTERM')
@@ -310,7 +302,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
         if (signal?.aborted && worker) {
           await terminateMlxWorker(worker, 2_000)
           workers.delete(id)
-          throw Object.assign(new Error('Transcription was cancelled. Your audio file is saved and can be retried.'), { code: 'TRANSCRIPTION_CANCELLED' })
+          throw cancellationError(definition)
         }
         if (worker && (worker.child.killed || worker.closed || !worker.child.stdin.writable)) await terminateMlxWorker(worker, 2_000)
         throw error
@@ -337,9 +329,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   }
 
   async function status() {
-    const [selected, selectedTranscription] = await Promise.all([
-      selectedGenerationModel(), selectedTranscriptionModel(),
-    ])
+    const [selected, selectedTranscription] = await Promise.all([selectedGenerationModel(), selectedTranscriptionModel()])
     const models = await Promise.all(Object.values(MODEL_DEFINITIONS).map(async (definition) => {
       const external = externalModels.get(definition.id)
       const externalStatus = external?.status ? await external.status() : null
@@ -480,6 +470,13 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     })
   }
 
+  async function extractText(imagePath, { signal } = {}) {
+    const definition = modelDefinition(OCR_MODEL_ID)
+    if (!await isInstalled(definition)) throw Object.assign(new Error('Install LightOnOCR in Settings → Models to extract text.'), { statusCode: 409 })
+    const { text } = await run(OCR_MODEL_ID, 'ocr', { imagePath }, OCR_TIMEOUT_MS, signal)
+    return { text: typeof text === 'string' ? text : '', modelId: OCR_MODEL_ID, model: definition.repository, revision: definition.revision }
+  }
+
   async function close() {
     closed = true
     for (const id of idleTimers.keys()) stopIdleTimer(id)
@@ -494,6 +491,6 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   }
 
   return { status, install, load, unload, remove, selectGenerationModel, selectedGenerationModel,
-    selectTranscriptionModel, selectedTranscriptionModel, generate, embed, transcribe, close, withModelActivity, registerExternalModel, keepAliveMs: warmKeepAliveMs,
+    selectTranscriptionModel, selectedTranscriptionModel, generate, embed, transcribe, extractText, close, withModelActivity, registerExternalModel, keepAliveMs: warmKeepAliveMs,
     modelDefinitions: MODEL_DEFINITIONS }
 }

@@ -92,6 +92,7 @@ test('models install explicitly into their pinned snapshots and use the JSONL wo
     { id: 'qwen35', purpose: 'generation', downloadSizeBytes: 3_060_000_000, selected: false },
     { id: 'llama32', purpose: 'generation', downloadSizeBytes: 1_810_000_000, selected: false },
     { id: 'embeddinggemma', purpose: 'embeddings', downloadSizeBytes: 212_000_000, selected: false },
+    { id: 'lightonocr', purpose: 'ocr', downloadSizeBytes: 2_020_000_000, selected: false },
     { id: 'whisper', purpose: 'transcription', downloadSizeBytes: 1_610_000_000, selected: true },
     { id: 'whisperlarge', purpose: 'transcription', downloadSizeBytes: 3_090_000_000, selected: false },
   ])
@@ -699,4 +700,65 @@ test('request and shutdown failures clean up worker state', async (t) => {
     .filter((entry) => entry.event === 'response' && entry.operation === 'shutdown').at(-1)
   assert.equal(failedShutdown.error, 'fixture shutdown error')
   assert.equal(failedShutdown.memory.cacheBytes, 0)
+})
+
+test('LightOnOCR installs, loads, extracts text, and shares the heavy-model slot with generation', async (t) => {
+  const { root, logPath, service } = await fixture(t)
+  const definition = service.modelDefinitions.lightonocr
+  assert.equal(definition.repository, 'lightonai/LightOnOCR-3-1B')
+  assert.equal(definition.revision, '23d544085c886bbdace647bcfab91203299417e2')
+  assert.equal(definition.task, 'ocr')
+
+  await assert.rejects(service.extractText(path.join(root, 'scan.png')), (error) => {
+    assert.equal(error.statusCode, 409)
+    assert.equal(error.message, 'Install LightOnOCR in Settings → Models to extract text.')
+    return true
+  })
+  await assert.rejects(service.load('lightonocr'), /not installed/)
+  assert.deepEqual(await readLog(logPath), [])
+
+  await service.install('gemma4')
+  const generationPid = (await readLog(logPath)).find((entry) => entry.event === 'ready' && entry.task === 'generation').pid
+  const installed = await service.install('lightonocr')
+  assertProcessExited(generationPid)
+  const model = installed.models.find((entry) => entry.id === 'lightonocr')
+  assert.equal(model.installed, true)
+  assert.equal(model.loaded, true)
+  assert.equal(model.selected, false)
+  assert.equal(installed.activeModel, 'lightonocr')
+  assert.equal(installed.models.find((entry) => entry.id === 'gemma4').loaded, false)
+  const snapshot = path.join(root, 'models', 'hf-cache', 'models--lightonai--LightOnOCR-3-1B', 'snapshots', definition.revision)
+  assert.deepEqual((await fs.readdir(snapshot)).sort(), ['config.json', 'model.safetensors', 'tokenizer.json', 'tokenizer_config.json'])
+
+  const imagePath = path.join(root, 'scan.png')
+  const result = await service.extractText(imagePath)
+  assert.deepEqual(result, {
+    text: '| Bank | Faktisk bankkonto i bank |', modelId: 'lightonocr',
+    model: 'lightonai/LightOnOCR-3-1B', revision: definition.revision,
+  })
+  const calls = await readLog(logPath)
+  assert.ok(calls.some((entry) => entry.operation === 'ocr' && entry.task === 'ocr' && entry.imagePath === imagePath))
+  assert.equal((await service.status()).models.find((entry) => entry.id === 'lightonocr').loaded, true)
+
+  await service.generate([{ role: 'user', content: 'Planning note.' }])
+  const afterGeneration = await service.status()
+  assert.equal(afterGeneration.models.find((entry) => entry.id === 'lightonocr').loaded, false)
+  assert.equal(afterGeneration.models.find((entry) => entry.id === 'gemma4').loaded, true)
+
+  await service.load('lightonocr')
+  assert.equal((await service.status()).models.find((entry) => entry.id === 'gemma4').loaded, false)
+  const unloaded = await service.unload('lightonocr')
+  assert.equal(unloaded.models.find((entry) => entry.id === 'lightonocr').loaded, false)
+  const removed = await service.remove('lightonocr')
+  assert.equal(removed.models.find((entry) => entry.id === 'lightonocr').installed, false)
+  await assert.rejects(service.extractText(imagePath), (error) => error.statusCode === 409)
+})
+
+test('LightOnOCR propagates helper errors and keeps the worker usable', async (t) => {
+  const { root, service } = await fixture(t)
+  await service.install('lightonocr')
+  await setControl(root, { failOcr: true })
+  await assert.rejects(service.extractText(path.join(root, 'scan.png')), /fixture ocr error/)
+  await setControl(root, { ocrText: 'Korte renter' })
+  assert.equal((await service.extractText(path.join(root, 'scan.png'))).text, 'Korte renter')
 })

@@ -1,10 +1,16 @@
 import { syntaxTree } from "@codemirror/language";
 import type { EditorView } from "@codemirror/view";
+import { extractImageText } from "../../../lib/assets.ts";
+import { cleanExtractedText, nextOcrState, ocrInsertChange, type OcrPreviewState } from "./image-ocr.ts";
 
 const TOOLBAR_CLASS = "cm-live-markdown-image-toolbar";
 const COPIED_RESET_MS = 1500;
 
+const PREVIEW_CLASS = "cm-live-markdown-ocr-preview";
+
 export type ImageToolbarOptions = {
+  /** The `/assets/<file>` path used to request text extraction. */
+  path: string;
   onError?: (message: string) => void;
 };
 
@@ -51,10 +57,10 @@ function createButton(label: string, icon: readonly string[], extraClass?: strin
   return button;
 }
 
-/** True when a DOM event originated inside an image toolbar. */
+/** True when a DOM event originated inside an image toolbar or its text preview. */
 export function isImageToolbarEvent(event: Event) {
   const target = event.target;
-  return target instanceof Element && target.closest(`.${TOOLBAR_CLASS}`) !== null;
+  return target instanceof Element && target.closest(`.${TOOLBAR_CLASS}, .${PREVIEW_CLASS}`) !== null;
 }
 
 /** Finds the Markdown range of the Image node that the frame widget replaces. */
@@ -174,10 +180,130 @@ export function createImageFrame(
     toolbar.append(remove);
   }
 
-  const extract = createButton("Extract text (coming soon)", ICONS.text);
-  extract.disabled = true;
+  const extract = createButton("Extract text", ICONS.text);
   toolbar.append(extract);
+
+  let ocrState: OcrPreviewState = { status: "idle" };
+  let preview: HTMLElement | null = null;
+  const closePreview = () => {
+    preview?.remove();
+    preview = null;
+    view.dom.removeEventListener("keydown", onKeydown, true);
+    ocrState = nextOcrState(ocrState, { type: "close" });
+    view.requestMeasure();
+  };
+  function onKeydown(event: KeyboardEvent) {
+    if (!frame.isConnected) {
+      view.dom.removeEventListener("keydown", onKeydown, true);
+      return;
+    }
+    if (event.key === "Escape" && preview) closePreview();
+  }
+  const setBusy = (busy: boolean) => {
+    extract.classList.toggle("is-busy", busy);
+    extract.disabled = busy;
+    if (busy) extract.setAttribute("aria-busy", "true");
+    else extract.removeAttribute("aria-busy");
+    extract.title = busy ? "Extracting…" : "Extract text";
+  };
+  extract.addEventListener("click", async () => {
+    if (ocrState.status === "preview") {
+      closePreview();
+      return;
+    }
+    if (ocrState.status !== "idle") return;
+    ocrState = nextOcrState(ocrState, { type: "start" });
+    setBusy(true);
+    try {
+      const result = await extractImageText(options.path);
+      ocrState = nextOcrState(ocrState, { type: "success", ...result });
+      preview = createOcrPreview(view, frame, result.text, result.cached, options, closePreview);
+      frame.append(preview);
+      view.dom.addEventListener("keydown", onKeydown, true);
+      view.requestMeasure();
+    } catch (error) {
+      ocrState = nextOcrState(ocrState, { type: "failure" });
+      options.onError?.(error instanceof Error ? error.message : "Could not extract text.");
+    } finally {
+      setBusy(false);
+    }
+  });
 
   frame.append(image, toolbar);
   return frame;
+}
+
+function createTextButton(label: string) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "cm-live-markdown-ocr-button";
+  button.textContent = label;
+  // Keep editor focus and selection when the preview is pressed.
+  button.addEventListener("mousedown", (event) => event.preventDefault());
+  return button;
+}
+
+/** Builds the extracted-text panel shown under the image. */
+function createOcrPreview(
+  view: EditorView,
+  frame: HTMLElement,
+  rawText: string,
+  cached: boolean,
+  options: ImageToolbarOptions,
+  close: () => void,
+) {
+  const text = cleanExtractedText(rawText);
+  const panel = document.createElement("div");
+  panel.className = PREVIEW_CLASS;
+  panel.setAttribute("role", "region");
+  panel.setAttribute("aria-label", "Extracted text");
+
+  const body = document.createElement("pre");
+  body.className = "cm-live-markdown-ocr-text";
+  body.textContent = text.trim() ? text : "No text found in this image.";
+
+  const actions = document.createElement("div");
+  actions.className = "cm-live-markdown-ocr-actions";
+
+  const copy = createTextButton("Copy");
+  let resetTimer: number | undefined;
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      options.onError?.("Could not copy the extracted text.");
+      return;
+    }
+    copy.textContent = "Copied";
+    window.clearTimeout(resetTimer);
+    resetTimer = window.setTimeout(() => {
+      copy.textContent = "Copy";
+    }, COPIED_RESET_MS);
+  });
+  actions.append(copy);
+
+  if (!view.state.readOnly) {
+    const insert = createTextButton("Insert below");
+    insert.addEventListener("click", () => {
+      const range = findImageRange(view, frame);
+      const change = range && !view.state.readOnly ? ocrInsertChange(view.state.doc, range, text) : null;
+      if (change) view.dispatch({ changes: change, userEvent: "input" });
+      close();
+    });
+    actions.append(insert);
+  }
+
+  const dismiss = createTextButton("Close");
+  dismiss.addEventListener("click", close);
+  actions.append(dismiss);
+
+  if (cached) {
+    const note = document.createElement("span");
+    note.className = "cm-live-markdown-ocr-note";
+    note.textContent = "(cached)";
+    actions.append(note);
+  }
+
+  panel.append(body, actions);
+  return panel;
 }

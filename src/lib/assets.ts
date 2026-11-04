@@ -91,3 +91,41 @@ export async function uploadImageAsset(file: File): Promise<string> {
     throw new Error("The server returned an invalid image path.");
   return body.path;
 }
+
+export type ExtractedImageText = { text: string; cached: boolean };
+
+/** Runs local OCR on an uploaded image and returns the extracted Markdown. */
+export async function extractImageText(path: string): Promise<ExtractedImageText> {
+  const bundleId = getActiveBundleId();
+  let response: Response;
+  try {
+    response = await fetch("/api/assets/ocr", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(bundleId
+          ? { "x-folio-bundle": bundleId, "x-folio-bundle-id": bundleId }
+          : {}),
+      },
+      body: JSON.stringify({ path }),
+    });
+  } catch {
+    throw new Error("The local FolioNotes service is not ready yet.");
+  }
+  let result: unknown = null;
+  try {
+    result = await response.json();
+  } catch {
+    result = null;
+  }
+  const body = result && typeof result === "object" ? (result as Record<string, unknown>) : {};
+  if (!response.ok)
+    throw new Error(
+      typeof body.error === "string"
+        ? body.error
+        : `Could not extract text (${response.status}).`,
+    );
+  if (typeof body.text !== "string")
+    throw new Error("The server returned invalid extracted text.");
+  return { text: body.text, cached: body.cached === true };
+}

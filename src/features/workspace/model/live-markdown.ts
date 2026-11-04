@@ -148,6 +148,7 @@ class ImageWidget extends WidgetType {
     image.draggable = false;
     image.addEventListener("load", () => view.requestMeasure());
     return createImageFrame(view, image, url, {
+      path: this.path,
       onError: (message) => this.callbacks.current.onError?.(message),
     });
   }

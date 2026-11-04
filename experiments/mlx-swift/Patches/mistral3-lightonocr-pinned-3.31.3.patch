@@ -1,0 +1,177 @@
+--- a/Libraries/MLXVLM/Models/Mistral3.swift
++++ b/Libraries/MLXVLM/Models/Mistral3.swift
+@@ -83,7 +83,7 @@
+     public var vocabSize: Int { _vocabSize ?? 32000 }
+     public var spatialMergeSize: Int { _spatialMergeSize ?? 2 }
+     public var multimodalProjectorBias: Bool { _multimodalProjectorBias ?? false }
+-    public var eosTokenId: [Int]? { _eosTokenId }
++    public var eosTokenId: [Int]? { _eosTokenId?.values }
+ 
+     private let _ignoreIndex: Int?
+     private let _imageTokenIndex: Int?
+@@ -93,7 +93,7 @@
+     private let _vocabSize: Int?
+     private let _spatialMergeSize: Int?
+     private let _multimodalProjectorBias: Bool?
+-    private let _eosTokenId: [Int]?
++    private let _eosTokenId: IntOrIntArray?
+ 
+     enum CodingKeys: String, CodingKey {
+         case textConfig = "text_config"
+@@ -303,6 +303,8 @@
+         @ModuleInfo(key: "k_proj") var wk: Linear
+         @ModuleInfo(key: "v_proj") var wv: Linear
+         @ModuleInfo(key: "o_proj") var wo: Linear
++        @ModuleInfo(key: "q_norm") var qNorm: RMSNorm?
++        @ModuleInfo(key: "k_norm") var kNorm: RMSNorm?
+ 
+         let rope: RoPELayer
+ 
+@@ -320,6 +322,12 @@
+             self._wk.wrappedValue = Linear(dim, nKVHeads * headDim, bias: false)
+             self._wv.wrappedValue = Linear(dim, nKVHeads * headDim, bias: false)
+             self._wo.wrappedValue = Linear(nHeads * headDim, dim, bias: false)
++
++            // Qwen3-style per-head QK norm (for example LightOnOCR's Qwen3 text decoder).
++            if config.useQkNorm {
++                self._qNorm.wrappedValue = RMSNorm(dimensions: headDim, eps: config.rmsNormEps)
++                self._kNorm.wrappedValue = RMSNorm(dimensions: headDim, eps: config.rmsNormEps)
++            }
+ 
+             // Initialize RoPE using rope_parameters - rope_theta is required like in Python
+             guard let ropeParams = config.ropeParameters,
+@@ -348,8 +356,12 @@
+             var keys = wk(x)
+             var values = wv(x)
+ 
+-            queries = queries.reshaped(B, L, nHeads, -1).transposed(0, 2, 1, 3)
+-            keys = keys.reshaped(B, L, nKVHeads, -1).transposed(0, 2, 1, 3)
++            queries = queries.reshaped(B, L, nHeads, -1)
++            keys = keys.reshaped(B, L, nKVHeads, -1)
++            if let qNorm { queries = qNorm(queries) }
++            if let kNorm { keys = kNorm(keys) }
++            queries = queries.transposed(0, 2, 1, 3)
++            keys = keys.transposed(0, 2, 1, 3)
+             values = values.reshaped(B, L, nKVHeads, -1).transposed(0, 2, 1, 3)
+ 
+             let offset = cache?.offset ?? 0
+@@ -790,6 +802,14 @@
+                 continue
+             }
+ 
++            // Original (PyTorch layout) checkpoints store the patch convolution as OIHW.
++            if newKey.contains("patch_conv.weight"), value.ndim == 4,
++                !PixtralVision.checkArrayShape(value)
++            {
++                newWeights[newKey] = value.transposed(0, 2, 3, 1)
++                continue
++            }
++
+             // Handle weight scale patterns
+             if newKey.contains("weight_scale_inv") {
+                 let scaleInv = value
+@@ -894,7 +914,7 @@
+             "role": message.role.rawValue,
+             "content": message.images.map { _ in
+                 ["type": "image"]
+-            } + [["type": "text", "text": message.content]],
++            } + (message.content.isEmpty ? [] : [["type": "text", "text": message.content]]),
+         ]
+     }
+ }
+@@ -906,11 +926,30 @@
+     private let tokenizer: any Tokenizer
+     private let imageToken: String
+     private let imageTokenId: Int
++    private let imageBreakTokenId: Int?
++    private let imageEndTokenId: Int?
+ 
+     private struct PreprocessResult {
+         let pixels: MLXArray  // BCHW
+         let frames: [THW]
+         let numImageTokens: Int
++        let mergedRows: Int
++        let mergedColumns: Int
++    }
++
++    /// Image tokens laid out like Pixtral's processor: each row of merged patches ends with
++    /// the break token, and the final row ends with the end token. Without both tokens the
++    /// image tokens are emitted as one contiguous block.
++    private func imageTokenSequence(_ result: PreprocessResult) -> [Int] {
++        guard let imageBreakTokenId, let imageEndTokenId, result.mergedColumns > 0 else {
++            return Array(repeating: imageTokenId, count: result.numImageTokens)
++        }
++        var tokens: [Int] = []
++        for row in 0 ..< result.mergedRows {
++            tokens.append(contentsOf: Array(repeating: imageTokenId, count: result.mergedColumns))
++            tokens.append(row == result.mergedRows - 1 ? imageEndTokenId : imageBreakTokenId)
++        }
++        return tokens
+     }
+ 
+     public init(_ config: Mistral3VLMProcessorConfiguration, tokenizer: any Tokenizer) {
+@@ -923,6 +962,8 @@
+         } else {
+             self.imageTokenId = 10
+         }
++        self.imageBreakTokenId = config.imageBreakToken.flatMap { tokenizer.convertTokenToId($0) }
++        self.imageEndTokenId = config.imageEndToken.flatMap { tokenizer.convertTokenToId($0) }
+     }
+ 
+     private func preprocessImage(
+@@ -935,8 +976,10 @@
+         var image = MediaProcessing.inSRGBToneCurveSpace(image)
+         image = MediaProcessing.apply(image, processing: processing)
+ 
+-        let maxVisionEdge = patchSize * 24  // Pixtral vision expects 24x24 patches (336px for patchSize=14)
+-        let targetEdge = min(longestEdge ?? maxVisionEdge, maxVisionEdge)
++        // Honor the checkpoint's longest_edge (for example 1540 for LightOnOCR); fall back to
++        // 24x24 patches (336px for patchSize=14) only when the processor config has none.
++        let maxVisionEdge = patchSize * 24
++        let targetEdge = longestEdge ?? maxVisionEdge
+ 
+         let originalSize = image.extent.size
+         let scale = min(CGFloat(targetEdge) / max(originalSize.width, originalSize.height), 1.0)
+@@ -992,7 +1035,9 @@
+         return PreprocessResult(
+             pixels: pixels,
+             frames: [THW(1, paddedHeight, paddedWidth)],
+-            numImageTokens: numImageTokens
++            numImageTokens: numImageTokens,
++            mergedRows: mergedPatchesH,
++            mergedColumns: mergedPatchesW
+         )
+     }
+ 
+@@ -1051,9 +1096,7 @@
+                 }
+                 // Add image tokens between pieces (not after the last one)
+                 if index < pieces.count - 1 {
+-                    expandedTokens.append(
+-                        contentsOf: Array(
+-                            repeating: imageTokenId, count: preprocessResult.numImageTokens))
++                    expandedTokens.append(contentsOf: imageTokenSequence(preprocessResult))
+                 }
+             }
+             promptTokens = expandedTokens
+@@ -1066,9 +1109,7 @@
+             for token in promptTokens {
+                 if token == imageTokenId && !foundImageToken {
+                     // Replace single image token with expanded tokens
+-                    expandedTokens.append(
+-                        contentsOf: Array(
+-                            repeating: imageTokenId, count: preprocessResult.numImageTokens))
++                    expandedTokens.append(contentsOf: imageTokenSequence(preprocessResult))
+                     foundImageToken = true
+                 } else {
+                     expandedTokens.append(token)
+@@ -1084,8 +1125,7 @@
+                     insertIndex = 1  // After BOS token
+                 }
+                 promptTokens.insert(
+-                    contentsOf: Array(
+-                        repeating: imageTokenId, count: preprocessResult.numImageTokens),
++                    contentsOf: imageTokenSequence(preprocessResult),
+                     at: insertIndex
+                 )
+             }

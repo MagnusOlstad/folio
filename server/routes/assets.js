@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import express from 'express'
+import { OCR_MODEL_ID, OCR_MODELS } from '../mlx/ocr-models.js'
 
 const MAX_ASSET_BYTES = 20 * 1024 * 1024
 const ASSET_TYPES = new Map([
@@ -51,6 +52,28 @@ function filenameSlug(slugify, header) {
   return String(slugify(base, 'image') || 'image').slice(0, 48).replace(/^-+|-+$/g, '') || 'image'
 }
 
+// Cached text is valid only for the OCR model revision that produced it.
+export const OCR_MODEL_REVISION = OCR_MODELS[OCR_MODEL_ID].revision
+const OCR_CACHE_VERSION = 1
+
+function parseAssetPath(requested) {
+  const match = /^\/assets\/([A-Za-z0-9][A-Za-z0-9._-]*)$/.exec(String(requested || ''))
+  const type = match ? EXTENSION_TYPES.get(path.extname(match[1]).toLowerCase()) : null
+  if (!match || !type || match[1].includes('..')) throw httpError(400, 'Invalid asset path.')
+  return match[1]
+}
+
+async function readOcrCache(file, sha256) {
+  try {
+    const entry = JSON.parse(await fs.readFile(file, 'utf8'))
+    if (entry?.version === OCR_CACHE_VERSION && entry.sha256 === sha256 && entry.revision === OCR_MODEL_REVISION
+      && typeof entry.model === 'string' && typeof entry.text === 'string') return entry
+  } catch {
+    // Missing or corrupt cache entries are recomputed.
+  }
+  return null
+}
+
 export function registerRoutes(app, runtime) {
   // The runtime is a per-request proxy, so read bundle-specific values lazily.
   const assetsDirectory = () => path.join(typeof runtime.getBundleRoot === 'function' ? runtime.getBundleRoot() : runtime.bundleRoot, 'assets')
@@ -96,11 +119,9 @@ export function registerRoutes(app, runtime) {
 
   app.get('/api/assets', async (request, response, next) => {
     try {
-      const requested = String(request.query.path || '')
-      const match = /^\/assets\/([A-Za-z0-9][A-Za-z0-9._-]*)$/.exec(requested)
-      const type = match ? EXTENSION_TYPES.get(path.extname(match[1]).toLowerCase()) : null
-      if (!match || !type || match[1].includes('..')) throw httpError(400, 'Invalid asset path.')
-      const filePath = path.join(assetsDirectory(), match[1])
+      const name = parseAssetPath(request.query.path)
+      const type = EXTENSION_TYPES.get(path.extname(name).toLowerCase())
+      const filePath = path.join(assetsDirectory(), name)
       await assertNoBundleSymlinks(filePath)
       const stat = await fs.stat(filePath)
       if (!stat.isFile()) throw httpError(404, 'Asset not found.')
@@ -113,6 +134,56 @@ export function registerRoutes(app, runtime) {
     } catch (error) {
       if (error.code === 'ENOENT') return response.status(404).json({ error: 'Asset not found.' })
       if (error.status) return response.status(error.status).json({ error: error.message })
+      next(error)
+    }
+  })
+
+  app.post('/api/assets/ocr', async (request, response, next) => {
+    const controller = new AbortController()
+    response.on('close', () => {
+      if (!response.writableFinished) controller.abort()
+    })
+    try {
+      const name = parseAssetPath(request.body?.path)
+      const filePath = path.join(assetsDirectory(), name)
+      await assertNoBundleSymlinks(filePath)
+      const stat = await fs.stat(filePath)
+      if (!stat.isFile()) throw httpError(404, 'Asset not found.')
+      const sha256 = crypto.createHash('sha256').update(await fs.readFile(filePath)).digest('hex')
+      const cacheDirectory = path.join(typeof runtime.getBundleRoot === 'function' ? runtime.getBundleRoot() : runtime.bundleRoot, '.folio', 'ocr-cache')
+      const cacheFile = path.join(cacheDirectory, `${sha256}.json`)
+
+      const cached = await readOcrCache(cacheFile, sha256)
+      if (cached) {
+        response.json({ text: cached.text, cached: true })
+        return
+      }
+
+      const result = await runtime.mlxService.extractText(filePath, { signal: controller.signal })
+      if (controller.signal.aborted) return
+      const entry = {
+        version: OCR_CACHE_VERSION,
+        sha256,
+        model: result.model,
+        revision: result.revision,
+        text: result.text,
+        createdAt: new Date().toISOString(),
+      }
+      try {
+        await assertNoBundleSymlinks(cacheDirectory, { allowMissing: true })
+        await fs.mkdir(cacheDirectory, { recursive: true })
+        const temporary = path.join(cacheDirectory, `.${sha256}.${crypto.randomBytes(4).toString('hex')}.tmp`)
+        await fs.writeFile(temporary, JSON.stringify(entry))
+        await fs.rename(temporary, cacheFile)
+      } catch {
+        // A cache write failure should not discard the extracted text.
+      }
+      response.json({ text: result.text, cached: false })
+    } catch (error) {
+      if (error.code === 'ENOENT') return response.status(404).json({ error: 'Asset not found.' })
+      if (error.status) return response.status(error.status).json({ error: error.message })
+      if (error.statusCode === 409) return response.status(409).json({ error: error.message })
+      if (controller.signal.aborted) return
       next(error)
     }
   })
