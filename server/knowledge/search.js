@@ -34,7 +34,7 @@ function lexicalScores(record, query) {
   const pathMetadata = path.posix.dirname(record.id).replaceAll('/', ' ')
   return {
     metadata: textMatchScore(metadata, terms) * 0.85 + textMatchScore(pathMetadata, terms) * 0.15,
-    content: textMatchScore(record.content, terms),
+    content: textMatchScore(record.imageText ? `${record.content}\n${record.imageText}` : record.content, terms),
   }
 }
 
@@ -54,9 +54,19 @@ function searchResultSnippet(content, query, maxLength = 320) {
   return `${start ? '...' : ''}${normalized.slice(start, start + maxLength)}${start + maxLength < normalized.length ? '...' : ''}`
 }
 
+// Prefers image text for the snippet when it matches the query better than the note body.
+function snippetSource(record, bestChunk, query) {
+  if (record.imageText && query) {
+    const terms = searchTerms(query)
+    if (textMatchScore(record.imageText, terms) > textMatchScore(record.content, terms)) return record.imageText
+  }
+  return bestChunk?.content || record.content
+}
+
 function publicSearchRecord({
   embedding: _embedding,
   chunks: _chunks,
+  imageText: _imageText,
   embeddingModel: _embeddingModel,
   embeddingSchemaVersion: _embeddingSchemaVersion,
   embeddingInputHash: _embeddingInputHash,
@@ -114,7 +124,7 @@ async function rankedRecords(query, records, limit = 8, tag = '') {
       return {
         ...record,
         bestChunk,
-        snippet: searchResultSnippet(bestChunk?.content || record.content, query),
+        snippet: searchResultSnippet(snippetSource(record, bestChunk, query), query),
         score: (lexicalScore(record, query) * 0.45 + semantic * 0.55) * lifecycleFactor(record),
       }
     })

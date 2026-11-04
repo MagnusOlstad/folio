@@ -79,6 +79,17 @@ export function registerRoutes(app, runtime) {
   const assetsDirectory = () => path.join(typeof runtime.getBundleRoot === 'function' ? runtime.getBundleRoot() : runtime.bundleRoot, 'assets')
   const assertNoBundleSymlinks = (...args) => runtime.assertNoBundleSymlinks(...args)
 
+  // New OCR text becomes searchable once the index is rebuilt; this never delays or fails a response.
+  function refreshIndexInBackground() {
+    try {
+      void Promise.resolve(runtime.reindexBundle())
+        .then(() => runtime.refreshMissingEmbeddingsInBackground())
+        .catch(() => {})
+    } catch {
+      // Index freshness is best effort.
+    }
+  }
+
   app.post(
     '/api/assets',
     express.raw({ type: () => true, limit: MAX_ASSET_BYTES }),
@@ -175,6 +186,7 @@ export function registerRoutes(app, runtime) {
         const temporary = path.join(cacheDirectory, `.${sha256}.${crypto.randomBytes(4).toString('hex')}.tmp`)
         await fs.writeFile(temporary, JSON.stringify(entry))
         await fs.rename(temporary, cacheFile)
+        refreshIndexInBackground()
       } catch {
         // A cache write failure should not discard the extracted text.
       }

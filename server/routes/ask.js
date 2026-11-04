@@ -96,6 +96,7 @@ app.post('/api/ask', async (request, response, next) => {
       sources: matches.map(({
         embedding: _embedding,
         chunks: _chunks,
+        imageText: _imageText,
         embeddingModel: _embeddingModel,
         embeddingSchemaVersion: _embeddingSchemaVersion,
         embeddingInputHash: _embeddingInputHash,

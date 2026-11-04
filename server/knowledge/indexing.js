@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 import { createSerialQueue } from '../core/queue.js'
+import { collectImageText } from './image-text.js'
 
 export function createKnowledgeIndex(runtime) {
   const { embedModel, embeddingSchemaVersion,
@@ -105,6 +106,7 @@ function publicRecord(record) {
     embedding: _embedding,
     chunks: _chunks,
     content: _content,
+    imageText: _imageText,
     embeddingModel: _embeddingModel,
     embeddingSchemaVersion: _embeddingSchemaVersion,
     embeddingInputHash: _embeddingInputHash,
@@ -154,13 +156,18 @@ function boundedEmbeddingText(value, maxBytes = 1600) {
   return Buffer.byteLength(text) <= maxBytes ? text : splitByUtf8Bytes(text, maxBytes)[0]
 }
 
+// OCR text of embedded images is index-only; with no image text every input stays byte-identical.
+function embeddingBody(record) {
+  return record.imageText ? `${record.content}\n${record.imageText}` : record.content
+}
+
 function embeddingInput(record) {
-  return embeddingDocumentInput(record.title, boundedEmbeddingText(`${record.description}\n${record.content}`))
+  return embeddingDocumentInput(record.title, boundedEmbeddingText(`${record.description}\n${embeddingBody(record)}`))
 }
 
 function embeddingInputHash(record) {
   return crypto.createHash('sha256')
-    .update(`${embeddingSchemaVersion}\n${record.title}\n${record.description}\n${record.content}`)
+    .update(`${embeddingSchemaVersion}\n${record.title}\n${record.description}\n${embeddingBody(record)}`)
     .digest('hex')
 }
 
@@ -174,7 +181,7 @@ function chunkInputHash(record, content) {
 
 function recordChunks(record, previous) {
   const previousChunks = new Map((previous?.chunks || []).map((chunk) => [chunk.embeddingInputHash, chunk]))
-  return noteChunks(`${record.description}\n\n${record.content}`).map((content) => {
+  return noteChunks(`${record.description}\n\n${record.imageText ? `${record.content}\n\n${record.imageText}` : record.content}`).map((content) => {
     const embeddingInputHash = chunkInputHash(record, content)
     const previousChunk = previousChunks.get(embeddingInputHash)
     const reusableEmbedding = previous?.embeddingSchemaVersion === embeddingSchemaVersion
@@ -216,7 +223,7 @@ async function refreshRecordEmbeddings(records, errors = []) {
   return errors
 }
 
-function indexedRecordsFromDocuments(documents, previousRecords) {
+function indexedRecordsFromDocuments(documents, previousRecords, imageText = new Map()) {
   const documentIds = new Set(documents.map((document) => document.id))
   return documents
     .filter((document) => document.parsed.type !== 'Raw Capture')
@@ -237,6 +244,7 @@ function indexedRecordsFromDocuments(documents, previousRecords) {
           document.relationships.map((relationship) => relationship.id).filter((id) => documentIds.has(id)),
         )),
         content,
+        imageText: imageText.get(document.id) || '',
         createdAt: document.parsed.generatedAt || document.fileStat.birthtime.toISOString(),
         updatedAt: document.fileStat.mtime.toISOString(),
         classifiedByModel: !String(document.parsed.frontmatter.generated?.by || '').startsWith('human:'),
@@ -264,10 +272,21 @@ function indexedRecordsFromDocuments(documents, previousRecords) {
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
 }
 
+async function readImageText(documents) {
+  try {
+    return await collectImageText(documents, {
+      bundleRoot: typeof runtime.getBundleRoot === 'function' ? runtime.getBundleRoot() : runtime.bundleRoot,
+      assertNoBundleSymlinks: (...args) => runtime.assertNoBundleSymlinks(...args),
+    })
+  } catch {
+    return new Map()
+  }
+}
+
 async function performReindexBundle({ refreshEmbeddings = false, markdownLocked = false } = {}) {
   const existing = new Map((await readRecords()).map((record) => [record.id, record]))
   let { documents, errors } = await readBundleDocuments()
-  let records = indexedRecordsFromDocuments(documents, existing)
+  let records = indexedRecordsFromDocuments(documents, existing, await readImageText(documents))
 
   normalizeEmbeddingDimensions(records)
 
@@ -280,14 +299,14 @@ async function performReindexBundle({ refreshEmbeddings = false, markdownLocked 
   const refreshedBundle = await readBundleDocuments()
   documents = refreshedBundle.documents
   errors.push(...refreshedBundle.errors)
-  records = indexedRecordsFromDocuments(documents, new Map(records.map((record) => [record.id, record])))
+  records = indexedRecordsFromDocuments(documents, new Map(records.map((record) => [record.id, record])), await readImageText(documents))
   normalizeEmbeddingDimensions(records)
   if (markdownLocked) await recalculateGeneratedRelationships(records, documents)
   else await queueMarkdownMutation(() => recalculateGeneratedRelationships(records, documents))
   const finalBundle = await readBundleDocuments()
   documents = finalBundle.documents
   errors.push(...finalBundle.errors)
-  records = indexedRecordsFromDocuments(documents, new Map(records.map((record) => [record.id, record])))
+  records = indexedRecordsFromDocuments(documents, new Map(records.map((record) => [record.id, record])), await readImageText(documents))
   normalizeEmbeddingDimensions(records)
   const documentIds = new Set(documents.map((document) => document.id))
   const relationshipsById = new Map(documents.map((document) => [document.id, document.relationships]))
