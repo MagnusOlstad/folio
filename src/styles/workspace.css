@@ -1623,6 +1623,64 @@
   cursor: default;
 }
 
+.live-markdown-editor .cm-live-markdown-image-frame {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.live-markdown-editor .cm-live-markdown-image-toolbar {
+  position: absolute;
+  top: 12px;
+  right: 6px;
+  z-index: 2;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-raised);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.live-markdown-editor .cm-live-markdown-image-frame:hover .cm-live-markdown-image-toolbar,
+.live-markdown-editor .cm-live-markdown-image-frame:focus-within .cm-live-markdown-image-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.live-markdown-editor .cm-live-markdown-image-action {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: var(--ink);
+  background: transparent;
+  cursor: pointer;
+}
+
+.live-markdown-editor .cm-live-markdown-image-action:hover,
+.live-markdown-editor .cm-live-markdown-image-action:focus-visible {
+  outline: none;
+  background: rgba(var(--highlight-rgb), 0.08);
+}
+
+.live-markdown-editor .cm-live-markdown-image-action.is-copied {
+  color: var(--acid);
+}
+
+.live-markdown-editor .cm-live-markdown-image-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .live-markdown-editor .cm-live-markdown-image,
 .document-content img {
   display: block;

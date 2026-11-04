@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { undo } from "@codemirror/commands";
 import { EditorView } from "@codemirror/view";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ViewerDocument } from "../../src/domain/types.ts";
@@ -126,6 +127,79 @@ describe("LiveMarkdownEditor image paste", () => {
     const image = screen.getByLabelText("Image note").querySelector("img.cm-live-markdown-image");
     expect(image?.getAttribute("src")).toContain("/api/assets?path=%2Fassets%2Fa.png");
     expect(image?.getAttribute("alt")).toBe("shot");
+  });
+});
+
+describe("LiveMarkdownEditor image toolbar", () => {
+  const label = (root: HTMLElement, name: string) => root.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`);
+
+  it("renders copy, remove and a disabled extract button", () => {
+    render(<LiveMarkdownEditor value="![shot](/assets/a.png)" onChange={vi.fn()} ariaLabel="Bar note" />);
+    const root = screen.getByLabelText("Bar note");
+    expect(root.querySelectorAll(".cm-live-markdown-image-toolbar button")).toHaveLength(3);
+    expect(label(root, "Copy image")).not.toBeNull();
+    expect(label(root, "Remove image")).not.toBeNull();
+    expect(label(root, "Extract text (coming soon)")?.disabled).toBe(true);
+  });
+
+  it("omits remove when read-only", () => {
+    render(<LiveMarkdownEditor value="![shot](/assets/a.png)" onChange={vi.fn()} readOnly ariaLabel="RO bar" />);
+    const root = screen.getByLabelText("RO bar");
+    expect(label(root, "Remove image")).toBeNull();
+    expect(label(root, "Copy image")).not.toBeNull();
+  });
+
+  it("removes the image inline and keeps surrounding text", () => {
+    const onChange = vi.fn();
+    render(<LiveMarkdownEditor value="a ![shot](/assets/a.png) b" onChange={onChange} ariaLabel="Inline rm" />);
+    const root = screen.getByLabelText("Inline rm");
+    fireEvent.click(label(root, "Remove image")!);
+    expect(onChange).toHaveBeenLastCalledWith("a  b");
+  });
+
+  it("removes the whole line when the image was alone, and undo restores it", () => {
+    const onChange = vi.fn();
+    render(<LiveMarkdownEditor value={"one\n![shot](/assets/a.png)\ntwo"} onChange={onChange} ariaLabel="Line rm" />);
+    const root = screen.getByLabelText("Line rm");
+    fireEvent.click(label(root, "Remove image")!);
+    expect(onChange).toHaveBeenLastCalledWith("one\ntwo");
+    const view = EditorView.findFromDOM(root)!;
+    expect(undo(view)).toBe(true);
+    expect(view.state.doc.toString()).toBe("one\n![shot](/assets/a.png)\ntwo");
+  });
+
+  it("removes a lone image completely", () => {
+    const onChange = vi.fn();
+    render(<LiveMarkdownEditor value="![shot](/assets/a.png)" onChange={onChange} ariaLabel="Only rm" />);
+    fireEvent.click(label(screen.getByLabelText("Only rm"), "Remove image")!);
+    expect(onChange).toHaveBeenLastCalledWith("");
+  });
+
+  it("copies the image as png to the clipboard", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new Uint8Array([1]), { headers: { "content-type": "image/png" } }));
+    const write = vi.fn().mockResolvedValue(undefined);
+    class FakeClipboardItem {
+      constructor(readonly items: Record<string, Blob>) {}
+    }
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("ClipboardItem", FakeClipboardItem);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { write } });
+    render(<LiveMarkdownEditor value="![shot](/assets/a.png)" onChange={vi.fn()} ariaLabel="Copy note" />);
+    const button = label(screen.getByLabelText("Copy note"), "Copy image")!;
+    fireEvent.click(button);
+    await waitFor(() => expect(write).toHaveBeenCalledOnce());
+    const item = write.mock.calls[0][0][0] as FakeClipboardItem;
+    expect(Object.keys(item.items)).toEqual(["image/png"]);
+    expect(fetchMock.mock.calls[0][0]).toContain("/api/assets?path=%2Fassets%2Fa.png");
+    await waitFor(() => expect(button.getAttribute("aria-label")).toBe("Copied"));
+  });
+
+  it("reports a copy failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("no", { status: 404 })));
+    const onError = vi.fn();
+    render(<LiveMarkdownEditor value="![shot](/assets/a.png)" onChange={vi.fn()} onError={onError} ariaLabel="Copy fail" />);
+    fireEvent.click(label(screen.getByLabelText("Copy fail"), "Copy image")!);
+    await waitFor(() => expect(onError).toHaveBeenCalledWith("Could not copy the image."));
   });
 });
 

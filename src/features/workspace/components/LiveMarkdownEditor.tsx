@@ -181,6 +181,7 @@ export function LiveMarkdownEditor({
   const callbacksRef = useRef<LiveMarkdownCallbacks>({
     onOpenLink: readOnly ? undefined : onOpenLink,
     onToggleTask: readOnly ? undefined : onToggleTask,
+    onError: (message) => onErrorRef.current?.(message),
   });
 
   useLayoutEffect(() => {
@@ -199,6 +200,7 @@ export function LiveMarkdownEditor({
     callbacksRef.current = {
       onOpenLink: readOnly ? undefined : onOpenLink,
       onToggleTask: readOnly || !onToggleTask ? undefined : performTaskToggle,
+      onError: (message) => onErrorRef.current?.(message),
     };
   }, [
     ariaLabel,

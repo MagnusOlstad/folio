@@ -15,10 +15,12 @@ import {
 } from "@codemirror/view";
 import type { MutableRefObject } from "react";
 import { assetUrl, resolveAssetHref } from "../../../lib/assets.ts";
+import { createImageFrame, isImageToolbarEvent } from "./image-toolbar.ts";
 
 export type LiveMarkdownCallbacks = {
   onOpenLink?: (href: string) => void;
   onToggleTask?: (lineNumber: number, checked: boolean) => void | Promise<void>;
+  onError?: (message: string) => void;
 };
 
 export type LiveMarkdownSelection = { from: number; to: number };
@@ -123,11 +125,13 @@ class TaskCheckboxWidget extends WidgetType {
 class ImageWidget extends WidgetType {
   private readonly path: string;
   private readonly alt: string;
+  private readonly callbacks: MutableRefObject<LiveMarkdownCallbacks>;
 
-  constructor(path: string, alt: string) {
+  constructor(path: string, alt: string, callbacks: MutableRefObject<LiveMarkdownCallbacks>) {
     super();
     this.path = path;
     this.alt = alt;
+    this.callbacks = callbacks;
   }
 
   eq(other: ImageWidget) {
@@ -137,17 +141,21 @@ class ImageWidget extends WidgetType {
   toDOM(view: EditorView) {
     const image = document.createElement("img");
     image.className = "cm-live-markdown-image";
-    image.src = assetUrl(this.path);
+    const url = assetUrl(this.path);
+    image.src = url;
     image.alt = this.alt;
     image.loading = "lazy";
     image.draggable = false;
     image.addEventListener("load", () => view.requestMeasure());
-    return image;
+    return createImageFrame(view, image, url, {
+      onError: (message) => this.callbacks.current.onError?.(message),
+    });
   }
 
-  // Let CodeMirror place the cursor on a click so the source becomes editable.
-  ignoreEvent() {
-    return false;
+  // Clicks on the image place the cursor so the source becomes editable;
+  // toolbar events are handled by the buttons themselves.
+  ignoreEvent(event: Event) {
+    return isImageToolbarEvent(event);
   }
 }
 
@@ -227,6 +235,7 @@ function addImageDecorations(
   ranges: Array<Range<Decoration>>,
   state: EditorState,
   reveal: (from: number, to: number) => boolean,
+  callbacks: MutableRefObject<LiveMarkdownCallbacks>,
 ) {
   syntaxTree(state).iterate({
     enter(node) {
@@ -245,7 +254,7 @@ function addImageDecorations(
         ? decodeMarkdownLinkText(state.sliceDoc(opening.to, closing.from))
         : "";
       ranges.push(
-        Decoration.replace({ widget: new ImageWidget(path, alt) }).range(node.from, node.to),
+        Decoration.replace({ widget: new ImageWidget(path, alt, callbacks) }).range(node.from, node.to),
       );
     },
   });
@@ -510,7 +519,7 @@ function buildDecorations(
     if (/^```/.test(text)) addHidden(ranges, line.from, line.to, !reveal(line.from, line.to));
   }
   addLinkDecorations(ranges, markdownLinks(state), reveal);
-  addImageDecorations(ranges, state, reveal);
+  addImageDecorations(ranges, state, reveal, configuration.callbacks);
   return Decoration.set(ranges, true);
 }
 
