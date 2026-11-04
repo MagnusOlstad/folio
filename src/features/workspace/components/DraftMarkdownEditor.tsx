@@ -12,6 +12,7 @@ type DraftMarkdownEditorProps = {
   value: string;
   onChange: (value: string) => void;
   onFile: () => void;
+  onError?: (message: string) => void;
   onOpenLink?: (href: string) => void;
   onToggleTask?: (lineNumber: number, checked: boolean) => void | Promise<void>;
   focusRequestId?: number;
@@ -26,6 +27,7 @@ export function DraftMarkdownEditor({
   value,
   onChange,
   onFile,
+  onError,
   onOpenLink,
   onToggleTask,
   focusRequestId,
@@ -176,6 +178,7 @@ export function DraftMarkdownEditor({
           );
         }}
         onFile={onFile}
+        onError={onError}
         onOpenLink={onOpenLink}
         onToggleTask={(lineNumber, checked) => onToggleTask?.(lineNumber + (serializedRef.current ? 1 : 0), checked)}
         initialSelection={initialSelection

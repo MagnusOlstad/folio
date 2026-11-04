@@ -15,6 +15,7 @@ type DocumentBodyProps = {
   onFocusRequestConsumed?: () => void;
   onChangeContent: (document: ViewerDocument, content: string) => void;
   onFileDraft: (document: ViewerDocument) => void;
+  onEditorError?: (message: string) => void;
   onFinishEditing: (
     groupId: string,
     document: ViewerDocument,
@@ -48,6 +49,7 @@ export function DocumentBody({
   onFocusRequestConsumed,
   onChangeContent,
   onFileDraft,
+  onEditorError,
   onFinishEditing,
   onBeginEditing,
   getSelection,
@@ -62,6 +64,7 @@ export function DocumentBody({
         value={draft ?? document.content}
         onChange={(content) => onChangeContent(document, content)}
         onFile={() => onFileDraft(document)}
+        onError={onEditorError}
         onOpenLink={(href) => {
           const linkedFile = resolveBundleLink(document.id, href);
           if (linkedFile) {
@@ -90,6 +93,7 @@ export function DocumentBody({
         key={editKey}
         value={value}
         onChange={(content) => onChangeContent(document, content)}
+        onError={onEditorError}
         onFocus={() => onBeginEditing(groupId, document)}
         onBlur={(scrollTop) =>
           onFinishEditing(groupId, document, scrollTop)

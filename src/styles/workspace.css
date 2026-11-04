@@ -1623,6 +1623,15 @@
   cursor: default;
 }
 
+.live-markdown-editor .cm-live-markdown-image,
+.document-content img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 6px 0;
+  border-radius: 6px;
+}
+
 .live-markdown-editor .cm-live-markdown-task-complete {
   text-decoration: line-through;
 }

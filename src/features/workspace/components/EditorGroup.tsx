@@ -27,7 +27,6 @@ type EditorGroupProps = {
     | "dismissMessage"
     | "beforeHistoryRestore"
     | "historyRestored"
-    | "notifyMessage"
   >;
   ui: WorkspaceEditorUi;
   historyPreview?: EditorWorkspaceProps["historyPreview"];
@@ -234,6 +233,7 @@ export function EditorGroup({
             }
             onChangeContent={actions.changeDraftContent}
             onFileDraft={actions.fileDraft}
+            onEditorError={actions.notifyMessage}
             onBeginEditing={actions.beginEditing}
             onFinishEditing={actions.finishEditing}
             onOpenDocument={actions.openDocument}

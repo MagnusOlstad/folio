@@ -42,6 +42,7 @@ export function EditorWorkspace({ model, actions, paneControls, historyPreview }
     closeTab: actions.closeTab,
     changeDraftContent: actions.changeDraftContent,
     fileDraft: actions.fileDraft,
+    notifyMessage: actions.notifyMessage,
     changeFilingFields: actions.changeFilingFields,
     revealStandaloneFiling: actions.revealStandaloneFiling,
     confirmFiling: actions.confirmFiling,

@@ -45,6 +45,7 @@ export type DocumentViewProps = {
   ) => void;
   onChangeContent: (document: ViewerDocument, content: string) => void;
   onFileDraft: (document: ViewerDocument) => void;
+  onEditorError?: (message: string) => void;
   onBeginEditing: (
     groupId: string,
     document: ViewerDocument,
@@ -130,6 +131,7 @@ export function DocumentView(props: DocumentViewProps) {
           onFocusRequestConsumed={props.onFocusRequestConsumed}
           onChangeContent={props.onChangeContent}
           onFileDraft={props.onFileDraft}
+          onEditorError={props.onEditorError}
           onFinishEditing={props.onFinishEditing}
           onBeginEditing={props.onBeginEditing}
           getSelection={props.getSelection}

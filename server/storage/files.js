@@ -166,7 +166,7 @@ async function listBundleDirectories(directory = bundleRoot, prefix = '') {
     if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name.startsWith('.')) continue
     const relative = prefix ? `${prefix}/${entry.name}` : entry.name
     const id = `/${relative}`
-    if (id === '/references' || id.startsWith('/references/')) continue
+    if (id === '/references' || id.startsWith('/references/') || id === '/assets' || id.startsWith('/assets/')) continue
     directories.push({ path: id })
     directories.push(...await listBundleDirectories(path.join(directory, entry.name), relative))
   }
@@ -204,7 +204,7 @@ function normalizeMoveDirectory(value) {
   if (!parts.length) return String(value || '').trim().replaceAll('\\', '/') === '/' ? '/' : null
   if (parts.length > 5 || parts.some((part) => part === '.' || part === '..')) return null
   const normalized = parts.map((part) => slugify(part, '')).filter(Boolean)
-  if (normalized.length !== parts.length || normalized[0] === 'daily' || normalized[0] === 'references') return null
+  if (normalized.length !== parts.length || normalized[0] === 'daily' || normalized[0] === 'references' || normalized[0] === 'assets') return null
   return `/${normalized.join('/')}`
 }
 

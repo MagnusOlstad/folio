@@ -14,6 +14,7 @@ import {
   type DecorationSet,
 } from "@codemirror/view";
 import type { MutableRefObject } from "react";
+import { assetUrl, resolveAssetHref } from "../../../lib/assets.ts";
 
 export type LiveMarkdownCallbacks = {
   onOpenLink?: (href: string) => void;
@@ -119,6 +120,37 @@ class TaskCheckboxWidget extends WidgetType {
   }
 }
 
+class ImageWidget extends WidgetType {
+  private readonly path: string;
+  private readonly alt: string;
+
+  constructor(path: string, alt: string) {
+    super();
+    this.path = path;
+    this.alt = alt;
+  }
+
+  eq(other: ImageWidget) {
+    return other.path === this.path && other.alt === this.alt;
+  }
+
+  toDOM(view: EditorView) {
+    const image = document.createElement("img");
+    image.className = "cm-live-markdown-image";
+    image.src = assetUrl(this.path);
+    image.alt = this.alt;
+    image.loading = "lazy";
+    image.draggable = false;
+    image.addEventListener("load", () => view.requestMeasure());
+    return image;
+  }
+
+  // Let CodeMirror place the cursor on a click so the source becomes editable.
+  ignoreEvent() {
+    return false;
+  }
+}
+
 class ListMarkerWidget extends WidgetType {
   private readonly marker: string;
   private readonly nested: boolean;
@@ -189,6 +221,34 @@ function addLinkDecorations(
         Decoration.mark({ class: "cm-live-markdown-link" }).range(link.textFrom, link.textTo),
       );
   }
+}
+
+function addImageDecorations(
+  ranges: Array<Range<Decoration>>,
+  state: EditorState,
+  reveal: (from: number, to: number) => boolean,
+) {
+  syntaxTree(state).iterate({
+    enter(node) {
+      if (node.name !== "Image") return;
+      const url = node.node.getChild("URL");
+      if (!url) return;
+      let href = state.sliceDoc(url.from, url.to);
+      if (href.startsWith("<") && href.endsWith(">")) href = href.slice(1, -1);
+      const path = resolveAssetHref(decodeMarkdownLinkText(href));
+      if (!path || reveal(node.from, node.to)) return;
+      const opening = node.node.firstChild;
+      let closing = opening?.nextSibling;
+      while (closing && !(closing.name === "LinkMark" && state.sliceDoc(closing.from, closing.to) === "]"))
+        closing = closing.nextSibling;
+      const alt = opening && closing
+        ? decodeMarkdownLinkText(state.sliceDoc(opening.to, closing.from))
+        : "";
+      ranges.push(
+        Decoration.replace({ widget: new ImageWidget(path, alt) }).range(node.from, node.to),
+      );
+    },
+  });
 }
 
 function decodeMarkdownLinkText(value: string) {
@@ -450,6 +510,7 @@ function buildDecorations(
     if (/^```/.test(text)) addHidden(ranges, line.from, line.to, !reveal(line.from, line.to));
   }
   addLinkDecorations(ranges, markdownLinks(state), reveal);
+  addImageDecorations(ranges, state, reveal);
   return Decoration.set(ranges, true);
 }
 
