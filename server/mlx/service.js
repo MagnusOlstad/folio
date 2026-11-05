@@ -3,6 +3,7 @@ import path from 'node:path'
 import { createMlxWorker, terminateMlxWorker } from './worker.js'
 import { createMlxModelCatalog, createEntityModelAvailabilityEvents } from './model-catalog.js'
 import { createGenerationSelection } from './generation-selection.js'
+import { createMlxActivityScheduler } from './scheduler.js'
 import { findModelSnapshot } from './snapshots.js'
 import { helperPath, nativeMlxAvailable } from './helper-path.js'
 import { OCR_MODEL_ID, OCR_TIMEOUT_MS, cancellationError } from './ocr-models.js'
@@ -13,7 +14,8 @@ import {
 
 const KEEP_ALIVE_MS = 60 * 60 * 1000
 
-export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKeepAliveMs = KEEP_ALIVE_MS, entitySnapshotValidator = findEntityModelSnapshot }) {
+export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKeepAliveMs = KEEP_ALIVE_MS, entitySnapshotValidator = findEntityModelSnapshot,
+  activityScheduler = null, backgroundCooldownMs = 30_000, maxPendingBackground = 1 }) {
   const cacheRoot = path.join(modelRoot, 'hf-cache')
   const executable = helperPath(projectRoot, mlxHelperPath)
   const workers = new Map()
@@ -32,7 +34,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   const { selectGenerationModel, selectedGenerationModel } = generationSelection
   const entityModelAvailability = createEntityModelAvailabilityEvents()
   let transcriptionSelectionTail = Promise.resolve()
-  let heavyQueue = Promise.resolve()
+  const scheduler = activityScheduler || createMlxActivityScheduler({ backgroundCooldownMs, maxPendingBackground })
   let activeHeavyModel = null
   const loadingModels = new Set()
   let closed = false
@@ -40,10 +42,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
 
   const { modelDefinition } = modelCatalog
 
-  function withModelActivity(id, operation, { activate = true, background = false } = {}) {
-    // The current model queue is intentionally exclusive. Background is part
-    // of the entity-service contract so the later scheduler can prioritize it.
-    void background
+  function withModelActivity(id, operation, { activate = true, background = false, signal = null } = {}) {
     const definition = modelDefinition(id)
     const run = async () => {
       try {
@@ -56,17 +55,18 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
         }
         return await operation()
       } finally {
-        modelActivities.set(id, Math.max(0, (modelActivities.get(id) || 1) - 1))
         if (definition.purpose !== 'embeddings') {
           activeHeavyModel = [...workers.keys()].find((modelId) => MODEL_DEFINITIONS[modelId]?.purpose !== 'embeddings') || null
         }
       }
     }
     modelActivities.set(id, (modelActivities.get(id) || 0) + 1)
-    if (definition.purpose === 'embeddings') return run()
-    const activity = heavyQueue.then(run, run)
-    heavyQueue = activity.catch(() => {})
-    return activity
+    const activity = definition.purpose === 'embeddings'
+      ? run()
+      : scheduler.run(run, { priority: background ? 'background' : 'interactive', signal })
+    return Promise.resolve(activity).finally(() => {
+      modelActivities.set(id, Math.max(0, (modelActivities.get(id) || 1) - 1))
+    })
   }
 
   async function selectedTranscriptionModel() {
@@ -278,7 +278,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
       return result
     }
     return MODEL_DEFINITIONS[id].purpose === 'embeddings'
-      ? executeWithCleanup() : withModelActivity(id, executeWithCleanup, { background })
+      ? executeWithCleanup() : withModelActivity(id, executeWithCleanup, { background, signal })
   }
 
   async function status() {
@@ -461,12 +461,12 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   async function close() {
     closed = true
     for (const id of idleTimers.keys()) stopIdleTimer(id)
+    const schedulerClose = scheduler.close()
     const activeWorkers = new Set([...workers.values(), ...startingWorkers.values()])
     const termination = Promise.all([...activeWorkers].map((worker) => terminateMlxWorker(worker)))
     const adapterClosures = modelCatalog.adapterClosures()
       .map((adapter) => adapter.close?.()).filter(Boolean)
-    await Promise.allSettled([...starting.values(), termination, ...adapterClosures])
-    await heavyQueue
+    await Promise.allSettled([...starting.values(), termination, ...adapterClosures, schedulerClose])
     await Promise.all([...activeWorkers].map((worker) => terminateMlxWorker(worker)))
     workers.clear()
   }
@@ -478,5 +478,6 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     close, isBusy: () => [...modelActivities.values()].some((count) => count > 0),
     withModelActivity, registerExternalModel: modelCatalog.registerExternalModel,
     keepAliveMs: warmKeepAliveMs,
+    activitySnapshot: scheduler.snapshot,
     modelDefinitions: MODEL_DEFINITIONS }
 }

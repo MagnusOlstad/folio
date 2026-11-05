@@ -24,7 +24,7 @@ function restorePlatform() {
   os.release = originalOsRelease
 }
 
-async function fixture(t, { warmKeepAliveMs = 60_000, entitySnapshotValidator } = {}) {
+async function fixture(t, { warmKeepAliveMs = 60_000, backgroundCooldownMs = 30_000, maxPendingBackground = 1, entitySnapshotValidator } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-mlx-test-'))
   const logPath = path.join(root, 'helper.jsonl')
   const previous = {
@@ -44,6 +44,8 @@ async function fixture(t, { warmKeepAliveMs = 60_000, entitySnapshotValidator } 
     modelRoot: path.join(root, 'models'),
     mlxHelperPath: helperPath,
     warmKeepAliveMs,
+    backgroundCooldownMs,
+    maxPendingBackground,
     ...(entitySnapshotValidator ? { entitySnapshotValidator } : {}),
   })
   t.after(async () => {
@@ -149,7 +151,10 @@ test('models install explicitly into their pinned snapshots and use the JSONL wo
 test('GLiNER uses explicit pinned install and frozen chunk/extraction helper operations', async (t) => {
   const snapshot = path.join(os.tmpdir(), 'folio-gliner-fixture-snapshot')
   let snapshotPresent = true
-  const { logPath, service } = await fixture(t, { entitySnapshotValidator: async () => snapshotPresent ? snapshot : null })
+  const { logPath, service } = await fixture(t, {
+    backgroundCooldownMs: 0,
+    entitySnapshotValidator: async () => snapshotPresent ? snapshot : null,
+  })
   const availability = []
   service.onEntityModelAvailabilityChange((event) => availability.push(event))
   const installing = await service.install('gliner25multi')
@@ -667,6 +672,79 @@ test('queues heavy model loading behind in-flight generation without overlapping
   assertProcessExited(processes.find((entry) => entry.event === 'ready' && entry.model?.includes('gemma-4')).pid)
   process.kill(processes.find((entry) => entry.event === 'ready' && entry.model?.includes('Qwen3.5')).pid, 0)
   assert.equal((await service.status()).activeModel, 'qwen35')
+})
+
+test('interactive MLX requests overtake queued entity background work', async (t) => {
+  const { root, logPath, service } = await fixture(t, {
+    backgroundCooldownMs: 0,
+    entitySnapshotValidator: async () => path.join(root, 'unused-snapshot'),
+  })
+  await service.install('gemma4')
+  await service.install('gliner25multi')
+  await setControl(root, { operationDelayMs: 70 })
+
+  const active = service.generate([{ role: 'user', content: 'first request' }])
+  await waitUntil(async () => (await readLog(logPath)).some((entry) => entry.event === 'request' && entry.operation === 'generate'))
+  const background = service.planEntityChunks({ text: 'Acme', schemaVersion: 'folio-entities-v1' }, { background: true })
+  const interactive = service.generate([{ role: 'user', content: 'second request' }])
+  await Promise.all([active, interactive, background])
+
+  const operations = (await readLog(logPath)).filter((entry) => entry.event === 'request'
+    && ['generate', 'plan_entity_chunks'].includes(entry.operation)).map((entry) => entry.operation)
+  assert.deepEqual(operations.slice(-3), ['generate', 'generate', 'plan_entity_chunks'])
+  assert.deepEqual(service.activitySnapshot(), {
+    closed: false,
+    activePriority: null,
+    pendingInteractive: 0,
+    pendingBackground: 0,
+    backgroundCooldown: false,
+    backgroundCooldownRemainingMs: 0,
+    pending: 0,
+  })
+})
+
+test('aborted background admission never starts a worker or leaves the model busy', async (t) => {
+  const { root, logPath, service } = await fixture(t, { backgroundCooldownMs: 0 })
+  await service.install('gemma4')
+  await setControl(root, { operationDelayMs: 120 })
+  const active = service.generate([{ role: 'user', content: 'active' }])
+  await waitUntil(async () => (await readLog(logPath)).some((entry) => entry.event === 'request' && entry.operation === 'generate'))
+  const controller = new AbortController()
+  const queued = service.planEntityChunks({ text: 'Acme', schemaVersion: 'folio-entities-v1' }, {
+    background: true,
+    signal: controller.signal,
+  })
+  controller.abort()
+  await assert.rejects(queued, { code: 'MLX_ACTIVITY_CANCELLED' })
+  const status = await service.status()
+  assert.equal(status.models.find(({ id }) => id === 'gliner25multi').busy, false)
+  await active
+  assert.equal((await readLog(logPath)).some((entry) => entry.event === 'ready' && entry.task === 'entities'), false)
+})
+
+test('bounds pending background work and cleans all admission counts on close', async (t) => {
+  const { root, logPath, service } = await fixture(t, {
+    backgroundCooldownMs: 0,
+    entitySnapshotValidator: async () => path.join(root, 'unused-snapshot'),
+  })
+  await service.install('gemma4')
+  await service.install('gliner25multi')
+  await setControl(root, { operationDelayMs: 250 })
+  const active = service.generate([{ role: 'user', content: 'active' }])
+  await waitUntil(async () => (await readLog(logPath)).some((entry) => entry.event === 'request' && entry.operation === 'generate'))
+  const queued = service.planEntityChunks({ text: 'Acme', schemaVersion: 'folio-entities-v1' }, { background: true })
+  await assert.rejects(service.extractEntities({ text: 'Acme' }, { background: true }), { code: 'MLX_BACKGROUND_QUEUE_FULL' })
+  assert.equal(service.activitySnapshot().pendingBackground, 1)
+
+  const closing = service.close()
+  await assert.rejects(queued, { code: 'MLX_SCHEDULER_CLOSED' })
+  await Promise.allSettled([active, closing])
+  assert.equal(service.activitySnapshot().closed, true)
+  assert.equal(service.activitySnapshot().pending, 0)
+  const status = await service.status()
+  assert.equal(status.models.find(({ id }) => id === 'gliner25multi').busy, false)
+  const log = await readLog(logPath)
+  assert.equal(log.some((entry) => entry.event === 'request' && entry.operation === 'extract_entities'), false)
 })
 
 test('cancels Whisper startup and waits for its process before the next heavy model starts', async (t) => {
