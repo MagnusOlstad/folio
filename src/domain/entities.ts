@@ -71,15 +71,34 @@ export type EntityCoverage = {
   pending: number;
 };
 
+export type EntityJobReason = "save" | "capture" | "import" | "transcription" | "ocr" | "enablement" | "startup" | "rebuild" | "history-restore" | "manual" | "move";
+
+export type EntityJobItem = {
+  noteId: string;
+  state: "queued" | "running" | "paused" | "complete" | "stale" | "failed" | "cancelled";
+  attempts: number;
+  error?: string;
+  resultCount?: number;
+  reused?: boolean;
+  updatedAt: string;
+};
+
 export type EntityJob = {
   id: string;
   bundleId: string;
   noteIds: string[];
-  state: "queued" | "running" | "paused" | "complete" | "failed" | "cancelled";
+  reason: EntityJobReason;
+  state: "queued" | "running" | "paused" | "complete" | "partial" | "failed" | "cancelled";
   completed: number;
   total: number;
   error: string | null;
+  items: EntityJobItem[];
+  createdAt: string;
+  updatedAt: string;
 };
+
+export type EntityJobMode = "running" | "paused" | "disabled" | "model_missing" | "helper_unavailable" | "unsupported_platform" | "closed";
+export type EntityJobSnapshot = { bundleId: string; mode: EntityJobMode; queued: number; running: number; paused: number; revision: number; closed: boolean };
 
 export type EntityCorrectionCommand =
   | { type: "rename"; entityId: string; label: string }
