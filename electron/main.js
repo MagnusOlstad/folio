@@ -390,6 +390,13 @@ app.whenReady().then(async () => {
       pageSize: 'A4',
       printBackground: true,
       preferCSSPageSize: true,
+      // Inches; mirrors the print stylesheet's @page margin (20mm) so the
+      // margins hold whichever source Chromium prefers.
+      margins: { marginType: 'custom', top: 0.79, bottom: 0.79, left: 0.79, right: 0.79 },
+      displayHeaderFooter: true,
+      headerTemplate: '<span></span>',
+      footerTemplate:
+        '<div style="width:100%;font:8px/1 -apple-system,Helvetica,Arial,sans-serif;color:#888;text-align:center;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>',
     })
     await fs.writeFile(filePath, pdf)
     return { canceled: false }

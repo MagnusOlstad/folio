@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ViewerDocument } from "../../src/domain/types.ts";
 import { NoteExportMenu } from "../../src/features/workspace/components/NoteExportMenu.tsx";
 import { NoteExportPreview } from "../../src/features/workspace/components/NoteExportPreview.tsx";
-import { useNoteExport } from "../../src/features/workspace/hooks/useNoteExport.ts";
+import { useNoteExport, waitForExportAssets } from "../../src/features/workspace/hooks/useNoteExport.ts";
 import {
   noteExportFilename,
   noteExportSnapshot,
@@ -195,5 +195,52 @@ describe("NoteExportPreview", () => {
     expect(screen.getByRole("heading", { name: "Tasks" })).toBeInTheDocument();
     expect(screen.getByRole("checkbox")).toBeChecked();
     expect(screen.getByRole("table")).toBeInTheDocument();
+  });
+
+  it("resolves asset images, applies the width suffix and strips it from alt", () => {
+    render(
+      <NoteExportPreview
+        snapshot={{
+          id: document.id,
+          title: document.title,
+          description: "",
+          content: "![Chart|300](/assets/chart.png)\n\n![Plain](https://example.com/a.png)",
+          draft: false,
+        }}
+      />,
+    );
+
+    const chart = screen.getByAltText("Chart");
+    expect(chart.getAttribute("src")).toContain("/api/assets?path=%2Fassets%2Fchart.png");
+    expect(chart).toHaveAttribute("width", "300");
+    expect(chart).toHaveAttribute("loading", "eager");
+    const plain = screen.getByAltText("Plain");
+    expect(plain).toHaveAttribute("src", "https://example.com/a.png");
+    expect(plain).not.toHaveAttribute("width");
+  });
+});
+
+describe("waitForExportAssets", () => {
+  it("waits for pending preview images to load or fail", async () => {
+    const article = window.document.createElement("article");
+    article.className = "note-export-preview";
+    const loading = window.document.createElement("img");
+    const failing = window.document.createElement("img");
+    for (const image of [loading, failing])
+      Object.defineProperty(image, "complete", { value: false });
+    article.append(loading, failing);
+    window.document.body.append(article);
+    let done = false;
+    const wait = waitForExportAssets(5000).then(() => {
+      done = true;
+    });
+
+    await Promise.resolve();
+    expect(done).toBe(false);
+    loading.dispatchEvent(new Event("load"));
+    failing.dispatchEvent(new Event("error"));
+    await wait;
+    expect(done).toBe(true);
+    article.remove();
   });
 });
