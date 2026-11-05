@@ -11,9 +11,10 @@ The helper requires Apple Silicon and macOS 14 or newer. It uses MLX Swift
 0.31.3 and MLX Swift LM 3.31.3, resolved in `Package.resolved`. The Gemma 4
 E4B support backport is in `Patches/gemma4-text-pinned-3.31.3.patch`. The
 EmbeddingGemma initializer fix is in
-`Patches/embeddinggemma-moduleinfo-pinned-3.31.3.patch`; both are applied to
-ignored source copies during the build and do not alter upstream package
-checkouts. It initializes `ModuleInfo` children through the supported module
+`Patches/embeddinggemma-moduleinfo-pinned-3.31.3.patch`. The LightOnOCR
+support is in `Patches/mistral3-lightonocr-pinned-3.31.3.patch`. All three are
+applied to ignored source copies during the build and do not alter upstream
+package checkouts. It initializes `ModuleInfo` children through the supported module
 update API and defines this checkpoint's projection head as 768→3072→768. The
 checkpoint's packed dense tensors establish those dimensions; its config's
 `intermediate_size` (1152) describes the transformer feed-forward layers, so
@@ -37,6 +38,33 @@ The pinned model snapshots are:
   3.08 GB `model.safetensors` and matching tokenizer files are pinned together
   in this repository snapshot. The native Whisper loader accepts the
   Hugging Face config and tensor layout, so no conversion is needed.
+- `lightonai/LightOnOCR-3-1B` at `23d544085c886bbdace647bcfab91203299417e2`
+  for image-to-Markdown OCR. This is the official BF16 checkpoint (a 2.01 GB
+  `model.safetensors`, about 2.02 GB with config, tokenizer, and processor
+  files); no conversion or quantization is applied.
+
+LightOnOCR is a `mistral3` wrapper (Pixtral vision encoder, Qwen3 decoder with
+tied embeddings) that the pinned `MLXVLM` Mistral3 port cannot load unmodified.
+The Mistral3 patch makes five targeted changes to
+`Libraries/MLXVLM/Models/Mistral3.swift`:
+
+- It creates and applies Qwen3-style per-head `q_norm`/`k_norm` RMSNorm
+  (before RoPE) only when the text config has `use_qk_norm`, so other Mistral3
+  checkpoints are unaffected. The upstream loader verifies all weights, so the
+  checkpoint's `q_norm`/`k_norm` tensors otherwise fail to load.
+- It transposes the original PyTorch-layout `patch_conv.weight` (OIHW) to MLX's
+  layout; converted checkpoints that are already MLX-layout are left alone.
+- It accepts an integer `eos_token_id` (the config stores `151645`, not a list).
+- It honors the processor's `longest_edge` (1540) instead of the upstream 336 px
+  cap, which would make documents unreadable.
+- It emits Pixtral's row layout (image tokens, then `image_break_token`, with
+  `image_end_token` closing the last row) when the processor config defines
+  both tokens, and omits an empty text part from the user message so the
+  prompt matches the checkpoint's own chat template.
+
+`rope_parameters`, tied embeddings, the `model.vision_encoder`/
+`model.vision_projection` key remapping, and `PixtralProcessor`→Mistral3
+processor selection already work upstream.
 
 ## Build
 
@@ -76,8 +104,12 @@ DEVELOPER_DIR="/path/to/Xcode.app/Contents/Developer" npm run build:mlx
 ## Helper protocol
 
 The Node service starts one helper process per model with `--task generation`,
-`--task embedding`, or `--task transcription`, plus the pinned repository and
-revision. Transcription accepts only the exact Turbo or full Large v3
+`--task embedding`, `--task transcription`, or `--task ocr`, plus the pinned
+repository and revision. OCR loads through `VLMModelFactory` (generation keeps
+using `LLMModelFactory` explicitly, so linking `MLXVLM` does not change how
+generation checkpoints load); without `--model-directory` it downloads the
+pinned repository and revision with the same download-progress events as
+generation. Transcription accepts only the exact Turbo or full Large v3
 repository/revision pairs listed above; omitting both arguments retains Turbo
 as the default. Installation uses `--operation install`; it downloads the
 pinned weight and matching tokenizer snapshots under `HF_HUB_CACHE`, reports
@@ -97,7 +129,16 @@ upstream `resampleAudio` path used by Whisper.
 The helper reports a JSON `ready` event on stdout and then accepts one JSON
 object per stdin line. Generation requests provide a system and user message;
 embedding requests provide an array of non-empty strings; transcription
-requests provide a local `audioPath` to an audio file. The reader decodes one
+requests provide a local `audioPath` to an audio file; OCR requests
+(`{"id", "operation": "ocr", "imagePath": "/absolute/path.png", "prompt"?,
+"maxTokens"?}`) provide a local image, use greedy decoding (temperature 0),
+default to 4096 generated tokens, and send an empty user text unless `prompt`
+is given, which the model treats as plain transcription to Markdown. The image
+is scaled, aspect ratio preserved, so its longest edge is 1540 px (the size the
+model was trained on; small screenshots are upscaled, large ones scaled down)
+instead of the 512 px session resize, and the response
+carries the Markdown in `text` with the same memory and metrics fields as
+generation. The reader decodes one
 30-second source window at a time, preserves the first channel used by the
 upstream audio loader, and resamples each window to 16 kHz for Whisper. It emits
 request-scoped `transcription-progress` events from completed source frames,

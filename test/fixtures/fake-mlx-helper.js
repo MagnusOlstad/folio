@@ -34,7 +34,7 @@ async function ensureSnapshot() {
   const directory = path.join(cacheRoot, `models--${model.replaceAll('/', '--')}`, 'snapshots', revision)
   await fs.mkdir(directory, { recursive: true })
   await Promise.all([
-    fs.writeFile(path.join(directory, 'config.json'), JSON.stringify({ model_type: task === 'generation' ? 'gemma4' : task === 'transcription' ? 'whisper' : 'embeddinggemma', n_vocab: 51866 })),
+    fs.writeFile(path.join(directory, 'config.json'), JSON.stringify({ model_type: task === 'generation' ? 'gemma4' : task === 'transcription' ? 'whisper' : task === 'ocr' ? 'mistral3' : 'embeddinggemma', n_vocab: 51866 })),
     fs.writeFile(path.join(directory, 'tokenizer.json'), '{}'),
     fs.writeFile(path.join(directory, 'tokenizer_config.json'), '{}'),
     fs.writeFile(path.join(directory, 'model.safetensors'), 'fake model weights'),
@@ -136,6 +136,12 @@ for await (const line of lines) {
     else if (request.operation === 'generate' && control.failGenerate) response = { id: request.id, error: 'fixture generation error', memory }
     else if (request.operation === 'generate') response = { id: request.id, text: await generate(request.messages), memory }
     else if (request.operation === 'embed') response = { id: request.id, embeddings: await embed(request.input), memory }
+    else if (request.operation === 'ocr' && task !== 'ocr') response = { id: request.id, error: 'This helper was started for another task, not ocr.', memory }
+    else if (request.operation === 'ocr' && control.failOcr) response = { id: request.id, error: 'fixture ocr error', memory }
+    else if (request.operation === 'ocr') {
+      await appendLog({ operation: 'ocr', task, model, imagePath: request.imagePath })
+      response = { id: request.id, text: control.ocrText ?? '| Bank | Faktisk bankkonto i bank |', memory }
+    }
     else if (request.operation === 'transcribe' && control.failTranscribe) response = { id: request.id, error: 'fixture transcription error', memory }
     else if (request.operation === 'transcribe') {
       for (const percent of control.transcriptionProgress || []) {

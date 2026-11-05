@@ -30,8 +30,8 @@ export function registerRoutes(app, runtime) {
     return name
   }
 
-  const isReservedId = (id) => id === '/daily' || id === '/references' || id === '/index.md' || id === '/log.md' || id === '/todo-list.md'
-    || id.startsWith('/daily/') || id.startsWith('/references/')
+  const isReservedId = (id) => id === '/daily' || id === '/references' || id === '/assets' || id === '/index.md' || id === '/log.md' || id === '/todo-list.md'
+    || id.startsWith('/daily/') || id.startsWith('/references/') || id.startsWith('/assets/')
 
   app.get('/api/directories', async (_request, response, next) => {
     try {

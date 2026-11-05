@@ -156,7 +156,7 @@ export type DesktopUpdateState = {
   percent: number | null;
   error: string | null;
 };
-export type MlxModelId = "gemma4" | "qwen35" | "llama32" | "embeddinggemma" | "whisper" | "whisperlarge";
+export type MlxModelId = "gemma4" | "qwen35" | "llama32" | "embeddinggemma" | "whisper" | "whisperlarge" | "lightonocr";
 export type MlxTranscriptionModelId = "whisper" | "whisperlarge";
 export const MLX_GENERATION_MODEL = { id: "gemma4", name: "Gemma 4 E4B" } as const satisfies {
   id: MlxModelId;
@@ -165,7 +165,7 @@ export const MLX_GENERATION_MODEL = { id: "gemma4", name: "Gemma 4 E4B" } as con
 export type MlxModelStatus = {
   id: MlxModelId;
   name: string;
-  purpose: "generation" | "embeddings" | "transcription";
+  purpose: "generation" | "embeddings" | "transcription" | "ocr";
   downloadSizeBytes: number;
   downloadSizeIsEstimate: boolean;
   selected: boolean;

@@ -22,6 +22,32 @@ function downloadMarkdown(filename: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
+const IMAGE_WAIT_MS = 10_000;
+
+/** Resolves once every preview image has loaded or failed, fonts are ready, or the timeout hits. */
+export function waitForExportAssets(timeoutMs = IMAGE_WAIT_MS) {
+  const images = Array.from(
+    document.querySelectorAll<HTMLImageElement>(".note-export-preview img"),
+  );
+  const loads = images.map(
+    (image) =>
+      new Promise<void>((resolve) => {
+        if (image.complete) return resolve();
+        image.addEventListener("load", () => resolve(), { once: true });
+        image.addEventListener("error", () => resolve(), { once: true });
+      }),
+  );
+  const fonts = document.fonts?.ready ?? Promise.resolve();
+  let timer: number | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = window.setTimeout(resolve, timeoutMs);
+  });
+  return Promise.race([
+    Promise.all([...loads, fonts]).then(() => undefined),
+    timeout,
+  ]).finally(() => window.clearTimeout(timer));
+}
+
 export function useNoteExport({ setMessage }: UseNoteExportOptions) {
   const [preview, setPreview] = useState<NoteExportSnapshot | null>(null);
   const [exportingNoteId, setExportingNoteId] = useState<string | null>(null);
@@ -35,6 +61,7 @@ export function useNoteExport({ setMessage }: UseNoteExportOptions) {
         const previousTitle = document.title;
         document.title = filename.replace(/\.pdf$/i, "");
         try {
+          await waitForExportAssets();
           if (window.folio?.savePdfExport) {
             const result = await window.folio.savePdfExport(filename);
             if (!result.canceled) setMessage(`Exported ${filename}`);

@@ -147,12 +147,14 @@ test('shows only selected local models in the workspace and keeps the full catal
   await expect(models.getByText('EmbeddingGemma', { exact: true })).toBeVisible()
   await expect(models.getByRole('button', { name: /Whisper Large v3 Turbo/ })).toBeVisible()
   await expect(models.getByRole('button', { name: /Whisper Large v3$/ })).toHaveCount(0)
+  await expect(models.getByText(/LightOnOCR/)).toHaveCount(0)
   await expect(models.locator('.mlx-model')).toHaveCount(3)
   await models.getByRole('button', { name: 'Manage', exact: true }).click()
   const settingsModels = page.getByRole('region', { name: 'Local models' })
   await expect(settingsModels.getByRole('radio', { name: /Qwen 3\.5 4B/ })).toBeVisible()
   await expect(settingsModels.getByRole('radio', { name: /Llama 3\.2 3B/ })).toBeVisible()
-  await expect(settingsModels.locator('.model-settings-row')).toHaveCount(6)
+  await expect(settingsModels.getByText(/LightOnOCR 3 1B/)).toBeVisible()
+  await expect(settingsModels.locator('.model-settings-row')).toHaveCount(7)
 })
 
 test('first-open model setup opens the real model settings controls', async ({ page }) => {

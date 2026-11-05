@@ -37,5 +37,10 @@ export function normalizeDirectoryInput(value: string) {
 }
 
 export function isInternalBundlePath(value: string) {
-  return value === "/references" || value.startsWith("/references/");
+  return (
+    value === "/references" ||
+    value.startsWith("/references/") ||
+    value === "/assets" ||
+    value.startsWith("/assets/")
+  );
 }

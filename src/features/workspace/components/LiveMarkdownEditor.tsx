@@ -35,6 +35,7 @@ import {
   setLiveMarkdownFocus,
   type LiveMarkdownCallbacks,
 } from "../model/live-markdown.ts";
+import { imageUploadExtension } from "../model/image-paste.ts";
 import { createNoteSearchPanel } from "../model/note-search-panel.ts";
 
 // Prop replacements are authoritative snapshots, not user edits.
@@ -54,6 +55,7 @@ export type LiveMarkdownEditorProps = {
   onBlur?: (scrollTop: number) => void;
   onFocus?: () => void;
   onFile?: () => void;
+  onError?: (message: string) => void;
   onOpenLink?: (href: string) => void;
   onToggleTask?: (lineNumber: number, checked: boolean) => void | Promise<void>;
   initialSelection?: { from: number; to: number };
@@ -132,6 +134,7 @@ export function LiveMarkdownEditor({
   onBlur,
   onFocus,
   onFile,
+  onError,
   onOpenLink,
   onToggleTask,
   autoFocus = false,
@@ -151,6 +154,7 @@ export function LiveMarkdownEditor({
   const onBlurRef = useRef(onBlur);
   const onFocusRef = useRef(onFocus);
   const onFileRef = useRef(onFile);
+  const onErrorRef = useRef(onError);
   const onToggleTaskRef = useRef(onToggleTask);
   const onSelectionChangeRef = useRef(onSelectionChange);
   const initialSelectionRef = useRef(initialSelection);
@@ -177,6 +181,7 @@ export function LiveMarkdownEditor({
   const callbacksRef = useRef<LiveMarkdownCallbacks>({
     onOpenLink: readOnly ? undefined : onOpenLink,
     onToggleTask: readOnly ? undefined : onToggleTask,
+    onError: (message) => onErrorRef.current?.(message),
   });
 
   useLayoutEffect(() => {
@@ -187,6 +192,7 @@ export function LiveMarkdownEditor({
     onBlurRef.current = onBlur;
     onFocusRef.current = onFocus;
     onFileRef.current = onFile;
+    onErrorRef.current = onError;
     onToggleTaskRef.current = onToggleTask;
     onSelectionChangeRef.current = onSelectionChange;
     onFocusRequestConsumedRef.current = onFocusRequestConsumed;
@@ -194,12 +200,14 @@ export function LiveMarkdownEditor({
     callbacksRef.current = {
       onOpenLink: readOnly ? undefined : onOpenLink,
       onToggleTask: readOnly || !onToggleTask ? undefined : performTaskToggle,
+      onError: (message) => onErrorRef.current?.(message),
     };
   }, [
     ariaLabel,
     onBlur,
     onChange,
     onFile,
+    onError,
     onFocus,
     onFocusRequestConsumed,
     onOpenLink,
@@ -348,6 +356,7 @@ export function LiveMarkdownEditor({
           ),
           keymapCompartment.current.of(readOnlyRef.current ? [] : editingKeymapRef.current),
           liveMarkdownExtensions({ callbacks: callbacksRef }),
+          imageUploadExtension({ onError: () => onErrorRef.current }),
           EditorView.updateListener.of((update) => {
             if (update.selectionSet && !update.state.readOnly)
               onSelectionChangeRef.current?.(

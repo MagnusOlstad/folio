@@ -232,6 +232,20 @@ else
     die "the EmbeddingGemma compatibility patch does not apply to the pinned mlx-swift-lm source"
 fi
 
+# LightOnOCR (a Mistral3 wrapper around a Qwen3 decoder) needs Qwen3 QK norm,
+# the PyTorch-layout patch convolution, an integer eos_token_id, the
+# checkpoint's longest_edge and Pixtral row break/end image tokens. Apply the
+# small reviewed patch to this ignored package copy only.
+MISTRAL3_PATCH="$EXPERIMENT_DIR/Patches/mistral3-lightonocr-pinned-3.31.3.patch"
+[[ -f "$MISTRAL3_PATCH" ]] || die "the pinned Mistral3 LightOnOCR patch is missing"
+if patch --dry-run -R --forward -p1 -d "$LOCAL_PACKAGES_DIR/mlx-swift-lm" < "$MISTRAL3_PATCH" >/dev/null 2>&1; then
+    : # already applied in a reusable ignored source tree
+elif patch --dry-run --forward -p1 -d "$LOCAL_PACKAGES_DIR/mlx-swift-lm" < "$MISTRAL3_PATCH" >/dev/null 2>&1; then
+    patch --forward -p1 -d "$LOCAL_PACKAGES_DIR/mlx-swift-lm" < "$MISTRAL3_PATCH"
+else
+    die "the Mistral3 LightOnOCR patch does not apply to the pinned mlx-swift-lm source"
+fi
+
 # SwiftPM resolves remote transitive packages from the checked-in lockfile.
 cp "$EXPERIMENT_DIR/Package.resolved" "$BUILD_DIR/Package.resolved"
 xcrun swift package --package-path "$BUILD_DIR" resolve

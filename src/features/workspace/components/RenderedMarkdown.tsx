@@ -12,8 +12,10 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import type { PluggableList } from "unified";
 import type { ViewerDocument } from "../../../domain/types.ts";
+import { assetUrl, resolveAssetHref } from "../../../lib/assets.ts";
 import { conceptUrl, resolveBundleLink } from "../../../lib/paths.ts";
 import { sourcePosition } from "../../../lib/workspace.ts";
+import { parseImageAlt } from "../model/image-size.ts";
 import { folioMarkdown } from "../model/folio-markdown.ts";
 import { readonlyMarkdownSearch } from "../model/readonly-markdown-search.ts";
 
@@ -154,6 +156,18 @@ export function RenderedMarkdown({
           <a href={href} target="_blank" rel="noopener noreferrer">
             {children}
           </a>
+        );
+      },
+      img: ({ node: _node, src, alt }) => {
+        const asset = resolveAssetHref(src);
+        const parsed = parseImageAlt(alt ?? "");
+        return (
+          <img
+            src={asset ? assetUrl(asset) : src}
+            alt={parsed.alt}
+            width={parsed.width ?? undefined}
+            loading="lazy"
+          />
         );
       },
       p: ({ node, ...props }) => <p {...props} {...sourcePosition(node)} />,

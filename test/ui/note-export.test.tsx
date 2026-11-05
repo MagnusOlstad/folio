@@ -3,10 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ViewerDocument } from "../../src/domain/types.ts";
 import { NoteExportMenu } from "../../src/features/workspace/components/NoteExportMenu.tsx";
 import { NoteExportPreview } from "../../src/features/workspace/components/NoteExportPreview.tsx";
-import { useNoteExport } from "../../src/features/workspace/hooks/useNoteExport.ts";
+import { useNoteExport, waitForExportAssets } from "../../src/features/workspace/hooks/useNoteExport.ts";
+import { remarkPreserveBlankLines } from "../../src/features/workspace/model/export-spacing.ts";
 import {
   noteExportFilename,
   noteExportSnapshot,
+  withoutLeadingTitleHeading,
 } from "../../src/features/workspace/model/note-export.ts";
 
 const document: ViewerDocument = {
@@ -62,6 +64,39 @@ describe("note export model", () => {
     const snapshot = noteExportSnapshot(recoveredDraft, undefined);
     expect(snapshot.title).toBe("Project notes");
     expect(snapshot.content).toBe("# Project notes\n\nKeep this body");
+  });
+});
+
+describe("withoutLeadingTitleHeading", () => {
+  it("removes a matching first level-1 heading", () => {
+    expect(withoutLeadingTitleHeading("\n\n# My Note\n\nBody", "My Note")).toBe("\nBody");
+    expect(withoutLeadingTitleHeading("# my note #\nBody", "My Note")).toBe("Body");
+  });
+
+  it("matches through inline markdown", () => {
+    expect(
+      withoutLeadingTitleHeading("# **My** `Note` [link](http://x)\nBody", "My Note link"),
+    ).toBe("Body");
+  });
+
+  it("keeps non-matching, non-first, and non-level-1 headings", () => {
+    expect(withoutLeadingTitleHeading("# Other\nBody", "My Note")).toBe("# Other\nBody");
+    expect(withoutLeadingTitleHeading("Intro\n# My Note", "My Note")).toBe("Intro\n# My Note");
+    expect(withoutLeadingTitleHeading("## My Note\nBody", "My Note")).toBe("## My Note\nBody");
+  });
+
+  it("does not alter the Markdown export content", () => {
+    const content = "# Quarterly: plan / review\n\nBody";
+    expect(noteExportSnapshot({ ...document, content }, undefined).content).toBe(content);
+  });
+
+  it("renders the title once in the preview", () => {
+    render(
+      <NoteExportPreview
+        snapshot={{ id: document.id, title: "My Note", description: "", content: "# My Note\n\nBody", draft: false }}
+      />,
+    );
+    expect(screen.getAllByRole("heading", { name: "My Note" })).toHaveLength(1);
   });
 });
 
@@ -128,8 +163,9 @@ describe("note export behavior", () => {
     });
 
     await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    // print() runs before the hook's finally cleanup; wait for it to settle.
+    await waitFor(() => expect(result.current.preview).toBeNull());
     expect(window.document.title).toBe(previousTitle);
-    expect(result.current.preview).toBeNull();
     expect(setMessage).toHaveBeenCalledWith(
       "Opened the print dialog for PDF export.",
     );
@@ -177,6 +213,53 @@ describe("note export behavior", () => {
   });
 });
 
+describe("remarkPreserveBlankLines", () => {
+  const block = (type: string, start: number, end: number) => ({
+    type,
+    position: { start: { line: start }, end: { line: end } },
+  });
+  const styleOf = (node: { data?: { hProperties?: Record<string, unknown> } }) =>
+    node.data?.hProperties?.style;
+
+  it("adds no space for a single blank line and scales for more", () => {
+    const tree = {
+      children: [
+        block("paragraph", 1, 1),
+        block("paragraph", 3, 3),
+        block("paragraph", 7, 7),
+      ],
+    };
+    remarkPreserveBlankLines()(tree);
+    expect(styleOf(tree.children[1])).toBeUndefined();
+    expect(styleOf(tree.children[2])).toBe("padding-top:2.90em");
+  });
+
+  it("is a no-op without positions", () => {
+    const tree = { children: [{ type: "paragraph" }, { type: "paragraph" }] };
+    remarkPreserveBlankLines()(tree);
+    expect(styleOf(tree.children[1])).toBeUndefined();
+  });
+
+  it("renders the extra space on images and paragraphs in the preview", () => {
+    const { container } = render(
+      <NoteExportPreview
+        snapshot={{
+          id: document.id,
+          title: document.title,
+          description: "",
+          content: "![a](x.png)\n\n\n\n![b](y.png)\n\ntext\n\n\n\nmore",
+          draft: true,
+        }}
+      />,
+    );
+    const paragraphs = Array.from(container.querySelectorAll("p"));
+    expect(paragraphs[0]).not.toHaveAttribute("style");
+    expect(paragraphs[1].getAttribute("style")).toContain("padding-top: 2.9em");
+    expect(paragraphs[2]).not.toHaveAttribute("style");
+    expect(paragraphs[3].getAttribute("style")).toContain("padding-top: 2.9em");
+  });
+});
+
 describe("NoteExportPreview", () => {
   it("renders filed note metadata and GFM content for printing", () => {
     render(
@@ -195,5 +278,52 @@ describe("NoteExportPreview", () => {
     expect(screen.getByRole("heading", { name: "Tasks" })).toBeInTheDocument();
     expect(screen.getByRole("checkbox")).toBeChecked();
     expect(screen.getByRole("table")).toBeInTheDocument();
+  });
+
+  it("resolves asset images, applies the width suffix and strips it from alt", () => {
+    render(
+      <NoteExportPreview
+        snapshot={{
+          id: document.id,
+          title: document.title,
+          description: "",
+          content: "![Chart|300](/assets/chart.png)\n\n![Plain](https://example.com/a.png)",
+          draft: false,
+        }}
+      />,
+    );
+
+    const chart = screen.getByAltText("Chart");
+    expect(chart.getAttribute("src")).toContain("/api/assets?path=%2Fassets%2Fchart.png");
+    expect(chart).toHaveAttribute("width", "300");
+    expect(chart).toHaveAttribute("loading", "eager");
+    const plain = screen.getByAltText("Plain");
+    expect(plain).toHaveAttribute("src", "https://example.com/a.png");
+    expect(plain).not.toHaveAttribute("width");
+  });
+});
+
+describe("waitForExportAssets", () => {
+  it("waits for pending preview images to load or fail", async () => {
+    const article = window.document.createElement("article");
+    article.className = "note-export-preview";
+    const loading = window.document.createElement("img");
+    const failing = window.document.createElement("img");
+    for (const image of [loading, failing])
+      Object.defineProperty(image, "complete", { value: false });
+    article.append(loading, failing);
+    window.document.body.append(article);
+    let done = false;
+    const wait = waitForExportAssets(5000).then(() => {
+      done = true;
+    });
+
+    await Promise.resolve();
+    expect(done).toBe(false);
+    loading.dispatchEvent(new Event("load"));
+    failing.dispatchEvent(new Event("error"));
+    await wait;
+    expect(done).toBe(true);
+    article.remove();
   });
 });

@@ -6,13 +6,19 @@ import MLXEmbedders
 import MLXHuggingFace
 import MLXLLM
 import MLXLMCommon
+import MLXVLM
 import HuggingFace
 import Tokenizers
 import MLXAudioCore
 import MLXAudioSTT
 import FolioMLXProgress
 
-private enum TaskKind: String { case generation, embedding, transcription }
+private enum TaskKind: String { case generation, embedding, transcription, ocr }
+
+private let ocrDefaultMaxTokens = 4096
+// LightOnOCR was trained on ~1540px page renders, so small screenshots must be upscaled (and large
+// ones scaled down) so the longest side is exactly this many pixels; the resize preserves aspect ratio.
+private let ocrLongestEdge: CGFloat = 1540
 
 private struct Message: Decodable {
     let role: String
@@ -28,6 +34,8 @@ private struct Request: Decodable {
     let temperature: Float?
     let noThinking: Bool?
     let audioPath: String?
+    let imagePath: String?
+    let prompt: String?
 }
 
 private struct MemoryStatus: Encodable {
@@ -275,6 +283,7 @@ private struct FolioMLX {
         var modelDirectory: URL?
         var operation: String?
         var maxTokens = 512
+        var maxTokensWasProvided = false
         var temperature: Float = 0.1
         while !arguments.isEmpty {
             let option = arguments.removeFirst()
@@ -282,7 +291,7 @@ private struct FolioMLX {
             let value = arguments.removeFirst()
             switch option {
             case "--task":
-                guard let parsed = TaskKind(rawValue: value) else { throw NSError(domain: "FolioMLX", code: 2, userInfo: [NSLocalizedDescriptionKey: "task must be generation, embedding, or transcription"]) }
+                guard let parsed = TaskKind(rawValue: value) else { throw NSError(domain: "FolioMLX", code: 2, userInfo: [NSLocalizedDescriptionKey: "task must be generation, embedding, transcription, or ocr"]) }
                 task = parsed
             case "--model": modelID = value; modelWasProvided = true
             case "--revision": revision = value; revisionWasProvided = true
@@ -291,6 +300,7 @@ private struct FolioMLX {
             case "--max-tokens":
                 guard let parsed = Int(value), parsed > 0 else { throw NSError(domain: "FolioMLX", code: 3, userInfo: [NSLocalizedDescriptionKey: "max tokens must be positive"]) }
                 maxTokens = parsed
+                maxTokensWasProvided = true
             case "--temperature":
                 guard let parsed = Float(value), parsed.isFinite, parsed >= 0 else { throw NSError(domain: "FolioMLX", code: 4, userInfo: [NSLocalizedDescriptionKey: "temperature must be finite and non-negative"]) }
                 temperature = parsed
@@ -350,14 +360,28 @@ private struct FolioMLX {
         let generator: ModelContainer?
         let embedder: EmbedderModelContainer?
         let whisper: WhisperModel?
-        if task == .generation {
-            log("Loading generation model \(modelID)…")
+        if task == .generation || task == .ocr {
+            log("Loading \(task == .ocr ? "OCR" : "generation") model \(modelID)…")
+            // Pick the factory explicitly: linking MLXVLM adds its factory to the global
+            // registry, which must not change how generation checkpoints are loaded.
             if let modelDirectory {
-                generator = try await loadModelContainer(from: modelDirectory, using: #huggingFaceTokenizerLoader())
+                if task == .ocr {
+                    generator = try await VLMModelFactory.shared.loadContainer(
+                        from: modelDirectory, using: #huggingFaceTokenizerLoader())
+                } else {
+                    generator = try await LLMModelFactory.shared.loadContainer(
+                        from: modelDirectory, using: #huggingFaceTokenizerLoader())
+                }
+            } else if task == .ocr {
+                generator = try await VLMModelFactory.shared.loadContainer(
+                    from: #hubDownloader(), using: #huggingFaceTokenizerLoader(),
+                    configuration: ModelConfiguration(id: modelID, revision: revision),
+                    progressHandler: { progress in writeDownloadProgress(progress) })
             } else {
                 let configuration = ModelConfiguration(id: modelID, revision: revision,
                     extraEOSTokens: Set(stopTokens(for: modelID)))
-                generator = try await #huggingFaceLoadModelContainer(
+                generator = try await LLMModelFactory.shared.loadContainer(
+                    from: #hubDownloader(), using: #huggingFaceTokenizerLoader(),
                     configuration: configuration,
                     progressHandler: { progress in writeDownloadProgress(progress) })
             }
@@ -402,7 +426,7 @@ private struct FolioMLX {
             do {
                 let request = try JSONDecoder().decode(Request.self, from: Data(line.utf8))
                 requestID = request.id
-                switch request.operation ?? (task == .generation ? "generate" : (task == .embedding ? "embed" : "transcribe")) {
+                switch request.operation ?? (task == .generation ? "generate" : (task == .embedding ? "embed" : (task == .ocr ? "ocr" : "transcribe"))) {
                 case "status":
                     writeLine(Response(id: requestID, model: modelID, text: nil, embeddings: nil,
                                        state: "loaded", memory: memoryStatus(), metrics: nil))
@@ -428,22 +452,34 @@ private struct FolioMLX {
                         model: generator, system: messages[0].content, prompt: messages[1].content,
                         parameters: GenerateParameters(maxTokens: requestTokens, temperature: requestTemperature),
                         noThinking: request.noThinking != false, clock: clock)
-                    synchronizeDefaultStream()
-                    let cleanupStarted = clock.now
-                    Memory.clearCache()
-                    synchronizeDefaultStream()
-                    let cleanup = seconds(from: cleanupStarted, to: clock.now)
-                    let memory = memoryStatus()
-                    let metrics = Metrics(coldLoadSeconds: coldLoadSeconds,
-                        totalRequestSeconds: generated.elapsedSeconds,
-                        sessionReleaseSeconds: generated.sessionReleaseSeconds,
-                        cleanupSeconds: cleanup, ttftSeconds: generated.ttftSeconds,
-                        promptTokens: generated.promptTokens, generatedTokens: generated.generatedTokens,
-                        promptSeconds: generated.promptSeconds, generationSeconds: generated.generationSeconds,
-                        tokensPerSecond: generated.tokensPerSecond,
-                        requestPeakActiveBytes: generated.requestPeakActiveBytes)
-                    writeLine(Response(id: requestID, model: modelID, text: generated.text, embeddings: nil,
-                                       state: nil, memory: memory, metrics: metrics))
+                    writeLine(generationResponse(id: requestID, model: modelID, generated: generated,
+                                                 coldLoadSeconds: coldLoadSeconds, clock: clock))
+                case "ocr":
+                    guard task == .ocr, let generator else { throw modelTaskError("ocr") }
+                    guard let imagePath = request.imagePath, !imagePath.isEmpty else {
+                        throw NSError(domain: "FolioMLX", code: 16, userInfo: [NSLocalizedDescriptionKey: "imagePath must name a local image file"])
+                    }
+                    let imageURL = URL(fileURLWithPath: imagePath)
+                    var isDirectory: ObjCBool = false
+                    guard FileManager.default.fileExists(atPath: imageURL.path, isDirectory: &isDirectory),
+                          !isDirectory.boolValue else {
+                        throw NSError(domain: "FolioMLX", code: 17, userInfo: [NSLocalizedDescriptionKey: "The selected image file is no longer available."])
+                    }
+                    let requestTokens = request.maxTokens ?? (maxTokensWasProvided ? maxTokens : ocrDefaultMaxTokens)
+                    guard requestTokens > 0 else {
+                        throw NSError(domain: "FolioMLX", code: 11, userInfo: [NSLocalizedDescriptionKey: "generation parameters are invalid"])
+                    }
+                    Memory.peakMemory = 0
+                    // Longest edge scaled to ocrLongestEdge (not the 512x512 session resize), greedy
+                    // decoding, and an empty user text unless the caller supplies one: LightOnOCR transcribes to Markdown.
+                    let generated = try await generate(
+                        model: generator, system: nil, prompt: request.prompt ?? "",
+                        images: [.url(imageURL)],
+                        processing: UserInput.Processing(resize: CGSize(width: ocrLongestEdge, height: ocrLongestEdge)),
+                        parameters: GenerateParameters(maxTokens: requestTokens, temperature: 0),
+                        noThinking: false, clock: clock)
+                    writeLine(generationResponse(id: requestID, model: modelID, generated: generated,
+                                                 coldLoadSeconds: coldLoadSeconds, clock: clock))
                 case "embed":
                     guard task == .embedding, let embedder else { throw modelTaskError("embedding") }
                     guard let input = request.input, !input.isEmpty,
@@ -506,16 +542,40 @@ private func transcribeAudio(_ whisper: WhisperModel, from url: URL, requestID: 
     return transcriptParts.joined(separator: " ")
 }
 
-private func generate(model: ModelContainer, system: String, prompt: String, parameters: GenerateParameters,
+private func generationResponse(id: String?, model: String, generated: GenerationOutput,
+                                coldLoadSeconds: Double, clock: ContinuousClock) -> Response {
+    synchronizeDefaultStream()
+    let cleanupStarted = clock.now
+    Memory.clearCache()
+    synchronizeDefaultStream()
+    let cleanup = seconds(from: cleanupStarted, to: clock.now)
+    let memory = memoryStatus()
+    let metrics = Metrics(coldLoadSeconds: coldLoadSeconds,
+        totalRequestSeconds: generated.elapsedSeconds,
+        sessionReleaseSeconds: generated.sessionReleaseSeconds,
+        cleanupSeconds: cleanup, ttftSeconds: generated.ttftSeconds,
+        promptTokens: generated.promptTokens, generatedTokens: generated.generatedTokens,
+        promptSeconds: generated.promptSeconds, generationSeconds: generated.generationSeconds,
+        tokensPerSecond: generated.tokensPerSecond,
+        requestPeakActiveBytes: generated.requestPeakActiveBytes)
+    return Response(id: id, model: model, text: generated.text, embeddings: nil,
+                    state: nil, memory: memory, metrics: metrics)
+}
+
+private func generate(model: ModelContainer, system: String?, prompt: String,
+                      images: [UserInput.Image] = [],
+                      processing: UserInput.Processing = .init(resize: CGSize(width: 512, height: 512)),
+                      parameters: GenerateParameters,
                       noThinking: Bool, clock: ContinuousClock) async throws -> GenerationOutput {
     let session = ChatSession(model, instructions: system, generateParameters: parameters,
+                              processing: processing,
                               additionalContext: noThinking ? ["enable_thinking": false] : nil)
     let started = clock.now
     var firstChunk: Double?
     var output = ""
     var info: GenerateCompletionInfo?
     do {
-        for try await event in session.streamDetails(to: prompt, role: .user, images: [], videos: []) {
+        for try await event in session.streamDetails(to: prompt, role: .user, images: images, videos: []) {
             switch event {
             case .chunk(let chunk):
                 if firstChunk == nil { firstChunk = seconds(from: started, to: clock.now) }

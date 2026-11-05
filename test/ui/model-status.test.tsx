@@ -138,6 +138,16 @@ describe("model status", () => {
     await act(async () => { finishInstall?.(response(currentStatus)); });
   });
 
+  it("shows LightOnOCR in the workspace panel only once it is installed", () => {
+    const props = { mlxActionModel: null, onInstallMlxModel: vi.fn(), onToggleMlxModel: vi.fn(), onOpenSettings: vi.fn() };
+    const template = status.models.find((model) => model.id === "gemma4")!;
+    const ocr = { ...template, id: "lightonocr" as const, name: "LightOnOCR 3 1B", purpose: "ocr" as const, selected: false, installed: false, loaded: false };
+    const { rerender } = render(<MlxModelStatusPanel {...props} mlxStatus={{ ...status, models: [...status.models, ocr] }} />);
+    expect(screen.queryByText("LightOnOCR 3 1B")).not.toBeInTheDocument();
+    rerender(<MlxModelStatusPanel {...props} mlxStatus={{ ...status, models: [...status.models, { ...ocr, installed: true }] }} />);
+    expect(screen.getByText("LightOnOCR 3 1B")).toBeInTheDocument();
+  });
+
   it.each([
     ["qwen35", "Qwen 3.5 4B", "generation"],
     ["embeddinggemma", "EmbeddingGemma", "embeddings"],

@@ -1623,6 +1623,229 @@
   cursor: default;
 }
 
+.live-markdown-editor .cm-live-markdown-image-frame {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.live-markdown-editor .cm-live-markdown-image-toolbar {
+  position: absolute;
+  top: 12px;
+  right: 6px;
+  z-index: 2;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-raised);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.live-markdown-editor .cm-live-markdown-image-frame:hover .cm-live-markdown-image-toolbar,
+.live-markdown-editor .cm-live-markdown-image-frame:focus-within .cm-live-markdown-image-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* The image carries a 6px vertical margin, so the corner sits 6px above the frame bottom. */
+.live-markdown-editor .cm-live-markdown-image-resize {
+  position: absolute;
+  right: 0;
+  bottom: 6px;
+  z-index: 2;
+  width: 24px;
+  height: 24px;
+  cursor: nwse-resize;
+  opacity: 0;
+  touch-action: none;
+  transition: opacity 140ms ease;
+}
+
+.live-markdown-editor .cm-live-markdown-image-resize::before {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 18px;
+  height: 18px;
+  border-right: 3px solid rgba(255, 255, 255, 0.95);
+  border-bottom: 3px solid rgba(255, 255, 255, 0.95);
+  border-bottom-right-radius: 6px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
+  transform-origin: 100% 100%;
+  transition: transform 140ms ease;
+}
+
+.live-markdown-editor .cm-live-markdown-image-frame:hover .cm-live-markdown-image-resize,
+.live-markdown-editor .cm-live-markdown-image-frame:focus-within .cm-live-markdown-image-resize,
+.live-markdown-editor .cm-live-markdown-image-frame.is-resizing .cm-live-markdown-image-resize {
+  opacity: 1;
+}
+
+.live-markdown-editor .cm-live-markdown-image-resize:hover::before,
+.live-markdown-editor .cm-live-markdown-image-frame.is-resizing .cm-live-markdown-image-resize::before {
+  transform: scale(1.18);
+}
+
+.live-markdown-editor .cm-live-markdown-image-frame.is-resizing .cm-live-markdown-image {
+  outline: 2px solid var(--acid);
+  outline-offset: 2px;
+}
+
+.live-markdown-editor .cm-live-markdown-image-frame.is-resizing .cm-live-markdown-image-toolbar {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.live-markdown-editor .cm-live-markdown-image-resize-badge {
+  position: absolute;
+  right: 10px;
+  bottom: 34px;
+  z-index: 3;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(20, 22, 26, 0.82);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-markdown-editor .cm-live-markdown-image-resize,
+  .live-markdown-editor .cm-live-markdown-image-resize::before {
+    transition: none;
+  }
+}
+
+.live-markdown-editor .cm-live-markdown-image-action {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: var(--ink);
+  background: transparent;
+  cursor: pointer;
+}
+
+.live-markdown-editor .cm-live-markdown-image-action:hover,
+.live-markdown-editor .cm-live-markdown-image-action:focus-visible {
+  outline: none;
+  background: rgba(var(--highlight-rgb), 0.08);
+}
+
+.live-markdown-editor .cm-live-markdown-image-action.is-copied {
+  color: var(--acid);
+}
+
+.live-markdown-editor .cm-live-markdown-image-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.live-markdown-editor .cm-live-markdown-image-action.is-busy {
+  cursor: progress;
+  animation: cm-live-markdown-ocr-pulse 1s ease-in-out infinite;
+}
+
+.live-markdown-editor .cm-live-markdown-image-action.is-busy:disabled {
+  opacity: 1;
+}
+
+@keyframes cm-live-markdown-ocr-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-markdown-editor .cm-live-markdown-image-action.is-busy {
+    animation: none;
+    opacity: 0.55;
+  }
+}
+
+.live-markdown-editor .cm-live-markdown-ocr-preview {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-width: min(320px, 100%);
+  margin: 0 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--paper-raised);
+  cursor: auto;
+}
+
+.live-markdown-editor .cm-live-markdown-ocr-text {
+  max-height: 320px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85em;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.live-markdown-editor .cm-live-markdown-ocr-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.live-markdown-editor .cm-live-markdown-ocr-button {
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  background: transparent;
+  font: inherit;
+  font-size: 0.8em;
+  cursor: pointer;
+}
+
+.live-markdown-editor .cm-live-markdown-ocr-button:hover,
+.live-markdown-editor .cm-live-markdown-ocr-button:focus-visible {
+  outline: none;
+  background: rgba(var(--highlight-rgb), 0.08);
+}
+
+.live-markdown-editor .cm-live-markdown-ocr-note {
+  margin-left: auto;
+  padding-right: 4px;
+  color: var(--ink);
+  opacity: 0.55;
+  font-size: 0.75em;
+}
+
+.live-markdown-editor .cm-live-markdown-image,
+.document-content img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 6px 0;
+  border-radius: 6px;
+}
+
 .live-markdown-editor .cm-live-markdown-task-complete {
   text-decoration: line-through;
 }
@@ -1630,6 +1853,37 @@
 .live-markdown-editor .cm-live-markdown-table {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.88em;
+}
+
+.live-markdown-editor .cm-live-markdown-table-widget {
+  max-width: 100%;
+  margin: 6px 0;
+  overflow-x: auto;
+  cursor: text;
+}
+
+.live-markdown-editor .cm-live-markdown-table-grid {
+  border-collapse: collapse;
+  font-size: 0.88em;
+  line-height: 1.5;
+}
+
+.live-markdown-editor .cm-live-markdown-table-grid th,
+.live-markdown-editor .cm-live-markdown-table-grid td {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.live-markdown-editor .cm-live-markdown-table-grid th {
+  background: var(--surface-alt);
+  font-weight: 600;
+}
+
+.live-markdown-editor .cm-live-markdown-table-grid code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9em;
 }
 
 .document-content {
@@ -1733,6 +1987,10 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 0.88em;
+}
+
+.document-content th {
+  background: var(--surface-alt);
 }
 
 .document-content th,
@@ -2177,16 +2435,42 @@
 @media print {
   @page {
     size: A4 portrait;
-    margin: 18mm;
+    margin: 20mm;
+  }
+
+  :root:root,
+  :root:root[data-theme] {
+    /* !important: useThemeSettings sets color-scheme inline on <html>, which would otherwise win and paint Chromium's dark canvas in the margins. */
+    color-scheme: light !important;
+    color: #171717;
+    background: #fff;
+    --ink: #171717;
+    --muted: #555;
+    --dim: #777;
+    --paper: #fff;
+    --paper-raised: #fff;
+    --line: #d5dae1;
+    --acid: #174ea6;
+    --canvas: #fff;
+    --surface-deep: #fff;
+    --surface-deeper: #fff;
+    --surface-alt: #fff;
+    --surface-editor: #fff;
+    --surface-band: #fff;
+    --highlight-rgb: 255, 255, 255;
   }
 
   html,
   body,
   #root,
   .shell {
+    background-image: none;
     width: auto;
     min-width: 0;
+    height: auto;
     min-height: 0;
+    margin: 0;
+    padding: 0;
     overflow: visible;
     color: #171717;
     background: #fff;
@@ -2197,22 +2481,31 @@
   }
 
   .note-export-preview {
+    position: static;
+    width: auto;
     max-width: none;
+    margin: 0;
+    padding: 0;
     display: block;
+    overflow: visible;
     color: #171717;
     background: #fff;
     font: 11pt/1.55 ui-serif, Georgia, Cambria, "Times New Roman", serif;
+    orphans: 3;
+    widows: 3;
+    overflow-wrap: break-word;
   }
 
   .note-export-preview > header {
-    margin-bottom: 24pt;
-    padding-bottom: 12pt;
+    margin-bottom: 20pt;
+    padding-bottom: 10pt;
     border-bottom: 1px solid #d8d8d8;
+    break-after: avoid;
   }
 
   .note-export-preview > header h1 {
     margin: 0;
-    font: 600 25pt/1.2 ui-sans-serif, system-ui, sans-serif;
+    font: 600 24pt/1.2 ui-sans-serif, system-ui, sans-serif;
     letter-spacing: -0.02em;
   }
 
@@ -2222,15 +2515,60 @@
     font: 10.5pt/1.45 ui-sans-serif, system-ui, sans-serif;
   }
 
+  .note-export-preview p {
+    margin: 0 0 8pt;
+  }
+
   .note-export-preview h1,
   .note-export-preview h2,
   .note-export-preview h3,
   .note-export-preview h4,
   .note-export-preview h5,
   .note-export-preview h6 {
+    margin: 18pt 0 6pt;
     break-after: avoid;
     color: #111;
     font-family: ui-sans-serif, system-ui, sans-serif;
+    font-weight: 600;
+    line-height: 1.25;
+  }
+
+  .note-export-preview h1 { font-size: 20pt; }
+  .note-export-preview h2 { font-size: 16pt; }
+  .note-export-preview h3 { font-size: 13pt; }
+  .note-export-preview h4,
+  .note-export-preview h5,
+  .note-export-preview h6 { font-size: 11pt; }
+
+  .note-export-preview ul,
+  .note-export-preview ol {
+    margin: 0 0 8pt;
+    padding-left: 18pt;
+  }
+
+  .note-export-preview li {
+    margin: 2pt 0;
+  }
+
+  .note-export-preview li > ul,
+  .note-export-preview li > ol {
+    margin-bottom: 0;
+  }
+
+  .note-export-preview li.task-list-item {
+    list-style: none;
+    margin-left: -18pt;
+  }
+
+  .note-export-preview input[type="checkbox"] {
+    margin: 0 5pt 0 0;
+    vertical-align: -1pt;
+  }
+
+  .note-export-preview hr {
+    margin: 14pt 0;
+    border: 0;
+    border-top: 1px solid #ccc;
   }
 
   .note-export-preview a {
@@ -2239,10 +2577,11 @@
   }
 
   .note-export-preview blockquote {
-    margin-left: 0;
+    margin: 0 0 8pt;
     padding-left: 12pt;
     border-left: 3px solid #aaa;
     color: #444;
+    break-inside: avoid;
   }
 
   .note-export-preview pre,
@@ -2250,31 +2589,83 @@
     font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   }
 
+  .note-export-preview code {
+    padding: 0.5pt 3pt;
+    border-radius: 3px;
+    color: #171717;
+    background: #f2f2f2;
+    font-size: 0.9em;
+  }
+
   .note-export-preview pre {
     max-width: 100%;
+    margin: 0 0 10pt;
     padding: 9pt;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
     break-inside: avoid;
     background: #f4f4f4;
+    font-size: 9.5pt;
+    line-height: 1.45;
+  }
+
+  .note-export-preview pre code {
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    font-size: inherit;
   }
 
   .note-export-preview table {
-    width: 100%;
+    width: auto;
+    max-width: 100%;
+    margin: 4pt 0 12pt;
     border-collapse: collapse;
+    font: 9.5pt/1.4 ui-sans-serif, system-ui, sans-serif;
+  }
+
+  .note-export-preview thead {
+    display: table-header-group;
+  }
+
+  .note-export-preview tr {
+    break-inside: avoid;
   }
 
   .note-export-preview th,
   .note-export-preview td {
-    padding: 5pt;
+    padding: 4pt 6pt;
     border: 1px solid #bbb;
-    text-align: left;
     vertical-align: top;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+
+  .note-export-preview th {
+    background: #f1f1f1;
+    font-weight: 600;
+  }
+
+  /* Alignment from the GFM delimiter row arrives as inline style or align. */
+  .note-export-preview th:not([style]):not([align]),
+  .note-export-preview td:not([style]):not([align]) {
+    text-align: left;
   }
 
   .note-export-preview img {
+    display: block;
     max-width: 100%;
+    height: auto;
+    margin: 6pt 0;
     break-inside: avoid;
+  }
+
+  .note-export-preview img + br {
+    display: none;
+  }
+
+  .note-export-preview p:has(> img) {
+    margin-bottom: 14pt;
   }
 }
 

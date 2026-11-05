@@ -14,10 +14,15 @@ import {
   type DecorationSet,
 } from "@codemirror/view";
 import type { MutableRefObject } from "react";
+import { assetUrl, resolveAssetHref } from "../../../lib/assets.ts";
+import { createImageFrame, isImageToolbarEvent } from "./image-toolbar.ts";
+import { parseImageAlt } from "./image-size.ts";
+import { parseTable, renderTable, type ParsedTable } from "./table-model.ts";
 
 export type LiveMarkdownCallbacks = {
   onOpenLink?: (href: string) => void;
   onToggleTask?: (lineNumber: number, checked: boolean) => void | Promise<void>;
+  onError?: (message: string) => void;
 };
 
 export type LiveMarkdownSelection = { from: number; to: number };
@@ -119,6 +124,85 @@ class TaskCheckboxWidget extends WidgetType {
   }
 }
 
+class ImageWidget extends WidgetType {
+  private readonly path: string;
+  private readonly alt: string;
+  private readonly width: number | null;
+  private readonly callbacks: MutableRefObject<LiveMarkdownCallbacks>;
+
+  constructor(
+    path: string,
+    alt: string,
+    width: number | null,
+    callbacks: MutableRefObject<LiveMarkdownCallbacks>,
+  ) {
+    super();
+    this.path = path;
+    this.alt = alt;
+    this.width = width;
+    this.callbacks = callbacks;
+  }
+
+  eq(other: ImageWidget) {
+    return other.path === this.path && other.alt === this.alt && other.width === this.width;
+  }
+
+  toDOM(view: EditorView) {
+    const image = document.createElement("img");
+    image.className = "cm-live-markdown-image";
+    const url = assetUrl(this.path);
+    image.src = url;
+    image.alt = this.alt;
+    image.loading = "lazy";
+    image.draggable = false;
+    image.addEventListener("load", () => view.requestMeasure());
+    return createImageFrame(view, image, url, {
+      path: this.path,
+      width: this.width,
+      onError: (message) => this.callbacks.current.onError?.(message),
+    });
+  }
+
+  // Clicks on the image place the cursor so the source becomes editable;
+  // toolbar events are handled by the buttons themselves.
+  ignoreEvent(event: Event) {
+    return isImageToolbarEvent(event);
+  }
+}
+
+class TableWidget extends WidgetType {
+  private readonly source: string;
+  private readonly table: ParsedTable;
+
+  constructor(source: string, table: ParsedTable) {
+    super();
+    this.source = source;
+    this.table = table;
+  }
+
+  eq(other: TableWidget) {
+    return other.source === this.source;
+  }
+
+  toDOM(view: EditorView) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "cm-live-markdown-table-widget";
+    wrapper.append(renderTable(this.table));
+    // Links in the preview are inert; the click places the cursor in the source.
+    wrapper.addEventListener("click", (event) => {
+      if (event.target instanceof Element && event.target.closest("a")) event.preventDefault();
+    });
+    requestAnimationFrame(() => view.requestMeasure());
+    return wrapper;
+  }
+
+  // CodeMirror handles the mousedown, moving the selection into the table
+  // which reveals the editable source.
+  ignoreEvent() {
+    return false;
+  }
+}
+
 class ListMarkerWidget extends WidgetType {
   private readonly marker: string;
   private readonly nested: boolean;
@@ -189,6 +273,37 @@ function addLinkDecorations(
         Decoration.mark({ class: "cm-live-markdown-link" }).range(link.textFrom, link.textTo),
       );
   }
+}
+
+function addImageDecorations(
+  ranges: Array<Range<Decoration>>,
+  state: EditorState,
+  reveal: (from: number, to: number) => boolean,
+  callbacks: MutableRefObject<LiveMarkdownCallbacks>,
+) {
+  syntaxTree(state).iterate({
+    enter(node) {
+      if (node.name !== "Image") return;
+      const url = node.node.getChild("URL");
+      if (!url) return;
+      let href = state.sliceDoc(url.from, url.to);
+      if (href.startsWith("<") && href.endsWith(">")) href = href.slice(1, -1);
+      const path = resolveAssetHref(decodeMarkdownLinkText(href));
+      if (!path || reveal(node.from, node.to)) return;
+      const opening = node.node.firstChild;
+      let closing = opening?.nextSibling;
+      while (closing && !(closing.name === "LinkMark" && state.sliceDoc(closing.from, closing.to) === "]"))
+        closing = closing.nextSibling;
+      const parsedAlt = parseImageAlt(opening && closing
+        ? decodeMarkdownLinkText(state.sliceDoc(opening.to, closing.from))
+        : "");
+      ranges.push(
+        Decoration.replace({
+          widget: new ImageWidget(path, parsedAlt.alt, parsedAlt.width, callbacks),
+        }).range(node.from, node.to),
+      );
+    },
+  });
 }
 
 function decodeMarkdownLinkText(value: string) {
@@ -450,7 +565,51 @@ function buildDecorations(
     if (/^```/.test(text)) addHidden(ranges, line.from, line.to, !reveal(line.from, line.to));
   }
   addLinkDecorations(ranges, markdownLinks(state), reveal);
-  return Decoration.set(ranges, true);
+  addImageDecorations(ranges, state, reveal, configuration.callbacks);
+  const replacedTables = tableWidgetDecorations(state, reveal);
+  // Marks, hidden ranges and images must not overlap a replaced table.
+  const kept = replacedTables.length
+    ? ranges.filter(
+        (range) =>
+          !replacedTables.some((table) =>
+            range.from === range.to
+              ? range.from >= table.from && range.from <= table.to
+              : range.from < table.to && range.to > table.from,
+          ),
+      )
+    : ranges;
+  for (const table of replacedTables) kept.push(table.decoration);
+  return Decoration.set(kept, true);
+}
+
+type ReplacedTable = { from: number; to: number; decoration: Range<Decoration> };
+
+/** Block widgets for GFM tables the selection is not inside of. */
+function tableWidgetDecorations(
+  state: EditorState,
+  reveal: (from: number, to: number) => boolean,
+): ReplacedTable[] {
+  const tables: ReplacedTable[] = [];
+  syntaxTree(state).iterate({
+    enter(node) {
+      if (node.name !== "Table") return;
+      if (node.node.parent?.name !== "Document") return false;
+      if (node.from !== state.doc.lineAt(node.from).from || reveal(node.from, node.to)) return false;
+      const source = state.sliceDoc(node.from, node.to);
+      const table = parseTable(source);
+      if (!table) return false;
+      tables.push({
+        from: node.from,
+        to: node.to,
+        decoration: Decoration.replace({
+          widget: new TableWidget(source, table),
+          block: true,
+        }).range(node.from, node.to),
+      });
+      return false;
+    },
+  });
+  return tables;
 }
 
 type DecorationFieldValue = { decorations: DecorationSet; focused: boolean };

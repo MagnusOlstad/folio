@@ -62,3 +62,27 @@ export function noteExportFilename(
   if (WINDOWS_RESERVED_FILENAME.test(basename)) basename = `${basename}-note`;
   return `${basename}.${format === "markdown" ? "md" : "pdf"}`;
 }
+
+function plainHeadingText(value: string) {
+  return value
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[*_`~]/g, "")
+    .normalize("NFC")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Removes a leading `# Title` heading that repeats the note title, so the PDF
+ * header does not show it twice. Returns the content unchanged otherwise.
+ */
+export function withoutLeadingTitleHeading(content: string, title: string) {
+  const match = /^(?:[ \t]*\r?\n)*[ \t]{0,3}#[ \t]+([^\r\n]*?)(?:[ \t]+#+)?[ \t]*(?:\r?\n|$)/.exec(
+    content,
+  );
+  if (!match) return content;
+  const heading = plainHeadingText(match[1]);
+  if (!heading || heading !== plainHeadingText(title)) return content;
+  return content.slice(match[0].length);
+}
