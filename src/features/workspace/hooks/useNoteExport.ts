@@ -38,13 +38,14 @@ export function waitForExportAssets(timeoutMs = IMAGE_WAIT_MS) {
       }),
   );
   const fonts = document.fonts?.ready ?? Promise.resolve();
-  const timeout = new Promise<void>((resolve) =>
-    window.setTimeout(resolve, timeoutMs),
-  );
+  let timer: number | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = window.setTimeout(resolve, timeoutMs);
+  });
   return Promise.race([
     Promise.all([...loads, fonts]).then(() => undefined),
     timeout,
-  ]);
+  ]).finally(() => window.clearTimeout(timer));
 }
 
 export function useNoteExport({ setMessage }: UseNoteExportOptions) {

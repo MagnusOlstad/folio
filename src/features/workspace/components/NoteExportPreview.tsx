@@ -3,7 +3,10 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { assetUrl, resolveAssetHref } from "../../../lib/assets.ts";
 import { parseImageAlt } from "../model/image-size.ts";
-import type { NoteExportSnapshot } from "../model/note-export.ts";
+import {
+  withoutLeadingTitleHeading,
+  type NoteExportSnapshot,
+} from "../model/note-export.ts";
 import { folioMarkdown } from "../model/folio-markdown.ts";
 
 type NoteExportPreviewProps = {
@@ -37,7 +40,9 @@ export function NoteExportPreview({ snapshot }: NoteExportPreviewProps) {
           },
         }}
       >
-        {snapshot.content}
+        {snapshot.draft
+          ? snapshot.content
+          : withoutLeadingTitleHeading(snapshot.content, snapshot.title)}
       </ReactMarkdown>
     </article>
   );

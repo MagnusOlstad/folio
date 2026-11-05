@@ -7,6 +7,7 @@ import { useNoteExport, waitForExportAssets } from "../../src/features/workspace
 import {
   noteExportFilename,
   noteExportSnapshot,
+  withoutLeadingTitleHeading,
 } from "../../src/features/workspace/model/note-export.ts";
 
 const document: ViewerDocument = {
@@ -62,6 +63,39 @@ describe("note export model", () => {
     const snapshot = noteExportSnapshot(recoveredDraft, undefined);
     expect(snapshot.title).toBe("Project notes");
     expect(snapshot.content).toBe("# Project notes\n\nKeep this body");
+  });
+});
+
+describe("withoutLeadingTitleHeading", () => {
+  it("removes a matching first level-1 heading", () => {
+    expect(withoutLeadingTitleHeading("\n\n# My Note\n\nBody", "My Note")).toBe("\nBody");
+    expect(withoutLeadingTitleHeading("# my note #\nBody", "My Note")).toBe("Body");
+  });
+
+  it("matches through inline markdown", () => {
+    expect(
+      withoutLeadingTitleHeading("# **My** `Note` [link](http://x)\nBody", "My Note link"),
+    ).toBe("Body");
+  });
+
+  it("keeps non-matching, non-first, and non-level-1 headings", () => {
+    expect(withoutLeadingTitleHeading("# Other\nBody", "My Note")).toBe("# Other\nBody");
+    expect(withoutLeadingTitleHeading("Intro\n# My Note", "My Note")).toBe("Intro\n# My Note");
+    expect(withoutLeadingTitleHeading("## My Note\nBody", "My Note")).toBe("## My Note\nBody");
+  });
+
+  it("does not alter the Markdown export content", () => {
+    const content = "# Quarterly: plan / review\n\nBody";
+    expect(noteExportSnapshot({ ...document, content }, undefined).content).toBe(content);
+  });
+
+  it("renders the title once in the preview", () => {
+    render(
+      <NoteExportPreview
+        snapshot={{ id: document.id, title: "My Note", description: "", content: "# My Note\n\nBody", draft: false }}
+      />,
+    );
+    expect(screen.getAllByRole("heading", { name: "My Note" })).toHaveLength(1);
   });
 });
 
@@ -128,8 +162,9 @@ describe("note export behavior", () => {
     });
 
     await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    // print() runs before the hook's finally cleanup; wait for it to settle.
+    await waitFor(() => expect(result.current.preview).toBeNull());
     expect(window.document.title).toBe(previousTitle);
-    expect(result.current.preview).toBeNull();
     expect(setMessage).toHaveBeenCalledWith(
       "Opened the print dialog for PDF export.",
     );
