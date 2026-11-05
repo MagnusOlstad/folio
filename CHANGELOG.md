@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.8](https://github.com/MagnusOlstad/folio/compare/v0.7.7...v0.7.8) (2026-11-05)
+
+
+### Bug Fixes
+
+* **editor:** paste and drop images into notes as bundle assets ([#126](https://github.com/MagnusOlstad/folio/issues/126)) ([4c6fc93](https://github.com/MagnusOlstad/folio/commit/4c6fc9391dbd29406c56297e1fb422bd8d17fcc3))
+
 ## [0.7.7](https://github.com/MagnusOlstad/folio/compare/v0.7.6...v0.7.7) (2026-10-08)
 
 
