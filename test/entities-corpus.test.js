@@ -8,6 +8,9 @@ const allowedTypes = new Set(corpus.schema.types);
 test('entity semantic annotations use exact UTF-16 half-open source spans and complete labels', () => {
   assert.equal(corpus.version, 1);
   assert.equal(corpus.schema.offsetUnit, 'UTF-16 code units');
+  assert.equal(corpus.reference.modelCheckpointRevision, '7b005274e82da37dcf1f5fd9d6a2ef413c6a004c');
+  assert.equal(corpus.reference.nativeRuntimeRevision, 'pending Folio implementation commit');
+  assert.equal(corpus.reference.referenceImplementation.revision, '4857a6b018e5e214616bbfa8f0f6da92af258ba2');
   assert.ok(corpus.cases.length >= 12);
   for (const item of corpus.cases) {
     assert.ok(item.id && item.language && item.text.length > 0);
