@@ -59,6 +59,7 @@ export function createEntityJobService(runtime, {
   let stateChain = Promise.resolve()
   let availability = { installed: false, available: false, helperAvailable: false }
   let settings = { enabled: false, modelId: 'gliner25multi' }
+  let degradedError = null
 
   function serialize(operation) {
     const result = stateChain.then(operation)
@@ -67,7 +68,20 @@ export function createEntityJobService(runtime, {
   }
 
   function snapshotState() { return structuredClone(state) }
-  async function save() { state.revision += 1; await storage.save(snapshotState()) }
+  function degrade(error) {
+    degradedError = String(error?.message || 'Entity job storage is unavailable.').slice(0, 500)
+    state.mode = 'storage_error'
+    if (current) current.controller.abort()
+  }
+  async function save() {
+    if (degradedError) throw jobError('ENTITY_JOB_STORAGE_FAILED', degradedError)
+    state.revision += 1
+    try { await storage.save(snapshotState()) }
+    catch (error) {
+      degrade(error)
+      throw jobError('ENTITY_JOB_STORAGE_FAILED', `Entity job state could not be saved: ${degradedError}`)
+    }
+  }
   function findJob(id) { return state.jobs.find((job) => job.id === id) }
   function updateJobsForTask(task, itemState, detail = {}) {
     for (const id of task.jobIds) {
@@ -79,7 +93,7 @@ export function createEntityJobService(runtime, {
     }
   }
   function refreshMode() {
-    state.mode = closed ? 'closed' : !settings.enabled ? 'disabled'
+    state.mode = degradedError ? 'storage_error' : closed ? 'closed' : !settings.enabled ? 'disabled'
       : !availability.installed ? 'model_missing'
         : !availability.available ? 'unsupported_platform'
           : !availability.helperAvailable ? 'helper_unavailable' : 'running'
@@ -103,8 +117,10 @@ export function createEntityJobService(runtime, {
     }
   }
   async function persistAndPump() {
-    await serialize(async () => { refreshMode(); await save() })
-    pump()
+    try {
+      await serialize(async () => { refreshMode(); await save() })
+      pump()
+    } catch { /* Degraded status is exposed by snapshot(); background events never leak rejections. */ }
   }
   async function queryAvailability() {
     if (typeof isModelInstalled === 'function') {
@@ -169,7 +185,6 @@ export function createEntityJobService(runtime, {
     }
     if (previous?.state === 'running' && current?.task.noteId === noteId) current.controller.abort()
     if (previous) task.jobIds = [...new Set([...previous.jobIds, job.id])]
-    if (previous) task.attempts = previous.attempts
     state.tasks[noteId] = task
     job.items.push({ noteId, state: state.mode === 'running' ? 'queued' : 'paused', attempts: task.attempts, updatedAt: now() })
     if (state.mode !== 'running') task.state = 'paused'
@@ -191,6 +206,7 @@ export function createEntityJobService(runtime, {
   async function requestEntityExtraction({ bundleId: requestedBundle, noteIds = null, reason = 'manual', force = false } = {}) {
     if (requestedBundle !== bundleId) throw jobError('BUNDLE_MISMATCH', 'Entity jobs cannot cross bundle runtimes.')
     if (!REASONS.has(reason)) throw new TypeError(`Unsupported entity extraction reason: ${reason}`)
+    if (degradedError) throw jobError('ENTITY_JOB_STORAGE_FAILED', degradedError)
     if (closed) throw jobError('ENTITY_JOBS_CLOSED', 'Entity job service is shutting down.')
     const ids = noteIds == null ? await getAllNoteIds() : [...new Set(noteIds.map(String))].sort()
     if (ids.some((id) => !id || id.includes('\0') || !runtime.resolveBundleMarkdownPath(id))) throw Object.assign(new Error('Invalid entity note ID.'), { status: 400 })
@@ -242,13 +258,14 @@ export function createEntityJobService(runtime, {
   async function runTask(task) {
     const controller = new AbortController()
     current = { task, controller }
-    await serialize(async () => {
-      if (state.tasks[task.noteId]?.token !== task.token) return
-      task.state = 'running'
-      updateJobsForTask(task, 'running', { error: null })
-      await save()
-    })
     try {
+      await serialize(async () => {
+        if (state.tasks[task.noteId]?.token !== task.token) return
+        task.state = 'running'
+        updateJobsForTask(task, 'running', { error: null })
+        await save()
+      })
+      if (state.tasks[task.noteId]?.token !== task.token) return
       const result = await commitTask(task, controller.signal)
       await serialize(async () => {
         if (state.tasks[task.noteId]?.token !== task.token) return
@@ -257,6 +274,7 @@ export function createEntityJobService(runtime, {
         await save()
       })
     } catch (error) {
+      if (error?.code === 'ENTITY_JOB_STORAGE_FAILED') throw error
       const cancelled = controller.signal.aborted || error?.code === 'ENTITY_JOB_CANCELLED' || error?.code === 'MLX_ACTIVITY_CANCELLED'
       await serialize(async () => {
         if (state.tasks[task.noteId]?.token !== task.token) return
@@ -268,8 +286,9 @@ export function createEntityJobService(runtime, {
             : state.mode === 'unsupported_platform' ? 'Entity extraction is unavailable on this platform.'
               : 'The local entity extraction helper is unavailable.' })
         } else if (cancelled) {
-          task.state = state.mode === 'running' ? 'queued' : 'paused'
-          task.pauseReason = state.mode === 'running' ? null : 'availability'
+          const manuallyPaused = task.pauseReason === 'manual' || task.jobIds.length === 0
+          task.state = manuallyPaused ? 'paused' : state.mode === 'running' ? 'queued' : 'paused'
+          task.pauseReason = manuallyPaused ? 'manual' : state.mode === 'running' ? null : 'availability'
           updateJobsForTask(task, task.state, { error: null })
         } else if (retryable(error) && task.attempts + 1 < MAX_ATTEMPTS) {
           task.attempts += 1
@@ -298,7 +317,7 @@ export function createEntityJobService(runtime, {
     if (!ready || closed || state.mode !== 'running' || pumpPromise) return
     pumpPromise = (async () => {
       while (ready && !closed && state.mode === 'running') {
-        const task = Object.values(state.tasks).filter((item) => item.state === 'queued').sort((a, b) => a.queuedAt.localeCompare(b.queuedAt) || a.noteId.localeCompare(b.noteId))[0]
+        const task = Object.values(state.tasks).filter((item) => item.state === 'queued' && item.jobIds.length > 0).sort((a, b) => a.queuedAt.localeCompare(b.queuedAt) || a.noteId.localeCompare(b.noteId))[0]
         if (!task) break
         try { availability = await queryAvailability() }
         catch { availability = { installed: false, available: false, helperAvailable: false } }
@@ -307,7 +326,7 @@ export function createEntityJobService(runtime, {
         await runTask(task)
         await yieldTask()
       }
-    })().finally(() => { pumpPromise = null })
+    })().catch((error) => { degrade(error) }).finally(() => { pumpPromise = null })
   }
 
   async function initialize() {
@@ -431,7 +450,7 @@ export function createEntityJobService(runtime, {
   function snapshot() {
     return { bundleId, mode: state.mode, queued: Object.values(state.tasks).filter((task) => task.state === 'queued').length,
       running: current ? 1 : 0, paused: Object.values(state.tasks).filter((task) => task.state === 'paused').length,
-      revision: state.revision, closed }
+      revision: state.revision, closed, error: degradedError }
   }
   async function close() {
     closed = true

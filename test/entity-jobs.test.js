@@ -223,3 +223,54 @@ test('job pagination anchors to the last job ID when new jobs arrive', async (t)
   assert.notEqual(secondPage.items[0].id, firstPage.items[0].id)
   await jobs.close()
 })
+
+test('pausing the last subscriber during active inference remains manually paused', async (t) => {
+  let startedResolve
+  const started = new Promise((resolve) => { startedResolve = resolve })
+  const f = await fixture({ extraction: async (_payload, options) => {
+    startedResolve()
+    await new Promise((resolve, reject) => {
+      if (options.signal.aborted) reject(Object.assign(new Error('cancelled'), { code: 'ENTITY_JOB_CANCELLED' }))
+      else options.signal.addEventListener('abort', () => reject(Object.assign(new Error('cancelled'), { code: 'ENTITY_JOB_CANCELLED' })), { once: true })
+    })
+  } })
+  t.after(f.cleanup)
+  const jobs = createEntityJobService(f.runtime)
+  await jobs.initialize()
+  await started
+  const active = (await jobs.listJobs({ limit: 1 })).items[0]
+  await jobs.pauseJob(active.id)
+  await waitFor(() => jobs.snapshot().running === 0 && jobs.snapshot().paused === 1)
+  assert.equal((await jobs.getJob(active.id)).items[0].state, 'paused')
+  assert.equal((await jobs.snapshot()).queued, 0)
+  await jobs.close()
+})
+
+test('a new source generation starts with a fresh retry budget', async (t) => {
+  const f = await fixture({ extraction: async () => { throw Object.assign(new Error('temporary'), { code: 'ETIMEDOUT' }) } })
+  t.after(f.cleanup)
+  const jobs = createEntityJobService(f.runtime, {
+    sleep: (_milliseconds, signal) => new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true })),
+  })
+  await jobs.initialize()
+  await waitFor(() => jobs.snapshot().running === 1 && jobs.snapshot().queued === 0)
+  const first = (await jobs.listJobs({ limit: 1 })).items[0]
+  await waitFor(async () => (await jobs.getJob(first.id)).items[0].attempts === 1)
+  await f.setText('Alice wrote a changed generation.')
+  const latest = await jobs.requestEntityExtraction({ bundleId: 'bundle-a', noteIds: [f.noteId], reason: 'save' })
+  assert.equal(latest.items[0].attempts, 0)
+  await jobs.close().catch(() => {})
+})
+
+test('background persistence failures are contained and exposed as degraded status', async (t) => {
+  const f = await fixture({ enabled: true })
+  t.after(f.cleanup)
+  const base = createEntityJobStorage(f.runtime)
+  let writes = 0
+  const storage = { ...base, async save(next) { writes += 1; if (writes >= 3) throw new Error('disk is read-only'); return base.save(next) } }
+  const jobs = createEntityJobService(f.runtime, { storage })
+  await jobs.initialize()
+  await waitFor(() => jobs.snapshot().mode === 'storage_error' && jobs.snapshot().running === 0)
+  assert.match(jobs.snapshot().error, /disk is read-only/)
+  await jobs.close().catch(() => {})
+})

@@ -14,7 +14,7 @@ function storageError(message, cause) {
 function validateState(value, bundleId) {
   if (!value || value.version !== VERSION || value.bundleId !== bundleId
     || !Number.isSafeInteger(value.revision) || value.revision < 0
-    || !['running', 'paused', 'disabled', 'model_missing', 'helper_unavailable', 'unsupported_platform', 'closed'].includes(value.mode)
+    || !['running', 'paused', 'disabled', 'model_missing', 'helper_unavailable', 'unsupported_platform', 'storage_error', 'closed'].includes(value.mode)
     || !Array.isArray(value.jobs) || !value.tasks || typeof value.tasks !== 'object' || Array.isArray(value.tasks)
     || !value.suppressed || typeof value.suppressed !== 'object' || Array.isArray(value.suppressed)) {
     throw storageError('Entity job state has an invalid schema.')

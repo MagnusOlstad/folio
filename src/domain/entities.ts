@@ -97,8 +97,8 @@ export type EntityJob = {
   updatedAt: string;
 };
 
-export type EntityJobMode = "running" | "paused" | "disabled" | "model_missing" | "helper_unavailable" | "unsupported_platform" | "closed";
-export type EntityJobSnapshot = { bundleId: string; mode: EntityJobMode; queued: number; running: number; paused: number; revision: number; closed: boolean };
+export type EntityJobMode = "running" | "paused" | "disabled" | "model_missing" | "helper_unavailable" | "unsupported_platform" | "storage_error" | "closed";
+export type EntityJobSnapshot = { bundleId: string; mode: EntityJobMode; queued: number; running: number; paused: number; revision: number; closed: boolean; error: string | null };
 
 export type EntityCorrectionCommand =
   | { type: "rename"; entityId: string; label: string }
