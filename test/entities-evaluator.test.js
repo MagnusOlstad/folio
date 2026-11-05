@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 const root = path.resolve(new URL('..', import.meta.url).pathname);
 const corpus = JSON.parse(await readFile(path.join(root, 'test/fixtures/entities/corpus.json'), 'utf8'));
 const evaluator = path.join(root, 'scripts/entities/evaluate.mjs');
-const metadata = { modelRevision: '7b005274e82da37dcf1f5fd9d6a2ef413c6a004c', runtimeRevision: '4857a6b018e5e214616bbfa8f0f6da92af258ba2', schemaVersion: 'folio-entities-v1', thresholds: Object.fromEntries(corpus.schema.types.map((type) => [type, 0.5])), device: 'fixture device', osVersion: 'fixture OS', precision: 'float16', chunkBudget: { maxTokens: 512, overlapTokens: 64 }, warmupCount: 1, repeatCount: 1 };
+const metadata = { modelRevision: '7b005274e82da37dcf1f5fd9d6a2ef413c6a004c', runtimeRevision: '4857a6b018e5e214616bbfa8f0f6da92af258ba2', runtimeProvenanceVerified: true, helperSha256: 'a'.repeat(64), schemaVersion: 'folio-entities-v1', thresholds: Object.fromEntries(corpus.schema.types.map((type) => [type, 0.5])), device: 'fixture device', osVersion: 'fixture OS', precision: 'float16', precisionVerified: true, chunkBudget: { maxTokens: 512, overlapTokens: 64 }, warmupCount: 1, repeatCount: 1 };
 
 test('entity evaluator scores perfect fixture output and rejects incomplete measurement metadata', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'folio-entities-eval-'));
@@ -76,4 +76,6 @@ test('entity evaluator rejects malformed measurement thresholds and run settings
   await expectRejected({ warmupCount: -1 }, /warmupCount must be a non-negative integer/);
   await expectRejected({ repeatCount: 0 }, /repeatCount must be a positive integer/);
   await expectRejected({ precision: 'int8' }, /precision must be float16, bfloat16, or float32/);
+  await expectRejected({ precisionVerified: false }, /precisionVerified must be true/);
+  await expectRejected({ runtimeProvenanceVerified: false }, /runtimeProvenanceVerified must be true/);
 });

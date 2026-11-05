@@ -5,7 +5,7 @@ import path from 'node:path';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const corpusPath = path.resolve(here, '../../test/fixtures/entities/corpus.json');
-const requiredMetadata = ['modelRevision', 'runtimeRevision', 'schemaVersion', 'thresholds', 'device', 'osVersion', 'precision', 'chunkBudget', 'warmupCount', 'repeatCount'];
+const requiredMetadata = ['modelRevision', 'runtimeRevision', 'runtimeProvenanceVerified', 'helperSha256', 'schemaVersion', 'thresholds', 'device', 'osVersion', 'precision', 'precisionVerified', 'chunkBudget', 'warmupCount', 'repeatCount'];
 
 function fail(message) {
   console.error(`Incomplete entity evaluation: ${message}`);
@@ -37,6 +37,8 @@ function validateMetadata(metadata, corpus) {
   const hashPattern = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/i;
   if (!hashPattern.test(metadata.modelRevision)) throw new Error('metadata.modelRevision must be a pinned 40- or 64-character hexadecimal revision');
   if (!hashPattern.test(metadata.runtimeRevision)) throw new Error('metadata.runtimeRevision must be the Folio runtime 40- or 64-character commit');
+  if (metadata.runtimeProvenanceVerified !== true) throw new Error('metadata.runtimeProvenanceVerified must be true for a complete measurement');
+  if (!/^[a-f0-9]{64}$/i.test(metadata.helperSha256)) throw new Error('metadata.helperSha256 must be a SHA-256 digest of the captured helper executable');
   if (metadata.schemaVersion !== corpus.reference.schemaVersion) throw new Error(`metadata.schemaVersion must be ${corpus.reference.schemaVersion}`);
   if (!metadata.thresholds || typeof metadata.thresholds !== 'object' || Array.isArray(metadata.thresholds)) throw new Error('metadata.thresholds must contain one numeric threshold per entity type');
   for (const type of corpus.schema.types) {
@@ -46,6 +48,7 @@ function validateMetadata(metadata, corpus) {
   if (typeof metadata.device !== 'string' || !metadata.device.trim()) throw new Error('metadata.device must be a non-empty string');
   if (typeof metadata.osVersion !== 'string' || !metadata.osVersion.trim()) throw new Error('metadata.osVersion must be a non-empty string');
   if (!['float16', 'bfloat16', 'float32'].includes(metadata.precision)) throw new Error('metadata.precision must be float16, bfloat16, or float32');
+  if (metadata.precisionVerified !== true) throw new Error('metadata.precisionVerified must be true; caller-declared precision is not a measurement');
   const budget = metadata.chunkBudget;
   if (!budget || !Number.isInteger(budget.maxTokens) || budget.maxTokens < 1 || budget.maxTokens > corpus.reference.maxTokens || !Number.isInteger(budget.overlapTokens) || budget.overlapTokens < 0 || budget.overlapTokens >= budget.maxTokens) throw new Error(`metadata.chunkBudget requires maxTokens 1..${corpus.reference.maxTokens} and overlapTokens 0..maxTokens-1`);
   if (!Number.isInteger(metadata.warmupCount) || metadata.warmupCount < 0) throw new Error('metadata.warmupCount must be a non-negative integer');

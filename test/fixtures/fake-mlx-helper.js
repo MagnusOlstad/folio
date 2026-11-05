@@ -74,6 +74,8 @@ async function generate(messages) {
   const steering = content.match(/<filing-steering>\n([\s\S]*?)\n<\/filing-steering>/)?.[1] || ''
   const text = control.emptyAnswer
     ? ''
+    : typeof control.entityResponseText === 'string'
+      ? control.entityResponseText
     : content.includes('grounded research assistant')
       ? 'The launch is planned for Friday.'
       : JSON.stringify({ concept: classify(`${steering}\n${note}`) })
