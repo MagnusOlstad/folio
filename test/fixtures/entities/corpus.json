@@ -1,0 +1,528 @@
+{
+  "version": 1,
+  "description": "Fictional bilingual entity extraction corpus. Semantic labels are manually annotated and distinct from runtime-parity goldens.",
+  "schema": {
+    "types": [
+      "person",
+      "organization",
+      "project",
+      "product",
+      "location"
+    ],
+    "offsetUnit": "UTF-16 code units",
+    "offsetConvention": "half-open [startUtf16,endUtf16)",
+    "identityPolicy": "Only explicit full-name or contextually certain fictional identities receive identityId; first-name-only mentions remain null."
+  },
+  "reference": {
+    "model": "fastino/gliner2.5-multi-v1",
+    "runtime": "7b005274e82da37dcf1f5fd9d6a2ef413c6a004c",
+    "parityGoldensStatus": "pending runtime outputs; do not treat semantic annotations as parity goldens",
+    "schemaVersion": "folio-entities-v1",
+    "maxTokens": 512,
+    "maxTokensIncludes": "entity descriptions",
+    "overlapTokenBudget": "pending",
+    "modelRevision": "fastino/gliner2.5-multi-v1@pending immutable upstream revision",
+    "runtimeRevision": "7b005274e82da37dcf1f5fd9d6a2ef413c6a004c"
+  },
+  "cases": [
+    {
+      "id": "en-meeting-core",
+      "language": "en",
+      "text": "Priya Sharma from Acme opened Project Atlas in Atlas. The Atlas dashboard belongs to Acme.",
+      "notes": "Core person, organization, project, and product/project-name collision.",
+      "semantic": {
+        "mentions": [
+          {
+            "text": "Priya Sharma",
+            "type": "person",
+            "startUtf16": 0,
+            "endUtf16": 12,
+            "identityId": "person:priya-sharma"
+          },
+          {
+            "text": "Acme",
+            "type": "organization",
+            "startUtf16": 18,
+            "endUtf16": 22,
+            "identityId": "org:acme"
+          },
+          {
+            "text": "Project Atlas",
+            "type": "project",
+            "startUtf16": 30,
+            "endUtf16": 43,
+            "identityId": "project:atlas"
+          },
+          {
+            "text": "Atlas",
+            "type": "product",
+            "startUtf16": 47,
+            "endUtf16": 52,
+            "identityId": "product:atlas-dashboard"
+          },
+          {
+            "text": "Atlas",
+            "type": "product",
+            "startUtf16": 58,
+            "endUtf16": 63,
+            "identityId": "product:atlas-dashboard"
+          },
+          {
+            "text": "Acme",
+            "type": "organization",
+            "startUtf16": 85,
+            "endUtf16": 89,
+            "identityId": "org:acme"
+          }
+        ]
+      },
+      "runtimeParityGoldens": {
+        "status": "pending",
+        "mentions": null
+      }
+    },
+    {
+      "id": "no-daglig",
+      "language": "no",
+      "text": "Kari Nord fra Fjord Labs jobber med prosjekt Nordlys i Tromsø.",
+      "notes": "Norwegian names, organization, project and location.",
+      "semantic": {
+        "mentions": [
+          {
+            "text": "Kari Nord",
+            "type": "person",
+            "startUtf16": 0,
+            "endUtf16": 9,
+            "identityId": "person:kari-nord"
+          },
+          {
+            "text": "Fjord Labs",
+            "type": "organization",
+            "startUtf16": 14,
+            "endUtf16": 24,
+            "identityId": "org:fjord-labs"
+          },
+          {
+            "text": "Nordlys",
+            "type": "project",
+            "startUtf16": 45,
+            "endUtf16": 52,
+            "identityId": "project:nordlys"
+          },
+          {
+            "text": "Tromsø",
+            "type": "location",
+            "startUtf16": 55,
+            "endUtf16": 61,
+            "identityId": "location:tromso"
+          }
+        ]
+      },
+      "runtimeParityGoldens": {
+        "status": "pending",
+        "mentions": null
+      }
+    },
+    {
+      "id": "mixed-brief",
+      "language": "en-no-mixed",
+      "text": "Acme flytter piloten til Project Atlas på mandag, sa Priya Sharma. Vi må avklare med Oslo-kontoret.",
+      "notes": "Mixed English and Norwegian; date expression intentionally unlabeled.",
+      "semantic": {
+        "mentions": [
+          {
+            "text": "Acme",
+            "type": "organization",
+            "startUtf16": 0,
+            "endUtf16": 4,
+            "identityId": "org:acme"
+          },
+          {
+            "text": "Project Atlas",
+            "type": "project",
+            "startUtf16": 25,
+            "endUtf16": 38,
+            "identityId": "project:atlas"
+          },
+          {
+            "text": "Priya Sharma",
+            "type": "person",
+            "startUtf16": 53,
+            "endUtf16": 65,
+            "identityId": "person:priya-sharma"
+          },
+          {
+            "text": "Oslo",
+            "type": "location",
+            "startUtf16": 85,
+            "endUtf16": 89,
+            "identityId": "location:oslo"
+          }
+        ]
+      },
+      "runtimeParityGoldens": {
+        "status": "pending",
+        "mentions": null
+      }
+    },
+    {
+      "id": "ambiguous-first-names",
+      "language": "en",
+      "text": "Alex met Alex after Priya called Priya. Keep each first-name-only mention unresolved.",
+      "notes": "Same first name alone must not establish shared identity.",
+      "semantic": {
+        "mentions": [
+          {
+            "text": "Alex",
+            "type": "person",
+            "startUtf16": 0,
+            "endUtf16": 4
+          },
+          {
+            "text": "Alex",
+            "type": "person",
+            "startUtf16": 9,
+            "endUtf16": 13
+          },
+          {
+            "text": "Priya",
+            "type": "person",
+            "startUtf16": 20,
+            "endUtf16": 25
+          },
+          {
+            "text": "Priya",
+            "type": "person",
+            "startUtf16": 33,
+            "endUtf16": 38
+          }
+        ]
+      },
+      "runtimeParityGoldens": {
+        "status": "pending",
+        "mentions": null
+      }
+    },
+    {
+      "id": "negated-identity",
+      "language": "en",
+      "text": "Priya Sharma did not approve the launch. Priya Shah approved it; they are different people.",
+      "notes": "Negation is preserved in context; similar first names remain distinct.",
+      "semantic": {
+        "mentions": [
+          {
+            "text": "Priya Sharma",
+            "type": "person",
+            "startUtf16": 0,
+            "endUtf16": 12,
+            "identityId": "person:priya-sharma"
+          },
+          {
+            "text": "Priya Shah",
+            "type": "person",
+            "startUtf16": 41,
+            "endUtf16": 51,
+            "identityId": "person:priya-shah"
+          }
+        ]
+      },
+      "runtimeParityGoldens": {
+        "status": "pending",
+        "mentions": null
+      }
+    },
+    {
+      "id": "no-entities",
+      "language": "en",
+      "text": "Keep the room quiet, charge the recorder, and review the outline tomorrow.",
+      "notes": "No named entities; ordinary instructions and date-like word are not entities.",
+      "semantic": {
+        "mentions": []
+      },
+      "runtimeParityGoldens": {
+        "status": "pending",
+        "mentions": null
+      }
+    },
+    {
+      "id": "unicode-offsets",
+      "language": "en",
+      "text": "🧭 Café notes: Zoë met 李雷 at Montréal; évidence stayed in the log.",
+      "notes": "Emoji, accented names, CJK name, and a decomposed combining sequence.",
+      "semantic": {
+        "mentions": [
+          {
+            "text": "Zoë",
+            "type": "person",
+            "startUtf16": 15,
+            "endUtf16": 18,
+            "identityId": "person:zoe"
+          },
+          {
+            "text": "李雷",
+            "type": "person",
+            "startUtf16": 23,
+            "endUtf16": 25,
+            "identityId": "person:li-lei"
+          },
+          {
+            "text": "Montréal",
+            "type": "location",
+            "startUtf16": 29,
+            "endUtf16": 37,
+            "identityId": "location:montreal"
+          }
+        ]
+      },
+      "runtimeParityGoldens": {
+        "status": "pending",
+        "mentions": null
+      }
+    },
+    {
+      "id": "transcription-ocr-noise",
+      "language": "en-no-mixed",
+      "text": "Transcription: Preea Sharma called Acme (OCR: Acmе) about Atlas, ikke Project Atlas.",
+      "notes": "Transcription/OCR spelling noise; Cyrillic e in the OCR token is deliberately not normalized into Acme; negated project mention still appears.",
+      "semantic": {
+        "mentions": [
+          {
+            "text": "Preea Sharma",
+            "type": "person",
+            "startUtf16": 15,
+            "endUtf16": 27
+          },
+          {
+            "text": "Acme",
+            "type": "organization",
+            "startUtf16": 35,
+            "endUtf16": 39,
+            "identityId": "org:acme"
+          },
+          {
+            "text": "Atlas",
+            "type": "project",
+            "startUtf16": 58,
+            "endUtf16": 63
+          },
+          {
+            "text": "Project Atlas",
+            "type": "project",
+            "startUtf16": 70,
+            "endUtf16": 83,
+            "identityId": "project:atlas"
+          }
+        ]
+      },
+      "runtimeParityGoldens": {
+        "status": "pending",
+        "mentions": null
+      }
+    },
+    {
+      "id": "short-capture",
+      "language": "en",
+      "text": "Ask Sam at Northstar about Atlas.",
+      "notes": "Short capture with person, organization and project.",
+      "semantic": {
+        "mentions": [
+          {
+            "text": "Sam",
+            "type": "person",
+            "startUtf16": 4,
+            "endUtf16": 7
+          },
+          {
+            "text": "Northstar",
+            "type": "organization",
+            "startUtf16": 11,
+            "endUtf16": 20,
+            "identityId": "org:northstar"
+          },
+          {
+            "text": "Atlas",
+            "type": "project",
+            "startUtf16": 27,
+            "endUtf16": 32,
+            "identityId": "project:atlas"
+          }
+        ]
+      },
+      "runtimeParityGoldens": {
+        "status": "pending",
+        "mentions": null
+      }
+    },
+    {
+      "id": "appended-daily-notes",
+      "language": "en-no-mixed",
+      "text": "Morning: Priya Sharma met Acme in Oslo.\n\n--- Appended capture ---\nKari Nord skrev at Atlas fortsatt venter.",
+      "notes": "Appended daily captures retain separate textual contexts.",
+      "semantic": {
+        "mentions": [
+          {
+            "text": "Priya Sharma",
+            "type": "person",
+            "startUtf16": 9,
+            "endUtf16": 21,
+            "identityId": "person:priya-sharma"
+          },
+          {
+            "text": "Acme",
+            "type": "organization",
+            "startUtf16": 26,
+            "endUtf16": 30,
+            "identityId": "org:acme"
+          },
+          {
+            "text": "Oslo",
+            "type": "location",
+            "startUtf16": 34,
+            "endUtf16": 38,
+            "identityId": "location:oslo"
+          },
+          {
+            "text": "Kari Nord",
+            "type": "person",
+            "startUtf16": 66,
+            "endUtf16": 75,
+            "identityId": "person:kari-nord"
+          },
+          {
+            "text": "Atlas",
+            "type": "project",
+            "startUtf16": 85,
+            "endUtf16": 90,
+            "identityId": "project:atlas"
+          }
+        ]
+      },
+      "runtimeParityGoldens": {
+        "status": "pending",
+        "mentions": null
+      }
+    },
+    {
+      "id": "chunk-boundary",
+      "language": "en",
+      "text": "Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Priya Sharma spoke with Acme about Project Atlas. Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context ",
+      "notes": "Long text places labeled mentions near the intended middle chunk boundary; evaluators must record actual chunk policy.",
+      "semantic": {
+        "mentions": [
+          {
+            "text": "Priya Sharma",
+            "type": "person",
+            "startUtf16": 384,
+            "endUtf16": 396,
+            "identityId": "person:priya-sharma"
+          },
+          {
+            "text": "Acme",
+            "type": "organization",
+            "startUtf16": 408,
+            "endUtf16": 412,
+            "identityId": "org:acme"
+          },
+          {
+            "text": "Project Atlas",
+            "type": "project",
+            "startUtf16": 419,
+            "endUtf16": 432,
+            "identityId": "project:atlas"
+          }
+        ]
+      },
+      "runtimeParityGoldens": {
+        "status": "pending",
+        "mentions": null
+      }
+    },
+    {
+      "id": "name-product-collision",
+      "language": "en",
+      "text": "Atlas called Atlas support from Atlas Labs; Project Atlas is still a separate initiative.",
+      "notes": "Ambiguous name/product/organization/project surface forms require context-sensitive labels.",
+      "semantic": {
+        "mentions": [
+          {
+            "text": "Atlas",
+            "type": "person",
+            "startUtf16": 0,
+            "endUtf16": 5
+          },
+          {
+            "text": "Atlas",
+            "type": "product",
+            "startUtf16": 0,
+            "endUtf16": 5,
+            "identityId": "product:atlas-suite"
+          },
+          {
+            "text": "Atlas Labs",
+            "type": "organization",
+            "startUtf16": 32,
+            "endUtf16": 42,
+            "identityId": "org:atlas-labs"
+          },
+          {
+            "text": "Project Atlas",
+            "type": "project",
+            "startUtf16": 44,
+            "endUtf16": 57,
+            "identityId": "project:atlas"
+          }
+        ]
+      },
+      "runtimeParityGoldens": {
+        "status": "pending",
+        "mentions": null
+      }
+    },
+    {
+      "id": "acme-directory-only",
+      "language": "en",
+      "text": "Acme appears in the vendor directory. No project or meeting context was recorded.",
+      "notes": "Organization-only control: sharing Acme alone must not imply a relation or factual connection.",
+      "semantic": {
+        "mentions": [
+          {
+            "text": "Acme",
+            "type": "organization",
+            "startUtf16": 0,
+            "endUtf16": 4,
+            "identityId": "org:acme"
+          }
+        ]
+      },
+      "runtimeParityGoldens": {
+        "status": "pending",
+        "mentions": null
+      }
+    }
+  ],
+  "relatedNotesEvaluation": {
+    "purpose": "Validate explainable related-note co-mention ranking. A shared entity is co-mention evidence only, never a factual relation.",
+    "positivePairs": [
+      {
+        "left": "en-meeting-core",
+        "right": "mixed-brief",
+        "sharedIdentityIds": [
+          "org:acme",
+          "project:atlas"
+        ],
+        "expected": "distinctive shared Acme and Project Atlas may support a suggestion"
+      }
+    ],
+    "negativePairs": [
+      {
+        "left": "en-meeting-core",
+        "right": "acme-directory-only",
+        "sharedIdentityIds": [
+          "org:acme"
+        ],
+        "expected": "organization-only overlap is insufficient to imply a project relationship"
+      }
+    ],
+    "dismissalInvariant": "Once dismissed, a suggestion remains absent until explicit user action resets that dismissal."
+  }
+}
