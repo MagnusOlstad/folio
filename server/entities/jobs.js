@@ -5,6 +5,7 @@ import { createExtractionFingerprint, extractProjectedMentions, readEntitySource
 const REASONS = new Set(['save', 'capture', 'import', 'transcription', 'ocr', 'enablement', 'startup', 'rebuild', 'history-restore', 'manual', 'move'])
 const MAX_ATTEMPTS = 4
 const MAX_BACKOFF_MS = 30_000
+const MAX_CAPACITY_WAIT_MS = 60_000
 const MAX_RETAINED_JOBS = 1000
 
 function jobId() { return `ejob-${crypto.randomUUID()}` }
@@ -254,7 +255,11 @@ export function createEntityJobService(runtime, {
   function retryDelay(attempt) { return Math.min(MAX_BACKOFF_MS, 250 * (2 ** Math.max(0, attempt - 1))) }
   function retryable(error) {
     if (error?.retryable === true) return true
-    return ['MLX_BACKGROUND_QUEUE_FULL', 'ENTITY_HELPER_UNAVAILABLE', 'ENTITY_CHUNK_INCOMPLETE', 'ENTITY_PLAN_INCOMPLETE', 'ENTITY_PLAN_INVALID', 'EPIPE', 'ECONNRESET', 'ETIMEDOUT'].includes(error?.code)
+    return ['ENTITY_HELPER_UNAVAILABLE', 'ENTITY_CHUNK_INCOMPLETE', 'ENTITY_PLAN_INCOMPLETE', 'ENTITY_PLAN_INVALID', 'EPIPE', 'ECONNRESET', 'ETIMEDOUT'].includes(error?.code)
+  }
+  function capacityWaitDelay() {
+    const remaining = Number(runtime.mlxService?.activitySnapshot?.()?.backgroundCooldownRemainingMs) || 0
+    return Math.min(MAX_CAPACITY_WAIT_MS, Math.max(250, remaining + 25))
   }
 
   async function runTask(task) {
@@ -278,6 +283,7 @@ export function createEntityJobService(runtime, {
     } catch (error) {
       if (error?.code === 'ENTITY_JOB_STORAGE_FAILED') throw error
       const cancelled = controller.signal.aborted || error?.code === 'ENTITY_JOB_CANCELLED' || error?.code === 'MLX_ACTIVITY_CANCELLED'
+      const waitingForCapacity = error?.code === 'MLX_BACKGROUND_QUEUE_FULL'
       await serialize(async () => {
         if (state.tasks[task.noteId]?.token !== task.token) return
         if (['ENTITY_MODEL_MISSING', 'ENTITY_UNSUPPORTED_PLATFORM', 'ENTITY_HELPER_UNAVAILABLE'].includes(error?.code)) {
@@ -292,6 +298,9 @@ export function createEntityJobService(runtime, {
           task.state = manuallyPaused ? 'paused' : state.mode === 'running' ? 'queued' : 'paused'
           task.pauseReason = manuallyPaused ? 'manual' : state.mode === 'running' ? null : 'availability'
           updateJobsForTask(task, task.state, { error: null })
+        } else if (waitingForCapacity) {
+          task.state = 'retry'
+          updateJobsForTask(task, 'queued', { error: 'Waiting for the shared MLX model slot.' })
         } else if (retryable(error) && task.attempts + 1 < MAX_ATTEMPTS) {
           task.attempts += 1
           task.state = 'retry'
@@ -302,8 +311,8 @@ export function createEntityJobService(runtime, {
         }
         await save()
       })
-      if (!cancelled && retryable(error) && task.attempts < MAX_ATTEMPTS) {
-        try { await sleep(retryDelay(task.attempts), controller.signal) }
+      if (!cancelled && (waitingForCapacity || retryable(error) && task.attempts < MAX_ATTEMPTS)) {
+        try { await sleep(waitingForCapacity ? capacityWaitDelay() : retryDelay(task.attempts), controller.signal) }
         catch { /* State changes and shutdown are persisted by their caller. */ }
         if (!closed) await serialize(async () => {
           const pending = state.tasks[task.noteId]

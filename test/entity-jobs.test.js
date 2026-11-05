@@ -7,8 +7,9 @@ import { createEntityJobService } from '../server/entities/jobs.js'
 import { createEntityJobStorage } from '../server/entities/job-storage.js'
 import { extractProjectedMentions } from '../server/entities/extraction.js'
 import { projectMarkdown } from '../server/entities/projection.js'
+import { createMlxActivityScheduler } from '../server/mlx/scheduler.js'
 
-async function fixture({ text = 'Alice met Bob in Oslo.', enabled = true, extraction = null, noteId = 'note.md' } = {}) {
+async function fixture({ text = 'Alice met Bob in Oslo.', enabled = true, extraction = null, noteId = 'note.md', bundleId = 'bundle-a' } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-entity-jobs-'))
   const notePath = path.join(root, 'note.md')
   const indexPath = path.join(root, 'search-index.json')
@@ -18,7 +19,7 @@ async function fixture({ text = 'Alice met Bob in Oslo.', enabled = true, extrac
   const extracts = []
   let currentText = text
   const entityService = {
-    bundleId: 'bundle-a',
+    bundleId,
     async getAnalysisSettings() { return { enabled, modelId: 'gliner25multi' } },
     onAnalysisSettingsChange(listener) { listeners.settings.add(listener); return () => listeners.settings.delete(listener) },
     async getMentionsForNote(noteId) {
@@ -260,6 +261,57 @@ test('a new source generation starts with a fresh retry budget', async (t) => {
   const latest = await jobs.requestEntityExtraction({ bundleId: 'bundle-a', noteIds: [f.noteId], reason: 'save' })
   assert.equal(latest.items[0].attempts, 0)
   await jobs.close().catch(() => {})
+})
+
+test('background capacity and warm cooldown defer work across bundles without spending retries', async (t) => {
+  const scheduler = createMlxActivityScheduler({ backgroundCooldownMs: 350, maxPendingBackground: 1 })
+  let releaseInteractive
+  const interactiveGate = new Promise((resolve) => { releaseInteractive = resolve })
+  const interactive = scheduler.run(() => interactiveGate)
+  const firstFixture = await fixture({ bundleId: 'bundle-a' })
+  const secondFixture = await fixture({ bundleId: 'bundle-b' })
+  t.after(async () => {
+    await firstFixture.cleanup()
+    await secondFixture.cleanup()
+    await scheduler.close()
+  })
+  let rejectedAdmissions = 0
+  function sharedMlxFor(runtime) {
+    const localPlanner = runtime.mlxService.planEntityChunks
+    return {
+      getEntityModelStatus: async () => ({ installed: true, available: true, helperAvailable: true }),
+      onEntityModelAvailabilityChange: () => () => {},
+      activitySnapshot: scheduler.snapshot,
+      planEntityChunks: localPlanner,
+      async extractEntities(payload, { signal }) {
+        try {
+          return await scheduler.run(async () => ({ mentions: [], coverage: { ...payload.region, complete: true }, tokenCount: 0 }), {
+            priority: 'background', signal,
+          })
+        } catch (error) {
+          if (error.code === 'MLX_BACKGROUND_QUEUE_FULL') rejectedAdmissions += 1
+          throw error
+        }
+      },
+    }
+  }
+  firstFixture.runtime.mlxService = sharedMlxFor(firstFixture.runtime)
+  secondFixture.runtime.mlxService = sharedMlxFor(secondFixture.runtime)
+  const firstJobs = createEntityJobService(firstFixture.runtime)
+  const secondJobs = createEntityJobService(secondFixture.runtime)
+  await Promise.all([firstJobs.initialize(), secondJobs.initialize()])
+  await waitFor(() => rejectedAdmissions > 0)
+  assert.equal(scheduler.snapshot().backgroundCooldown, false)
+  releaseInteractive()
+  await interactive
+  await waitFor(async () => (await firstJobs.getJob((await firstJobs.listJobs({ limit: 1 })).items[0]?.id))?.items[0]?.state === 'complete'
+    && (await secondJobs.getJob((await secondJobs.listJobs({ limit: 1 })).items[0]?.id))?.items[0]?.state === 'complete', 6_000)
+  const firstItem = (await firstJobs.listJobs({ limit: 1 })).items[0].items[0]
+  const secondItem = (await secondJobs.listJobs({ limit: 1 })).items[0].items[0]
+  assert.ok(rejectedAdmissions >= 1)
+  assert.equal(firstItem.attempts, 0)
+  assert.equal(secondItem.attempts, 0)
+  await Promise.all([firstJobs.close(), secondJobs.close()])
 })
 
 test('background persistence failures are contained and exposed as degraded status', async (t) => {
