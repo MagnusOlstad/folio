@@ -42,7 +42,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   async function refreshModelLogs() {
     const entries = await readFakeMlxLog(fixture.logPath)
     const classifications = entries.filter((entry) => entry.operation === 'generate' && entry.task === 'generation'
-      && !entry.messages?.some((message) => message.content?.includes('grounded research assistant')))
+      && !entry.messages?.some((message) => message.content?.includes('grounded research assistant') || message.content?.includes('precise translation engine')))
     classificationRequests = classifications.length
     classificationPrompts.splice(0, classificationPrompts.length,
       ...classifications.map((entry) => entry.messages.at(-1)?.content || ''))

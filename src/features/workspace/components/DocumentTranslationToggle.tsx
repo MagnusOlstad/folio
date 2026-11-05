@@ -11,9 +11,10 @@ type Props = {
   onEnabledChange: (enabled: boolean) => void;
 };
 
+/** Leading switch segment plus the language segments; rendered inside the header toolbar. */
 export function DocumentTranslationToggle({ enabled, saving, error, value, available, onChange, onEnabledChange }: Props) {
   return (
-    <div className="document-translation-controls">
+    <div className="document-translation-group" data-error={error ? "true" : undefined}>
       <button
         type="button"
         role="switch"
@@ -21,7 +22,7 @@ export function DocumentTranslationToggle({ enabled, saving, error, value, avail
         aria-label="Background translation"
         className="document-translation-switch"
         disabled={saving}
-        title={enabled ? "Translation on — turn off to stop translating notes in the background" : "Translation off — turn on to translate notes in the background"}
+        title={error || (enabled ? "Translation on — turn off to stop translating notes in the background" : "Translation off — turn on to translate notes in the background")}
         onClick={() => onEnabledChange(!enabled)}
       >
         <span className="document-translation-switch-track" aria-hidden="true" />
@@ -29,29 +30,28 @@ export function DocumentTranslationToggle({ enabled, saving, error, value, avail
       {enabled ? (
         <div
           className="document-translation-toggle"
-          role="radiogroup"
+          role="group"
           aria-label="Note language"
-          title={available ? undefined : "Install a generation model in Settings to translate notes."}
         >
-          {NOTE_TRANSLATION_LANGUAGES.map(({ target, label }) => {
-            const selected = value === target;
+          {NOTE_TRANSLATION_LANGUAGES.map(({ target, label, code, name }) => {
+            const pressed = value === target;
             return (
               <button
-                key={label}
+                key={target}
                 type="button"
-                role="radio"
-                aria-checked={selected}
-                className={selected ? "active" : undefined}
-                disabled={!available && target !== null}
-                onClick={() => onChange(target)}
+                aria-pressed={pressed}
+                aria-label={label}
+                disabled={!available}
+                title={available ? `Show in ${name} — click again for original` : "Install a generation model in Settings to translate notes."}
+                onClick={() => onChange(pressed ? null : target)}
               >
-                {label}
+                {code}
               </button>
             );
           })}
         </div>
       ) : null}
-      {error ? <span className="translation-status is-error" role="alert">{error}</span> : null}
+      {error ? <span className="translation-controls-error" role="alert">{error}</span> : null}
     </div>
   );
 }

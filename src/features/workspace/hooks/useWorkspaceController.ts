@@ -18,6 +18,7 @@ import { useNoteHistoryCheckpoint } from "./useNoteHistoryCheckpoint.ts";
 import { prepareFiledDocumentHistory } from "../model/history-actions.ts";
 import { expandedPathsForFiles, filedDraftContent, isUntitledId } from "../../../lib/workspace.ts";
 import { bundleDirectories } from "../model/directory-suggestions.ts";
+import { deliverTranslatedExport } from "../model/translated-export.ts";
 import { useNoteExport } from "./useNoteExport.ts";
 import { useThemeSettings } from "../../settings/hooks/useThemeSettings.ts";
 import type { SettingsCategory } from "../../settings/model/settings-category.ts";
@@ -842,6 +843,21 @@ export function useWorkspaceController(): WorkspaceShellProps {
             document,
             documents.drafts[document.id],
             format,
+          ),
+        deliverTranslatedExport: (document, result, target, destination) =>
+          deliverTranslatedExport(
+            {
+              exportSnapshot: noteExport.exportSnapshot,
+              createDraft: (content) => {
+                setEditorFocusRequest(null);
+                tabs.createNewTab(undefined, content);
+              },
+              setMessage,
+            },
+            document,
+            result,
+            target,
+            destination,
           ),
         beforeHistoryRestore,
         historyRestored,

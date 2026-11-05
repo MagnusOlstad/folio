@@ -112,37 +112,41 @@ describe("DocumentView translation", () => {
     const draft = storedDraftDocument({ id: "untitled-1", content: "hi", createdAt: "2026-01-01", updatedAt: "2026-01-01" });
     render(<DocumentView {...props(draft)} />);
     await act(async () => {});
-    expect(screen.queryByRole("radiogroup", { name: "Note language" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Note language" })).toBeNull();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/note/translation"))).toBe(false);
   });
 
   it("hides the toggle for read-only files and when translation is disabled", async () => {
     render(<DocumentView {...props({ ...noteDocument, deletable: false, movable: false })} />);
     await act(async () => {});
-    expect(screen.queryByRole("radiogroup", { name: "Note language" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Note language" })).toBeNull();
   });
 
   it("renders the toggle for filed notes and a read-only translated view, then restores the editor", async () => {
     render(<DocumentView {...props(noteDocument)} />);
-    const group = await screen.findByRole("radiogroup", { name: "Note language" });
+    const group = await screen.findByRole("group", { name: "Note language" });
     expect(group).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Original" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("button", { name: "Original" })).toBeNull();
+    expect(screen.getByRole("button", { name: "English" })).toHaveAttribute("aria-pressed", "false");
     expect(document.querySelector("[data-live-markdown-editor]")).not.toBeNull();
     expect(translationCalls()).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole("radio", { name: "English" }));
+    fireEvent.click(screen.getByRole("button", { name: "English" }));
+    expect(screen.getByRole("button", { name: "English" })).toHaveAttribute("aria-pressed", "true");
     expect(await screen.findByText("Translating 3 of 12 paragraphs…")).toBeInTheDocument();
     expect(await screen.findByText("This is a test.")).toBeInTheDocument();
     expect(screen.getAllByRole("heading", { name: "Hello" }).length).toBeGreaterThan(0);
     expect(screen.getByText("A test")).toBeInTheDocument();
     expect(document.querySelector("[data-live-markdown-editor]")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Refile" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Refile" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refile" })).toHaveAttribute("title", "Switch back to the original to refile");
     expect(screen.queryByTitle("Click to edit title")).toBeNull();
     expect(JSON.parse(window.localStorage.getItem(noteTranslationStorageKey(null)) ?? "{}")).toEqual({ [noteDocument.id]: "en" });
 
-    fireEvent.click(screen.getByRole("radio", { name: "Original" }));
+    fireEvent.click(screen.getByRole("button", { name: "English" }));
     await waitFor(() => expect(document.querySelector("[data-live-markdown-editor]")).not.toBeNull());
     expect(screen.queryByText("Translating 3 of 12 paragraphs…")).toBeNull();
+    expect(window.localStorage.getItem(noteTranslationStorageKey(null))).toBe("{}");
   });
 
   it("restores the remembered choice and shows an error with the toggle still available", async () => {
@@ -153,8 +157,8 @@ describe("DocumentView translation", () => {
         : new Response(JSON.stringify({ error: "boom" }), { status: 500 }));
     render(<DocumentView {...props(noteDocument)} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("boom");
-    expect(screen.getByRole("radio", { name: "Norsk" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("radio", { name: "Original" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Norsk" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Norsk" })).toBeEnabled();
   });
 });
 
@@ -183,15 +187,15 @@ describe("Background translation setting", () => {
     expect(settingsSwitch).not.toBeChecked();
     expect(headerSwitch).toHaveAttribute("aria-checked", "false");
     expect(headerSwitch).toHaveAttribute("title", expect.stringContaining("Translation off"));
-    expect(screen.queryByRole("radiogroup", { name: "Note language" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Note language" })).toBeNull();
     expect(document.querySelector("[data-live-markdown-editor]")).not.toBeNull();
     fireEvent.click(settingsSwitch);
-    expect(await screen.findByRole("radiogroup", { name: "Note language" })).toBeInTheDocument();
+    expect(await screen.findByRole("group", { name: "Note language" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url, init]) => String(url).includes("/api/translation/settings") && init?.method === "PUT")).toBe(true);
     expect(settingsSwitch).toBeChecked();
     expect(screen.getByRole("switch", { name: "Background translation" })).toHaveAttribute("aria-checked", "true");
     fireEvent.click(screen.getByRole("switch", { name: "Background translation" }));
-    await waitFor(() => expect(screen.queryByRole("radiogroup", { name: "Note language" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("group", { name: "Note language" })).toBeNull());
     expect(settingsSwitch).not.toBeChecked();
   });
 
@@ -218,7 +222,7 @@ describe("Background translation setting", () => {
     expect(screen.getByRole("switch", { name: "Background translation" })).toHaveAttribute("aria-checked", "false");
     failPut = false;
     fireEvent.click(screen.getByRole("switch", { name: "Background translation" }));
-    expect(await screen.findByRole("radio", { name: "Norsk" })).toHaveAttribute("aria-checked", "true");
+    expect(await screen.findByRole("button", { name: "Norsk" })).toHaveAttribute("aria-pressed", "true");
     expect(await screen.findByText("Norsk tekst")).toBeInTheDocument();
     vi.unstubAllGlobals();
   });

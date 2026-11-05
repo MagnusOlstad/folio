@@ -1,12 +1,20 @@
 import { useEffect, useId, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
+import type { ComponentProps, KeyboardEvent } from "react";
+import type { ViewerDocument } from "../../../domain/types.ts";
 import type { NoteExportFormat } from "../model/note-export.ts";
+import { TranslatedExportDialog } from "./TranslatedExportDialog.tsx";
 
 type NoteExportMenuProps = {
   title: string;
   exporting: boolean;
   disabled?: boolean;
   onExport: (format: NoteExportFormat) => void;
+  /** Present only for filed notes; `available` mirrors the translation settings. */
+  translate?: {
+    document: ViewerDocument;
+    available: boolean;
+    onDeliver: ComponentProps<typeof TranslatedExportDialog>["onDeliver"];
+  };
 };
 
 export function NoteExportMenu({
@@ -14,8 +22,10 @@ export function NoteExportMenu({
   exporting,
   disabled = false,
   onExport,
+  translate,
 }: NoteExportMenuProps) {
   const [open, setOpen] = useState(false);
+  const [translateOpen, setTranslateOpen] = useState(false);
   const menuId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -45,7 +55,7 @@ export function NoteExportMenu({
 
   function moveMenuFocus(event: KeyboardEvent<HTMLDivElement>) {
     const items = Array.from(
-      event.currentTarget.querySelectorAll<HTMLButtonElement>("[role=menuitem]"),
+      event.currentTarget.querySelectorAll<HTMLButtonElement>("[role=menuitem]:not(:disabled)"),
     );
     const index = items.indexOf(document.activeElement as HTMLButtonElement);
     if (event.key === "Escape") {
@@ -97,7 +107,34 @@ export function NoteExportMenu({
           <button type="button" role="menuitem" onClick={() => choose("pdf")}>
             PDF
           </button>
+          {translate ? (
+            <>
+              <div className="note-export-separator" role="separator" />
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!translate.available}
+                title={translate.available ? undefined : "Install a generation model in Settings to translate notes."}
+                onClick={() => {
+                  setOpen(false);
+                  setTranslateOpen(true);
+                }}
+              >
+                Translate…
+              </button>
+            </>
+          ) : null}
         </div>
+      ) : null}
+      {translate && translateOpen ? (
+        <TranslatedExportDialog
+          document={translate.document}
+          onDeliver={translate.onDeliver}
+          onClose={() => {
+            setTranslateOpen(false);
+            window.requestAnimationFrame(() => triggerRef.current?.focus());
+          }}
+        />
       ) : null}
     </div>
   );

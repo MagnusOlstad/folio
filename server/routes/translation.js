@@ -26,6 +26,24 @@ export function registerRoutes(app, runtime) {
     } catch (error) { fail(response, next, error) }
   })
 
+  app.post('/api/note/translation/export', async (request, response, next) => {
+    try {
+      response.status(202).json(await runtime.translation.startExport(String(request.body?.id || ''), String(request.body?.target || '')))
+    } catch (error) { fail(response, next, error) }
+  })
+
+  app.get('/api/note/translation/export/:jobId', (request, response) => {
+    const job = runtime.translation.getExport(request.params.jobId)
+    if (!job) return response.status(404).json({ error: 'Export job not found.' })
+    response.json(job)
+  })
+
+  app.delete('/api/note/translation/export/:jobId', (request, response) => {
+    const result = runtime.translation.cancelExport(request.params.jobId)
+    if (!result) return response.status(404).json({ error: 'Export job not found.' })
+    response.json(result)
+  })
+
   app.get('/api/translation/settings', async (_request, response, next) => {
     try { response.json(await runtime.translation.getSettings()) } catch (error) { next(error) }
   })

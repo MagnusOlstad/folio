@@ -1,4 +1,19 @@
-import type { NoteTranslation, NoteTranslationTarget, TranslationSettings } from "../domain/types.ts";
+import type {
+  NoteTranslation,
+  NoteTranslationTarget,
+  TranslatedExportJob,
+  TranslatedExportTarget,
+  TranslationSettings,
+} from "../domain/types.ts";
+
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
 
 let activeBundleId: string | null = null;
 
@@ -58,7 +73,7 @@ export async function api<T>(url: string, options?: RequestInit): Promise<T> {
         : [502, 503, 504].includes(response.status)
           ? "The local FolioNotes service is not ready yet."
           : `Request failed (${response.status}).`;
-    throw new Error(error);
+    throw new ApiError(error, response.status);
   }
   return result as T;
 }
@@ -109,5 +124,22 @@ export function saveTranslationSettings(enabled: boolean): Promise<TranslationSe
   return api<TranslationSettings>("/api/translation/settings", {
     method: "PUT",
     body: JSON.stringify({ enabled }),
+  });
+}
+
+export function startTranslatedExport(id: string, target: TranslatedExportTarget): Promise<TranslatedExportJob> {
+  return api<TranslatedExportJob>("/api/note/translation/export", {
+    method: "POST",
+    body: JSON.stringify({ id, target }),
+  });
+}
+
+export function fetchTranslatedExport(jobId: string, signal?: AbortSignal): Promise<TranslatedExportJob> {
+  return api<TranslatedExportJob>(`/api/note/translation/export/${encodeURIComponent(jobId)}`, { signal });
+}
+
+export function cancelTranslatedExport(jobId: string): Promise<{ jobId: string; status: "cancelled" }> {
+  return api<{ jobId: string; status: "cancelled" }>(`/api/note/translation/export/${encodeURIComponent(jobId)}`, {
+    method: "DELETE",
   });
 }

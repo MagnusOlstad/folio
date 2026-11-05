@@ -60,6 +60,7 @@ export function EditorWorkspace({ model, actions, paneControls, historyPreview }
     persistMetadata: actions.persistMetadata,
     moveBundleFile: actions.moveBundleFile,
     exportDocument: actions.exportDocument,
+    deliverTranslatedExport: actions.deliverTranslatedExport,
     getDocumentScrollTop: actions.getDocumentScrollTop,
     rememberDocumentScrollTop: actions.rememberDocumentScrollTop,
     getDocumentSelection: actions.getDocumentSelection,

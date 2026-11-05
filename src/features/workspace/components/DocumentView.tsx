@@ -10,6 +10,7 @@ import {
   subscribeNoteTranslationChoices,
   translatedProgressLabel,
 } from "../model/note-translation.ts";
+import type { TranslatedExportDeliver } from "../model/translated-export.ts";
 import { RenderedMarkdown } from "./RenderedMarkdown.tsx";
 import { isUntitledId } from "../../../lib/workspace.ts";
 import { DocumentBody } from "./DocumentBody.tsx";
@@ -85,6 +86,7 @@ export type DocumentViewProps = {
   onFinishTagEditing: (document: ViewerDocument, value: string) => void;
   onDelete: (document: ViewerDocument) => Promise<void>;
   onExport: (document: ViewerDocument, format: NoteExportFormat) => void;
+  onTranslatedExport?: TranslatedExportDeliver;
   filing: FilingQueueEntry | undefined;
   refile: RefileEntry | undefined;
   focusFiling: boolean;
@@ -169,6 +171,7 @@ export function DocumentView(props: DocumentViewProps) {
             groupId={props.groupId}
             document={translationTarget ? translatedDocument : document}
             readOnly={Boolean(translationTarget)}
+            refileLocked={Boolean(translationTarget) && document.deletable && document.movable}
             languageToggle={languageToggle}
             editingKey={props.editingMetadataKey}
             drafts={props.metadataDrafts}
@@ -253,6 +256,7 @@ export function DocumentView(props: DocumentViewProps) {
         onFileDraft={props.onFileDraft}
         onDelete={props.onDelete}
         onExport={props.onExport}
+        onTranslatedExport={props.onTranslatedExport}
         onOpenDocument={props.onOpenDocument}
       />
       {props.refile && (

@@ -233,3 +233,18 @@ export type NoteTranslation = {
   content: string;
 };
 export type TranslationSettings = { enabled: boolean; available: boolean };
+export type TranslatedExportTarget = "en" | "no" | "de" | "es" | "fr" | "fi" | "sv" | "da";
+export type TranslatedExportJob = {
+  jobId: string;
+  id: string;
+  target: TranslatedExportTarget;
+  status: "running" | "done" | "failed" | "cancelled";
+  translatedBlocks: number;
+  totalBlocks: number;
+  /** Paragraphs kept in the original language after the model failed. */
+  failedBlocks?: number;
+  title?: string;
+  description?: string;
+  content?: string;
+  error?: string;
+};

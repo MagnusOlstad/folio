@@ -3,6 +3,7 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 import { createTranslationCache } from './cache.js'
+import { createExportManager } from './export.js'
 import { createTextBlock, renderItems, splitBody, translatableBlocks } from './blocks.js'
 import {
   buildDirectTranslationMessages, buildTranslationMessages, maxTokensFor, parseDirectTranslation, parseTranslationOutput,
@@ -17,7 +18,7 @@ function httpError(status, message) {
 }
 
 export function createTranslationService(runtime, options = {}) {
-  const settings = { debounceMs: 2_000, backfillDelayMs: 5_000, busyPollMs: 500, statusTtlMs: 5_000, ...runtime.translationOptions, ...options }
+  const settings = { debounceMs: 2_000, backfillDelayMs: 5_000, busyPollMs: 500, statusTtlMs: 5_000, exportRetentionMs: 10 * 60_000, ...runtime.translationOptions, ...options }
   const settingsPath = path.join(runtime.modelRoot, 'translation-settings.json')
   const cache = createTranslationCache(path.join(runtime.bundleRoot, '.folio', 'translations.json'))
   const queue = []
@@ -98,6 +99,11 @@ export function createTranslationService(runtime, options = {}) {
     }
   }
 
+  const exports = createExportManager({
+    runtime, cache, readNote, installedModel, translateBlock: (block, modelId) => translateBlock(block, modelId),
+    waitForTurn: (options) => waitForTurn(options), closedFlag: () => closed, retentionMs: settings.exportRetentionMs,
+  })
+
   function needsWork(block, modelId) {
     const entry = cache.get(block.hash)
     if (!entry) return true
@@ -130,9 +136,10 @@ export function createTranslationService(runtime, options = {}) {
   }
 
   // Waits until user-facing model work has finished. Returns false when work should stop.
-  async function waitForTurn() {
+  async function waitForTurn({ force = false } = {}) {
     while (!closed) {
-      if (!(await isEnabled()) || !(await installedModel())) return false
+      if ((!force && !(await isEnabled())) || !(await installedModel())) return false
+      if (!force && exports.pending()) { await sleep(settings.busyPollMs); continue }
       if (!runtime.mlxService.isBusy?.()) return true
       await sleep(settings.busyPollMs)
     }
@@ -241,7 +248,7 @@ export function createTranslationService(runtime, options = {}) {
     kick()
     if (!complete) return
     for (const [hash, entry] of Object.entries(cache.entries())) {
-      if (!referenced.has(hash) && String(entry.translatedAt) < startedAt) cache.delete(hash)
+      if (!referenced.has(hash.split(':')[0]) && String(entry.translatedAt) < startedAt) cache.delete(hash)
     }
   }
 
@@ -281,11 +288,12 @@ export function createTranslationService(runtime, options = {}) {
   }
 
   async function idle() {
-    while (running || backfill || queue.length || debounceTimers.size) await (running || backfill || sleep(10))
+    while (running || backfill || queue.length || debounceTimers.size || exports.pending()) await (running || backfill || sleep(10))
   }
 
   async function close() {
     closed = true
+    exports.close()
     queue.length = 0
     priority.clear()
     clearTimeout(backfillTimer)
@@ -296,5 +304,6 @@ export function createTranslationService(runtime, options = {}) {
     await cache.flush()
   }
 
-  return { enqueue, prioritize, startBackfill, view, getSettings, setEnabled, idle, close, validId }
+  return { enqueue, prioritize, startBackfill, view, getSettings, setEnabled, idle, close, validId,
+    startExport: exports.start, getExport: exports.get, cancelExport: exports.cancel }
 }

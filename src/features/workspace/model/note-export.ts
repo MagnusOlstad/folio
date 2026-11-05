@@ -1,4 +1,4 @@
-import type { ViewerDocument } from "../../../domain/types.ts";
+import type { TranslatedExportTarget, ViewerDocument } from "../../../domain/types.ts";
 import { filedDraftContent, isUntitledId } from "../../../lib/workspace.ts";
 
 export type NoteExportFormat = "markdown" | "pdf";
@@ -61,6 +61,17 @@ export function noteExportFilename(
   if (!basename) basename = "Untitled";
   if (WINDOWS_RESERVED_FILENAME.test(basename)) basename = `${basename}-note`;
   return `${basename}.${format === "markdown" ? "md" : "pdf"}`;
+}
+
+/** `Title.de.md` / `Title.de.pdf`: the language code sits before the extension. */
+export function translatedExportFilename(
+  title: string,
+  format: NoteExportFormat,
+  target: TranslatedExportTarget,
+) {
+  const filename = noteExportFilename(title, format);
+  const extension = format === "markdown" ? ".md" : ".pdf";
+  return `${filename.slice(0, -extension.length)}.${target}${extension}`;
 }
 
 function plainHeadingText(value: string) {

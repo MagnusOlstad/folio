@@ -22,6 +22,8 @@ type DocumentHeaderProps = {
   onRefile?: (document: ViewerDocument) => void;
   refileDisabled?: boolean;
   readOnly?: boolean;
+  /** Keeps a disabled Refile in the toolbar so its layout does not shift in translated views. */
+  refileLocked?: boolean;
   languageToggle?: {
     enabled: boolean;
     saving: boolean;
@@ -44,14 +46,24 @@ export function DocumentHeader({
   onRefile = () => {},
   refileDisabled = false,
   readOnly = false,
+  refileLocked = false,
   languageToggle,
 }: DocumentHeaderProps) {
   const titleKey = `${groupId}:${document.id}:title`;
   const descriptionKey = `${groupId}:${document.id}:description`;
+  const showRefile = refileLocked || (!readOnly && document.deletable && document.movable);
+  const hasToolbar = Boolean(languageToggle) || showRefile;
 
   return (
-    <header className="document-heading">
-      {languageToggle ? <DocumentTranslationToggle {...languageToggle} /> : null}
+    <header className={`document-heading${hasToolbar ? " has-toolbar" : ""}`}>
+      {hasToolbar ? (
+        <div className="document-toolbar" role="toolbar" aria-label="Note actions">
+          {languageToggle ? <DocumentTranslationToggle {...languageToggle} /> : null}
+          {showRefile ? (
+            <button type="button" className="document-refile-button" onClick={() => onRefile(document)} disabled={refileDisabled || refileLocked} title={refileLocked ? "Switch back to the original to refile" : undefined}>Refile</button>
+          ) : null}
+        </div>
+      ) : null}
       <p>
         {document.type}
         {document.stale ? " / stale" : ""}
@@ -142,9 +154,6 @@ export function DocumentHeader({
         </button>
       ) : document.description ? (
         <span>{document.description}</span>
-      ) : null}
-      {!readOnly && document.deletable && document.movable ? (
-        <button type="button" className="document-refile-button" onClick={() => onRefile(document)} disabled={refileDisabled}>Refile</button>
       ) : null}
     </header>
   );

@@ -3,10 +3,10 @@ import { readStorageItem, writeStorageItem } from "../../../lib/storage.ts";
 
 export type NoteTranslationChoices = Record<string, NoteTranslationTarget>;
 
-export const NOTE_TRANSLATION_LANGUAGES: readonly { target: NoteTranslationTarget | null; label: string }[] = [
-  { target: null, label: "Original" },
-  { target: "no", label: "Norsk" },
-  { target: "en", label: "English" },
+/** Original is the absence of a choice, so only the two translated languages are listed. */
+export const NOTE_TRANSLATION_LANGUAGES: readonly { target: NoteTranslationTarget; label: string; code: string; name: string }[] = [
+  { target: "no", label: "Norsk", code: "NO", name: "Norwegian" },
+  { target: "en", label: "English", code: "EN", name: "English" },
 ];
 
 export function noteTranslationStorageKey(bundleId: string | null | undefined): string {

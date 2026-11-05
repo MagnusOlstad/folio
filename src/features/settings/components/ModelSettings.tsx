@@ -71,7 +71,7 @@ export function ModelSettings({ controls }: { controls: ModelSettingsControls })
       {translation.settings ? (
         <fieldset className="model-settings-group" aria-label="Background translation">
           <legend>Background translation</legend>
-          <article className="model-settings-row"><label>
+          <article className="translation-settings-row"><label>
             <input
               type="checkbox"
               role="switch"

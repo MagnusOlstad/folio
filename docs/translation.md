@@ -30,6 +30,16 @@ Writes are atomic (temp file + rename). Because entries are keyed by text hash, 
 - `POST /api/note/translation/prioritize` with `{ id }` returns 202 `{ queued: true }`.
 - `GET|PUT /api/translation/settings` returns/accepts `{ enabled }` and returns `{ enabled, available }`; `PUT` requires a boolean.
 
+## Translated export
+
+An explicit, on-demand export translates one filed note into `en` (English), `no` (Norwegian Bokmål), `de` (German), `es` (Spanish), `fr` (French), `fi` (Finnish), `sv` (Swedish) or `da` (Danish). It works even when background translation is switched off, but still needs an installed, selected generation model and never downloads anything.
+
+- `POST /api/note/translation/export` with `{ id, target }` returns 202 `{ jobId, id, target, status: 'running', translatedBlocks, totalBlocks }`. An identical running job is returned instead of starting another. 400 for an invalid target or non-bundle id, 404 for a missing note, 503 when no generation model is installed.
+- `GET /api/note/translation/export/:jobId` returns the job with `status` `running|done|failed|cancelled` and an additive `failedBlocks` (blocks that fell back to the original after retries); `title`, `description` and `content` (Markdown body) appear only when `done`, `error` only when `failed`. 404 for unknown or expired jobs (kept 10 minutes after finishing).
+- `DELETE /api/note/translation/export/:jobId` cancels between blocks and returns `{ jobId, status: 'cancelled' }` (idempotent, 404 if unknown). A job that already finished keeps its `done`/`failed` status, which the response reports.
+
+Jobs are in memory, run one at a time per bundle (FIFO) and take priority over the background queue, which pauses meanwhile; they still wait for user-facing model work. `en` and `no` reuse the main cache with the same detect-and-translate path. Other languages pivot through English: the main-cache entry is ensured first, then the English text (the original for English blocks, the cached English translation for Norwegian ones, or the original without a source label for `other`/failed blocks) is translated with a prompt that names the source language. Placeholders are re-protected on the English text and restored exactly. Entries record `pivot: 'en' | null`, and language entries without a `pivot` field are treated as stale and redone, and are cached in the same file as `<hash>:<lang>` entries (`{ translation, modelId, translatedAt, failed? }`). After one retry an invalid block falls back to the original text. Pruning keeps language entries whose base hash is still referenced.
+
 ## Privacy
 
 Everything runs on the local MLX model. Local drafts live client-side and are never sent. Only notes already filed in the bundle are read.

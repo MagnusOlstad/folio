@@ -52,6 +52,7 @@ export function useNoteExport({ setMessage }: UseNoteExportOptions) {
   const [preview, setPreview] = useState<NoteExportSnapshot | null>(null);
   const [exportingNoteId, setExportingNoteId] = useState<string | null>(null);
   const pendingPdfFilenameRef = useRef<string | null>(null);
+  const pendingNoticeRef = useRef("");
 
   useEffect(() => {
     if (!preview || !pendingPdfFilenameRef.current) return;
@@ -64,7 +65,7 @@ export function useNoteExport({ setMessage }: UseNoteExportOptions) {
           await waitForExportAssets();
           if (window.folio?.savePdfExport) {
             const result = await window.folio.savePdfExport(filename);
-            if (!result.canceled) setMessage(`Exported ${filename}`);
+            if (!result.canceled) setMessage(`Exported ${filename}${pendingNoticeRef.current}`);
           } else {
             window.print();
             setMessage("Opened the print dialog for PDF export.");
@@ -85,14 +86,15 @@ export function useNoteExport({ setMessage }: UseNoteExportOptions) {
     return () => window.cancelAnimationFrame(frame);
   }, [preview, setMessage]);
 
-  async function exportDocument(
-    document: ViewerDocument,
-    draft: string | undefined,
+  async function exportSnapshot(
+    snapshot: NoteExportSnapshot,
     format: NoteExportFormat,
+    filename: string,
+    noteId: string,
+    notice = "",
   ) {
-    const snapshot = noteExportSnapshot(document, draft);
-    const filename = noteExportFilename(snapshot.title, format);
-    setExportingNoteId(document.id);
+    setExportingNoteId(noteId);
+    pendingNoticeRef.current = notice;
     if (format === "pdf") {
       pendingPdfFilenameRef.current = filename;
       setPreview(snapshot);
@@ -104,10 +106,10 @@ export function useNoteExport({ setMessage }: UseNoteExportOptions) {
           filename,
           snapshot.content,
         );
-        if (!result.canceled) setMessage(`Exported ${filename}`);
+        if (!result.canceled) setMessage(`Exported ${filename}${notice}`);
       } else {
         downloadMarkdown(filename, snapshot.content);
-        setMessage(`Downloaded ${filename}`);
+        setMessage(`Downloaded ${filename}${notice}`);
       }
     } catch (error) {
       setMessage(
@@ -118,6 +120,15 @@ export function useNoteExport({ setMessage }: UseNoteExportOptions) {
     }
   }
 
-  return { preview, exportingNoteId, exportDocument };
+  async function exportDocument(
+    document: ViewerDocument,
+    draft: string | undefined,
+    format: NoteExportFormat,
+  ) {
+    const snapshot = noteExportSnapshot(document, draft);
+    await exportSnapshot(snapshot, format, noteExportFilename(snapshot.title, format), document.id);
+  }
+
+  return { preview, exportingNoteId, exportDocument, exportSnapshot };
 }
 

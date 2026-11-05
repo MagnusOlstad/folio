@@ -79,3 +79,15 @@ export function parseDirectTranslation(text, tokens, original, protectedSource) 
   if (restored === null) throw new TranslationOutputError('Translation dropped a placeholder.')
   return restored
 }
+
+export const EXPORT_LANGUAGES = Object.freeze({
+  en: 'English', no: 'Norwegian Bokmål', de: 'German', es: 'Spanish', fr: 'French', fi: 'Finnish', sv: 'Swedish', da: 'Danish',
+})
+
+export function buildLanguageMessages(language, protectedText, sourceLanguage = null) {
+  const subject = sourceLanguage ? `${sourceLanguage} text` : 'text'
+  return [
+    { role: 'system', content: `You are a precise translation engine. Translate the following text into ${language}. If it is already in ${language}, return it unchanged. Keep placeholders like <x1/> exactly as written, preserve inline Markdown formatting, names and numbers. Reply with only the translation, no quotes or explanation.` },
+    { role: 'user', content: `Translate the following ${subject} into ${language}:\n<<<\n${protectedText}\n>>>` },
+  ]
+}
