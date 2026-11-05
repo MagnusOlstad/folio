@@ -1653,26 +1653,79 @@
   pointer-events: auto;
 }
 
+/* The image carries a 6px vertical margin, so the corner sits 6px above the frame bottom. */
 .live-markdown-editor .cm-live-markdown-image-resize {
   position: absolute;
-  right: 4px;
-  bottom: 10px;
+  right: 0;
+  bottom: 6px;
   z-index: 2;
-  width: 14px;
-  height: 14px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--paper-raised);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  width: 24px;
+  height: 24px;
   cursor: nwse-resize;
   opacity: 0;
   touch-action: none;
-  transition: opacity 120ms ease;
+  transition: opacity 140ms ease;
+}
+
+.live-markdown-editor .cm-live-markdown-image-resize::before {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 18px;
+  height: 18px;
+  border-right: 3px solid rgba(255, 255, 255, 0.95);
+  border-bottom: 3px solid rgba(255, 255, 255, 0.95);
+  border-bottom-right-radius: 6px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
+  transform-origin: 100% 100%;
+  transition: transform 140ms ease;
 }
 
 .live-markdown-editor .cm-live-markdown-image-frame:hover .cm-live-markdown-image-resize,
+.live-markdown-editor .cm-live-markdown-image-frame:focus-within .cm-live-markdown-image-resize,
 .live-markdown-editor .cm-live-markdown-image-frame.is-resizing .cm-live-markdown-image-resize {
   opacity: 1;
+}
+
+.live-markdown-editor .cm-live-markdown-image-resize:hover::before,
+.live-markdown-editor .cm-live-markdown-image-frame.is-resizing .cm-live-markdown-image-resize::before {
+  transform: scale(1.18);
+}
+
+.live-markdown-editor .cm-live-markdown-image-frame.is-resizing .cm-live-markdown-image {
+  outline: 2px solid var(--acid);
+  outline-offset: 2px;
+}
+
+.live-markdown-editor .cm-live-markdown-image-frame.is-resizing .cm-live-markdown-image-toolbar {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.live-markdown-editor .cm-live-markdown-image-resize-badge {
+  position: absolute;
+  right: 10px;
+  bottom: 34px;
+  z-index: 3;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(20, 22, 26, 0.82);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-markdown-editor .cm-live-markdown-image-resize,
+  .live-markdown-editor .cm-live-markdown-image-resize::before {
+    transition: none;
+  }
 }
 
 .live-markdown-editor .cm-live-markdown-image-action {

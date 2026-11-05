@@ -108,6 +108,9 @@ function attachResizeHandle(
   handle.setAttribute("role", "separator");
   handle.setAttribute("aria-label", "Resize image");
   handle.title = "Drag to resize, double-click to reset";
+  const badge = document.createElement("span");
+  badge.className = "cm-live-markdown-image-resize-badge";
+  badge.setAttribute("aria-hidden", "true");
   let drag: { pointerId: number; startX: number; startWidth: number; width: number } | null = null;
   const maxWidth = () => Math.max(MIN_IMAGE_WIDTH, view.contentDOM.clientWidth);
 
@@ -118,18 +121,22 @@ function attachResizeHandle(
     const startWidth = image.getBoundingClientRect().width;
     drag = { pointerId: event.pointerId, startX: event.clientX, startWidth, width: startWidth };
     handle.setPointerCapture(event.pointerId);
+    badge.textContent = `${Math.round(startWidth)} px`;
+    frame.append(badge);
     frame.classList.add("is-resizing");
   });
   handle.addEventListener("pointermove", (event) => {
     if (!drag || event.pointerId !== drag.pointerId) return;
     drag.width = Math.min(maxWidth(), Math.max(MIN_IMAGE_WIDTH, drag.startWidth + event.clientX - drag.startX));
     image.style.width = `${drag.width}px`;
+    badge.textContent = `${Math.round(drag.width)} px`;
   });
   const finish = (event: PointerEvent, commit: boolean) => {
     if (!drag || event.pointerId !== drag.pointerId) return;
     const { width, startWidth } = drag;
     drag = null;
     frame.classList.remove("is-resizing");
+    badge.remove();
     if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
     if (commit && Math.round(width) !== Math.round(startWidth)) setImageWidth(view, frame, width);
     else if (!commit) image.style.width = options.width ? `${options.width}px` : "";
