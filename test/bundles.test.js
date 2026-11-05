@@ -138,3 +138,94 @@ test('scoped runtimes isolate same file and draft IDs', async (context) => {
   assert.equal(firstDrafts.find((draft) => draft.id === draftId).content, 'first draft')
   assert.equal(secondDrafts.find((draft) => draft.id === draftId).content, 'second draft')
 })
+
+test('entity jobs capture the requested bundle and reject cross-bundle IDs', async (context) => {
+  const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-entity-jobs-isolation-'))
+  const firstPath = path.join(dataRoot, 'first')
+  const secondPath = path.join(dataRoot, 'second')
+  await Promise.all([fs.mkdir(firstPath, { recursive: true }), fs.mkdir(secondPath, { recursive: true })])
+  await Promise.all([
+    fs.writeFile(path.join(firstPath, 'same.md'), '---\ntitle: First\n---\nFirst bundle text.'),
+    fs.writeFile(path.join(secondPath, 'same.md'), '---\ntitle: Second\n---\nSecond bundle text.'),
+  ])
+  const app = await createApp(createRuntime({ ...process.env, FOLIO_DATA_ROOT: dataRoot }))
+  const first = await app.bundleManager.registry.setup({ name: 'First', markdownPath: firstPath, source: 'existing' })
+  const second = await app.bundleManager.registry.setup({ name: 'Second', markdownPath: secondPath, source: 'existing' })
+  const server = await new Promise((resolve) => {
+    const listener = app.listen(0, '127.0.0.1', () => resolve(listener))
+  })
+  context.after(async () => {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+    await app.bundleManager.close()
+    await fs.rm(dataRoot, { recursive: true, force: true })
+  })
+  const url = `http://127.0.0.1:${server.address().port}/api/entities/jobs`
+  async function request(bundle, method, body) {
+    return fetch(url, { method, headers: { 'x-folio-bundle': bundle.id, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) })
+  }
+  const firstResponse = await request(first, 'POST', { noteIds: ['/same.md'] })
+  const secondResponse = await request(second, 'POST', { noteIds: ['/same.md'] })
+  assert.equal(firstResponse.status, 202)
+  assert.equal(secondResponse.status, 202)
+  const [firstJob, secondJob] = await Promise.all([firstResponse.json(), secondResponse.json()])
+  assert.equal(firstJob.bundleId, first.id)
+  assert.equal(secondJob.bundleId, second.id)
+  assert.notEqual(firstJob.id, secondJob.id)
+  assert.equal((await request(first, 'GET')).status, 200)
+  const foreign = await request(first, 'GET').then((response) => response.json())
+  assert.equal(foreign.items.some((job) => job.id === secondJob.id), false)
+  const crossBundle = await fetch(`${url}/${encodeURIComponent(secondJob.id)}`, { headers: { 'x-folio-bundle': first.id } })
+  assert.equal(crossBundle.status, 404)
+  for (const action of ['pause', 'resume', 'cancel']) {
+    const control = await fetch(`${url}/${encodeURIComponent(firstJob.id)}/${action}`, { method: 'POST', headers: { 'x-folio-bundle': first.id } })
+    assert.equal(control.status, 200, `${action} endpoint should update the selected bundle's job`)
+  }
+  const missingJob = await fetch(`${url}/unknown-job`, { headers: { 'x-folio-bundle': first.id } })
+  assert.equal(missingJob.status, 404)
+  const save = await fetch(`${url.replace('/api/entities/jobs', '/api/note?id=%2Fsame.md')}`, {
+    method: 'PATCH',
+    headers: { 'x-folio-bundle': second.id, 'content-type': 'application/json' },
+    body: JSON.stringify({ content: 'Updated second bundle text.' }),
+  })
+  assert.equal(save.status, 200)
+  const updatedJobs = await request(second, 'GET').then((response) => response.json())
+  assert.equal(updatedJobs.items.some((job) => job.reason === 'save'), false, 'automatic saves do not queue work before opt-in')
+  const invalid = await request(first, 'POST', { noteIds: ['/../outside.md'] })
+  assert.equal(invalid.status, 400)
+})
+
+test('damaged entity job state degrades the feature without blocking note reads', async (context) => {
+  const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-entity-job-damage-'))
+  const bundlePath = path.join(dataRoot, 'notes')
+  await fs.mkdir(path.join(bundlePath, '.folio'), { recursive: true })
+  await fs.writeFile(path.join(bundlePath, 'note.md'), '---\ntitle: Note\n---\nReadable note body.')
+  await fs.mkdir(path.join(dataRoot, 'state', 'bundles', 'broken-bundle'), { recursive: true })
+  await fs.writeFile(path.join(dataRoot, 'state', 'bundles', 'broken-bundle', 'entity-jobs.json'), '{damaged')
+  const app = await createApp(createRuntime({ ...process.env, FOLIO_DATA_ROOT: dataRoot }))
+  const bundle = await app.bundleManager.registry.setup({ name: 'Broken jobs', markdownPath: bundlePath, source: 'existing' })
+  // Job paths are keyed by the stable registry identity.
+  const statePath = path.join(dataRoot, 'state', 'bundles', bundle.id, 'entity-jobs.json')
+  await fs.mkdir(path.dirname(statePath), { recursive: true })
+  await fs.rename(path.join(dataRoot, 'state', 'bundles', 'broken-bundle', 'entity-jobs.json'), statePath)
+  let managerClosed = false
+  const server = await new Promise((resolve) => {
+    const listener = app.listen(0, '127.0.0.1', () => resolve(listener))
+  })
+  context.after(async () => {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+    if (!managerClosed) await app.bundleManager.close()
+    await fs.rm(dataRoot, { recursive: true, force: true })
+  })
+  const base = `http://127.0.0.1:${server.address().port}`
+  const headers = { 'x-folio-bundle': bundle.id }
+  const jobs = await fetch(`${base}/api/entities/jobs`, { headers })
+  assert.equal(jobs.status, 503)
+  assert.match((await jobs.json()).error, /damaged|corrupt|quarantine/i)
+  const note = await fetch(`${base}/api/file?path=%2Fnote.md`, { headers })
+  assert.equal(note.status, 200)
+  assert.match((await note.json()).content, /Readable note body/)
+  await app.bundleManager.waitForBackground()
+  await app.bundleManager.close()
+  managerClosed = true
+  assert.equal(await fs.readFile(statePath, 'utf8'), '{damaged')
+})

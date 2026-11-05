@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { scheduleEntityExtraction } from '../entities/triggers.js'
 
 const IGNORED_DIRECTORIES = new Set(['.obsidian', '.trash', '.git'])
 const activeScans = new Map()
@@ -253,6 +254,7 @@ export function createObsidianImportService(runtime) {
     const { manifest, manifestPath } = await manifestFor(scan.vaultId, scan.name)
     let wrote = false
     let reindexAttempted = false
+    const writtenNoteIds = new Set()
 
     async function reindexWrittenFiles() {
       if (!wrote || reindexAttempted) return
@@ -260,6 +262,7 @@ export function createObsidianImportService(runtime) {
       job.phase = 'indexing'
       await runtime.reindexBundle()
       void runtime.refreshMissingEmbeddingsInBackground()
+      scheduleEntityExtraction(runtime, [...writtenNoteIds], 'import')
     }
 
     try {
@@ -364,6 +367,7 @@ export function createObsidianImportService(runtime) {
             if (provenance?.provider !== 'obsidian' || provenance?.vault_id !== scan.vaultId || provenance?.source_path !== file.relativePath || provenance?.source_hash !== file.hash) throw error
           }
           Object.assign(entry, { status: 'complete', importedAt, unresolvedLinks: linked.unresolved, error: null })
+          writtenNoteIds.add(entry.destination)
           job.imported += 1
           job.unresolvedLinks += linked.unresolved
           wrote = true

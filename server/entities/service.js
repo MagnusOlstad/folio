@@ -20,7 +20,38 @@ function page(items, cursor, requestedLimit) {
   return { items: items.slice(offset, offset + limit), nextCursor: offset + limit < items.length ? cursorFor(offset + limit) : null }
 }
 function stableMentionId(mention) {
-  return `men-${crypto.createHash('sha256').update([mention.noteId, mention.displayStartUtf16 ?? mention.startUtf16, mention.displayEndUtf16 ?? mention.endUtf16, mention.text].join('\0')).digest('hex').slice(0, 32)}`
+  const identity = [mention.noteId, mention.displayStartUtf16 ?? mention.startUtf16, mention.displayEndUtf16 ?? mention.endUtf16, mention.text]
+  if (mention.typedIdentity === true) identity.push(mention.extractedType || mention.type)
+  return `men-${crypto.createHash('sha256').update(identity.join('\0')).digest('hex').slice(0, 32)}`
+}
+function remapMentionReferences(state, ids) {
+  const remap = (value) => {
+    if (!value || typeof value !== 'object') return
+    if (Array.isArray(value)) { for (const item of value) remap(item); return }
+    if (typeof value.mentionId === 'string') value.mentionId = ids.get(value.mentionId) || value.mentionId
+    if (Array.isArray(value.mentionIds)) value.mentionIds = value.mentionIds.map((id) => ids.get(id) || id)
+    for (const nested of Object.values(value)) remap(nested)
+  }
+  remap(state.mentionDecisions || [])
+  for (const correction of state.corrections || []) {
+    remap(correction.command); remap(correction.inverse); remap(correction.scope)
+    remap(correction.beforeMentions); remap(correction.beforeState?.mentionDecisions)
+  }
+}
+function collectMentionReferences(state) {
+  const ids = new Set((state.mentionDecisions || []).map((item) => item.mentionId).filter((id) => typeof id === 'string'))
+  const collect = (value) => {
+    if (!value || typeof value !== 'object') return
+    if (Array.isArray(value)) { for (const item of value) collect(item); return }
+    if (typeof value.mentionId === 'string') ids.add(value.mentionId)
+    if (Array.isArray(value.mentionIds)) for (const id of value.mentionIds) if (typeof id === 'string') ids.add(id)
+    for (const nested of Object.values(value)) collect(nested)
+  }
+  for (const correction of state.corrections || []) {
+    collect(correction.command); collect(correction.inverse); collect(correction.scope); collect(correction.beforeMentions)
+    collect(correction.beforeState?.mentionDecisions)
+  }
+  return ids
 }
 async function mapConcurrent(items, limit, operation) {
   const results = new Array(items.length)
@@ -95,21 +126,51 @@ export function createEntityService(runtime) {
         }
         const mapped = mapProjectedSpan(projection, mention.startUtf16, mention.endUtf16)
         if (!mapped || mapped.text !== mention.text) throw new Error('Entity span does not match the current source text.')
-        return validateMention({ ...mention, extractionFingerprint: mentionFingerprint, id: stableMentionId({ ...mention, noteId, displayStartUtf16: mapped.displayStartUtf16, displayEndUtf16: mapped.displayEndUtf16 }), bundleId: storage.bundleId, noteId, contentHash: projection.contentHash,
-          projectionVersion: projection.version, startUtf16: mention.startUtf16, endUtf16: mention.endUtf16,
-          rawStartUtf16: mapped.rawStartUtf16, rawEndUtf16: mapped.rawEndUtf16,
-          displayStartUtf16: mapped.displayStartUtf16, displayEndUtf16: mapped.displayEndUtf16,
-          blockId: mapped.blockId, status: 'active' }, storage.bundleId)
+        const extractedType = mention.extractedType || mention.type
+        return { ...mention, extractedType, extractionFingerprint: mentionFingerprint, mapped, bundleId: storage.bundleId, noteId }
       })
+      const typesBySpan = new Map()
+      for (const mention of accepted) {
+        const key = [mention.startUtf16, mention.endUtf16, mention.text].join('\0')
+        if (!typesBySpan.has(key)) typesBySpan.set(key, new Set())
+        typesBySpan.get(key).add(mention.extractedType)
+      }
+      for (let indexOfMention = 0; indexOfMention < accepted.length; indexOfMention += 1) {
+        const mention = accepted[indexOfMention]
+        const typedIdentity = (typesBySpan.get([mention.startUtf16, mention.endUtf16, mention.text].join('\0'))?.size || 0) > 1
+        accepted[indexOfMention] = validateMention({ ...mention, typedIdentity, id: stableMentionId({ ...mention, typedIdentity, displayStartUtf16: mention.mapped.displayStartUtf16, displayEndUtf16: mention.mapped.displayEndUtf16 }), bundleId: storage.bundleId, noteId, contentHash: projection.contentHash,
+          projectionVersion: projection.version, startUtf16: mention.startUtf16, endUtf16: mention.endUtf16,
+          rawStartUtf16: mention.mapped.rawStartUtf16, rawEndUtf16: mention.mapped.rawEndUtf16,
+          displayStartUtf16: mention.mapped.displayStartUtf16, displayEndUtf16: mention.mapped.displayEndUtf16,
+          blockId: mention.mapped.blockId, status: 'active' }, storage.bundleId)
+      }
       // Keep user assignments and dismissals for occurrences whose exact source span survives extraction.
       const prior = index.mentions.filter((mention) => mention.noteId === noteId)
+      const legacyIds = new Map()
       for (const mention of accepted) {
-        const previous = prior.find((item) => item.startUtf16 === mention.startUtf16 && item.endUtf16 === mention.endUtf16 && item.text === mention.text && item.type === mention.type)
+        const sameSpan = prior.filter((item) => item.startUtf16 === mention.startUtf16 && item.endUtf16 === mention.endUtf16 && item.text === mention.text)
+        const sameType = sameSpan.filter((item) => (item.extractedType || item.type) === mention.extractedType)
+        const previous = sameType.length === 1 ? sameType[0] : sameSpan.length === 1 ? sameSpan[0] : null
+        if (previous && previous.id !== mention.id) legacyIds.set(previous.id, mention.id)
         if (previous && (previous.resolutionProvenance === 'user' || previous.status === 'dismissed')) {
           mention.entityId = previous.entityId; mention.resolution = previous.resolution
           mention.resolutionProvenance = previous.resolutionProvenance; mention.status = previous.status
         }
       }
+      const referencedIds = collectMentionReferences(state)
+      const sourceTypeByLegacyId = new Map()
+      for (const correction of state.corrections || []) for (const before of correction.beforeMentions || []) {
+        if (typeof before.mentionId === 'string' && typeof before.type === 'string') sourceTypeByLegacyId.set(before.mentionId, before.type)
+      }
+      for (const mention of accepted) {
+        const legacyId = stableMentionId({ ...mention, typedIdentity: false })
+        if (!referencedIds.has(legacyId) || legacyIds.has(legacyId)) continue
+        const candidates = accepted.filter((candidate) => stableMentionId({ ...candidate, typedIdentity: false }) === legacyId)
+        const sourceType = sourceTypeByLegacyId.get(legacyId)
+        const matches = sourceType ? candidates.filter((candidate) => candidate.extractedType === sourceType) : candidates
+        if (matches.length === 1 && matches[0].id !== legacyId) legacyIds.set(legacyId, matches[0].id)
+      }
+      if (legacyIds.size) remapMentionReferences(state, legacyIds)
       const decisions = new Map((state.mentionDecisions || []).map((decision) => [decision.mentionId, decision]))
       for (const mention of accepted) {
         const decision = decisions.get(mention.id)
@@ -273,21 +334,54 @@ export function createEntityService(runtime) {
       const { content: targetContent, sourceGeneration } = await sourceForNote(newNoteId)
       const projection = projectMarkdown(targetContent)
       const { index, state } = await readCurrent({ persist: true })
-      for (const mention of index.mentions.filter((item) => item.noteId === oldNoteId)) {
+      const movedMentionIds = new Map()
+      const movedMentions = index.mentions.filter((item) => item.noteId === oldNoteId)
+      const candidates = movedMentions.map((mention) => {
         const possible = []
         if (projection.text.slice(mention.startUtf16, mention.endUtf16) === mention.text) possible.push(mention.startUtf16)
         else {
           let from = 0
           while ((from = projection.text.indexOf(mention.text, from)) !== -1) { possible.push(from); from += Math.max(1, mention.text.length) }
         }
-        if (possible.length === 1) {
-          const start = possible[0]; const end = start + mention.text.length; const mapped = mapProjectedSpan(projection, start, end)
+        if (possible.length !== 1) return { mention, mapped: null }
+        const start = possible[0]; const end = start + mention.text.length; const mapped = mapProjectedSpan(projection, start, end)
+        return { mention, start, end, mapped }
+      })
+      const movedTypesBySpan = new Map()
+      for (const candidate of candidates) if (candidate.mapped) {
+        const key = [candidate.start, candidate.end, candidate.mention.text].join('\0')
+        if (!movedTypesBySpan.has(key)) movedTypesBySpan.set(key, new Set())
+        movedTypesBySpan.get(key).add(candidate.mention.extractedType || candidate.mention.type)
+      }
+      for (const candidate of candidates) {
+        const { mention, start, end, mapped } = candidate
+        if (mapped) {
           const oldId = mention.id
-          mention.noteId = newNoteId; mention.id = stableMentionId({ ...mention, noteId: newNoteId, displayStartUtf16: mapped.displayStartUtf16, displayEndUtf16: mapped.displayEndUtf16 })
+          const typedIdentity = (movedTypesBySpan.get([start, end, mention.text].join('\0'))?.size || 0) > 1
+          mention.noteId = newNoteId; mention.id = stableMentionId({ ...mention, typedIdentity, noteId: newNoteId, displayStartUtf16: mapped.displayStartUtf16, displayEndUtf16: mapped.displayEndUtf16 })
+          movedMentionIds.set(oldId, mention.id)
           mention.startUtf16 = start; mention.endUtf16 = end; mention.rawStartUtf16 = mapped.rawStartUtf16; mention.rawEndUtf16 = mapped.rawEndUtf16
           mention.displayStartUtf16 = mapped.displayStartUtf16; mention.displayEndUtf16 = mapped.displayEndUtf16; mention.contentHash = projection.contentHash; mention.blockId = mapped.blockId
           for (const decision of state.mentionDecisions || []) if (decision.mentionId === oldId) decision.mentionId = mention.id
         } else mention.status = 'stale'
+      }
+      const remapId = (id) => movedMentionIds.get(id) || id
+      const remapMentionFields = (value) => {
+        if (!value || typeof value !== 'object') return
+        if (Array.isArray(value)) { for (const item of value) remapMentionFields(item); return }
+        for (const key of ['mentionId']) if (typeof value[key] === 'string') value[key] = remapId(value[key])
+        for (const key of ['mentionIds']) if (Array.isArray(value[key])) value[key] = value[key].map(remapId)
+        for (const nested of Object.values(value)) remapMentionFields(nested)
+      }
+      for (const correction of state.corrections || []) {
+        remapMentionFields(correction.command)
+        remapMentionFields(correction.inverse)
+        remapMentionFields(correction.scope)
+        remapMentionFields(correction.beforeMentions)
+        remapMentionFields(correction.beforeState?.mentionDecisions)
+        for (const link of correction.beforeState?.noteLinks || []) if (link.noteId === oldNoteId) link.noteId = newNoteId
+        if (correction.command?.noteId === oldNoteId) correction.command.noteId = newNoteId
+        if (correction.inverse?.noteId === oldNoteId) correction.inverse.noteId = newNoteId
       }
       if (index.coverage[oldNoteId]) { index.coverage[newNoteId] = { ...index.coverage[oldNoteId], contentHash: projection.contentHash, projectionHash: projection.projectionHash, sourceGeneration }; delete index.coverage[oldNoteId] }
       for (const link of state.noteLinks) if (link.noteId === oldNoteId) link.noteId = newNoteId

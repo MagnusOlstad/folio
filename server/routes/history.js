@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import { scheduleEntityExtraction } from '../entities/triggers.js'
 
 function noteVersion(request) {
   return String(request.query.revision || request.query.version || request.body?.revision || request.body?.version || '')
@@ -134,6 +135,7 @@ export function registerRoutes(app, runtime) {
         console.error(`The note restored, but its history checkpoint failed: ${error.message}`)
         historyWarning = 'The note was restored, but its history checkpoint could not be saved.'
       }
+      scheduleEntityExtraction(runtime, [id], 'history-restore')
       const records = reindexed?.records || await runtime.readRecords()
       const note = records.find((record) => record.id === id)
       if (!note) return response.status(404).json({ error: 'Note not found after restore.' })

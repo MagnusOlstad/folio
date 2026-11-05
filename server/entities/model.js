@@ -44,7 +44,7 @@ export function validateMention(mention, bundleId) {
     contentHash: mention.contentHash, projectionVersion: Number.isInteger(mention.projectionVersion) ? mention.projectionVersion : 1,
     startUtf16, endUtf16,
     rawStartUtf16, rawEndUtf16, displayStartUtf16, displayEndUtf16,
-    text: mention.text, type: mention.type, score,
+    text: mention.text, type: mention.type, extractedType: ENTITY_TYPES.includes(mention.extractedType) ? mention.extractedType : mention.type, score,
     extractionFingerprint: mention.extractionFingerprint || null,
     provenance: mention.provenance && typeof mention.provenance === 'object' ? mention.provenance : {},
     entityId: mention.entityId || null,
@@ -61,8 +61,9 @@ export function validateIndex(value, bundleId) {
   if (value.mentions.length > 500000 || value.entities.length > 100000) throw new Error('Entity index record limit exceeded.')
   for (const entity of value.entities) validateEntity(entity, bundleId)
   const ids = new Set()
-  for (const mention of value.mentions) {
-    validateMention(mention, bundleId)
+  for (let index = 0; index < value.mentions.length; index += 1) {
+    const mention = value.mentions[index]
+    value.mentions[index] = validateMention(mention, bundleId)
     if (ids.has(mention.id)) throw new Error('Entity index contains duplicate mention IDs.')
     ids.add(mention.id)
   }

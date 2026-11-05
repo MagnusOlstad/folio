@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { scheduleEntityDelete } from '../entities/triggers.js'
 export function registerRoutes(app, runtime) {
   const { appVersion, updateRepo, fetchLatestRelease, compareVersions, mlxService, classifierModel, embedModel,
     warmKeepAliveMs, askContextLength, indexEmbeddingCoverage, refreshMissingEmbeddingsInBackground,
@@ -153,6 +154,7 @@ app.delete('/api/note', async (request, response, next) => {
 
     await reindexBundle()
     await runtime.entityService.forgetNote(id)
+    scheduleEntityDelete(runtime, [id])
     let warning = null
     try {
       await runtime.history.reconcile(`Deleted ${id}`, [id])

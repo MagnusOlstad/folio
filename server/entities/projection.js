@@ -10,6 +10,7 @@ export function projectMarkdown(content) {
   const projectedToRaw = []
   const kept = []
   let offset = 0
+  let projectedOffset = 0
   let frontmatter = lines[0]?.trim() === '---'
   let generatedRelated = false
   let activeCaptureId = null
@@ -29,11 +30,12 @@ export function projectMarkdown(content) {
     if (captureStart) { activeCaptureId = captureStart[1]; offset += line.length + 1; continue }
     if (captureEnd) { activeCaptureId = null; offset += line.length + 1; continue }
     if (!generatedRelated) {
-      const start = kept.join('').length
+      const start = projectedOffset
       kept.push(line)
+      projectedOffset += line.length
       for (let position = 0; position < line.length; position += 1) projectedToRaw.push(offset + position)
       if (line.trim()) blocks.push({ id: activeCaptureId ? `capture-${activeCaptureId}-line-${index + 1}` : `line-${index + 1}`, startUtf16: start, endUtf16: start + line.length, rawStartUtf16: offset })
-      if (index < lines.length - 1) { kept.push('\n'); projectedToRaw.push(offset + line.length) }
+      if (index < lines.length - 1) { kept.push('\n'); projectedToRaw.push(offset + line.length); projectedOffset += 1 }
     }
     offset += line.length + (index < lines.length - 1 ? 1 : 0)
   }

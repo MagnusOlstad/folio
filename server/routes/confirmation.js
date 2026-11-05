@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { scheduleEntityDelete, scheduleEntityExtraction, scheduleEntityMove } from '../entities/triggers.js'
 
 export function registerRoutes(app, runtime) {
   const { embedModel, embeddingSchemaVersion, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, queueDraftMutation, readDraft, writeDraft, resolveBundleMarkdownPath,
@@ -221,6 +222,16 @@ app.post(['/api/filing/confirm', '/api/notes/confirm'], async (request, response
     }
     if (embeddingWarning) void refreshMissingEmbeddingsInBackground()
     runtime.translation?.enqueue(targetId)
+    if (sourceRemoved) {
+      try { await runtime.entityService.forgetNote(receipt.id) }
+      catch (error) { console.error(`Could not clear entity locators for removed source ${receipt.id}: ${error.message}`) }
+      scheduleEntityDelete(runtime, [receipt.id])
+      if (targetId !== receipt.id) scheduleEntityExtraction(runtime, [targetId], 'capture')
+    } else if (receipt.id !== targetId) {
+      try { await runtime.entityService.migrateNote(receipt.id, targetId) }
+      catch (error) { console.error(`Could not migrate entity locators after confirmation: ${error.message}`) }
+      scheduleEntityMove(runtime, receipt.id, targetId)
+    } else scheduleEntityExtraction(runtime, [targetId], 'capture')
     response.json({ note, notes: currentRecords.map(publicRecord), warning: embeddingWarning, oldId: receipt.id, newId: targetId, appended: receipt.confirmation.mode !== 'new', sourceRemoved, filing: confirmation, idempotent: false })
   } catch (error) {
     next(error)

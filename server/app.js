@@ -35,6 +35,8 @@ import { registerRoutes as registerHistoryRoutes } from './routes/history.js'
 import { registerRoutes as registerTranslationRoutes } from './routes/translation.js'
 import { registerRoutes as registerEntityRoutes } from './routes/entities.js'
 import { createEntityService } from './entities/service.js'
+import { createEntityJobService } from './entities/jobs.js'
+import { registerRoutes as registerEntityJobRoutes } from './routes/entity-jobs.js'
 import { registerRoutes as registerTranscriptionRoutes } from './transcription/routes.js'
 import { createBundleRuntimeManager } from './bundles/registry.js'
 
@@ -48,6 +50,7 @@ export function createRuntime(env = process.env, sharedMlxService = null) {
   runtime.entityService = createEntityService(runtime)
   Object.assign(runtime, createMarkdownMoves(runtime))
   Object.assign(runtime, createKnowledgeIndex(runtime))
+  runtime.entityJobs = createEntityJobService(runtime)
   Object.assign(runtime, createClassificationService(runtime))
   Object.assign(runtime, createSearchService(runtime))
   Object.assign(runtime, createFilingService(runtime))
@@ -85,9 +88,21 @@ export async function createApp(runtime = createRuntime()) {
       fs.mkdir(runtime.draftsRoot, { recursive: true }),
       fs.mkdir(runtime.importsRoot, { recursive: true }),
     ])
-    await runtime.entityService.restoreBundleSidecar()
+    try {
+      await runtime.entityService.restoreBundleSidecar()
+    } catch (error) {
+      runtime.entityFeatureError = `Entity data could not be restored: ${error.message}`
+      console.error(runtime.entityFeatureError)
+    }
     await runtime.reindexBundle()
     runtime.translation.startBackfill()
+    if (!runtime.entityFeatureError) {
+      try { await runtime.entityJobs.initialize() }
+      catch (error) {
+        runtime.entityFeatureError = `Entity jobs could not be restored: ${error.message}`
+        console.error(runtime.entityFeatureError)
+      }
+    }
     manager.trackBackground(
       runtime.history.reconcile('Baseline'),
       'Could not initialize note history.',
@@ -137,6 +152,11 @@ export async function createApp(runtime = createRuntime()) {
   registerAssetRoutes(app, scopedRuntime)
   registerHistoryRoutes(app, scopedRuntime)
   registerTranslationRoutes(app, scopedRuntime)
+  app.use('/api/entities', (request, response, next) => {
+    if (!scopedRuntime.entityFeatureError) return next()
+    response.status(503).json({ code: 'ENTITY_FEATURE_UNAVAILABLE', error: scopedRuntime.entityFeatureError })
+  })
+  registerEntityJobRoutes(app, scopedRuntime)
   registerEntityRoutes(app, scopedRuntime)
   registerTranscriptionRoutes(app, scopedRuntime)
   registerCaptureRoutes(app, scopedRuntime)

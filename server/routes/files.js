@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { normalizeAggregateBaseContent, prepareAggregateContentForSave } from '../filing/aggregate-editing.js'
+import { scheduleEntityExtraction, scheduleEntityMove } from '../entities/triggers.js'
 
 export function registerRoutes(app, runtime) {
   const { assertNoBundleSymlinks, embedModel, embeddingSchemaVersion, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, resolveBundleMarkdownPath, listBundleMarkdownFiles, bundleFileId, parseMarkdownFile,
@@ -119,6 +120,7 @@ app.post('/api/file/move', async (request, response, next) => {
     if (moveResult.oldId !== moveResult.newId) {
       try { await runtime.entityService.migrateNote(moveResult.oldId, moveResult.newId) }
       catch (error) { console.error(`Could not migrate entity locators after move: ${error.message}`) }
+      scheduleEntityMove(runtime, moveResult.oldId, moveResult.newId)
     }
     try {
       await runtime.history.reconcile(`Moved ${moveResult.oldId}`)
@@ -266,7 +268,8 @@ app.post('/api/file/refile', async (request, response, next) => {
     if (outcome.oldId !== outcome.newId) {
       try { await runtime.entityService.migrateNote(outcome.oldId, outcome.newId) }
       catch (error) { console.error(`Could not migrate entity locators after refile: ${error.message}`) }
-    }
+      scheduleEntityMove(runtime, outcome.oldId, outcome.newId)
+    } else scheduleEntityExtraction(runtime, [outcome.newId], 'move')
     try { await runtime.history.reconcile(`Refiled ${outcome.oldId}`) }
     catch { warning = 'The note was refiled, but its history checkpoint could not be saved.' }
     warning ||= outcome.warning
@@ -433,6 +436,7 @@ app.patch('/api/note', async (request, response, next) => {
         historyWarning = 'The note was updated, but its history checkpoint could not be saved.'
       }
     }
+    if (hasMarkdownChanges) scheduleEntityExtraction(runtime, [newId], 'save')
 
     const graph = await relationshipIndex()
     const publicUpdated = publicRecord(updated)

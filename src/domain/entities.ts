@@ -39,6 +39,8 @@ export type EntityMention = {
   displayEndUtf16: number;
   text: string;
   type: EntityType;
+  /** Immutable native label used in the stable occurrence ID; type may be user-corrected. */
+  extractedType: EntityType;
   score: number | null;
   extractionFingerprint: ExtractionFingerprint | null;
   provenance: Record<string, string | number | boolean | null>;
@@ -98,7 +100,7 @@ export type EntityJob = {
 };
 
 export type EntityJobMode = "running" | "paused" | "disabled" | "model_missing" | "helper_unavailable" | "unsupported_platform" | "storage_error" | "closed";
-export type EntityJobSnapshot = { bundleId: string; mode: EntityJobMode; queued: number; running: number; paused: number; revision: number; closed: boolean; error: string | null };
+export type EntityJobSnapshot = { bundleId: string; mode: EntityJobMode; ready: boolean; queued: number; running: number; paused: number; revision: number; closed: boolean; error: string | null; admissionError: { code: string; message: string } | null };
 
 export type EntityCorrectionCommand =
   | { type: "rename"; entityId: string; label: string }

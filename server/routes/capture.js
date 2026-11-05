@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { scheduleEntityExtraction } from '../entities/triggers.js'
 
 export function registerRoutes(app, runtime) {
   const { embedModel, getRawRoot, getBundleRoot, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, normalizeDraftId, archiveDraft,
@@ -291,6 +292,7 @@ app.post('/api/notes', async (request, response, next) => {
       warning ||= 'The note was created, but its history checkpoint could not be saved.'
     }
     runtime.translation?.enqueue(createdNote.id)
+    scheduleEntityExtraction(runtime, [createdNote.id], 'capture')
     response.status(201).json({ note: createdNote, notes: [createdNote], warning, appended, filing: confirmation })
   } catch (error) {
     next(error)

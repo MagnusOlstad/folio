@@ -267,9 +267,21 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
         fs.mkdir(runtime.draftsRoot, { recursive: true }),
         fs.mkdir(runtime.importsRoot, { recursive: true }),
       ]).then(async () => {
-        await runtime.entityService?.restoreBundleSidecar?.()
+        try {
+          await runtime.entityService?.restoreBundleSidecar?.()
+        } catch (error) {
+          runtime.entityFeatureError = `Entity data could not be restored: ${error.message}`
+          console.error(runtime.entityFeatureError)
+        }
         await runtime.reindexBundle()
         runtime.translation?.startBackfill()
+        if (!runtime.entityFeatureError) {
+          try { await runtime.entityJobs?.initialize?.() }
+          catch (error) {
+            runtime.entityFeatureError = `Entity jobs could not be restored: ${error.message}`
+            console.error(runtime.entityFeatureError)
+          }
+        }
         if (runtime.history) trackBackground(
           runtime.history.reconcile('Baseline'),
           'Could not initialize note history.',
@@ -296,6 +308,7 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
 
   async function close() {
     const allRuntimes = new Set([defaultRuntime, pendingRuntime, ...runtimes.values()])
+    await Promise.allSettled(Array.from(allRuntimes, (runtime) => runtime.entityJobs?.close?.()))
     await Promise.allSettled([
       ...Array.from(allRuntimes, (runtime) => runtime.history?.close?.()),
       ...Array.from(allRuntimes, (runtime) => runtime.transcriptionService?.close?.()),
@@ -312,9 +325,18 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
         return typeof value === 'function' ? value.bind(service) : value
       },
     })
+    const entityJobsProxy = new Proxy({}, {
+      get(_target, property) {
+        const service = activeRuntime().entityJobs
+        const value = service?.[property]
+        return typeof value === 'function' ? value.bind(service) : value
+      },
+    })
     return new Proxy(defaultRuntime, {
       get(_target, property) {
         if (property === 'entityService') return entityServiceProxy
+        if (property === 'entityJobs') return entityJobsProxy
+        if (property === 'entityFeatureError') return activeRuntime().entityFeatureError || null
         if (property === 'getBundleRoot') return () => activeRuntime().bundleRoot
         if (property === 'getRawRoot') return () => activeRuntime().rawRoot
         if (property === 'history') return activeRuntime().history

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -59,6 +60,17 @@ test('projection keeps UTF-16 spans exact through frontmatter and generated-sect
   assert.equal(mapped.displayStartUtf16, mapped.rawStartUtf16)
 })
 
+test('long projections maintain linear UTF-16 offsets across excluded blocks', () => {
+  const body = Array.from({ length: 20000 }, (_, index) => `Line ${index}🙂`).join('\n')
+  const projection = projectMarkdown(`---\ntitle: long\n---\n${body}\n<!-- folio:generated-related:start -->\nExcluded\n<!-- folio:generated-related:end -->`)
+  const phrase = 'Line 19999🙂'
+  const start = projection.text.lastIndexOf(phrase)
+  assert.equal(projection.text.length, body.length + 1, 'the newline before the excluded section remains part of the source body')
+  const mapped = mapProjectedSpan(projection, start, start + phrase.length)
+  assert.equal(mapped.text, phrase)
+  assert.equal(projection.rawText.slice(mapped.rawStartUtf16, mapped.rawEndUtf16), phrase)
+})
+
 test('analysis preferences are durable per bundle and notify only after writes', async (t) => {
   const first = await fixture('analysis-one')
   const second = await fixture('analysis-two')
@@ -106,6 +118,82 @@ test('dismiss decisions survive derived-index loss and undo survives service res
   const undone = await service.undoCorrection({ expectedRevision: renamed.revision, undoToken: renamed.undoToken })
   assert.equal(undone.revision, renamed.revision + 1)
   assert.equal((await service.getEntity(entity.id)).label, entity.label)
+})
+
+test('correction undo locators follow a moved note through re-extraction', async (t) => {
+  const data = await fixture()
+  t.after(() => fs.rm(data.root, { recursive: true, force: true }))
+  const service = createEntityService(data.runtime)
+  const projection = projectMarkdown(data.content)
+  await service.replaceNoteMentions('/meeting.md', [mentionFrom(projection, 'Priya Sharma', 'person')])
+  const mention = (await service.getMentionsForNote('/meeting.md')).items[0]
+  const result = await service.applyCorrection({ expectedRevision: 0, command: { type: 'dismiss', mentionIds: [mention.id] } })
+  await data.runtime.moveTo('/moved.md')
+  await service.migrateNote('/meeting.md', '/moved.md')
+  await service.replaceNoteMentions('/moved.md', [mentionFrom(projectMarkdown(data.content), 'Priya Sharma', 'person')])
+  assert.equal((await service.getMentionsForNote('/moved.md')).items.length, 0)
+  await service.undoCorrection({ expectedRevision: result.revision, undoToken: result.undoToken })
+  const restored = await service.getMentionsForNote('/moved.md')
+  assert.equal(restored.items.length, 1)
+  assert.equal(restored.items[0].status, 'active')
+})
+
+test('same-span different-type mentions keep distinct IDs across retype and re-extraction', async (t) => {
+  const data = await fixture()
+  t.after(() => fs.rm(data.root, { recursive: true, force: true }))
+  const service = createEntityService(data.runtime)
+  const projection = projectMarkdown(data.content)
+  await service.replaceNoteMentions('/meeting.md', [
+    mentionFrom(projection, 'Acmé', 'project'),
+    mentionFrom(projection, 'Acmé', 'product'),
+  ])
+  const initial = (await service.getMentionsForNote('/meeting.md')).items
+  assert.equal(initial.length, 2)
+  assert.notEqual(initial[0].id, initial[1].id)
+  const projectMention = initial.find((mention) => mention.extractedType === 'project')
+  const projectEntity = (await service.getEntity(projectMention.entityId))
+  const changed = await service.applyCorrection({ expectedRevision: 0, command: { type: 'retype', entityId: projectEntity.id, entityType: 'location' } })
+  await service.replaceNoteMentions('/meeting.md', [
+    mentionFrom(projectMarkdown(data.content), 'Acmé', 'project'),
+    mentionFrom(projectMarkdown(data.content), 'Acmé', 'product'),
+  ])
+  const rebuilt = (await service.getMentionsForNote('/meeting.md')).items
+  const corrected = rebuilt.find((mention) => mention.extractedType === 'project')
+  assert.equal(corrected.id, projectMention.id)
+  assert.equal(corrected.type, 'location')
+  assert.equal(rebuilt.find((mention) => mention.extractedType === 'product').type, 'product')
+  assert.equal(changed.revision, 1)
+  await data.runtime.moveTo('/moved.md')
+  await service.migrateNote('/meeting.md', '/moved.md')
+  await service.replaceNoteMentions('/moved.md', [
+    mentionFrom(projectMarkdown(data.content), 'Acmé', 'project'),
+    mentionFrom(projectMarkdown(data.content), 'Acmé', 'product'),
+  ])
+  const moved = (await service.getMentionsForNote('/moved.md')).items
+  assert.equal(moved.find((mention) => mention.extractedType === 'project').type, 'location')
+  assert.notEqual(moved.find((mention) => mention.extractedType === 'project').id, projectMention.id)
+})
+
+test('pre-extractedType ledgers migrate correction IDs during the next extraction', async (t) => {
+  const data = await fixture()
+  t.after(() => fs.rm(data.root, { recursive: true, force: true }))
+  const service = createEntityService(data.runtime)
+  const projection = projectMarkdown(data.content)
+  await service.replaceNoteMentions('/meeting.md', [mentionFrom(projection, 'Acmé', 'organization')])
+  const before = (await service.getMentionsForNote('/meeting.md')).items[0]
+  const correction = await service.applyCorrection({ expectedRevision: 0, command: { type: 'dismiss', mentionIds: [before.id] } })
+  const oldId = `men-${crypto.createHash('sha256').update(['/meeting.md', before.displayStartUtf16, before.displayEndUtf16, before.text].join('\0')).digest('hex').slice(0, 32)}`
+  const index = JSON.parse(await fs.readFile(service.storage.indexPath, 'utf8'))
+  const state = JSON.parse(await fs.readFile(service.storage.userStatePath, 'utf8'))
+  index.mentions[0].id = oldId
+  delete index.mentions[0].extractedType
+  for (const decision of state.mentionDecisions) if (decision.mentionId === before.id) decision.mentionId = oldId
+  await fs.writeFile(service.storage.indexPath, JSON.stringify(index))
+  await fs.writeFile(service.storage.userStatePath, JSON.stringify(state))
+  const restarted = createEntityService(data.runtime)
+  await restarted.replaceNoteMentions('/meeting.md', [mentionFrom(projectMarkdown(data.content), 'Acmé', 'organization')])
+  assert.equal((await restarted.getMentionsForNote('/meeting.md')).items.length, 0)
+  assert.equal(correction.revision, 1)
 })
 
 test('entity ledgers, mentions, and correction histories stay bundle-local', async (t) => {

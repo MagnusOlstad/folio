@@ -60,6 +60,7 @@ export function createEntityJobService(runtime, {
   let availability = { installed: false, available: false, helperAvailable: false }
   let settings = { enabled: false, modelId: 'gliner25multi' }
   let degradedError = null
+  let admissionError = null
 
   function serialize(operation) {
     const result = stateChain.then(operation)
@@ -215,6 +216,7 @@ export function createEntityJobService(runtime, {
       for (const noteId of ids) await enqueueNote(noteId, reason, force, job)
       Object.assign(job, summarizeJob(job))
       await save()
+      admissionError = null
       pump()
       return structuredClone(job)
     })
@@ -362,7 +364,11 @@ export function createEntityJobService(runtime, {
   async function backfill(reason) {
     if (!ready || closed || !settings.enabled || !availability.installed || !availability.available || !availability.helperAvailable) return null
     try { return await requestEntityExtraction({ bundleId, reason }) }
-    catch { return null }
+    catch (error) {
+      admissionError = { code: error?.code || 'ENTITY_JOB_ADMISSION_FAILED', message: String(error?.message || 'Entity backfill could not be queued.').slice(0, 500) }
+      console.error(`Entity backfill for ${bundleId} was not queued: ${admissionError.message}`)
+      return null
+    }
   }
 
   async function listJobs({ limit = 25, cursor = null } = {}) {
@@ -376,7 +382,7 @@ export function createEntityJobService(runtime, {
     }
     const size = Math.max(1, Math.min(100, Number(limit) || 25))
     const items = state.jobs.slice(start, start + size).map((job) => structuredClone(summarizeJob(job)))
-    return { items, nextCursor: start + size < state.jobs.length ? Buffer.from(items.at(-1).id).toString('base64url') : null, mode: state.mode }
+    return { items, nextCursor: start + size < state.jobs.length ? Buffer.from(items.at(-1).id).toString('base64url') : null, mode: state.mode, admissionError: admissionError ? { ...admissionError } : null }
   }
   async function getJob(id) { await stateChain; const job = findJob(id); return job ? structuredClone(summarizeJob(job)) : null }
   async function mutateJob(id, operation) {
@@ -448,16 +454,16 @@ export function createEntityJobService(runtime, {
     })
   }
   function snapshot() {
-    return { bundleId, mode: state.mode, queued: Object.values(state.tasks).filter((task) => task.state === 'queued').length,
+    return { bundleId, mode: state.mode, ready, queued: Object.values(state.tasks).filter((task) => task.state === 'queued').length,
       running: current ? 1 : 0, paused: Object.values(state.tasks).filter((task) => task.state === 'paused').length,
-      revision: state.revision, closed, error: degradedError }
+      revision: state.revision, closed, error: degradedError, admissionError: admissionError ? { ...admissionError } : null }
   }
   async function close() {
     closed = true
     settingsUnsubscribe?.(); settingsUnsubscribe = null
     availabilityUnsubscribe?.(); availabilityUnsubscribe = null
     if (current) current.controller.abort()
-    await serialize(async () => { refreshMode(); await save() })
+    if (ready && !degradedError) await serialize(async () => { refreshMode(); await save() })
     await pumpPromise
     await stateChain
   }

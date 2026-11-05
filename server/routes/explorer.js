@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { scheduleEntityDelete, scheduleEntityExtraction, scheduleEntityMove } from '../entities/triggers.js'
 
 export function registerRoutes(app, runtime) {
   const {
@@ -189,6 +190,11 @@ export function registerRoutes(app, runtime) {
           if (!staged) await fs.rm(stage, { recursive: true, force: true }).catch(() => {})
         }
       }))
+      for (const deletedId of result.deletedIds) {
+        try { await runtime.entityService.forgetNote(deletedId) }
+        catch (error) { console.error(`Could not clear entity locators for deleted ${deletedId}: ${error.message}`) }
+      }
+      scheduleEntityDelete(runtime, result.deletedIds)
       response.json(result)
     } catch (error) {
       if (error.status) return response.status(error.status).json({ error: error.message })
@@ -245,6 +251,7 @@ export function registerRoutes(app, runtime) {
         console.error(`The note was created, but its history checkpoint failed: ${error.message}`)
         warning = 'The note was created, but its history checkpoint could not be saved.'
       }
+      scheduleEntityExtraction(runtime, [createdId], 'save')
       response.status(201).json({ id: createdId, warning })
     } catch (error) {
       if (error.status) return response.status(error.status).json({ error: error.message })
@@ -304,6 +311,9 @@ export function registerRoutes(app, runtime) {
         console.error(`The note was renamed, but its history checkpoint failed: ${error.message}`)
         historyWarning = 'The note was renamed, but its history checkpoint could not be saved.'
       }
+      try { await runtime.entityService.migrateNote(moveResult.oldId, moveResult.newId) }
+      catch (error) { console.error(`Could not migrate entity locators after rename: ${error.message}`) }
+      scheduleEntityMove(runtime, moveResult.oldId, moveResult.newId)
       const records = await readRecords()
       const current = records.find((record) => record.id === moveResult.newId) || moveResult.record
       const graph = await relationshipIndex()
