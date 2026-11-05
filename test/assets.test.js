@@ -29,7 +29,7 @@ test('image assets upload, serve safely, and stay reserved', async (context) => 
   context.after(async () => {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
     await bundleRuntime.embeddingRefresh
-    await fs.rm(dataRoot, { recursive: true, force: true })
+    await fs.rm(dataRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
   })
   const baseUrl = `http://127.0.0.1:${server.address().port}`
   const upload = (body, type, extra = {}) => fetch(`${baseUrl}/api/assets`, {
@@ -106,7 +106,7 @@ test('OCR route extracts text once per image content and honors the cache', asyn
   context.after(async () => {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
     await bundleRuntime.embeddingRefresh
-    await fs.rm(dataRoot, { recursive: true, force: true })
+    await fs.rm(dataRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
   })
   const baseUrl = `http://127.0.0.1:${server.address().port}`
   const upload = async (name) => {
