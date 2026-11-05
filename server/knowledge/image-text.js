@@ -60,7 +60,7 @@ export function assetImageLinks(markdown) {
     const href = match[2].replace(/^<|>$/g, '')
     const name = resolveAssetName(href)
     if (!name) continue
-    const alt = match[1].replace(/\\(.)/g, '$1').replace(/\s+/g, ' ').trim()
+    const alt = match[1].replace(/\\(.)/g, '$1').replace(/\s+/g, ' ').replace(/\|\d+(?:x\d+)?\s*$/, '').trim()
     links.push({ alt: alt || name, name })
   }
   return links

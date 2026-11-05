@@ -386,11 +386,27 @@ app.whenReady().then(async () => {
   ipcMain.handle('folio:save-pdf-export', async (event, filename) => {
     const filePath = await selectExportPath(filename, 'pdf', 'PDF')
     if (!filePath) return { canceled: true }
-    const pdf = await event.sender.printToPDF({
-      pageSize: 'A4',
-      printBackground: true,
-      preferCSSPageSize: true,
-    })
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const previousBackground = win?.getBackgroundColor()
+    // Page margins are painted with the window background; force white so they are not dark.
+    win?.setBackgroundColor('#ffffff')
+    let pdf
+    try {
+      pdf = await event.sender.printToPDF({
+        pageSize: 'A4',
+        printBackground: true,
+        preferCSSPageSize: true,
+        // Inches; mirrors the print stylesheet's @page margin (20mm) so the
+        // margins hold whichever source Chromium prefers.
+        margins: { marginType: 'custom', top: 0.79, bottom: 0.79, left: 0.79, right: 0.79 },
+        displayHeaderFooter: true,
+        headerTemplate: '<span></span>',
+        footerTemplate:
+          '<div style="width:100%;font:8px/1 -apple-system,Helvetica,Arial,sans-serif;color:#888;text-align:center;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>',
+      })
+    } finally {
+      if (win && !win.isDestroyed() && previousBackground) win.setBackgroundColor(previousBackground)
+    }
     await fs.writeFile(filePath, pdf)
     return { canceled: false }
   })
