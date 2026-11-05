@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Fictional bilingual entity extraction corpus. Semantic labels are manually annotated and distinct from runtime-parity goldens.",
+  "description": "Fictional bilingual entity extraction corpus. Semantic labels are manually annotated and distinct from independent pinned-reference parity goldens.",
   "schema": {
     "types": [
       "person",
@@ -16,13 +16,18 @@
   "reference": {
     "model": "fastino/gliner2.5-multi-v1",
     "runtime": "7b005274e82da37dcf1f5fd9d6a2ef413c6a004c",
-    "parityGoldensStatus": "pending runtime outputs; do not treat semantic annotations as parity goldens",
+    "parityGoldensStatus": "pending independent pinned-reference outputs to compare against Folio Swift runtime",
     "schemaVersion": "folio-entities-v1",
     "maxTokens": 512,
     "maxTokensIncludes": "entity descriptions",
     "overlapTokenBudget": "pending",
-    "modelRevision": "fastino/gliner2.5-multi-v1@pending immutable upstream revision",
-    "runtimeRevision": "7b005274e82da37dcf1f5fd9d6a2ef413c6a004c"
+    "modelCheckpointRevision": "7b005274e82da37dcf1f5fd9d6a2ef413c6a004c",
+    "referenceImplementation": {
+      "repository": "Blaizzy/mlx-vlm",
+      "revision": "4857a6b018e5e214616bbfa8f0f6da92af258ba2"
+    },
+    "nativeRuntimeRevision": "pending Folio implementation commit",
+    "overlapTokens": "pending"
   },
   "cases": [
     {
@@ -77,7 +82,7 @@
         ]
       },
       "runtimeParityGoldens": {
-        "status": "pending",
+        "status": "pending independent pinned-reference output",
         "mentions": null
       }
     },
@@ -119,7 +124,7 @@
         ]
       },
       "runtimeParityGoldens": {
-        "status": "pending",
+        "status": "pending independent pinned-reference output",
         "mentions": null
       }
     },
@@ -161,7 +166,7 @@
         ]
       },
       "runtimeParityGoldens": {
-        "status": "pending",
+        "status": "pending independent pinned-reference output",
         "mentions": null
       }
     },
@@ -199,7 +204,7 @@
         ]
       },
       "runtimeParityGoldens": {
-        "status": "pending",
+        "status": "pending independent pinned-reference output",
         "mentions": null
       }
     },
@@ -227,7 +232,7 @@
         ]
       },
       "runtimeParityGoldens": {
-        "status": "pending",
+        "status": "pending independent pinned-reference output",
         "mentions": null
       }
     },
@@ -240,7 +245,7 @@
         "mentions": []
       },
       "runtimeParityGoldens": {
-        "status": "pending",
+        "status": "pending independent pinned-reference output",
         "mentions": null
       }
     },
@@ -275,7 +280,7 @@
         ]
       },
       "runtimeParityGoldens": {
-        "status": "pending",
+        "status": "pending independent pinned-reference output",
         "mentions": null
       }
     },
@@ -315,7 +320,7 @@
         ]
       },
       "runtimeParityGoldens": {
-        "status": "pending",
+        "status": "pending independent pinned-reference output",
         "mentions": null
       }
     },
@@ -349,7 +354,7 @@
         ]
       },
       "runtimeParityGoldens": {
-        "status": "pending",
+        "status": "pending independent pinned-reference output",
         "mentions": null
       }
     },
@@ -398,7 +403,7 @@
         ]
       },
       "runtimeParityGoldens": {
-        "status": "pending",
+        "status": "pending independent pinned-reference output",
         "mentions": null
       }
     },
@@ -433,7 +438,7 @@
         ]
       },
       "runtimeParityGoldens": {
-        "status": "pending",
+        "status": "pending independent pinned-reference output",
         "mentions": null
       }
     },
@@ -474,7 +479,7 @@
         ]
       },
       "runtimeParityGoldens": {
-        "status": "pending",
+        "status": "pending independent pinned-reference output",
         "mentions": null
       }
     },
@@ -495,7 +500,7 @@
         ]
       },
       "runtimeParityGoldens": {
-        "status": "pending",
+        "status": "pending independent pinned-reference output",
         "mentions": null
       }
     }

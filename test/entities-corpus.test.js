@@ -12,7 +12,7 @@ test('entity semantic annotations use exact UTF-16 half-open source spans and co
   for (const item of corpus.cases) {
     assert.ok(item.id && item.language && item.text.length > 0);
     assert.ok(item.semantic && Array.isArray(item.semantic.mentions));
-    assert.equal(item.runtimeParityGoldens.status, 'pending');
+    assert.match(item.runtimeParityGoldens.status, /^pending independent pinned-reference output$/);
     const spans = new Set();
     const ordered = [...item.semantic.mentions].sort((a, b) => a.startUtf16 - b.startUtf16 || a.endUtf16 - b.endUtf16);
     for (let index = 1; index < ordered.length; index += 1) {
