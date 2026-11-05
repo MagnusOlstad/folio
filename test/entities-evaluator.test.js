@@ -60,3 +60,20 @@ test('entity evaluator rejects fabricated spans, invalid types, and unknown case
   unknownCase.cases.push({ id: 'invented-case', mentions: [] });
   await expectRejected(unknownCase, /unknown corpus cases: invented-case/);
 });
+
+test('entity evaluator rejects malformed measurement thresholds and run settings', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'folio-entities-metadata-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const input = path.join(directory, 'predictions.json');
+  const base = { corpusVersion: corpus.version, metadata, cases: corpus.cases.map((item) => ({ id: item.id, mentions: item.semantic.mentions })) };
+  const expectRejected = async (changes, pattern) => {
+    await writeFile(input, JSON.stringify({ ...base, metadata: { ...metadata, ...changes } }));
+    const result = spawnSync(process.execPath, [evaluator, input], { encoding: 'utf8' });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, pattern);
+  };
+  await expectRejected({ thresholds: {} }, /thresholds\.person must be a finite number/);
+  await expectRejected({ warmupCount: -1 }, /warmupCount must be a non-negative integer/);
+  await expectRejected({ repeatCount: 0 }, /repeatCount must be a positive integer/);
+  await expectRejected({ precision: 'int8' }, /precision must be float16, bfloat16, or float32/);
+});
