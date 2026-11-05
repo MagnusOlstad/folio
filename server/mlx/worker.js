@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { recordDownloadProgress, summarizeDownloadProgress } from './download-progress.js'
 
-export function createMlxWorker({ id, definition, executable, cacheRoot, modelDirectory, onExit }) {
+export function createMlxWorker({ id, definition, executable, cacheRoot, modelDirectory, startupOperation = null, onExit }) {
   const args = ['--task', definition.task, '--model', definition.repository, '--revision', definition.revision]
+  if (startupOperation) args.push('--operation', startupOperation)
   if (definition.task === 'transcription') args.push('--operation', 'transcribe')
   if (modelDirectory) args.push('--model-directory', modelDirectory)
   const child = spawn(executable, args, {

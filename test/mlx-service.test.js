@@ -24,7 +24,7 @@ function restorePlatform() {
   os.release = originalOsRelease
 }
 
-async function fixture(t, { warmKeepAliveMs = 60_000 } = {}) {
+async function fixture(t, { warmKeepAliveMs = 60_000, entitySnapshotValidator } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-mlx-test-'))
   const logPath = path.join(root, 'helper.jsonl')
   const previous = {
@@ -44,6 +44,7 @@ async function fixture(t, { warmKeepAliveMs = 60_000 } = {}) {
     modelRoot: path.join(root, 'models'),
     mlxHelperPath: helperPath,
     warmKeepAliveMs,
+    ...(entitySnapshotValidator ? { entitySnapshotValidator } : {}),
   })
   t.after(async () => {
     await service.close()
@@ -95,6 +96,7 @@ test('models install explicitly into their pinned snapshots and use the JSONL wo
     { id: 'lightonocr', purpose: 'ocr', downloadSizeBytes: 2_020_000_000, selected: false },
     { id: 'whisper', purpose: 'transcription', downloadSizeBytes: 1_610_000_000, selected: true },
     { id: 'whisperlarge', purpose: 'transcription', downloadSizeBytes: 3_090_000_000, selected: false },
+    { id: 'gliner25multi', purpose: 'entities', downloadSizeBytes: 1_165_502_487, selected: false },
   ])
 
   await assert.rejects(service.load('gemma4'), /not installed/)
@@ -142,6 +144,34 @@ test('models install explicitly into their pinned snapshots and use the JSONL wo
   assert.equal(unloaded.models.find((model) => model.id === 'gemma4').loaded, false)
   assert.equal(unloaded.models.find((model) => model.id === 'gemma4').memory, null)
   assert.equal((await readLog(logPath)).findLast((entry) => entry.event === 'response' && entry.operation === 'shutdown').memory.cacheBytes, 0)
+})
+
+test('GLiNER uses explicit pinned install and frozen chunk/extraction helper operations', async (t) => {
+  const snapshot = path.join(os.tmpdir(), 'folio-gliner-fixture-snapshot')
+  let snapshotPresent = true
+  const { logPath, service } = await fixture(t, { entitySnapshotValidator: async () => snapshotPresent ? snapshot : null })
+  const availability = []
+  service.onEntityModelAvailabilityChange((event) => availability.push(event))
+  const installing = await service.install('gliner25multi')
+  assert.equal(installing.models.find(({ id }) => id === 'gliner25multi').installed, true)
+  assert.deepEqual(availability, [{ installed: true }])
+  const log = await readLog(logPath)
+  const ready = log.find((entry) => entry.event === 'ready' && entry.task === 'entities')
+  assert.equal(ready.model, 'fastino/gliner2.5-multi-v1')
+  assert.equal(ready.revision, '7b005274e82da37dcf1f5fd9d6a2ef413c6a004c')
+  assert.equal(log.find((entry) => entry.event === 'ready' && entry.task === 'entities').modelDirectory, snapshot)
+  assert.equal(ready.startupOperation, 'install')
+  assert.deepEqual((await service.planEntityChunks({ text: 'Acme', schemaVersion: 'folio-entities-v1' })).chunks, [
+    { index: 0, startUtf16: 0, endUtf16: 1, tokenCount: 1, schemaTokenCount: 1 },
+  ])
+  assert.deepEqual((await service.extractEntities({ text: 'Acme', labels: [{ type: 'organization' }] }, { background: true })).mentions, [])
+  const requests = (await readLog(logPath)).filter((entry) => entry.event === 'request')
+  assert.deepEqual(requests.map(({ operation }) => operation), ['plan_entity_chunks', 'extract_entities'])
+  assert.deepEqual((await service.getEntityModelStatus()), { installed: true, available: true, helperAvailable: true })
+  await service.remove('gliner25multi')
+  snapshotPresent = false
+  assert.deepEqual(availability, [{ installed: true }, { installed: false }])
+  await assert.rejects(service.extractEntities({ text: 'Acme' }), /not installed/)
 })
 
 test('download progress counts pinned snapshot files and ignores unrelated incomplete blobs', async (t) => {
@@ -426,6 +456,54 @@ test('transcription selection route updates shared MLX status and rejects genera
     method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'gemma4' }),
   })
   assert.equal(rejected.status, 400)
+})
+
+test('entity installation scopes enablement to the initiating bundle and rejects unknown bundles before download', async (t) => {
+  let releaseInstall
+  let installCalls = 0
+  let snapshotsCaptured = 0
+  const settings = new Map([['bundle-a', { enabled: false, revision: 0 }], ['bundle-b', { enabled: false, revision: 0 }]])
+  const entries = new Map([['bundle-a', { id: 'bundle-a' }], ['bundle-b', { id: 'bundle-b' }]])
+  const app = express()
+  app.use(express.json())
+  registerRoutes(app, {
+    status: async () => ({ models: [] }),
+    install: async () => { installCalls += 1; await new Promise((resolve) => { releaseInstall = resolve }); return { models: [] } },
+  }, {
+    registry: { get: (id) => entries.get(id) || null, list: () => [...entries.values()] },
+    runtimeFor: (entry) => ({ entityService: {
+      getAnalysisSettingsSnapshot: async () => { snapshotsCaptured += 1; return { ...settings.get(entry.id), modelId: 'gliner25multi' } },
+      enableAnalysisAfterInstall: async (expectedRevision) => {
+        const current = settings.get(entry.id)
+        if (current.revision === expectedRevision) settings.set(entry.id, { enabled: true, revision: current.revision + 1 })
+        return { ...settings.get(entry.id), modelId: 'gliner25multi' }
+      },
+      getAnalysisSettings: async () => ({ ...settings.get(entry.id), modelId: 'gliner25multi' }),
+    } }),
+  })
+  const server = app.listen(0, '127.0.0.1')
+  await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject) })
+  t.after(() => new Promise((resolve) => server.close(resolve)))
+  const address = server.address()
+  assert.ok(address && typeof address === 'object')
+  const base = `http://127.0.0.1:${address.port}`
+  const unknownStatus = await fetch(`${base}/api/mlx/status?bundle=missing`)
+  assert.equal(unknownStatus.status, 404)
+  const invalid = await fetch(`${base}/api/mlx/models/gliner25multi/install?bundle=missing`, { method: 'POST' })
+  assert.equal(invalid.status, 404)
+  assert.equal(installCalls, 0)
+  const first = fetch(`${base}/api/mlx/models/gliner25multi/install?bundle=bundle-a`, { method: 'POST' })
+  await waitUntil(() => installCalls === 1)
+  settings.set('bundle-a', { enabled: false, revision: 1 })
+  const second = fetch(`${base}/api/mlx/models/gliner25multi/install?bundle=bundle-b`, { method: 'POST' })
+  await waitUntil(() => snapshotsCaptured === 2)
+  releaseInstall?.()
+  const [firstResponse, secondResponse] = await Promise.all([first, second])
+  assert.equal(firstResponse.status, 200)
+  assert.deepEqual(settings.get('bundle-a'), { enabled: false, revision: 1 })
+  assert.equal(secondResponse.status, 200)
+  assert.deepEqual(settings.get('bundle-b'), { enabled: true, revision: 1 })
+  assert.equal(installCalls, 1)
 })
 
 test('queues cache removal until active requests finish', async (t) => {

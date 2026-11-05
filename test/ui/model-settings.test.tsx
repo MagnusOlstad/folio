@@ -35,7 +35,7 @@ function renderSettings(overrides: Partial<ModelSettingsControls> = {}) {
       obsidianImport={{ supported: false, busy: false, scan: null, job: null, error: "", selectVault: () => {}, confirmImport: () => {}, cancelImport: () => {}, clearScan: () => {} }}
       onClose={vi.fn()}
       initialCategory="models"
-      modelSettings={{ status, actionModel: null, action: null, error: "", install, remove, select, selectTranscription, ...overrides }}
+      modelSettings={{ status, actionModel: null, action: null, error: "", install, remove, select, selectTranscription, setEntityAnalysisEnabled: vi.fn(), ...overrides }}
     />,
   );
   return { ...rendered, select, selectTranscription, install, remove };
@@ -46,6 +46,23 @@ describe("model settings", () => {
     renderSettings();
     expect(screen.queryByRole("switch")).toBeNull();
     expect(screen.queryByRole("group", { name: "Background translation" })).toBeNull();
+  });
+
+  it("keeps entity analysis configuration bundle-local and allows pausing while inference is busy", () => {
+    const setEnabled = vi.fn();
+    const entityModel = { id: "gliner25multi" as const, name: "GLiNER 2.5 Multi", purpose: "entities", downloadSizeBytes: 1_165_502_487, downloadSizeIsEstimate: false, selected: false, installed: true, loaded: true, busy: true, requestCount: 1, memory: null };
+    renderSettings({ status: { ...status, entityAnalysis: { bundleId: "bundle-a", enabled: true, modelId: "gliner25multi" }, models: [...status.models, entityModel] }, setEntityAnalysisEnabled: setEnabled });
+    const toggle = screen.getByRole("checkbox", { name: "Analyze this bundle" });
+    expect(toggle).toBeChecked();
+    expect(toggle).toBeEnabled();
+    fireEvent.click(toggle);
+    expect(setEnabled).toHaveBeenCalledWith(false);
+  });
+
+  it("surfaces damaged per-bundle analysis settings", () => {
+    const entityModel = { id: "gliner25multi" as const, name: "GLiNER 2.5 Multi", purpose: "entities", downloadSizeBytes: 1_165_502_487, downloadSizeIsEstimate: false, selected: false, installed: false, loaded: false, memory: null };
+    renderSettings({ status: { ...status, entityAnalysis: { bundleId: "bundle-a", enabled: false, modelId: "gliner25multi", error: "Entity analysis settings need recovery." }, models: [...status.models, entityModel] } });
+    expect(screen.getByRole("alert")).toHaveTextContent("settings need recovery");
   });
 
   it("lists LightOnOCR and installs it from settings", () => {
@@ -67,7 +84,7 @@ describe("model settings", () => {
     const { rerender } = render(
       <SettingsDialog
         themeId="original" onSelectTheme={vi.fn()} obsidianImport={{ supported: false, busy: false, scan: null, job: null, error: "", selectVault: () => {}, confirmImport: () => {}, cancelImport: () => {}, clearScan: () => {} }}
-        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: started, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn() }}
+        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: started, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn(), setEntityAnalysisEnabled: vi.fn() }}
       />,
     );
 
@@ -78,7 +95,7 @@ describe("model settings", () => {
     rerender(
       <SettingsDialog
         themeId="original" onSelectTheme={vi.fn()} obsidianImport={{ supported: false, busy: false, scan: null, job: null, error: "", selectVault: () => {}, confirmImport: () => {}, cancelImport: () => {}, clearScan: () => {} }}
-        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, downloads: [{ id, progress: { downloadedBytes: 0, totalBytes: 0, percent: 0, phase: "downloading" } }] }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn() }}
+        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, downloads: [{ id, progress: { downloadedBytes: 0, totalBytes: 0, percent: 0, phase: "downloading" } }] }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn(), setEntityAnalysisEnabled: vi.fn() }}
       />,
     );
     expect(progress()).not.toHaveAttribute("value");
@@ -87,7 +104,7 @@ describe("model settings", () => {
     rerender(
       <SettingsDialog
         themeId="original" onSelectTheme={vi.fn()} obsidianImport={{ supported: false, busy: false, scan: null, job: null, error: "", selectVault: () => {}, confirmImport: () => {}, cancelImport: () => {}, clearScan: () => {} }}
-        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, downloads: [{ id, progress: { downloadedBytes: 1_000_000_000, totalBytes: 4_000_000_000, percent: 25, phase: "downloading" } }], models: status.models.map((item) => item.id === id ? { ...item, loading: true } : item) }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn() }}
+        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, downloads: [{ id, progress: { downloadedBytes: 1_000_000_000, totalBytes: 4_000_000_000, percent: 25, phase: "downloading" } }], models: status.models.map((item) => item.id === id ? { ...item, loading: true } : item) }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn(), setEntityAnalysisEnabled: vi.fn() }}
       />,
     );
     expect(progress()).toHaveAttribute("value", "25");
@@ -97,7 +114,7 @@ describe("model settings", () => {
     rerender(
       <SettingsDialog
         themeId="original" onSelectTheme={vi.fn()} obsidianImport={{ supported: false, busy: false, scan: null, job: null, error: "", selectVault: () => {}, confirmImport: () => {}, cancelImport: () => {}, clearScan: () => {} }}
-        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, downloads: [{ id, progress: { downloadedBytes: 3_000_000_000, totalBytes: 4_000_000_000, percent: 75, phase: "downloading" } }] }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn() }}
+        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, downloads: [{ id, progress: { downloadedBytes: 3_000_000_000, totalBytes: 4_000_000_000, percent: 75, phase: "downloading" } }] }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn(), setEntityAnalysisEnabled: vi.fn() }}
       />,
     );
     expect(progress()).toHaveAttribute("value", "75");
@@ -105,7 +122,7 @@ describe("model settings", () => {
     rerender(
       <SettingsDialog
         themeId="original" onSelectTheme={vi.fn()} obsidianImport={{ supported: false, busy: false, scan: null, job: null, error: "", selectVault: () => {}, confirmImport: () => {}, cancelImport: () => {}, clearScan: () => {} }}
-        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, downloads: [{ id, progress: { downloadedBytes: 4_000_000_000, totalBytes: 4_000_000_000, percent: 100, phase: "loading" } }], models: status.models.map((item) => item.id === id ? { ...item, installed: true, loading: true } : item) }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn() }}
+        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, downloads: [{ id, progress: { downloadedBytes: 4_000_000_000, totalBytes: 4_000_000_000, percent: 100, phase: "loading" } }], models: status.models.map((item) => item.id === id ? { ...item, installed: true, loading: true } : item) }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn(), setEntityAnalysisEnabled: vi.fn() }}
       />,
     );
     expect(screen.getByRole("progressbar", { name: `Loading model ${name}` })).not.toHaveAttribute("value");
@@ -115,14 +132,14 @@ describe("model settings", () => {
     rerender(
       <SettingsDialog
         themeId="original" onSelectTheme={vi.fn()} obsidianImport={{ supported: false, busy: false, scan: null, job: null, error: "", selectVault: () => {}, confirmImport: () => {}, clearScan: () => {} }}
-        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, installing: [], downloads: [], models: status.models.map((item) => item.id === id ? { ...item, installed: true } : item) }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn() }}
+        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, installing: [], downloads: [], models: status.models.map((item) => item.id === id ? { ...item, installed: true } : item) }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn(), setEntityAnalysisEnabled: vi.fn() }}
       />,
     );
     expect(screen.queryByRole("progressbar", { name: new RegExp(name) })).not.toBeInTheDocument();
   });
 
   it("shows an indeterminate bar immediately while an install request is active and clears it on failure", () => {
-    const controls = { status: { ...status, installing: [], downloads: [] }, actionModel: "llama32" as const, action: "install", error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn() };
+    const controls = { status: { ...status, installing: [], downloads: [] }, actionModel: "llama32" as const, action: "install", error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn(), setEntityAnalysisEnabled: vi.fn() };
     const { rerender } = renderSettings(controls);
     expect(screen.getByRole("progressbar", { name: "Downloading Llama 3.2 3B Instruct" })).not.toHaveAttribute("value");
     rerender(

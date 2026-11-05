@@ -92,7 +92,7 @@ async function embed(input) {
 }
 
 await ensureSnapshot()
-await appendLog({ event: 'ready', task, model, pid: process.pid, revision, modelDirectory, memory })
+await appendLog({ event: 'ready', task, model, pid: process.pid, revision, modelDirectory, startupOperation: argument('--operation'), memory })
 const startupControl = await readControl()
 if (startupControl.exitBeforeReady) {
   process.stderr.write('fixture exited before readiness\n')
@@ -136,6 +136,8 @@ for await (const line of lines) {
     else if (request.operation === 'generate' && control.failGenerate) response = { id: request.id, error: 'fixture generation error', memory }
     else if (request.operation === 'generate') response = { id: request.id, text: await generate(request.messages), memory }
     else if (request.operation === 'embed') response = { id: request.id, embeddings: await embed(request.input), memory }
+    else if (request.operation === 'plan_entity_chunks') response = { id: request.id, chunks: [{ index: 0, startUtf16: 0, endUtf16: 1, tokenCount: 1, schemaTokenCount: 1 }], coverage: { complete: true }, schemaTokenCount: 1, memory }
+    else if (request.operation === 'extract_entities') response = { id: request.id, mentions: [], coverage: { complete: true }, tokenCount: 1, metrics: { coldLoadSeconds: 0, totalRequestSeconds: 0, requestPeakActiveBytes: memory.activeBytes }, memory }
     else if (request.operation === 'ocr' && task !== 'ocr') response = { id: request.id, error: 'This helper was started for another task, not ocr.', memory }
     else if (request.operation === 'ocr' && control.failOcr) response = { id: request.id, error: 'fixture ocr error', memory }
     else if (request.operation === 'ocr') {

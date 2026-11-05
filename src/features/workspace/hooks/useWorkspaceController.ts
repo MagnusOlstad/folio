@@ -116,7 +116,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
     persistenceEnabled,
   });
   const layout = useWorkspaceLayout(initialWorkspaceState?.splitPosition);
-  const models = useWorkspaceModels(setMessage, bundleSetup.ready && bundleSetup.bundles.length > 0);
+  const models = useWorkspaceModels(setMessage, bundleSetup.ready && bundleSetup.bundles.length > 0, bundleSetup.activeBundleId);
   const tabs = useWorkspaceTabs({
     documents: documents.documents,
     drafts: documents.drafts,
@@ -690,6 +690,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
         remove: models.removeMlxModel,
         select: models.selectGenerationModel,
         selectTranscription: models.selectTranscriptionModel,
+        setEntityAnalysisEnabled: models.setEntityAnalysisEnabled,
       },
       onClose: themeSettings.closeSettings,
     },

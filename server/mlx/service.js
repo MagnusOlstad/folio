@@ -6,6 +6,7 @@ import { findModelSnapshot } from './snapshots.js'
 import { helperPath, nativeMlxAvailable } from './helper-path.js'
 import { OCR_MODELS, OCR_MODEL_ID, OCR_TIMEOUT_MS, cancellationError } from './ocr-models.js'
 import { installationProgress } from './progress.js'
+import { ENTITY_MODEL_BYTES, ENTITY_MODEL_ID, ENTITY_MODEL_REPOSITORY, ENTITY_MODEL_REVISION, findEntityModelSnapshot } from './entities-model.js'
 import { TRANSCRIPTION_MODELS,
   readTranscriptionModelPreference, writeTranscriptionModelPreference } from '../transcription/models.js'
 
@@ -33,9 +34,14 @@ const MODEL_DEFINITIONS = Object.freeze({
   },
   ...OCR_MODELS,
   ...TRANSCRIPTION_MODELS,
+  [ENTITY_MODEL_ID]: {
+    id: ENTITY_MODEL_ID, name: 'GLiNER 2.5 Multi', purpose: 'entities',
+    repository: ENTITY_MODEL_REPOSITORY, revision: ENTITY_MODEL_REVISION,
+    task: 'entities', downloadSizeBytes: ENTITY_MODEL_BYTES,
+  },
 })
 
-export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKeepAliveMs = KEEP_ALIVE_MS }) {
+export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKeepAliveMs = KEEP_ALIVE_MS, entitySnapshotValidator = findEntityModelSnapshot }) {
   const cacheRoot = path.join(modelRoot, 'hf-cache')
   const executable = helperPath(projectRoot, mlxHelperPath)
   const workers = new Map()
@@ -50,6 +56,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   const modelActivities = new Map()
   const externalModels = new Map()
   const externalModelAdapters = new Map()
+  const entityModelAvailabilityListeners = new Set()
   let transcriptionSelectionTail = Promise.resolve()
   let heavyQueue = Promise.resolve()
   let activeHeavyModel = null
@@ -63,7 +70,10 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     return model
   }
 
-  function withModelActivity(id, operation, { activate = true } = {}) {
+  function withModelActivity(id, operation, { activate = true, background = false } = {}) {
+    // The current model queue is intentionally exclusive. Background is part
+    // of the entity-service contract so the later scheduler can prioritize it.
+    void background
     const definition = modelDefinition(id)
     const run = async () => {
       try {
@@ -144,7 +154,21 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   }
 
   async function isInstalled(definition) {
+    if (definition.purpose === 'entities') return Boolean(await entitySnapshotValidator(cacheRoot, definition))
     return Boolean(await findModelSnapshot(cacheRoot, definition))
+  }
+
+  function emitEntityModelAvailability(installed) {
+    for (const listener of entityModelAvailabilityListeners) {
+      try { void Promise.resolve(listener({ installed })).catch((error) => console.error(`Entity model availability listener failed: ${error.message}`)) }
+      catch (error) { console.error(`Entity model availability listener failed: ${error.message}`) }
+    }
+  }
+
+  function onEntityModelAvailabilityChange(listener) {
+    if (typeof listener !== 'function') throw new TypeError('Entity model availability listener must be a function.')
+    entityModelAvailabilityListeners.add(listener)
+    return () => entityModelAvailabilityListeners.delete(listener)
   }
 
   async function waitForRequests(id) {
@@ -189,7 +213,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     idleTimers.set(id, timer)
   }
 
-  async function startModel(id, { allowDownload = false, signal = null } = {}) {
+  async function startModel(id, { allowDownload = false, signal = null, installation = false } = {}) {
     const definition = modelDefinition(id)
     if (closed) throw new Error('The MLX service is shutting down.')
     if (removing.has(id)) throw Object.assign(new Error('This model is being removed. Try again when it finishes.'), { statusCode: 409 })
@@ -204,11 +228,14 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
       try {
         const snapshot = definition.purpose === 'transcription'
           ? await externalModels.get(id)?.snapshot?.()
-          : await findModelSnapshot(cacheRoot, definition)
+          : definition.purpose === 'entities'
+            ? await entitySnapshotValidator(cacheRoot, definition)
+            : await findModelSnapshot(cacheRoot, definition)
         if (closed) throw new Error('The MLX service is shutting down.')
         if (!allowDownload && !snapshot) throw new Error(`${definition.name} is not installed. Choose Install to download it first.`)
         await fs.mkdir(cacheRoot, { recursive: true })
-        worker = createMlxWorker({ id, definition, executable, cacheRoot, modelDirectory: snapshot, onExit: (closed) => {
+        worker = createMlxWorker({ id, definition, executable, cacheRoot, modelDirectory: snapshot,
+          startupOperation: installation && definition.purpose === 'entities' ? 'install' : null, onExit: (closed) => {
           if (workers.get(id) === closed) {
             workers.delete(id)
             stopIdleTimer(id)
@@ -273,7 +300,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     if (!closed && workers.get(id) === worker && (activeRequests.get(id) || 0) === 0) armIdleTimer(id, worker)
   }
 
-  async function run(id, operation, payload, timeoutMs, signal = null, { onEvent = null, unloadAfter = false } = {}) {
+  async function run(id, operation, payload, timeoutMs, signal = null, { onEvent = null, unloadAfter = false, background = false } = {}) {
     const definition = modelDefinition(id)
     if (removing.has(id)) throw Object.assign(new Error('This model is being removed. Try again when it finishes.'), { statusCode: 409 })
     if (unloading.has(id)) throw Object.assign(new Error('This model is stopping. Try again when it finishes.'), { statusCode: 409 })
@@ -325,7 +352,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
       return result
     }
     return MODEL_DEFINITIONS[id].purpose === 'embeddings'
-      ? executeWithCleanup() : withModelActivity(id, executeWithCleanup)
+      ? executeWithCleanup() : withModelActivity(id, executeWithCleanup, { background })
   }
 
   async function status() {
@@ -339,7 +366,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
         name: definition.name,
         purpose: definition.purpose,
         downloadSizeBytes: definition.downloadSizeBytes,
-        downloadSizeIsEstimate: true,
+        downloadSizeIsEstimate: definition.purpose !== 'entities',
         selected: definition.purpose === 'generation' ? selected === definition.id
           : definition.purpose === 'transcription' && selectedTranscription === definition.id,
         installed: externalStatus ? Boolean(externalStatus.installed) : await isInstalled(definition),
@@ -381,6 +408,13 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     }
   }
 
+  async function getEntityModelStatus() {
+    const definition = modelDefinition(ENTITY_MODEL_ID)
+    let helperAvailable = false
+    try { await fs.access(executable); helperAvailable = isAvailable } catch { /* native helper is not packaged */ }
+    return { installed: await isInstalled(definition), available: isAvailable, helperAvailable }
+  }
+
   async function install(id) {
     const definition = modelDefinition(id)
     const external = externalModels.get(id)
@@ -391,7 +425,16 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     loadingModels.add(id)
     const operation = async () => {
       installing.add(id)
-      try { await startModel(id, { allowDownload: true }); return await status() }
+      try {
+        await startModel(id, { allowDownload: true, installation: definition.purpose === 'entities' })
+        if (definition.purpose === 'entities' && !await isInstalled(definition)) {
+          await stopModel(id)
+          throw Object.assign(new Error('GLiNER install completed without a complete pinned weights, encoder, and tokenizer snapshot.'), { code: 'ENTITY_MODEL_INCOMPLETE', statusCode: 503 })
+        }
+        const currentStatus = await status()
+        if (definition.purpose === 'entities') emitEntityModelAvailability(true)
+        return currentStatus
+      }
       finally { installing.delete(id); loadingModels.delete(id) }
     }
     return definition.purpose === 'embeddings' ? operation() : withModelActivity(id, operation)
@@ -436,7 +479,9 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
         await stopModel(id)
         const repoRoot = path.join(cacheRoot, `models--${definition.repository.replaceAll('/', '--')}`)
         await fs.rm(repoRoot, { recursive: true, force: true })
-        return status()
+        const currentStatus = await status()
+        if (definition.purpose === 'entities') emitEntityModelAvailability(false)
+        return currentStatus
       }
       return definition.purpose === 'embeddings' ? await operation() : await withModelActivity(id, operation, { activate: false })
     } finally {
@@ -477,6 +522,16 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     return { text: typeof text === 'string' ? text : '', modelId: OCR_MODEL_ID, model: definition.repository, revision: definition.revision }
   }
 
+  function planEntityChunks(payload, { signal = null, background = false } = {}) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw Object.assign(new Error('Entity chunk planning payload is required.'), { statusCode: 400 })
+    return run(ENTITY_MODEL_ID, 'plan_entity_chunks', payload, 15 * 60_000, signal, { background })
+  }
+
+  function extractEntities(payload, { signal = null, background = false } = {}) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw Object.assign(new Error('Entity extraction payload is required.'), { statusCode: 400 })
+    return run(ENTITY_MODEL_ID, 'extract_entities', payload, 15 * 60_000, signal, { background })
+  }
+
   async function close() {
     closed = true
     for (const id of idleTimers.keys()) stopIdleTimer(id)
@@ -491,6 +546,9 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   }
 
   return { status, install, load, unload, remove, selectGenerationModel, selectedGenerationModel,
-    selectTranscriptionModel, selectedTranscriptionModel, generate, embed, transcribe, extractText, close, isBusy: () => [...modelActivities.values()].some((count) => count > 0), withModelActivity, registerExternalModel, keepAliveMs: warmKeepAliveMs,
+    selectTranscriptionModel, selectedTranscriptionModel, generate, embed, transcribe, extractText,
+    planEntityChunks, extractEntities, getEntityModelStatus, onEntityModelAvailabilityChange,
+    close, isBusy: () => [...modelActivities.values()].some((count) => count > 0),
+    withModelActivity, registerExternalModel, keepAliveMs: warmKeepAliveMs,
     modelDefinitions: MODEL_DEFINITIONS }
 }

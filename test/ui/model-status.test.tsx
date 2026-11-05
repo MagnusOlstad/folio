@@ -92,7 +92,7 @@ describe("model status", () => {
     function ProgressHarness() {
       const models = useWorkspaceModels(vi.fn());
       return <>
-        <ModelSettings controls={{ status: models.mlxStatus, actionModel: models.mlxActionModel, action: models.mlxAction, error: models.modelError, install: models.installMlxModel, remove: models.removeMlxModel, select: models.selectGenerationModel, selectTranscription: models.selectTranscriptionModel }} />
+        <ModelSettings controls={{ status: models.mlxStatus, actionModel: models.mlxActionModel, action: models.mlxAction, error: models.modelError, install: models.installMlxModel, remove: models.removeMlxModel, select: models.selectGenerationModel, selectTranscription: models.selectTranscriptionModel, setEntityAnalysisEnabled: models.setEntityAnalysisEnabled }} />
         <MlxModelStatusPanel mlxStatus={models.mlxStatus} mlxActionModel={models.mlxActionModel} mlxAction={models.mlxAction} onInstallMlxModel={models.installMlxModel} onToggleMlxModel={models.toggleMlxModel} onOpenSettings={vi.fn()} />
       </>;
     }
@@ -407,6 +407,24 @@ describe("model status", () => {
     });
     expect(reads).toBe(2);
     expect(result.current.mlxStatus?.activeModel).toBe("whisper");
+  });
+
+  it("keeps model status and installation requests bound to the rendered bundle", async () => {
+    let finishInstall: ((value: Response) => void) | undefined;
+    const fetchMock = vi.fn((_url: string, options?: RequestInit) => options?.method === "POST"
+      ? new Promise<Response>((resolve) => { finishInstall = resolve; })
+      : Promise.resolve(response(status)));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result, rerender } = renderHook(({ bundleId }: { bundleId: string }) => useWorkspaceModels(vi.fn(), true, bundleId), { initialProps: { bundleId: "bundle-a" } });
+    await act(async () => { await result.current.refreshMlxStatus(); });
+    let installation: Promise<void>;
+    await act(async () => { installation = result.current.installMlxModel("gliner25multi"); });
+    const installRequest = fetchMock.mock.calls.find(([url, options]) => url === "/api/mlx/models/gliner25multi/install" && options?.method === "POST");
+    expect(installRequest?.[1]?.headers).toMatchObject({ "x-folio-bundle": "bundle-a", "x-folio-bundle-id": "bundle-a" });
+    rerender({ bundleId: "bundle-b" });
+    expect(result.current.mlxStatus).toBeNull();
+    await act(async () => { finishInstall?.(response(status)); await installation!; });
+    expect(result.current.mlxStatus).toBeNull();
   });
 
   it("routes transcription selection independently and falls back to Turbo for legacy status", async () => {

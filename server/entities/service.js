@@ -36,6 +36,7 @@ async function mapConcurrent(items, limit, operation) {
 
 export function createEntityService(runtime) {
   const storage = createEntityStorage(runtime)
+  const analysisSettingsListeners = new Set()
 
   async function sourceForNote(noteId) {
     const filePath = runtime.resolveBundleMarkdownPath?.(noteId)
@@ -294,6 +295,34 @@ export function createEntityService(runtime) {
     })
   }
 
+  async function getAnalysisSettings() { return storage.readAnalysisSettings() }
+  async function getAnalysisSettingsSnapshot() { return storage.readAnalysisSettingsRecord() }
+  function emitAnalysisSettings(settings) {
+    for (const listener of analysisSettingsListeners) {
+      try { void Promise.resolve(listener(settings)).catch((error) => console.error(`Entity analysis settings listener failed: ${error.message}`)) }
+      catch (error) { console.error(`Entity analysis settings listener failed: ${error.message}`) }
+    }
+  }
+  async function setAnalysisEnabled(enabled) {
+    const settings = await storage.withLock(() => storage.writeAnalysisSettings(enabled))
+    emitAnalysisSettings(settings)
+    return settings
+  }
+  async function enableAnalysisAfterInstall(expectedRevision) {
+    const result = await storage.withLock(async () => {
+      const current = await storage.readAnalysisSettingsRecord()
+      if (current.revision !== expectedRevision) return { settings: { enabled: current.enabled, modelId: current.modelId }, changed: false }
+      return { settings: await storage.writeAnalysisSettings(true), changed: true }
+    })
+    if (result.changed) emitAnalysisSettings(result.settings)
+    return result.settings
+  }
+  function onAnalysisSettingsChange(listener) {
+    if (typeof listener !== 'function') throw new TypeError('Analysis settings listener must be a function.')
+    analysisSettingsListeners.add(listener)
+    return () => analysisSettingsListeners.delete(listener)
+  }
+
   async function exportUserMetadata() { return { version: 1, bundleId: storage.bundleId, userState: await storage.readUserState() } }
   async function importUserMetadata(value) {
     if (!value || value.version !== 1 || !value.userState || value.userState.version !== 1) throw new Error('Invalid entity metadata attachment.')
@@ -325,5 +354,6 @@ export function createEntityService(runtime) {
 
   return { bundleId: storage.bundleId, storage, listEntities, getEntity, listMentions, getMentionsForNote,
     applyCorrection: commitCorrection, undoCorrection, replaceNoteMentions, forgetNote, migrateNote,
-    exportUserMetadata, importUserMetadata, restoreBundleSidecar, resolveEntityKey: entityKey }
+    exportUserMetadata, importUserMetadata, restoreBundleSidecar, resolveEntityKey: entityKey,
+    getAnalysisSettings, getAnalysisSettingsSnapshot, setAnalysisEnabled, enableAnalysisAfterInstall, onAnalysisSettingsChange }
 }

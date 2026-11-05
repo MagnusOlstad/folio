@@ -59,6 +59,32 @@ test('projection keeps UTF-16 spans exact through frontmatter and generated-sect
   assert.equal(mapped.displayStartUtf16, mapped.rawStartUtf16)
 })
 
+test('analysis preferences are durable per bundle and notify only after writes', async (t) => {
+  const first = await fixture('analysis-one')
+  const second = await fixture('analysis-two')
+  t.after(async () => Promise.all([fs.rm(first.root, { recursive: true, force: true }), fs.rm(second.root, { recursive: true, force: true })]))
+  const firstService = createEntityService(first.runtime)
+  const secondService = createEntityService(second.runtime)
+  const events = []
+  firstService.onAnalysisSettingsChange((settings) => events.push(settings))
+  assert.deepEqual(await firstService.getAnalysisSettings(), { enabled: false, modelId: 'gliner25multi' })
+  assert.deepEqual(await firstService.setAnalysisEnabled(true), { enabled: true, modelId: 'gliner25multi' })
+  assert.deepEqual(events, [{ enabled: true, modelId: 'gliner25multi' }])
+  assert.deepEqual(await secondService.getAnalysisSettings(), { enabled: false, modelId: 'gliner25multi' })
+  const restarted = createEntityService(first.runtime)
+  assert.deepEqual(await restarted.getAnalysisSettings(), { enabled: true, modelId: 'gliner25multi' })
+})
+
+test('damaged analysis settings fail with an actionable recovery error without rewriting the file', async (t) => {
+  const data = await fixture()
+  t.after(() => fs.rm(data.root, { recursive: true, force: true }))
+  const service = createEntityService(data.runtime)
+  await fs.mkdir(path.dirname(service.storage.analysisSettingsPath), { recursive: true })
+  await fs.writeFile(service.storage.analysisSettingsPath, '{broken json')
+  await assert.rejects(service.getAnalysisSettings(), (error) => error.status === 503 && error.code === 'ENTITY_SETTINGS_DAMAGED' && /recovery/i.test(error.message))
+  assert.equal(await fs.readFile(service.storage.analysisSettingsPath, 'utf8'), '{broken json')
+})
+
 test('dismiss decisions survive derived-index loss and undo survives service restart', async (t) => {
   const data = await fixture()
   t.after(() => fs.rm(data.root, { recursive: true, force: true }))

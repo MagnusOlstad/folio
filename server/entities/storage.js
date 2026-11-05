@@ -33,6 +33,7 @@ export function createEntityStorage(runtime) {
   const stateRoot = runtime.entityStateRoot || path.dirname(runtime.indexPath || path.join(runtime.dataRoot, 'state', 'bundles', bundleId, 'search-index.json'))
   const indexPath = path.join(stateRoot, 'entity-index.json')
   const userStatePath = path.join(stateRoot, 'entity-user-state.json')
+  const analysisSettingsPath = path.join(stateRoot, 'entity-analysis-settings.json')
   const queue = createSerialQueue()
   let correctionLedgerError = null
 
@@ -64,13 +65,37 @@ export function createEntityStorage(runtime) {
       return empty
     }
   }
+  async function readAnalysisSettingsRecord() {
+    const fallback = { version: 1, bundleId, enabled: false, modelId: 'gliner25multi', revision: 0 }
+    try {
+      const value = await readJson(analysisSettingsPath, fallback)
+      if (!value || value.version !== 1 || value.bundleId !== bundleId || value.modelId !== 'gliner25multi' || typeof value.enabled !== 'boolean' || !Number.isSafeInteger(value.revision ?? 0) || (value.revision ?? 0) < 0) throw new Error('The stored entity analysis settings do not match this bundle.')
+      return { enabled: value.enabled, modelId: value.modelId, revision: value.revision ?? 0 }
+    } catch (error) {
+      throw Object.assign(new Error(`Entity analysis settings need recovery: ${error.message || 'invalid settings file'}`), { status: 503, code: 'ENTITY_SETTINGS_DAMAGED' })
+    }
+  }
+  async function readAnalysisSettings() {
+    const { enabled, modelId } = await readAnalysisSettingsRecord()
+    return { enabled, modelId }
+  }
+  async function writeAnalysisSettings(enabled) {
+    if (typeof enabled !== 'boolean') throw Object.assign(new Error('enabled must be a boolean.'), { status: 400 })
+    const current = await readAnalysisSettingsRecord()
+    const value = { version: 1, bundleId, enabled, modelId: 'gliner25multi', revision: current.revision + 1 }
+    await writeAtomic(analysisSettingsPath, value)
+    return { enabled: value.enabled, modelId: value.modelId }
+  }
   return {
-    bundleId, indexPath, userStatePath,
+    bundleId, indexPath, userStatePath, analysisSettingsPath,
     readIndex,
     readUserState: initializeUserState,
     withLock: (operation) => queue(operation),
     writeIndex: (value) => writeAtomic(indexPath, validateIndex(value, bundleId)),
     writeUserState: async (value) => { validateUserState(value, bundleId); await writeAtomic(userStatePath, value); correctionLedgerError = null },
+    readAnalysisSettings,
+    readAnalysisSettingsRecord,
+    writeAnalysisSettings,
     getLedgerError: () => correctionLedgerError,
   }
 }

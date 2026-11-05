@@ -5,6 +5,14 @@ function sendError(response, error) {
 export function registerRoutes(app, runtime) {
   const service = runtime.entityService
   if (!service) throw new Error('Entity service is not configured.')
+  app.get('/api/entities/settings', async (_request, response) => {
+    try { response.json(await service.getAnalysisSettings()) }
+    catch (error) { sendError(response, error) }
+  })
+  app.put('/api/entities/settings', async (request, response) => {
+    try { response.json(await service.setAnalysisEnabled(request.body?.enabled)) }
+    catch (error) { sendError(response, error) }
+  })
   app.get('/api/entities/mentions', async (request, response) => {
     try {
       if (typeof request.query.noteId !== 'string') { response.status(400).json({ error: 'noteId is required.' }); return }

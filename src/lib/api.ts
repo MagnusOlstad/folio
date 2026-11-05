@@ -49,7 +49,8 @@ export async function api<T>(url: string, options?: RequestInit): Promise<T> {
         ...options?.headers,
       },
     });
-  } catch {
+  } catch (error) {
+    if ((error instanceof DOMException && error.name === "AbortError") || options?.signal?.aborted) throw error;
     throw new Error("The local FolioNotes service is not ready yet.");
   }
   const body = await response.text();
@@ -150,4 +151,19 @@ export function cancelTranslatedExport(jobId: string): Promise<{ jobId: string; 
 
 export function fetchNoteLanguage(id: string, signal?: AbortSignal): Promise<NoteLanguageInfo> {
   return api<NoteLanguageInfo>(`/api/note/language?id=${encodeURIComponent(id)}`, { signal });
+}
+
+export async function apiWithRetryForBundle<T>(bundleId: string | null, url: string, options?: RequestInit, attempts = 8): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await apiForBundle<T>(bundleId, url, options);
+    } catch (error) {
+      lastError = error;
+      if ((error instanceof DOMException && error.name === "AbortError") || options?.signal?.aborted) throw error;
+      if (error instanceof Error && "status" in error && typeof error.status === "number" && error.status < 500) throw error;
+      if (attempt < attempts - 1) await new Promise((resolve) => window.setTimeout(resolve, Math.min(250 * 2 ** attempt, 1500)));
+    }
+  }
+  throw lastError;
 }

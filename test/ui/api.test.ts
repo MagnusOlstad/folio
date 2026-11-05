@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "../../src/lib/api.ts";
+import { api, apiWithRetryForBundle } from "../../src/lib/api.ts";
 
 describe("API client error contract", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -70,5 +70,21 @@ describe("API client error contract", () => {
     await expect(api("/api/status")).rejects.toThrow(
       "The server returned an invalid response.",
     );
+  });
+});
+
+describe("bundle-scoped API retries", () => {
+  it("does not retry canceled bundle requests", async () => {
+    const fetchMock = vi.fn(() => Promise.reject(new DOMException("Aborted", "AbortError")));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(apiWithRetryForBundle("bundle-a", "/api/mlx/status")).rejects.toThrow("Aborted");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("does not retry non-transient bundle errors", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ error: "Bundle not found." }), { status: 404 })));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(apiWithRetryForBundle("missing", "/api/mlx/status")).rejects.toThrow("Bundle not found.");
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

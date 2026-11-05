@@ -12,6 +12,7 @@ export type ModelSettingsControls = {
   remove: (id: MlxModelId) => void;
   select: (id: MlxModelId) => void;
   selectTranscription: (id: MlxTranscriptionModelId) => void;
+  setEntityAnalysisEnabled: (enabled: boolean) => void;
 };
 
 export function ModelSettings({ controls }: { controls: ModelSettingsControls }) {
@@ -29,6 +30,7 @@ export function ModelSettings({ controls }: { controls: ModelSettingsControls })
       : download?.phase === "loading" || model?.loading ? "Loading…" : "Downloading…";
     const busy = Boolean(model?.busy || model?.loading || downloading || controls.actionModel !== null);
     const identity = <span><strong>{definition.name}</strong><small>{definition.description}</small></span>;
+    const analysisEnabled = Boolean(controls.status?.entityAnalysis?.enabled);
     return (
       <article className={`model-settings-row${definition.generation ? "" : " model-settings-auxiliary"}`} key={definition.id}>
         {definition.generation ? <label>
@@ -39,6 +41,10 @@ export function ModelSettings({ controls }: { controls: ModelSettingsControls })
           {identity}
         </label> : identity}
         <div className="model-settings-actions">
+          {definition.entityAnalysis ? <label className="entity-analysis-toggle">
+            <input type="checkbox" checked={analysisEnabled} onChange={(event) => controls.setEntityAnalysisEnabled(event.currentTarget.checked)} disabled={busy && !analysisEnabled || (!analysisEnabled && (!canManage || !model?.installed))} />
+            Analyze this bundle
+          </label> : null}
           {model?.installed ? <span className="model-installed">{model.busy ? "In use" : model.loading ? "Loading…" : model.loaded ? "Ready" : "Installed"}</span> : null}
           {model?.installed ? (
             <button type="button" onClick={() => controls.remove(definition.id)} disabled={!canManage || busy} title={model.busy ? "Wait until this model finishes its requests to remove it." : undefined}>
@@ -51,6 +57,8 @@ export function ModelSettings({ controls }: { controls: ModelSettingsControls })
           )}
         </div>
         {installing ? <ModelDownloadProgress modelName={definition.name} progress={download} /> : null}
+        {definition.entityAnalysis && analysisEnabled && !model?.installed ? <p className="settings-import-message">Entity analysis is paused because GLiNER is not installed. Install it to resume analysis; your existing entity data stays available.</p> : null}
+        {definition.entityAnalysis && controls.status?.entityAnalysis?.error ? <p className="settings-model-error" role="alert">{controls.status.entityAnalysis.error} Entity analysis is paused until this bundle’s settings are repaired.</p> : null}
       </article>
     );
   };
@@ -58,7 +66,7 @@ export function ModelSettings({ controls }: { controls: ModelSettingsControls })
     <section className="settings-section" aria-labelledby="settings-models-heading">
       <div className="settings-section-copy">
         <h2 id="settings-models-heading">Local models</h2>
-        <p>Choose models for text generation and transcription. Manage semantic search below. Model files stay in FolioNotes’s local cache.</p>
+        <p>Choose local models for text generation, transcription, and entity analysis. Model files stay in FolioNotes’s local cache.</p>
       </div>
       {!controls.status?.available ? <p className="settings-import-message">Local MLX models need Apple Silicon and macOS 14 or newer.</p> : null}
       {controls.status?.available && !controls.status.helperAvailable ? <p className="settings-import-message">The local MLX helper is not ready. Rebuild or reinstall FolioNotes, then retry the download.</p> : null}
@@ -72,7 +80,12 @@ export function ModelSettings({ controls }: { controls: ModelSettingsControls })
         {modelCatalog.filter((definition) => definition.transcription).map(renderModel)}
         {controls.status && canManage && !selectedTranscriptionInstalled ? <p role="status">The selected transcription model is not installed. Transcription will wait until it is downloaded.</p> : null}
       </fieldset>
-      {modelCatalog.filter((definition) => !definition.generation && !definition.transcription).map(renderModel)}
+      <fieldset className="model-settings-group" aria-label="Entity extraction">
+        <legend>Entity extraction</legend>
+        <p>Find people, organizations, projects, products, and places in this bundle’s notes. Entity choices are stored separately for each bundle.</p>
+        {modelCatalog.filter((definition) => definition.entityAnalysis).map(renderModel)}
+      </fieldset>
+      {modelCatalog.filter((definition) => !definition.generation && !definition.transcription && !definition.entityAnalysis).map(renderModel)}
       {controls.error ? <p className="settings-model-error" role="alert">{controls.error}</p> : null}
     </section>
   );

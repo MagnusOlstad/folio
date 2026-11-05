@@ -10,7 +10,7 @@ export const OCR_MODELS = Object.freeze({
 })
 
 export function cancellationError(definition) {
-  return definition.purpose === 'ocr'
-    ? Object.assign(new Error('Text extraction was cancelled.'), { code: 'OCR_CANCELLED' })
-    : Object.assign(new Error('Transcription was cancelled. Your audio file is saved and can be retried.'), { code: 'TRANSCRIPTION_CANCELLED' })
+  if (definition.purpose === 'ocr') return Object.assign(new Error('Text extraction was cancelled.'), { code: 'OCR_CANCELLED' })
+  if (definition.purpose === 'entities') return Object.assign(new Error('Entity extraction was cancelled. Entity data remains available and can be retried.'), { code: 'ENTITY_EXTRACTION_CANCELLED' })
+  return Object.assign(new Error('Transcription was cancelled. Your audio file is saved and can be retried.'), { code: 'TRANSCRIPTION_CANCELLED' })
 }

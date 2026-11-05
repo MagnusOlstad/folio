@@ -174,6 +174,7 @@ export function MlxModelStatusPanel({
             const modelState = !mlxStatus ? "Checking status"
               : loading ? download?.phase === "loading" ? "Loading" : download?.phase === "downloading" || (acting && mlxAction === "install") ? "Downloading" : acting && mlxAction === "unload" ? "Unloading" : acting && mlxAction === "remove" ? "Removing" : acting && (mlxAction === "select" || mlxAction === "select-transcription") ? "Selecting" : "Loading"
               : !available ? "Unavailable"
+              : definition.entityAnalysis && mlxStatus.entityAnalysis?.enabled && !installed ? "Paused"
               : busy ? "In use"
               : loaded ? "Running"
               : installed ? "Stopped" : "Not installed";
@@ -202,7 +203,7 @@ export function MlxModelStatusPanel({
                 <span className="mlx-model-details" id={`model-details-${id}`}>
                   {memory ? <span title={`Active memory ${formatModelBytes(memory.activeBytes)} · ${formatModelBytes(memory.cacheBytes)} allocator cache · ${formatModelBytes(memory.peakResidentBytes)} peak process`}>{formatModelBytes(memory.activeBytes)} active</span>
                     : <span title={`Estimated launch memory, based on the approximate download size (${launchMemory}).`}>~{launchMemory} on launch</span>}
-                  {!installed ? <span>{model?.downloadSizeIsEstimate ?? true ? "About " : ""}{launchMemory} download</span>
+                  {!installed ? <span>{definition.entityAnalysis && mlxStatus?.entityAnalysis?.enabled ? "Cached entity data remains available" : `${model?.downloadSizeIsEstimate ?? true ? "About " : ""}${launchMemory} download`}</span>
                     : busy ? <span>Processing locally</span>
                     : <span>{!available ? "Manage in settings" : loaded ? "Ready on device" : "Click to load"}</span>}
                   {busy ? <span>{model?.requestCount ? `${model.requestCount} active request${model.requestCount === 1 ? "" : "s"}` : "Request in progress"}</span> : null}
