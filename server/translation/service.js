@@ -34,8 +34,8 @@ export function createTranslationService(runtime, options = {}) {
 
   function sleep(ms) {
     return new Promise((resolve) => {
+      // Ref'd on purpose: callers await this (idle(), busy polling), so it must keep the event loop alive.
       const timer = setTimeout(() => { sleepers.delete(done); resolve() }, ms)
-      timer.unref?.()
       const done = () => { clearTimeout(timer); sleepers.delete(done); resolve() }
       sleepers.add(done)
     })
