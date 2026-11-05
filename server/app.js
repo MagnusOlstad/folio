@@ -33,6 +33,8 @@ import { registerRoutes as registerBackupRoutes } from './routes/backup.js'
 import { registerRoutes as registerBundleRoutes } from './routes/bundles.js'
 import { registerRoutes as registerHistoryRoutes } from './routes/history.js'
 import { registerRoutes as registerTranslationRoutes } from './routes/translation.js'
+import { registerRoutes as registerEntityRoutes } from './routes/entities.js'
+import { createEntityService } from './entities/service.js'
 import { registerRoutes as registerTranscriptionRoutes } from './transcription/routes.js'
 import { createBundleRuntimeManager } from './bundles/registry.js'
 
@@ -43,6 +45,7 @@ export function createRuntime(env = process.env, sharedMlxService = null) {
   runtime.transcriptionService = createTranscriptionService(runtime)
   Object.assign(runtime, createFileStorage(runtime))
   Object.assign(runtime, createMarkdownDocuments(runtime))
+  runtime.entityService = createEntityService(runtime)
   Object.assign(runtime, createMarkdownMoves(runtime))
   Object.assign(runtime, createKnowledgeIndex(runtime))
   Object.assign(runtime, createClassificationService(runtime))
@@ -82,6 +85,7 @@ export async function createApp(runtime = createRuntime()) {
       fs.mkdir(runtime.draftsRoot, { recursive: true }),
       fs.mkdir(runtime.importsRoot, { recursive: true }),
     ])
+    await runtime.entityService.restoreBundleSidecar()
     await runtime.reindexBundle()
     runtime.translation.startBackfill()
     manager.trackBackground(
@@ -95,6 +99,9 @@ export async function createApp(runtime = createRuntime()) {
   }
 
   const app = express()
+  // Bundle metadata attachments can approach the bounded 32 MiB state limit.
+  // Parse only this import endpoint with its larger envelope allowance.
+  app.post('/api/entities/metadata', express.json({ limit: '34mb' }))
   app.use(express.json({ limit: '1mb' }))
   registerBundleRoutes(app, manager)
   registerBackupRoutes(app, manager)
@@ -130,6 +137,7 @@ export async function createApp(runtime = createRuntime()) {
   registerAssetRoutes(app, scopedRuntime)
   registerHistoryRoutes(app, scopedRuntime)
   registerTranslationRoutes(app, scopedRuntime)
+  registerEntityRoutes(app, scopedRuntime)
   registerTranscriptionRoutes(app, scopedRuntime)
   registerCaptureRoutes(app, scopedRuntime)
   registerConfirmationRoutes(app, scopedRuntime)

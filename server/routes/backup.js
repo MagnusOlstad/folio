@@ -37,10 +37,26 @@ function archiveRoots(bundles) {
 }
 
 export function registerRoutes(app, manager) {
-  app.get('/api/backup', (_request, response, next) => {
+  app.get('/api/backup', async (_request, response, next) => {
     const bundles = manager.registry.list()
     if (!bundles.length) {
       response.status(409).json({ code: 'NO_BUNDLE', error: 'Set up a bundle before downloading a backup.' })
+      return
+    }
+
+    let bundleBackups
+    try {
+      bundleBackups = await Promise.all(archiveRoots(bundles).map(async (bundle) => {
+        const entityService = manager.runtimeFor(bundle).entityService
+        await entityService.restoreBundleSidecar?.()
+        return { ...bundle, entityMetadata: await entityService.exportUserMetadata() }
+      }))
+    } catch (error) {
+      if (error.code === 'ENTITY_LEDGER_DAMAGED') {
+        response.status(error.status || 503).json({ code: error.code, error: error.message })
+        return
+      }
+      next(error)
       return
     }
 
@@ -65,7 +81,10 @@ export function registerRoutes(app, manager) {
     response.set('Cache-Control', 'no-store')
     response.attachment(backupFilename())
     archive.pipe(response)
-    for (const bundle of archiveRoots(bundles)) archive.directory(bundle.markdownPath, bundle.archivePath)
+    for (const bundle of bundleBackups) {
+      archive.directory(bundle.markdownPath, bundle.archivePath, (entry) => entry.name === '.folio/entity-metadata.json' ? false : entry)
+      archive.append(`${JSON.stringify(bundle.entityMetadata, null, 2)}\n`, { name: `${bundle.archivePath}/.folio/entity-metadata.json` })
+    }
     void archive.finalize().catch(fail)
   })
 }

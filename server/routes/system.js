@@ -152,6 +152,7 @@ app.delete('/api/note', async (request, response, next) => {
     if (!record) return response.status(404).json({ error: 'Note not found.' })
 
     await reindexBundle()
+    await runtime.entityService.forgetNote(id)
     let warning = null
     try {
       await runtime.history.reconcile(`Deleted ${id}`, [id])

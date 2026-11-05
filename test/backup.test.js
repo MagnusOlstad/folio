@@ -42,6 +42,7 @@ test('downloads all attached bundle trees as a ZIP archive', async (context) => 
   await fs.writeFile(path.join(firstRoot, 'nested', 'note.md'), '# First\n')
   await fs.writeFile(path.join(firstRoot, '.folio', 'history.git', 'HEAD'), 'ref: refs/heads/main\n')
   await fs.writeFile(path.join(firstRoot, '.folio', 'history.git', 'objects', 'snapshot'), 'snapshot bytes')
+  await fs.writeFile(path.join(firstRoot, '.folio', 'entity-metadata.json'), '{"version":1,"bundleId":"stale","userState":{"version":1}}')
   await fs.writeFile(path.join(secondRoot, 'attachments', 'paper.pdf'), 'second attachment')
   await fs.writeFile(path.join(detachedRoot, 'detached.md'), '# Detached\n')
   await fs.writeFile(path.join(dataRoot, 'drafts', 'private.md'), '# Not backed up\n')
@@ -51,13 +52,17 @@ test('downloads all attached bundle trees as a ZIP archive', async (context) => 
 
   const registry = createBundleRegistry({ dataRoot })
   await registry.read()
-  await registry.setup({ name: 'Research / Notes', markdownPath: firstRoot, source: 'existing' })
-  await registry.setup({ name: 'Research?Notes', markdownPath: secondRoot, source: 'existing' })
+  const first = await registry.setup({ name: 'Research / Notes', markdownPath: firstRoot, source: 'existing' })
+  const second = await registry.setup({ name: 'Research?Notes', markdownPath: secondRoot, source: 'existing' })
   const detached = await registry.setup({ name: '../Detached', markdownPath: detachedRoot, source: 'existing' })
   await registry.detach(detached.id)
 
+  let damagedLedger = false
   const app = express()
-  registerRoutes(app, { registry })
+  registerRoutes(app, { registry, runtimeFor: (bundle) => ({ entityService: { exportUserMetadata: async () => {
+    if (damagedLedger) throw Object.assign(new Error('Ledger needs recovery.'), { status: 503, code: 'ENTITY_LEDGER_DAMAGED' })
+    return { version: 1, bundleId: bundle.id, userState: { version: 1 } }
+  } } }) })
   const server = http.createServer(app)
   await listen(server)
   context.after(() => close(server))
@@ -71,10 +76,18 @@ test('downloads all attached bundle trees as a ZIP archive', async (context) => 
   assert.match(response.headers.get('content-disposition'), /^attachment; filename="folio-bundle-backup-.+\.zip"$/)
   assert.equal(response.headers.get('cache-control'), 'no-store')
   assert.deepEqual(archive.subarray(0, 2), Buffer.from('PK'))
-  assert.deepEqual(await archiveEntries(archive), {
+  const entries = await archiveEntries(archive)
+  assert.deepEqual(entries, {
+    'bundles/FolioNotes-bundle/.folio/entity-metadata.json': `${JSON.stringify({ version: 1, bundleId: 'legacy-bundle', userState: { version: 1 } }, null, 2)}\n`,
     'bundles/Research-Notes/nested/note.md': '# First\n',
     'bundles/Research-Notes/.folio/history.git/HEAD': 'ref: refs/heads/main\n',
     'bundles/Research-Notes/.folio/history.git/objects/snapshot': 'snapshot bytes',
     'bundles/Research-Notes-2/attachments/paper.pdf': 'second attachment',
+    'bundles/Research-Notes/.folio/entity-metadata.json': `${JSON.stringify({ version: 1, bundleId: first.id, userState: { version: 1 } }, null, 2)}\n`,
+    'bundles/Research-Notes-2/.folio/entity-metadata.json': `${JSON.stringify({ version: 1, bundleId: second.id, userState: { version: 1 } }, null, 2)}\n`,
   })
+  damagedLedger = true
+  const failedBackup = await fetch(`http://127.0.0.1:${port}/api/backup`)
+  assert.equal(failedBackup.status, 503)
+  assert.equal((await failedBackup.json()).code, 'ENTITY_LEDGER_DAMAGED')
 })

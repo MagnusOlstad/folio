@@ -267,6 +267,7 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
         fs.mkdir(runtime.draftsRoot, { recursive: true }),
         fs.mkdir(runtime.importsRoot, { recursive: true }),
       ]).then(async () => {
+        await runtime.entityService?.restoreBundleSidecar?.()
         await runtime.reindexBundle()
         runtime.translation?.startBackfill()
         if (runtime.history) trackBackground(
@@ -304,8 +305,16 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
   }
 
   function proxyRuntime() {
+    const entityServiceProxy = new Proxy({}, {
+      get(_target, property) {
+        const service = activeRuntime().entityService
+        const value = service?.[property]
+        return typeof value === 'function' ? value.bind(service) : value
+      },
+    })
     return new Proxy(defaultRuntime, {
       get(_target, property) {
+        if (property === 'entityService') return entityServiceProxy
         if (property === 'getBundleRoot') return () => activeRuntime().bundleRoot
         if (property === 'getRawRoot') return () => activeRuntime().rawRoot
         if (property === 'history') return activeRuntime().history

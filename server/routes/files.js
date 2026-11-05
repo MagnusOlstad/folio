@@ -116,6 +116,10 @@ app.post('/api/file/move', async (request, response, next) => {
     const records = await readRecords()
     const current = records.find((record) => record.id === moveResult.newId) || moveResult.record
     let historyWarning = null
+    if (moveResult.oldId !== moveResult.newId) {
+      try { await runtime.entityService.migrateNote(moveResult.oldId, moveResult.newId) }
+      catch (error) { console.error(`Could not migrate entity locators after move: ${error.message}`) }
+    }
     try {
       await runtime.history.reconcile(`Moved ${moveResult.oldId}`)
     } catch (error) {
@@ -259,6 +263,10 @@ app.post('/api/file/refile', async (request, response, next) => {
     if (outcome.invalid) return response.status(400).json({ error: 'Choose a valid destination path.' })
     if (outcome.missing) return response.status(404).json({ error: 'Note not found.' })
     let warning = null
+    if (outcome.oldId !== outcome.newId) {
+      try { await runtime.entityService.migrateNote(outcome.oldId, outcome.newId) }
+      catch (error) { console.error(`Could not migrate entity locators after refile: ${error.message}`) }
+    }
     try { await runtime.history.reconcile(`Refiled ${outcome.oldId}`) }
     catch { warning = 'The note was refiled, but its history checkpoint could not be saved.' }
     warning ||= outcome.warning
