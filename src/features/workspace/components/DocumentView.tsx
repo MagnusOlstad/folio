@@ -171,15 +171,12 @@ export function DocumentView(props: DocumentViewProps) {
             groupId={props.groupId}
             document={translationTarget ? translatedDocument : document}
             readOnly={Boolean(translationTarget)}
-            refileLocked={Boolean(translationTarget) && document.deletable && document.movable}
             languageToggle={languageToggle}
             editingKey={props.editingMetadataKey}
             drafts={props.metadataDrafts}
             onBeginEditing={props.onBeginMetadataEditing}
             onChangeDraft={props.onChangeMetadataDraft}
             onFinishEditing={props.onFinishMetadataEditing}
-            onRefile={(target) => props.onStartRefile(target.id)}
-            refileDisabled={props.refile?.status === "preparing" || props.refile?.status === "proposing" || props.refile?.status === "submitting"}
           />
         )}
         {translationTarget ? (
@@ -257,6 +254,9 @@ export function DocumentView(props: DocumentViewProps) {
         onDelete={props.onDelete}
         onExport={props.onExport}
         onTranslatedExport={props.onTranslatedExport}
+        onRefile={(target) => props.onStartRefile(target.id)}
+        refileDisabled={props.refile?.status === "preparing" || props.refile?.status === "proposing" || props.refile?.status === "submitting"}
+        refileTranslated={Boolean(translationTarget)}
         onOpenDocument={props.onOpenDocument}
       />
       {props.refile && (

@@ -522,7 +522,7 @@ test('exports the current draft as an exact Markdown download', async ({ page })
   const content = 'Exported draft\n\n**Bold detail**'
   await editor.fill(content)
 
-  await page.getByRole('button', { name: 'Export', exact: true }).click()
+  await page.getByRole('button', { name: 'More actions', exact: true }).click()
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('menuitem', { name: 'Markdown' }).click()
   const download = await downloadPromise

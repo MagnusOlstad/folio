@@ -1290,10 +1290,9 @@
 }
 .document-toolbar button:disabled { cursor: not-allowed; opacity: 0.35; }
 .document-toolbar button:focus-visible { outline: 2px solid var(--acid); outline-offset: 1px; }
-.document-refile-button { padding: 0 7px; }
-.document-refile-button:hover:not(:disabled),
-.document-refile-button:focus-visible { border-color: var(--acid); color: var(--acid); }
 .document-translation-group {
+  overflow: hidden;
+  border-radius: var(--control-radius);
   display: flex;
   align-items: stretch;
   min-height: 20px;
@@ -1346,7 +1345,7 @@
   white-space: nowrap;
 }
 .document-heading.has-toolbar > p:first-of-type {
-  padding-right: 170px;
+  padding-right: 110px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2433,25 +2432,26 @@
   gap: 8px;
 }
 
-.note-export-menu {
+.note-more-menu {
   position: relative;
 }
 
-.save-state .note-export-trigger {
+.save-state .note-more-trigger {
   border-color: var(--line);
   color: var(--muted);
   background: transparent;
 }
 
-.save-state .note-export-trigger:hover,
-.save-state .note-export-trigger:focus-visible,
-.save-state .note-export-trigger[aria-expanded="true"] {
+.save-state .note-more-trigger:hover,
+.save-state .note-more-trigger:focus-visible,
+.save-state .note-more-trigger[aria-expanded="true"] {
   border-color: var(--acid);
   color: var(--acid);
   background: transparent;
 }
 
-.note-export-options {
+.note-more-options {
+  border-radius: var(--control-radius);
   position: absolute;
   right: 0;
   bottom: calc(100% + 7px);
@@ -2466,7 +2466,8 @@
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
 }
 
-.save-state .note-export-options button {
+.save-state .note-more-options button {
+  border-radius: calc(var(--control-radius) - 1px);
   width: 100%;
   min-height: 28px;
   padding: 0 8px;
@@ -2476,13 +2477,22 @@
   text-align: left;
 }
 
-.note-export-separator {
+.note-more-separator {
   height: 1px;
   margin: 3px 4px;
   background: var(--line);
 }
 
-.save-state .note-export-options button:disabled { cursor: not-allowed; opacity: 0.5; }
+.save-state .note-more-options button:disabled { cursor: not-allowed; opacity: 0.5; }
+.note-more-group { display: grid; gap: 2px; }
+.note-more-label {
+  padding: 4px 8px 2px;
+  color: var(--muted);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
 
 .translated-export-layer {
   position: fixed;
@@ -2533,8 +2543,8 @@
 .translated-export-actions button:focus-visible,
 .translated-export-options input:focus-visible { outline: 2px solid var(--acid); outline-offset: 2px; }
 
-.save-state .note-export-options button:hover,
-.save-state .note-export-options button:focus-visible {
+.save-state .note-more-options button:hover,
+.save-state .note-more-options button:focus-visible {
   color: var(--ink);
   background: rgba(255, 255, 255, 0.06);
   outline: none;
@@ -2547,6 +2557,7 @@
 }
 
 .save-state button {
+  border-radius: var(--control-radius);
   min-height: 24px;
   padding: 0 9px;
   border: 1px solid var(--acid);

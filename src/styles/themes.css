@@ -1,5 +1,6 @@
 :root,
 :root[data-theme='original'] {
+  --control-radius: 5px;
   --ink: #e9e5d9;
   --muted: #918f87;
   --dim: #5e615b;

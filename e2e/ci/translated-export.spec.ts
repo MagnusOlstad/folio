@@ -27,7 +27,7 @@ test('translated export downloads a suffixed Markdown file and can open a new dr
     await page.goto('/')
     await page.locator('.workbench-sidebar').getByRole('button', { name: title, exact: true }).click()
     const openDialog = async () => {
-      await page.getByRole('button', { name: 'Export', exact: true }).click()
+      await page.getByRole('button', { name: 'More actions', exact: true }).click()
       await page.getByRole('menuitem', { name: 'Translate…' }).click()
       return page.getByRole('dialog', { name: 'Translate and export' })
     }

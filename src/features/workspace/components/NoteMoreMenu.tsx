@@ -4,11 +4,18 @@ import type { ViewerDocument } from "../../../domain/types.ts";
 import type { NoteExportFormat } from "../model/note-export.ts";
 import { TranslatedExportDialog } from "./TranslatedExportDialog.tsx";
 
-type NoteExportMenuProps = {
+type NoteMoreMenuProps = {
   title: string;
   exporting: boolean;
   disabled?: boolean;
   onExport: (format: NoteExportFormat) => void;
+  /** Present only where Refile is offered (editable filed notes). */
+  refile?: {
+    onRefile: () => void;
+    disabled: boolean;
+    /** Tooltip explaining why Refile is unavailable right now. */
+    reason?: string;
+  };
   /** Present only for filed notes; `available` mirrors the translation settings. */
   translate?: {
     document: ViewerDocument;
@@ -17,16 +24,20 @@ type NoteExportMenuProps = {
   };
 };
 
-export function NoteExportMenu({
+const ENABLED_ITEMS = "[role=menuitem]:not(:disabled)";
+
+export function NoteMoreMenu({
   title,
   exporting,
   disabled = false,
   onExport,
+  refile,
   translate,
-}: NoteExportMenuProps) {
+}: NoteMoreMenuProps) {
   const [open, setOpen] = useState(false);
   const [translateOpen, setTranslateOpen] = useState(false);
   const menuId = useId();
+  const exportLabelId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -48,15 +59,21 @@ export function NoteExportMenu({
     };
   }, [open]);
 
-  function choose(format: NoteExportFormat) {
+  function focusItem(which: "first" | "last") {
+    window.requestAnimationFrame(() => {
+      const items = rootRef.current?.querySelectorAll<HTMLButtonElement>(ENABLED_ITEMS);
+      if (!items?.length) return;
+      items[which === "first" ? 0 : items.length - 1].focus();
+    });
+  }
+
+  function choose(action: () => void) {
     setOpen(false);
-    onExport(format);
+    action();
   }
 
   function moveMenuFocus(event: KeyboardEvent<HTMLDivElement>) {
-    const items = Array.from(
-      event.currentTarget.querySelectorAll<HTMLButtonElement>("[role=menuitem]:not(:disabled)"),
-    );
+    const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>(ENABLED_ITEMS));
     const index = items.indexOf(document.activeElement as HTMLButtonElement);
     if (event.key === "Escape") {
       event.preventDefault();
@@ -66,59 +83,73 @@ export function NoteExportMenu({
       event.preventDefault();
       const direction = event.key === "ArrowDown" ? 1 : -1;
       items[(index + direction + items.length) % items.length]?.focus();
+    } else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      items[event.key === "Home" ? 0 : items.length - 1]?.focus();
     }
   }
 
   return (
-    <div className="note-export-menu" ref={rootRef}>
+    <div className="note-more-menu" ref={rootRef}>
       <button
         type="button"
-        className="note-export-trigger"
+        className="note-more-trigger"
         ref={triggerRef}
+        aria-label="More actions"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         disabled={exporting || disabled}
         onClick={() => setOpen((current) => !current)}
         onKeyDown={(event) => {
-          if (event.key !== "ArrowDown") return;
+          if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
           event.preventDefault();
           setOpen(true);
-          window.requestAnimationFrame(() =>
-            rootRef.current
-              ?.querySelector<HTMLButtonElement>("[role=menuitem]")
-              ?.focus(),
-          );
+          focusItem(event.key === "ArrowDown" ? "first" : "last");
         }}
       >
-        {exporting ? "Exporting…" : "Export"}
+        {exporting ? "Exporting…" : "More"}
       </button>
       {open ? (
         <div
-          className="note-export-options"
+          className="note-more-options"
           id={menuId}
           role="menu"
-          aria-label={`Export ${title}`}
+          aria-label={`More actions for ${title}`}
           onKeyDown={moveMenuFocus}
         >
-          <button type="button" role="menuitem" onClick={() => choose("markdown")}>
-            Markdown
-          </button>
-          <button type="button" role="menuitem" onClick={() => choose("pdf")}>
-            PDF
-          </button>
+          {refile ? (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={refile.disabled}
+                title={refile.disabled ? refile.reason : undefined}
+                onClick={() => choose(refile.onRefile)}
+              >
+                Refile…
+              </button>
+              <div className="note-more-separator" role="separator" />
+            </>
+          ) : null}
+          <div role="group" aria-labelledby={exportLabelId} className="note-more-group">
+            <span id={exportLabelId} className="note-more-label">Export</span>
+            <button type="button" role="menuitem" onClick={() => choose(() => onExport("markdown"))}>
+              Markdown
+            </button>
+            <button type="button" role="menuitem" onClick={() => choose(() => onExport("pdf"))}>
+              PDF
+            </button>
+          </div>
           {translate ? (
             <>
-              <div className="note-export-separator" role="separator" />
+              <div className="note-more-separator" role="separator" />
               <button
                 type="button"
                 role="menuitem"
                 disabled={!translate.available}
                 title={translate.available ? undefined : "Install a generation model in Settings to translate notes."}
-                onClick={() => {
-                  setOpen(false);
-                  setTranslateOpen(true);
-                }}
+                onClick={() => choose(() => setTranslateOpen(true))}
               >
                 Translate…
               </button>

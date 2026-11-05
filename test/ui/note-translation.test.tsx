@@ -138,8 +138,10 @@ describe("DocumentView translation", () => {
     expect(screen.getAllByRole("heading", { name: "Hello" }).length).toBeGreaterThan(0);
     expect(screen.getByText("A test")).toBeInTheDocument();
     expect(document.querySelector("[data-live-markdown-editor]")).toBeNull();
-    expect(screen.getByRole("button", { name: "Refile" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Refile" })).toHaveAttribute("title", "Switch back to the original to refile");
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "Refile…" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Refile…" })).toHaveAttribute("title", "Switch back to the original to refile");
+    fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByTitle("Click to edit title")).toBeNull();
     expect(JSON.parse(window.localStorage.getItem(noteTranslationStorageKey(null)) ?? "{}")).toEqual({ [noteDocument.id]: "en" });
 

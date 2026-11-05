@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TranslatedExportJob, ViewerDocument } from "../../src/domain/types.ts";
-import { NoteExportMenu } from "../../src/features/workspace/components/NoteExportMenu.tsx";
+import { NoteMoreMenu } from "../../src/features/workspace/components/NoteMoreMenu.tsx";
 import { draftFilingGuidance } from "../../src/lib/workspace.ts";
 import { translatedExportFilename } from "../../src/features/workspace/model/note-export.ts";
 import {
@@ -99,7 +99,7 @@ describe("translated export dialog", () => {
 
   function renderMenu(available = true, translate = true) {
     return render(
-      <NoteExportMenu
+      <NoteMoreMenu
         title={note.title}
         exporting={false}
         onExport={vi.fn()}
@@ -108,7 +108,7 @@ describe("translated export dialog", () => {
     );
   }
   const openDialog = () => {
-    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Translate…" }));
   };
   const tick = (ms = 1600) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
@@ -123,14 +123,14 @@ describe("translated export dialog", () => {
 
   it("offers Translate… only for translatable notes and disables it without a model", () => {
     renderMenu(true, false);
-    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
     expect(screen.queryByRole("menuitem", { name: "Translate…" })).toBeNull();
     expect(screen.getByRole("menuitem", { name: "Markdown" })).toBeInTheDocument();
   });
 
   it("disables the item with a hint when translation is unavailable", () => {
     renderMenu(false);
-    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
     expect(screen.getByRole("menuitem", { name: "Translate…" })).toBeDisabled();
   });
 
@@ -169,7 +169,7 @@ describe("translated export dialog", () => {
     await tick(50);
     // rAF is real; flush it.
     await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(null))); });
-    expect(screen.getByRole("button", { name: "Export" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "More actions" })).toHaveFocus();
   });
 
   it("shows a settings hint when no generation model is installed (503) and a retry", async () => {
