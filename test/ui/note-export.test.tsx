@@ -4,6 +4,7 @@ import type { ViewerDocument } from "../../src/domain/types.ts";
 import { NoteExportMenu } from "../../src/features/workspace/components/NoteExportMenu.tsx";
 import { NoteExportPreview } from "../../src/features/workspace/components/NoteExportPreview.tsx";
 import { useNoteExport, waitForExportAssets } from "../../src/features/workspace/hooks/useNoteExport.ts";
+import { remarkPreserveBlankLines } from "../../src/features/workspace/model/export-spacing.ts";
 import {
   noteExportFilename,
   noteExportSnapshot,
@@ -209,6 +210,53 @@ describe("note export behavior", () => {
     expect(setMessage).toHaveBeenCalledWith(
       "Exported Quarterly- plan - review.pdf",
     );
+  });
+});
+
+describe("remarkPreserveBlankLines", () => {
+  const block = (type: string, start: number, end: number) => ({
+    type,
+    position: { start: { line: start }, end: { line: end } },
+  });
+  const styleOf = (node: { data?: { hProperties?: Record<string, unknown> } }) =>
+    node.data?.hProperties?.style;
+
+  it("adds no space for a single blank line and scales for more", () => {
+    const tree = {
+      children: [
+        block("paragraph", 1, 1),
+        block("paragraph", 3, 3),
+        block("paragraph", 7, 7),
+      ],
+    };
+    remarkPreserveBlankLines()(tree);
+    expect(styleOf(tree.children[1])).toBeUndefined();
+    expect(styleOf(tree.children[2])).toBe("padding-top:2.90em");
+  });
+
+  it("is a no-op without positions", () => {
+    const tree = { children: [{ type: "paragraph" }, { type: "paragraph" }] };
+    remarkPreserveBlankLines()(tree);
+    expect(styleOf(tree.children[1])).toBeUndefined();
+  });
+
+  it("renders the extra space on images and paragraphs in the preview", () => {
+    const { container } = render(
+      <NoteExportPreview
+        snapshot={{
+          id: document.id,
+          title: document.title,
+          description: "",
+          content: "![a](x.png)\n\n\n\n![b](y.png)\n\ntext\n\n\n\nmore",
+          draft: true,
+        }}
+      />,
+    );
+    const paragraphs = Array.from(container.querySelectorAll("p"));
+    expect(paragraphs[0]).not.toHaveAttribute("style");
+    expect(paragraphs[1].getAttribute("style")).toContain("padding-top: 2.9em");
+    expect(paragraphs[2]).not.toHaveAttribute("style");
+    expect(paragraphs[3].getAttribute("style")).toContain("padding-top: 2.9em");
   });
 });
 

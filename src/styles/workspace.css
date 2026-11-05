@@ -2656,8 +2656,16 @@
     display: block;
     max-width: 100%;
     height: auto;
-    margin: 8pt 0;
+    margin: 6pt 0;
     break-inside: avoid;
+  }
+
+  .note-export-preview img + br {
+    display: none;
+  }
+
+  .note-export-preview p:has(> img) {
+    margin-bottom: 14pt;
   }
 }
 

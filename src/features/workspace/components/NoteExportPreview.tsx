@@ -7,6 +7,7 @@ import {
   withoutLeadingTitleHeading,
   type NoteExportSnapshot,
 } from "../model/note-export.ts";
+import { remarkPreserveBlankLines } from "../model/export-spacing.ts";
 import { folioMarkdown } from "../model/folio-markdown.ts";
 
 type NoteExportPreviewProps = {
@@ -23,7 +24,7 @@ export function NoteExportPreview({ snapshot }: NoteExportPreviewProps) {
         </header>
       ) : null}
       <ReactMarkdown
-        remarkPlugins={[folioMarkdown, remarkGfm, remarkBreaks]}
+        remarkPlugins={[folioMarkdown, remarkGfm, remarkBreaks, remarkPreserveBlankLines]}
         components={{
           img: ({ node: _node, src, alt }) => {
             const asset = resolveAssetHref(src);
