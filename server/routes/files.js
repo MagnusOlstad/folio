@@ -124,6 +124,7 @@ app.post('/api/file/move', async (request, response, next) => {
     }
     const graph = await relationshipIndex()
     if (moveResult.warning) void refreshMissingEmbeddingsInBackground()
+    runtime.translation?.enqueue(moveResult.newId)
     response.json({
       oldId: moveResult.oldId,
       newId: moveResult.newId,
@@ -263,6 +264,7 @@ app.post('/api/file/refile', async (request, response, next) => {
     const records = await readRecords()
     const graph = await relationshipIndex()
     if (warning) void refreshMissingEmbeddingsInBackground()
+    runtime.translation?.enqueue(outcome.newId)
     response.json({
       oldId: outcome.oldId,
       newId: outcome.newId,
@@ -291,6 +293,7 @@ app.post('/api/reindex', async (_request, response, next) => {
       console.error(`The bundle reindexed, but its history checkpoint failed: ${error.message}`)
       historyWarning = 'The bundle reindexed, but its history checkpoint could not be saved.'
     }
+    runtime.translation?.startBackfill()
     response.json({ notes: result.records.map(publicRecord), errors: result.errors, warning: historyWarning })
   } catch (error) {
     next(error)
@@ -409,6 +412,7 @@ app.patch('/api/note', async (request, response, next) => {
     if (updateResult.notFound) return response.status(404).json({ error: 'Note not found.' })
 
     const { newId, updated, currentRecords, warning } = updateResult
+    if (hasContent || hasTitle || hasDescription) runtime.translation?.enqueue(newId)
     if (warning) void refreshMissingEmbeddingsInBackground()
     let historyWarning = null
     if (refreshEmbeddings === true || (hasMarkdownChanges && !contentAutosaveOnly)) {

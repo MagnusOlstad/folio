@@ -4,6 +4,7 @@ import type { BundleDirectory, BundleFile, Note, TabGroup, ViewerDocument } from
 import { apiForBundle, getActiveBundleId } from "../../../lib/api.ts";
 import { canDeleteExplorerDirectory, isExplorerDescendant, type ExplorerFileActions } from "../model/explorer.ts";
 import type { NoteExportFormat } from "../model/note-export.ts";
+import { migrateStoredNoteTranslationChoice } from "../model/note-translation.ts";
 
 type ExplorerActionOptions = {
   files: BundleFile[];
@@ -79,6 +80,7 @@ export function useWorkspaceExplorerActions(options: ExplorerActionOptions): Exp
   }
 
   function reconcileRenamedFile(oldId: string, newId: string, note: ViewerDocument) {
+    migrateStoredNoteTranslationChoice(getActiveBundleId(), oldId, newId);
     setDocuments((current) => {
       const next = { ...current };
       delete next[oldId];

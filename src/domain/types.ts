@@ -220,3 +220,16 @@ export type ExpandedDirectoryState = {
 export type MarkdownNode = {
   position?: { start: { line: number }; end: { line: number } };
 };
+export type NoteTranslationTarget = "en" | "no";
+export type NoteTranslationStatus = "ready" | "pending" | "disabled" | "unavailable";
+export type NoteTranslation = {
+  id: string;
+  target: NoteTranslationTarget;
+  status: NoteTranslationStatus;
+  translatedBlocks: number;
+  totalBlocks: number;
+  title: string;
+  description: string;
+  content: string;
+};
+export type TranslationSettings = { enabled: boolean; available: boolean };

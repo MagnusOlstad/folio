@@ -11,7 +11,7 @@ import type {
   TabGroup,
   ViewerDocument,
 } from "../../../domain/types.ts";
-import { api } from "../../../lib/api.ts";
+import { api, getActiveBundleId } from "../../../lib/api.ts";
 import {
   filedDraftContent,
   isUntitledId,
@@ -28,6 +28,7 @@ import {
   proposalFields,
   type FilingFields,
 } from "../model/filing.ts";
+import { migrateStoredNoteTranslationChoice } from "../model/note-translation.ts";
 
 type UseWorkspaceDocumentMutationsOptions = {
   documents: WorkspaceDocumentState;
@@ -262,6 +263,7 @@ export function useWorkspaceDocumentMutations({
 
   function applyUpdatedNote(updated: NoteDetail, oldId = updated.id, contentBase?: string) {
     const newId = updated.id;
+    migrateStoredNoteTranslationChoice(getActiveBundleId(), oldId, newId);
     const previous = state.documentsRef.current[oldId] || state.documentsRef.current[newId];
     if (oldId === newId && previous) rebaseOpenAggregateDraft(updated, previous.content, contentBase);
     state.setDocuments((current) => {

@@ -1,0 +1,39 @@
+import fs from 'node:fs/promises'
+
+export function registerRoutes(app, runtime) {
+  function fail(response, next, error) {
+    if (error.status) return response.status(error.status).json({ error: error.message })
+    return next(error)
+  }
+
+  app.get('/api/note/translation', async (request, response, next) => {
+    try {
+      response.json(await runtime.translation.view(String(request.query.id || ''), String(request.query.target || '')))
+    } catch (error) { fail(response, next, error) }
+  })
+
+  app.post('/api/note/translation/prioritize', async (request, response, next) => {
+    try {
+      const id = String(request.body?.id || '')
+      const filePath = runtime.resolveBundleMarkdownPath(id)
+      if (!filePath) return response.status(400).json({ error: 'Only bundle notes can be translated.' })
+      await runtime.assertNoBundleSymlinks(filePath)
+      try { await fs.access(filePath) } catch {
+        return response.status(404).json({ error: 'Note not found.' })
+      }
+      runtime.translation.prioritize(id)
+      response.status(202).json({ queued: true })
+    } catch (error) { fail(response, next, error) }
+  })
+
+  app.get('/api/translation/settings', async (_request, response, next) => {
+    try { response.json(await runtime.translation.getSettings()) } catch (error) { next(error) }
+  })
+
+  app.put('/api/translation/settings', async (request, response, next) => {
+    try {
+      if (typeof request.body?.enabled !== 'boolean') return response.status(400).json({ error: 'enabled must be a boolean.' })
+      response.json(await runtime.translation.setEnabled(request.body.enabled))
+    } catch (error) { next(error) }
+  })
+}

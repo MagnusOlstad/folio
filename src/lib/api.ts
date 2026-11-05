@@ -1,3 +1,5 @@
+import type { NoteTranslation, NoteTranslationTarget, TranslationSettings } from "../domain/types.ts";
+
 let activeBundleId: string | null = null;
 
 export function setActiveBundleId(bundleId: string | null) {
@@ -79,4 +81,33 @@ export async function apiWithRetry<T>(
     }
   }
   throw lastError;
+}
+
+export function fetchNoteTranslation(
+  id: string,
+  target: NoteTranslationTarget,
+  signal?: AbortSignal,
+): Promise<NoteTranslation> {
+  return api<NoteTranslation>(
+    `/api/note/translation?id=${encodeURIComponent(id)}&target=${target}`,
+    { signal },
+  );
+}
+
+export function prioritizeNoteTranslation(id: string): Promise<{ queued: boolean }> {
+  return api<{ queued: boolean }>("/api/note/translation/prioritize", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+  });
+}
+
+export function fetchTranslationSettings(): Promise<TranslationSettings> {
+  return api<TranslationSettings>("/api/translation/settings");
+}
+
+export function saveTranslationSettings(enabled: boolean): Promise<TranslationSettings> {
+  return api<TranslationSettings>("/api/translation/settings", {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  });
 }

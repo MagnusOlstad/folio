@@ -1,5 +1,6 @@
-import type { ViewerDocument } from "../../../domain/types.ts";
+import type { NoteTranslationTarget, ViewerDocument } from "../../../domain/types.ts";
 import type { MetadataField } from "../types.ts";
+import { DocumentTranslationToggle } from "./DocumentTranslationToggle.tsx";
 
 type DocumentHeaderProps = {
   groupId: string;
@@ -21,6 +22,15 @@ type DocumentHeaderProps = {
   onRefile?: (document: ViewerDocument) => void;
   refileDisabled?: boolean;
   readOnly?: boolean;
+  languageToggle?: {
+    enabled: boolean;
+    saving: boolean;
+    error: string;
+    onEnabledChange: (enabled: boolean) => void;
+    value: NoteTranslationTarget | null;
+    available: boolean;
+    onChange: (target: NoteTranslationTarget | null) => void;
+  };
 };
 
 export function DocumentHeader({
@@ -34,12 +44,14 @@ export function DocumentHeader({
   onRefile = () => {},
   refileDisabled = false,
   readOnly = false,
+  languageToggle,
 }: DocumentHeaderProps) {
   const titleKey = `${groupId}:${document.id}:title`;
   const descriptionKey = `${groupId}:${document.id}:description`;
 
   return (
     <header className="document-heading">
+      {languageToggle ? <DocumentTranslationToggle {...languageToggle} /> : null}
       <p>
         {document.type}
         {document.stale ? " / stale" : ""}

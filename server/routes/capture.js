@@ -290,6 +290,7 @@ app.post('/api/notes', async (request, response, next) => {
       console.error(`The note was created, but its history checkpoint failed: ${error.message}`)
       warning ||= 'The note was created, but its history checkpoint could not be saved.'
     }
+    runtime.translation?.enqueue(createdNote.id)
     response.status(201).json({ note: createdNote, notes: [createdNote], warning, appended, filing: confirmation })
   } catch (error) {
     next(error)

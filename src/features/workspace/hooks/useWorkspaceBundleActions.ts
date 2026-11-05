@@ -7,8 +7,9 @@ import type {
   TabGroup,
   ViewerDocument,
 } from "../../../domain/types.ts";
-import { api } from "../../../lib/api.ts";
+import { api, getActiveBundleId } from "../../../lib/api.ts";
 import { isUntitledId } from "../../../lib/workspace.ts";
+import { migrateStoredNoteTranslationChoice } from "../model/note-translation.ts";
 
 type BundleActionState = {
   reindexing: boolean;
@@ -179,6 +180,7 @@ export function useWorkspaceBundleActions(
         api<BundleDirectory[]>("/api/directories"),
       ]);
 
+      migrateStoredNoteTranslationChoice(getActiveBundleId(), result.oldId, result.newId);
       setDocuments((current) => {
         const next = { ...current };
         delete next[result.oldId];

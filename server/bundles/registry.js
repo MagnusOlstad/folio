@@ -268,6 +268,7 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
         fs.mkdir(runtime.importsRoot, { recursive: true }),
       ]).then(async () => {
         await runtime.reindexBundle()
+        runtime.translation?.startBackfill()
         if (runtime.history) trackBackground(
           runtime.history.reconcile('Baseline'),
           'Could not initialize note history.',
@@ -297,6 +298,7 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
     await Promise.allSettled([
       ...Array.from(allRuntimes, (runtime) => runtime.history?.close?.()),
       ...Array.from(allRuntimes, (runtime) => runtime.transcriptionService?.close?.()),
+      ...Array.from(allRuntimes, (runtime) => runtime.translation?.close?.()),
       defaultRuntime.mlxService?.close?.(),
     ])
   }
@@ -307,6 +309,7 @@ export function createBundleRuntimeManager({ config, defaultRuntime, createRunti
         if (property === 'getBundleRoot') return () => activeRuntime().bundleRoot
         if (property === 'getRawRoot') return () => activeRuntime().rawRoot
         if (property === 'history') return activeRuntime().history
+        if (property === 'translation') return activeRuntime().translation
         const propertyName = String(property)
         const defaultValue = Reflect.get(defaultRuntime, property, defaultRuntime)
         if (typeof defaultValue !== 'function') return defaultValue

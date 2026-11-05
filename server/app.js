@@ -18,6 +18,7 @@ import { createFilingService } from './filing/service.js'
 import { createReleaseService } from './updates/service.js'
 import { createObsidianImportService } from './imports/obsidian.js'
 import { createHistoryService } from './history/service.js'
+import { createTranslationService } from './translation/service.js'
 import { registerRoutes as registerMlxRoutes } from './routes/mlx.js'
 import { registerRoutes as registerSystemRoutes } from './routes/system.js'
 import { registerRoutes as registerFileRoutes } from './routes/files.js'
@@ -31,6 +32,7 @@ import { registerRoutes as registerImportRoutes } from './routes/imports.js'
 import { registerRoutes as registerBackupRoutes } from './routes/backup.js'
 import { registerRoutes as registerBundleRoutes } from './routes/bundles.js'
 import { registerRoutes as registerHistoryRoutes } from './routes/history.js'
+import { registerRoutes as registerTranslationRoutes } from './routes/translation.js'
 import { registerRoutes as registerTranscriptionRoutes } from './transcription/routes.js'
 import { createBundleRuntimeManager } from './bundles/registry.js'
 
@@ -49,6 +51,7 @@ export function createRuntime(env = process.env, sharedMlxService = null) {
   Object.assign(runtime, createReleaseService(runtime))
   Object.assign(runtime, createObsidianImportService(runtime))
   Object.assign(runtime, { history: createHistoryService(runtime) })
+  runtime.translation = createTranslationService(runtime)
   return runtime
 }
 
@@ -80,6 +83,7 @@ export async function createApp(runtime = createRuntime()) {
       fs.mkdir(runtime.importsRoot, { recursive: true }),
     ])
     await runtime.reindexBundle()
+    runtime.translation.startBackfill()
     manager.trackBackground(
       runtime.history.reconcile('Baseline'),
       'Could not initialize note history.',
@@ -125,6 +129,7 @@ export async function createApp(runtime = createRuntime()) {
   registerFileContentRoutes(app, scopedRuntime)
   registerAssetRoutes(app, scopedRuntime)
   registerHistoryRoutes(app, scopedRuntime)
+  registerTranslationRoutes(app, scopedRuntime)
   registerTranscriptionRoutes(app, scopedRuntime)
   registerCaptureRoutes(app, scopedRuntime)
   registerConfirmationRoutes(app, scopedRuntime)
