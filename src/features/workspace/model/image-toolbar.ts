@@ -1,16 +1,20 @@
 import { syntaxTree } from "@codemirror/language";
 import type { EditorView } from "@codemirror/view";
 import { extractImageText } from "../../../lib/assets.ts";
+import { imageAltWidthChange, MIN_IMAGE_WIDTH } from "./image-size.ts";
 import { cleanExtractedText, nextOcrState, ocrInsertChange, type OcrPreviewState } from "./image-ocr.ts";
 
 const TOOLBAR_CLASS = "cm-live-markdown-image-toolbar";
 const COPIED_RESET_MS = 1500;
 
 const PREVIEW_CLASS = "cm-live-markdown-ocr-preview";
+const HANDLE_CLASS = "cm-live-markdown-image-resize";
 
 export type ImageToolbarOptions = {
   /** The `/assets/<file>` path used to request text extraction. */
   path: string;
+  /** Width in CSS pixels from the `alt|width` suffix, or null for natural size. */
+  width?: number | null;
   onError?: (message: string) => void;
 };
 
@@ -60,7 +64,7 @@ function createButton(label: string, icon: readonly string[], extraClass?: strin
 /** True when a DOM event originated inside an image toolbar or its text preview. */
 export function isImageToolbarEvent(event: Event) {
   const target = event.target;
-  return target instanceof Element && target.closest(`.${TOOLBAR_CLASS}, .${PREVIEW_CLASS}`) !== null;
+  return target instanceof Element && target.closest(`.${TOOLBAR_CLASS}, .${PREVIEW_CLASS}, .${HANDLE_CLASS}`) !== null;
 }
 
 /** Finds the Markdown range of the Image node that the frame widget replaces. */
@@ -78,6 +82,67 @@ export function findImageRange(view: EditorView, frame: HTMLElement) {
     }
   }
   return null;
+}
+
+/** Rewrites the alt suffix of the image so it has the given width (null resets). */
+export function setImageWidth(view: EditorView, frame: HTMLElement, width: number | null) {
+  const range = findImageRange(view, frame);
+  if (!range || view.state.readOnly) return false;
+  const change = imageAltWidthChange(view.state.sliceDoc(range.from, range.to), width);
+  if (!change) return false;
+  view.dispatch({
+    changes: { from: range.from + change.from, to: range.from + change.to, insert: change.insert },
+    userEvent: "input",
+  });
+  return true;
+}
+
+function attachResizeHandle(
+  view: EditorView,
+  frame: HTMLElement,
+  image: HTMLImageElement,
+  options: ImageToolbarOptions,
+) {
+  const handle = document.createElement("span");
+  handle.className = HANDLE_CLASS;
+  handle.setAttribute("role", "separator");
+  handle.setAttribute("aria-label", "Resize image");
+  handle.title = "Drag to resize, double-click to reset";
+  let drag: { pointerId: number; startX: number; startWidth: number; width: number } | null = null;
+  const maxWidth = () => Math.max(MIN_IMAGE_WIDTH, view.contentDOM.clientWidth);
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startWidth = image.getBoundingClientRect().width;
+    drag = { pointerId: event.pointerId, startX: event.clientX, startWidth, width: startWidth };
+    handle.setPointerCapture(event.pointerId);
+    frame.classList.add("is-resizing");
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    drag.width = Math.min(maxWidth(), Math.max(MIN_IMAGE_WIDTH, drag.startWidth + event.clientX - drag.startX));
+    image.style.width = `${drag.width}px`;
+  });
+  const finish = (event: PointerEvent, commit: boolean) => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const { width, startWidth } = drag;
+    drag = null;
+    frame.classList.remove("is-resizing");
+    if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+    if (commit && Math.round(width) !== Math.round(startWidth)) setImageWidth(view, frame, width);
+    else if (!commit) image.style.width = options.width ? `${options.width}px` : "";
+  };
+  handle.addEventListener("pointerup", (event) => finish(event, true));
+  handle.addEventListener("pointercancel", (event) => finish(event, false));
+  handle.addEventListener("mousedown", (event) => event.preventDefault());
+  handle.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setImageWidth(view, frame, null);
+  });
+  frame.append(handle);
 }
 
 /** Deletes the image Markdown, dropping the whole line when nothing else is on it. */
@@ -229,7 +294,9 @@ export function createImageFrame(
     }
   });
 
+  if (options.width) image.style.width = `${options.width}px`;
   frame.append(image, toolbar);
+  if (!view.state.readOnly) attachResizeHandle(view, frame, image, options);
   return frame;
 }
 

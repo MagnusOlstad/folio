@@ -15,6 +15,7 @@ import type { ViewerDocument } from "../../../domain/types.ts";
 import { assetUrl, resolveAssetHref } from "../../../lib/assets.ts";
 import { conceptUrl, resolveBundleLink } from "../../../lib/paths.ts";
 import { sourcePosition } from "../../../lib/workspace.ts";
+import { parseImageAlt } from "../model/image-size.ts";
 import { folioMarkdown } from "../model/folio-markdown.ts";
 import { readonlyMarkdownSearch } from "../model/readonly-markdown-search.ts";
 
@@ -159,10 +160,14 @@ export function RenderedMarkdown({
       },
       img: ({ node: _node, src, alt }) => {
         const asset = resolveAssetHref(src);
-        return asset ? (
-          <img src={assetUrl(asset)} alt={alt ?? ""} loading="lazy" />
-        ) : (
-          <img src={src} alt={alt ?? ""} loading="lazy" />
+        const parsed = parseImageAlt(alt ?? "");
+        return (
+          <img
+            src={asset ? assetUrl(asset) : src}
+            alt={parsed.alt}
+            width={parsed.width ?? undefined}
+            loading="lazy"
+          />
         );
       },
       p: ({ node, ...props }) => <p {...props} {...sourcePosition(node)} />,
