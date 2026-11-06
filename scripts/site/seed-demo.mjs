@@ -3,13 +3,20 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { prepareDemoDirs, launch, api, workDir } from './lib.mjs'
 import { notes } from './demo/notes.mjs'
+import { renderCard } from './demo/make-ocr-image.mjs'
 
 prepareDemoDirs({ fresh: true })
 const { app, base } = await launch()
 const ids = {}
 try {
+  // Upload the generated recipe-card image as a bundle asset for the OCR demo note.
+  const cardPng = path.join(workDir, 'cardamom-buns-recipe-card.png')
+  await renderCard(cardPng)
+  const upload = await fetch(base + '/api/assets', { method: 'POST', headers: { 'content-type': 'image/png', 'x-folio-filename': 'cardamom-buns-recipe-card.png' }, body: fs.readFileSync(cardPng) })
+  const { path: cardAsset } = await upload.json()
+  console.log('card asset', cardAsset)
   for (const n of notes) {
-    const content = n.content
+    const content = n.content.replaceAll('__CARD_ASSET__', cardAsset)
     const t = Date.now()
     const res = await api(base, 'POST', '/api/notes', { content, timeZone: 'Europe/Oslo' })
     if (res.filing?.id && res.filing.mode !== 'append') {
