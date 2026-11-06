@@ -5,6 +5,7 @@ import type { WorkspaceShellProps } from "../components/WorkspaceShell.tsx";
 import { useWorkspaceBootstrap } from "./useWorkspaceBootstrap.ts";
 import { useWorkspaceLayout } from "./useWorkspaceLayout.ts";
 import { useWorkspaceModels } from "./useWorkspaceModels.ts";
+import { useEntityScope } from "./useEntityScope.ts";
 import { useWorkspaceTabs } from "./useWorkspaceTabs.ts";
 import { useWorkspaceDocumentState } from "./useWorkspaceDocumentState.ts";
 import { useWorkspaceDocumentMutations } from "./useWorkspaceDocumentMutations.ts";
@@ -117,6 +118,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
   });
   const layout = useWorkspaceLayout(initialWorkspaceState?.splitPosition);
   const models = useWorkspaceModels(setMessage, bundleSetup.ready && bundleSetup.bundles.length > 0, bundleSetup.activeBundleId);
+  const entityScope = useEntityScope(bundleSetup.activeBundleId);
   const tabs = useWorkspaceTabs({
     documents: documents.documents,
     drafts: documents.drafts,
@@ -664,6 +666,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
     historyScopeId: persistenceBundleId,
     app: {
       versionInfo: models.versionInfo,
+      entityBundleId: bundleSetup.activeBundleId,
+      entityScope,
       mlxStatus: models.mlxStatus,
       mlxActionModel: models.mlxActionModel,
       mlxAction: models.mlxAction,

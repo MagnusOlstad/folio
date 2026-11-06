@@ -29,6 +29,7 @@ export function ModelSettings({ controls }: { controls: ModelSettingsControls })
     const installLabel = download?.phase === "downloading" ? "Downloading…"
       : download?.phase === "loading" || model?.loading ? "Loading…" : "Downloading…";
     const busy = Boolean(model?.busy || model?.loading || downloading || controls.actionModel !== null);
+    const canRemoveDuringEntityWork = Boolean(definition.entityAnalysis && model?.installed && !model?.loading && !downloading && controls.actionModel === null);
     const identity = <span><strong>{definition.name}</strong><small>{definition.description}</small></span>;
     const analysisEnabled = Boolean(controls.status?.entityAnalysis?.enabled);
     return (
@@ -47,7 +48,7 @@ export function ModelSettings({ controls }: { controls: ModelSettingsControls })
           </label> : null}
           {model?.installed ? <span className="model-installed">{model.busy ? "In use" : model.loading ? "Loading…" : model.loaded ? "Ready" : "Installed"}</span> : null}
           {model?.installed ? (
-            <button type="button" onClick={() => controls.remove(definition.id)} disabled={!canManage || busy} title={model.busy ? "Wait until this model finishes its requests to remove it." : undefined}>
+            <button type="button" onClick={() => controls.remove(definition.id)} disabled={(!canManage && !canRemoveDuringEntityWork) || (busy && !canRemoveDuringEntityWork)} title={model.busy && !definition.entityAnalysis ? "Wait until this model finishes its requests to remove it." : undefined}>
               {acting && controls.action === "remove" ? "Removing…" : "Remove"}
             </button>
           ) : (

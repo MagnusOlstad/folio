@@ -17,6 +17,7 @@ type EditorGroupProps = {
   groupCount: number;
   model: Omit<EditorWorkspaceModel, "groups" | "splitPosition" | "message"> & {
     filingOwnerGroupIds: Record<string, string>;
+    entityReveal?: { documentId: string; requestId: number; from: number; to: number; expectedText: string; sourceContent: string } | null;
   };
   actions: Omit<
     EditorWorkspaceActions,
@@ -202,6 +203,7 @@ export function EditorGroup({
             editKey={editKey}
             draft={model.drafts[document.id]}
             saving={saving}
+            entityReveal={model.entityReveal?.documentId === document?.id ? model.entityReveal : null}
             focusRequestId={focusRequest?.id}
             onFocusRequestConsumed={
               focusRequest

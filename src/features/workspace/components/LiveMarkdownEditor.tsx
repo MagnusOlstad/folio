@@ -59,6 +59,7 @@ export type LiveMarkdownEditorProps = {
   onOpenLink?: (href: string) => void;
   onToggleTask?: (lineNumber: number, checked: boolean) => void | Promise<void>;
   initialSelection?: { from: number; to: number };
+  revealSelection?: { requestId: number; from: number; to: number; expectedText: string; sourceContent: string } | null;
   onSelectionChange?: (from: number, to: number) => void;
   autoFocus?: boolean;
   readOnly?: boolean;
@@ -145,6 +146,7 @@ export function LiveMarkdownEditor({
   placeholder,
   ariaLabel,
   initialSelection,
+  revealSelection,
   onSelectionChange,
 }: LiveMarkdownEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -158,6 +160,7 @@ export function LiveMarkdownEditor({
   const onToggleTaskRef = useRef(onToggleTask);
   const onSelectionChangeRef = useRef(onSelectionChange);
   const initialSelectionRef = useRef(initialSelection);
+  const revealSelectionRef = useRef(revealSelection);
   // CodeMirror Text shares unchanged document structure between edits. Keep a
   // bounded window of unacknowledged edits so delayed echoes cannot erase typing.
   const pendingLocalDocsRef = useRef<Text[]>([]);
@@ -183,6 +186,23 @@ export function LiveMarkdownEditor({
     onToggleTask: readOnly ? undefined : onToggleTask,
     onError: (message) => onErrorRef.current?.(message),
   });
+
+  useLayoutEffect(() => {
+    revealSelectionRef.current = revealSelection;
+  }, [revealSelection]);
+
+  useLayoutEffect(() => {
+    const view = viewRef.current;
+    const reveal = revealSelectionRef.current;
+    if (!view || !reveal) return;
+    const currentContent = view.state.doc.toString();
+    if (currentContent !== reveal.sourceContent || reveal.from < 0 || reveal.to <= reveal.from
+      || reveal.to > currentContent.length || currentContent.slice(reveal.from, reveal.to) !== reveal.expectedText) return;
+    view.dispatch({
+      selection: EditorSelection.range(reveal.from, reveal.to),
+      scrollIntoView: true,
+    });
+  }, [revealSelection?.requestId]);
 
   useLayoutEffect(() => {
     controlledValueRef.current = value;

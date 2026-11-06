@@ -115,6 +115,7 @@ export type EditorWorkspaceActions = {
 export type EditorWorkspaceProps = {
   model: EditorWorkspaceModel;
   actions: EditorWorkspaceActions;
+  entityReveal?: { documentId: string; requestId: number; from: number; to: number; expectedText: string; sourceContent: string } | null;
   historyPreview?: {
     groupId: string;
     documentId: string;

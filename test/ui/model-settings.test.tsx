@@ -59,6 +59,17 @@ describe("model settings", () => {
     expect(setEnabled).toHaveBeenCalledWith(false);
   });
 
+  it("allows removing the installed entity model while a bounded extraction is running", () => {
+    const remove = vi.fn();
+    const entityModel = { id: "gliner25multi" as const, name: "GLiNER 2.5 Multi", purpose: "entities", downloadSizeBytes: 1_165_502_487, downloadSizeIsEstimate: false, selected: false, installed: true, loaded: true, busy: true, requestCount: 1, memory: null };
+    renderSettings({ status: { ...status, available: false, helperAvailable: false, models: [...status.models, entityModel] }, remove });
+    const row = screen.getByText("GLiNER 2.5 Multi").closest("article")!;
+    const removeButton = within(row).getByRole("button", { name: "Remove" });
+    expect(removeButton).toBeEnabled();
+    fireEvent.click(removeButton);
+    expect(remove).toHaveBeenCalledWith("gliner25multi");
+  });
+
   it("surfaces damaged per-bundle analysis settings", () => {
     const entityModel = { id: "gliner25multi" as const, name: "GLiNER 2.5 Multi", purpose: "entities", downloadSizeBytes: 1_165_502_487, downloadSizeIsEstimate: false, selected: false, installed: false, loaded: false, memory: null };
     renderSettings({ status: { ...status, entityAnalysis: { bundleId: "bundle-a", enabled: false, modelId: "gliner25multi", error: "Entity analysis settings need recovery." }, models: [...status.models, entityModel] } });

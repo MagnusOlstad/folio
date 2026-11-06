@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent } from "react";
 import { SettingsDialog } from "../../settings/components/SettingsDialog.tsx";
 import type { SettingsDialogProps } from "../../settings/components/SettingsDialog.tsx";
@@ -18,9 +18,15 @@ import { NoteHistoryPanel } from "./NoteHistoryPanel.tsx";
 import { isUntitledId } from "../../../lib/workspace.ts";
 import type { SettingsCategory } from "../../settings/model/settings-category.ts";
 import type { TranscriptionDockProps } from "../../transcription/components/TranscriptionDock.tsx";
+import { EntitiesPanel } from "./EntitiesPanel.tsx";
+import type { EntityMention } from "../../../domain/entities.ts";
+import { exactMentionRange, sourceMatchesHash } from "../model/entity-view.ts";
+import { apiForBundle } from "../../../lib/api.ts";
 
 type WorkspaceAppProps = WorkspaceStatusProps & {
   versionInfo: VersionInfo | null;
+  entityBundleId: string | null;
+  entityScope: ReturnType<typeof import("../hooks/useEntityScope.ts").useEntityScope>;
   onOpenSettings: (category?: SettingsCategory) => void;
 };
 
@@ -67,6 +73,67 @@ export function WorkspaceShell({
   const activeGroup = editor.model.groups.find((group) => group.id === editor.model.activeGroupId);
   const activeDocumentId = activeGroup?.activeId ?? null;
   const activeDocument = activeDocumentId ? editor.model.documents[activeDocumentId] : null;
+  const [entityReveal, setEntityReveal] = useState<EditorWorkspaceProps["entityReveal"]>(null);
+  const currentBundleId = useRef(app.entityBundleId);
+  useLayoutEffect(() => { currentBundleId.current = app.entityBundleId; }, [app.entityBundleId]);
+  const openEntityNote = async (documentId: string) => {
+    const bundleId = app.entityBundleId;
+    if (!bundleId) return;
+    try {
+      const fetched = await apiForBundle<import("../../../domain/types.ts").ViewerDocument>(bundleId, `/api/file?path=${encodeURIComponent(documentId)}`);
+      if (currentBundleId.current !== bundleId) return;
+      const draft = editor.model.drafts[documentId];
+      const saved = editor.model.documents[documentId]?.content ?? fetched.content;
+      if (draft !== undefined && draft !== saved) {
+        editor.actions.notifyMessage("Save the source note draft before opening it here.");
+        return;
+      }
+      await editor.actions.openDocument(documentId, "note");
+    } catch {
+      if (currentBundleId.current === bundleId) editor.actions.notifyMessage("Could not open that source note.");
+    }
+  };
+  const createEntityNote = async (title: string): Promise<string | null> => {
+    const bundleId = app.entityBundleId;
+    if (!bundleId) return null;
+    try {
+      const result = await apiForBundle<{ id: string }>(bundleId, "/api/file/create", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ directory: "/", name: `${title}.md` }),
+      });
+      if (currentBundleId.current !== bundleId) return null;
+      await editor.actions.openDocument(result.id, "note");
+      return result.id;
+    } catch {
+      if (currentBundleId.current === bundleId) editor.actions.notifyMessage("Could not create the entity note. Choose a different title and try again.");
+      return null;
+    }
+  };
+  const revealEntityMention = async (mention: EntityMention) => {
+    const bundleId = app.entityBundleId;
+    if (!bundleId) return;
+    const documentId = mention.noteId;
+    try {
+      const fetched = await apiForBundle<import("../../../domain/types.ts").ViewerDocument>(bundleId, `/api/file?path=${encodeURIComponent(documentId)}`);
+      if (currentBundleId.current !== bundleId) return;
+      const draft = editor.model.drafts[documentId];
+      if (draft !== undefined && draft !== fetched.content) {
+        editor.actions.notifyMessage("Save the source note draft before revealing this match.");
+        return;
+      }
+      const range = exactMentionRange(mention, fetched.content);
+      if (!range || !await sourceMatchesHash(fetched.content, mention.contentHash)) {
+        editor.actions.notifyMessage("This match is out of date. Refresh the note and try again.");
+        return;
+      }
+      if (currentBundleId.current !== bundleId) return;
+      if (activeDocumentId !== documentId) await editor.actions.openDocument(documentId, "note");
+      if (currentBundleId.current !== bundleId) return;
+      setEntityReveal({ ...range, documentId, requestId: Date.now(), expectedText: mention.text, sourceContent: fetched.content });
+    } catch {
+      if (currentBundleId.current === bundleId) editor.actions.notifyMessage("Could not load the saved source note. Refresh and try again.");
+    }
+  };
   const historyAvailable = Boolean(activeDocumentId && activeDocument && !editor.model.loadingDocuments.has(activeDocumentId)
     && activeDocument.deletable && !isUntitledId(activeDocumentId));
   const scope = `${historyScopeId ?? ""}:\0${activeGroup?.id ?? ""}:\0${activeDocumentId ?? ""}:\0${layout.rightPaneOpen}:\0${historyAvailable}`;
@@ -135,6 +202,7 @@ export function WorkspaceShell({
         ) : null}
         <EditorWorkspace
           {...editor}
+          entityReveal={entityReveal}
           historyPreview={history.scope === scope && (history.snapshot !== null || history.loading || history.failed) && activeGroup && activeDocumentId && activeDocument ? { groupId: activeGroup.id, documentId: activeDocumentId, snapshot: history.snapshot, loading: history.loading, failed: history.failed, presentContent: editor.model.drafts[activeDocumentId] ?? activeDocument.content } : undefined}
           paneControls={{
             leftOpen: layout.sidebarOpen,
@@ -161,6 +229,17 @@ export function WorkspaceShell({
             onHide={() => layout.setRightPaneOpen(false)}
             historyContent={historyContent}
             transcription={transcription}
+            entitiesContent={<EntitiesPanel
+              key={`${app.entityBundleId ?? ""}:${activeDocumentId ?? ""}`}
+              bundleId={app.entityBundleId}
+              note={activeDocument && activeDocument.deletable && !isUntitledId(activeDocument.id) ? { id: activeDocument.id, title: activeDocument.title, content: activeDocument.content } : null}
+              draft={activeDocumentId && editor.model.drafts[activeDocumentId] !== activeDocument?.content ? editor.model.drafts[activeDocumentId] : undefined}
+              onReveal={(mention) => { void revealEntityMention(mention); }}
+              onOpenNote={(noteId) => { void openEntityNote(noteId); }}
+              onCreateNote={createEntityNote}
+              scope={app.entityScope}
+              onOpenSettings={() => app.onOpenSettings("models")}
+            />}
           />
         ) : null}
       </section>

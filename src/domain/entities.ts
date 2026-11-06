@@ -49,6 +49,12 @@ export type EntityMention = {
   resolutionProvenance: EntityResolutionProvenance;
   status: EntityMentionStatus;
   correctedType?: EntityType;
+  noteTitle?: string;
+  /** The source note's creation/update date, never an inferred event date. */
+  noteDate?: string | null;
+  excerpt?: string;
+  excerptStartUtf16?: number;
+  excerptFresh?: boolean;
 };
 
 export type Entity = {
@@ -58,6 +64,7 @@ export type Entity = {
   label: string;
   aliases: string[];
   linkedNoteId?: string | null;
+  linkedNoteIds?: string[];
   mentionCount: number;
   noteCount: number;
   createdAt: string;
@@ -111,7 +118,8 @@ export type EntityCorrectionCommand =
   | { type: "reassign"; mentionIds: string[]; entityId: string | null }
   | { type: "dismiss" | "restore"; mentionIds: string[] }
   | { type: "do-not-merge"; leftEntityId: string; rightEntityId: string }
-  | { type: "link-note" | "unlink-note"; entityId: string; noteId: string };
+  | { type: "link-note" | "unlink-note"; entityId: string; noteId: string }
+  | { type: "dismiss-related"; noteId: string; relatedNoteId: string };
 
 export type EntityCorrectionScope =
   | { kind: "bundle" }
@@ -155,3 +163,14 @@ export type EntityNoteMentions = {
 };
 
 export type EntityCorrectionResult = { revision: number; indexRevision: number; undoToken?: string };
+export type EntityUndoState = { revision: number; undoToken: string | null };
+export type EntityRelatedSuggestion = {
+  noteId: string;
+  title: string;
+  noteDate: string | null;
+  sharedEntities: Array<{ id: string; label: string; type: EntityType }>;
+  sharedEntityCount: number;
+};
+export type EntityRelatedPage = { items: EntityRelatedSuggestion[]; nextCursor: string | null };
+export type EntityJobPage = { items: EntityJob[]; nextCursor: string | null; mode: EntityJobMode; snapshot?: EntityJobSnapshot; coverage?: EntityCoverage };
+export type EntityAnalysisSettings = { enabled: boolean; modelId: "gliner25multi" };

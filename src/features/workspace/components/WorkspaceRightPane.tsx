@@ -15,10 +15,11 @@ type WorkspaceRightPaneProps = WorkspaceStatusProps & {
   updateState?: DesktopUpdateState | null;
   historyContent?: ReactNode;
   transcription: TranscriptionDockProps;
+  entitiesContent?: ReactNode;
 };
 
-export function WorkspaceRightPane({ onHide, historyContent, transcription, versionInfo = null, updateState = null, ...props }: WorkspaceRightPaneProps) {
-  const [activeTab, setActiveTab] = useState<"history" | "transcription">("history");
+export function WorkspaceRightPane({ onHide, historyContent, transcription, entitiesContent, versionInfo = null, updateState = null, ...props }: WorkspaceRightPaneProps) {
+  const [activeTab, setActiveTab] = useState<"history" | "transcription" | "entities">("history");
   const { collapsed, toggleCollapsed } = useModelPanelCollapse();
   const { height: statusPanelHeight, minHeight, maxHeight, panelRef, onPointerDown, onPointerMove, onPointerUp, onKeyDown } = usePanelHeightResize(collapsed);
   return (
@@ -41,9 +42,10 @@ export function WorkspaceRightPane({ onHide, historyContent, transcription, vers
       <div className="sidebar-tabs right-pane-tabs" role="tablist" aria-label="Workspace tools">
         <button type="button" role="tab" className={activeTab === "history" ? "active" : ""} aria-selected={activeTab === "history"} onClick={() => setActiveTab("history")}>History</button>
         <button type="button" role="tab" className={activeTab === "transcription" ? "active" : ""} aria-selected={activeTab === "transcription"} onClick={() => setActiveTab("transcription")}>Transcription</button>
+        <button type="button" role="tab" className={activeTab === "entities" ? "active" : ""} aria-selected={activeTab === "entities"} onClick={() => setActiveTab("entities")}>Entities</button>
       </div>
-      <div className="right-pane-content" role="tabpanel" aria-label={activeTab === "history" ? "History" : "Transcription"}>
-        {activeTab === "history" ? historyContent : <TranscriptionDock {...transcription} />}
+      <div className="right-pane-content" role="tabpanel" aria-label={activeTab === "history" ? "History" : activeTab === "transcription" ? "Transcription" : "Entities"}>
+        {activeTab === "history" ? historyContent : activeTab === "transcription" ? <TranscriptionDock {...transcription} /> : entitiesContent}
       </div>
       <footer className={`right-pane-status${statusPanelHeight !== null ? " is-resized" : ""}`} ref={panelRef} style={{ height: statusPanelHeight ?? undefined }}>
         <PanelHeightHandle

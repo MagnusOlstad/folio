@@ -3172,3 +3172,24 @@
 .bundle-explorer-empty p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .bundle-setup-cta { margin-top: 5px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper-raised); color: var(--ink); font: inherit; font-size: 10px; }
 .bundle-setup-cta:hover { border-color: var(--acid); }
+.entities-panel { display: flex; flex-direction: column; gap: 1rem; padding: 1rem; overflow: auto; color: var(--text-primary); }
+.entities-panel h2, .entities-panel h3, .entities-panel h4, .entities-panel h5, .entities-panel p { margin: 0 0 .45rem; }
+.entities-panel section { border-top: 1px solid var(--border-subtle); padding-top: .75rem; }
+.entities-panel button { cursor: pointer; }
+.entities-panel button:disabled { cursor: default; opacity: .55; }
+.entities-panel-heading, .entity-detail header, .entities-jobs li, .entities-related li, .entities-current li, .entities-browser li { display: flex; align-items: center; gap: .55rem; }
+.entities-panel-heading { justify-content: space-between; }
+.entities-panel-heading p, .entities-related > p { color: var(--text-secondary); font-size: .85rem; }
+.entities-analysis-setting { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; }
+.entities-panel ul { list-style: none; margin: .3rem 0; padding: 0; }
+.entities-panel li { padding: .35rem 0; }
+.entities-current li span, .entities-browser li span, .entities-related li span { color: var(--text-secondary); font-size: .82rem; }
+.entities-current li span { margin-left: auto; }
+.entities-browser label, .entity-detail label { display: grid; gap: .25rem; }
+.entities-browser input:not([type=checkbox]), .entity-detail input { width: 100%; }
+.entities-browser li button:not(:first-child) { margin-left: .2rem; }
+.entities-related li button { margin-left: auto; }
+.entities-error { color: var(--danger, #b42318); }
+.entity-detail { display: grid; gap: .5rem; border: 1px solid var(--border-subtle); border-radius: .5rem; padding: .75rem; }
+.entity-detail header { justify-content: space-between; }
+.entity-detail time { margin-left: auto; color: var(--text-secondary); font-size: .8rem; }

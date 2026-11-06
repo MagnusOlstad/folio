@@ -11,6 +11,7 @@ type DocumentBodyProps = {
   editKey: string;
   draft: string | undefined;
   saving: boolean;
+  entityReveal?: { requestId: number; from: number; to: number; expectedText: string; sourceContent: string } | null;
   focusRequestId?: number;
   onFocusRequestConsumed?: () => void;
   onChangeContent: (document: ViewerDocument, content: string) => void;
@@ -45,6 +46,7 @@ export function DocumentBody({
   editKey,
   draft,
   saving,
+  entityReveal,
   focusRequestId,
   onFocusRequestConsumed,
   onChangeContent,
@@ -92,6 +94,7 @@ export function DocumentBody({
       <LiveMarkdownEditor
         key={editKey}
         value={value}
+        revealSelection={entityReveal}
         onChange={(content) => onChangeContent(document, content)}
         onError={onEditorError}
         onFocus={() => onBeginEditing(groupId, document)}
