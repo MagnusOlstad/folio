@@ -8,6 +8,14 @@ Entity mentions route candidate selection; they do not provide evidence. Retriev
 
 Full entity names and confirmed aliases can be resolved by the query helper. A one-word person name remains unresolved, including when it is a first name shared by multiple people. Entity-name query boosting is disabled: current fixtures establish safe intersection behavior, but do not establish a relevance gain that justifies changing ranking.
 
-## Retrieval fixtures
+## Fixed retrieval evaluation
 
-The deterministic route fixtures exercise English (`Acme approved the Project Atlas launch plan.`) and Norwegian (`Acme og Project Atlas godkjente lanseringen.`). With the two-entity intersection, the English `launch` query and Norwegian `lansering` query each return the one matching current-source note: scoped precision is 1/1 in each fixture, with zero out-of-scope notes. The English test also combines a tag and query and confirms stale cached body text is not returned. These are contract fixtures, not a quality benchmark; they are too small to justify a ranking boost. No claim about general English or Norwegian retrieval quality is made.
+`test/entities-retrieval-evaluation.test.js` uses fictional English and Norwegian notes and exercises production scope preparation, search/Ask ranking, source projection, and current-file validation. The lexical search cases produce:
+
+| Case | Unscoped relevant / returned | Entity-scoped relevant / returned |
+| --- | ---: | ---: |
+| English Acme + Atlas launch | 2 / 5 (P 0.40, R 1.00) | 2 / 2 (P 1.00, R 1.00) |
+| Norwegian Fjord Labs + Nordlys launch | 1 / 2 (P 0.50, R 1.00) | 1 / 1 (P 1.00, R 1.00) |
+| Norwegian “yesterday” Ask | 1 / 2 (P 0.50, R 1.00) | 1 / 1 (P 1.00, R 1.00) |
+
+The test also verifies first-name ambiguity (`Priya` matches neither of two people), unique full-name matching, negated wording, exact current-source passages, and stale-source exclusion with `incomplete=true`. The metric is note-level relevance for this small fixed set. Entity filtering changes the eligible candidate pool; these results support the explicit intersection contract and do not establish a general retrieval gain or justify free-query boosting. The fixtures do not measure generated answer quality, semantic embedding quality, or broad English/Norwegian performance.
