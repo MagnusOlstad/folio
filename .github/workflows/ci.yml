@@ -82,6 +82,7 @@ jobs:
       - run: npx playwright install-deps chromium
       - run: npm run build
       - run: npm run test:e2e
+      - run: npm run test:e2e:entities
       - uses: actions/upload-artifact@v7
         if: failure()
         with:

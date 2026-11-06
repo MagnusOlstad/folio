@@ -7,6 +7,8 @@ import { createMlxService } from '../server/mlx/service.js'
 import { startServer } from '../server/index.js'
 
 const root = await seedDataRoot()
+const rootStatePath = path.join(os.tmpdir(), `folio-entities-e2e-root-${process.env.FOLIO_ENTITIES_E2E_PORT || '4174'}.json`)
+await fs.writeFile(rootStatePath, JSON.stringify({ root }))
 const bundleRoot = path.join(root, 'bundle')
 await fs.writeFile(path.join(bundleRoot, 'entity-launch.md'), '---\ntitle: Acme launch\n---\nAcme met Priya Sharma to review Atlas.')
 await fs.writeFile(path.join(bundleRoot, 'entity-followup.md'), '---\ntitle: Atlas follow-up\n---\nAcme shared an Atlas update with Priya Sharma.')
@@ -33,6 +35,7 @@ const env = {
 }
 const mlxService = createMlxService({
   projectRoot: path.resolve('.'), modelRoot, mlxHelperPath: env.FOLIO_MLX_HELPER,
+  backgroundCooldownMs: 0,
   entitySnapshotValidator: async (cacheRoot, definition) => {
     const snapshot = path.join(cacheRoot, `models--${definition.repository.replaceAll('/', '--')}`, 'snapshots', definition.revision)
     try { await fs.access(path.join(snapshot, 'model.safetensors')); return snapshot } catch { return null }
@@ -45,5 +48,6 @@ server.on('close', () => {
   Object.defineProperty(process, 'platform', platform)
   Object.defineProperty(process, 'arch', arch)
   os.release = release
+  void fs.rm(rootStatePath, { force: true })
   void fs.rm(root, { recursive: true, force: true })
 })
