@@ -29,7 +29,7 @@ let package = Package(
         .testTarget(
             name: "FolioMLXEntitiesTests",
             dependencies: ["FolioMLXEntities"],
-            resources: [.copy("Fixtures/gliner25-reference-parity.json")]
+            exclude: ["Fixtures"]
         ),
         .executableTarget(
             name: "folio-mlx",
