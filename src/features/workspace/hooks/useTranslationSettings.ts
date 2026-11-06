@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import type { TranslationSettings } from "../../../domain/types.ts";
-import { fetchTranslationSettings, saveTranslationSettings } from "../../../lib/api.ts";
+import { fetchTranslationSettings } from "../../../lib/api.ts";
 
-type Snapshot = { settings: TranslationSettings | null; error: string; saving: boolean };
+type Snapshot = { settings: TranslationSettings | null; error: string };
 
-let snapshot: Snapshot = { settings: null, error: "", saving: false };
+let snapshot: Snapshot = { settings: null, error: "" };
 let loading: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
@@ -16,9 +16,9 @@ function publish(next: Snapshot) {
 function load(force = false) {
   if (loading || (snapshot.settings && !force)) return;
   loading = fetchTranslationSettings()
-    .then((settings) => publish({ settings, error: "", saving: false }))
+    .then((settings) => publish({ settings, error: "" }))
     .catch((error: unknown) =>
-      publish({ settings: snapshot.settings, error: error instanceof Error ? error.message : "Could not load translation settings.", saving: false }),
+      publish({ settings: snapshot.settings, error: error instanceof Error ? error.message : "Could not load translation settings." }),
     )
     .finally(() => {
       loading = null;
@@ -31,11 +31,11 @@ export function refreshTranslationSettings() {
 }
 
 export function resetTranslationSettingsForTests() {
-  snapshot = { settings: null, error: "", saving: false };
+  snapshot = { settings: null, error: "" };
   loading = null;
 }
 
-/** Shared across the toggle and Settings so flipping the switch updates open notes immediately. */
+/** App-wide translation availability (is a generation model installed). */
 export function useTranslationSettings() {
   const state = useSyncExternalStore(
     (listener) => {
@@ -47,19 +47,5 @@ export function useTranslationSettings() {
   useEffect(() => {
     load();
   }, []);
-  const setEnabled = useCallback(async (enabled: boolean) => {
-    const previous = snapshot.settings;
-    if (!previous || snapshot.saving) return;
-    publish({ settings: { ...previous, enabled }, error: "", saving: true });
-    try {
-      publish({ settings: await saveTranslationSettings(enabled), error: "", saving: false });
-    } catch (error) {
-      publish({
-        settings: previous,
-        error: error instanceof Error ? error.message : "Could not save translation settings.",
-        saving: false,
-      });
-    }
-  }, []);
-  return { ...state, setEnabled };
+  return state;
 }

@@ -646,8 +646,7 @@
   height: 6px;
   accent-color: var(--acid);
 }
-.model-settings-row,
-.translation-settings-row {
+.model-settings-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -674,7 +673,6 @@
   line-height: 1.5;
 }
 .model-settings-row > label,
-.translation-settings-row > label,
 .model-settings-row > span:first-child {
   display: flex;
   align-items: flex-start;
@@ -682,18 +680,15 @@
   min-width: 0;
 }
 .model-settings-row label > span,
-.translation-settings-row label > span,
 .model-settings-row > span:first-child {
   display: grid;
   gap: 4px;
 }
-.model-settings-row strong,
-.translation-settings-row strong {
+.model-settings-row strong {
   font-size: 12px;
   font-weight: 550;
 }
 .model-settings-row small,
-.translation-settings-row small,
 .model-installed {
   color: var(--muted);
   font-size: 10px;

@@ -124,6 +124,7 @@ app.post('/api/file/move', async (request, response, next) => {
     }
     const graph = await relationshipIndex()
     if (moveResult.warning) void refreshMissingEmbeddingsInBackground()
+    runtime.translation?.moveNote(moveResult.oldId, moveResult.newId)
     runtime.translation?.enqueue(moveResult.newId)
     response.json({
       oldId: moveResult.oldId,
@@ -264,6 +265,7 @@ app.post('/api/file/refile', async (request, response, next) => {
     const records = await readRecords()
     const graph = await relationshipIndex()
     if (warning) void refreshMissingEmbeddingsInBackground()
+    runtime.translation?.moveNote(outcome.oldId, outcome.newId)
     runtime.translation?.enqueue(outcome.newId)
     response.json({
       oldId: outcome.oldId,

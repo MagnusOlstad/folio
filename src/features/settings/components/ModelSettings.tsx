@@ -1,6 +1,5 @@
 import type { MlxModelId, MlxStatus, MlxTranscriptionModelId } from "../../../domain/types.ts";
 
-import { useTranslationSettings } from "../../workspace/hooks/useTranslationSettings.ts";
 import { ModelDownloadProgress } from "../../workspace/components/ModelDownloadProgress.tsx";
 import { modelCatalog } from "../../workspace/model/model-catalog.ts";
 
@@ -16,7 +15,6 @@ export type ModelSettingsControls = {
 };
 
 export function ModelSettings({ controls }: { controls: ModelSettingsControls }) {
-  const translation = useTranslationSettings();
   const models = controls.status?.models ?? [];
   const canManage = Boolean(controls.status?.available && controls.status.helperAvailable);
   const selectedTranscriptionModel = controls.status?.selectedTranscriptionModel ?? "whisper";
@@ -68,24 +66,6 @@ export function ModelSettings({ controls }: { controls: ModelSettingsControls })
         <legend>Text generation</legend>
         {modelCatalog.filter((definition) => definition.generation).map(renderModel)}
       </fieldset>
-      {translation.settings ? (
-        <fieldset className="model-settings-group" aria-label="Background translation">
-          <legend>Background translation</legend>
-          <article className="translation-settings-row"><label>
-            <input
-              type="checkbox"
-              role="switch"
-              checked={translation.settings.enabled}
-              onChange={(event) => void translation.setEnabled(event.currentTarget.checked)}
-            />
-            <span>
-              <strong>Translate filed notes</strong>
-              <small>Keeps Norwegian and English versions of your notes ready, so you can switch language on any note. Uses the selected generation model and keeps it loaded more often.</small>
-            </span>
-          </label></article>
-          {translation.error ? <p className="settings-model-error" role="alert">{translation.error}</p> : null}
-        </fieldset>
-      ) : null}
       <fieldset className="model-settings-group" aria-label="Transcription">
         <legend>Transcription</legend>
         <p>Choose a local speech recognition model. If your choice is missing, install it below before transcribing.</p>

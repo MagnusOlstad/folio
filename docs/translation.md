@@ -17,7 +17,7 @@ Filed bundle notes are translated between Norwegian and English in the backgroun
 
 ## Scheduling
 
-A single serial queue per bundle processes one block per `generate` call and waits between blocks while any other model work (Ask, filing, transcription, embeddings) is active. Saves, moves and refiles enqueue the note (2 s debounce); opening a note via the API prioritizes it. After bundle initialization or reindex an idle backfill translates all notes (raw captures are skipped) and prunes cache entries no note references. Nothing runs if translation is disabled or no generation model is installed; models are never downloaded or force-loaded for this.
+A single serial queue per bundle processes one block per `generate` call and waits between blocks while any other model work (Ask, filing, transcription, embeddings) is active. Background work is per note: only notes with auto translate switched on are queued. Saves, moves, refiles and filing enqueue such a note (2 s debounce); switching a note on prioritizes it immediately and switching it off removes it from the queue. After bundle initialization or reindex an idle backfill translates the auto-on notes (raw captures are skipped) and prunes cache entries no note references. Nothing runs for notes with auto translate off or when no generation model is installed; models are never downloaded or force-loaded for this.
 
 ## Cache
 
@@ -27,13 +27,15 @@ A single serial queue per bundle processes one block per `generate` call and wai
 { "version": 1, "entries": { "<sha256 of normalized text>": { "source": "no", "translation": "...", "modelId": "gemma4", "translatedAt": "ISO date" } } }
 ```
 
-Writes are atomic (temp file + rename). Because entries are keyed by text hash, they survive note moves and renames. The app-wide `enabled` setting lives in `<modelRoot>/translation-settings.json` beside the generation-model selection. Background translation is **off by default**: with no settings file `enabled` is `false`; a saved choice is respected. Explicit exports and language detection on filing do not depend on it.
+Writes are atomic (temp file + rename). Because entries are keyed by text hash, they survive note moves and renames. Auto translate is a **per-note flag, off by default for every note**. It is stored per bundle in `<bundle>/.folio/translation-notes.json` (`{ "version": 1, "notes": { "<note id>": { "autoTranslate": true, "since": "ISO date" } } }`, atomic writes) and never in the note's frontmatter, so toggling never rewrites the note. The entry follows moves, refiles and renames and is dropped when the note or its folder is deleted. Explicit exports and language detection on filing do not depend on it.
 
 ## API
 
-- `GET /api/note/translation?id=<note id>&target=en|no` returns `{ id, target, status, translatedBlocks, totalBlocks, title, description, content }`. `status` is `ready`, `pending`, `disabled` (always when switched off) or `unavailable` (no installed model and incomplete). Untranslated blocks show the original text; a pending note is prioritized. 400 for an invalid target or non-bundle id, 404 for a missing note.
+- `GET /api/note/translation?id=<note id>&target=en|no` returns `{ id, target, status, translatedBlocks, totalBlocks, title, description, content }`. `status` is `ready`, `pending`, `disabled` (auto translate is off for this note and it is not fully cached; nothing is started) or `unavailable` (no installed model and incomplete). Untranslated blocks show the original text; a pending auto-on note is prioritized. The response also carries `autoTranslate: boolean`. 400 for an invalid target or non-bundle id, 404 for a missing note.
 - `POST /api/note/translation/prioritize` with `{ id }` returns 202 `{ queued: true }`.
-- `GET|PUT /api/translation/settings` returns/accepts `{ enabled }` and returns `{ enabled, available }`; `PUT` requires a boolean.
+- `GET /api/translation/settings` returns `{ available }` (a generation model is installed); there is no global switch.
+- `PUT /api/note/translation/auto` with `{ id, enabled }` returns `{ id, autoTranslate, available }`; 400 for a non-boolean or non-bundle id, 404 for a missing note.
+- `GET /api/note/language` also returns `autoTranslate`.
 
 ## Translated export
 

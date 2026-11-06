@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 async function mockExport(page: Page, id: string) {
   let polls = 0
-  await page.route('**/api/translation/settings', (route) => route.fulfill({ json: { enabled: false, available: true } }))
+  await page.route('**/api/translation/settings', (route) => route.fulfill({ json: { available: true } }))
   await page.route('**/api/note/translation/export', (route) => route.fulfill({
     status: 202, json: { jobId: 'job-1', id, target: 'de', status: 'running', translatedBlocks: 0, totalBlocks: 2 },
   }))

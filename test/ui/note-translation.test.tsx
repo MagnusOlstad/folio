@@ -1,8 +1,8 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NoteTranslation, ViewerDocument } from "../../src/domain/types.ts";
 import { DocumentView, type DocumentViewProps } from "../../src/features/workspace/components/DocumentView.tsx";
-import { resetTranslationSettingsForTests } from "../../src/features/workspace/hooks/useTranslationSettings.ts";
+import { refreshTranslationSettings, resetTranslationSettingsForTests, useTranslationSettings } from "../../src/features/workspace/hooks/useTranslationSettings.ts";
 import {
   migrateNoteTranslationChoice,
   migrateStoredNoteTranslationChoice,
@@ -88,7 +88,7 @@ describe("note translation model", () => {
 describe("DocumentView translation", () => {
   const fetchMock = vi.fn();
   let translation: NoteTranslation;
-  let languageInfo: { noteLanguage: "no" | "en" | null; noteLanguageSource: "frontmatter" | "detected" | null };
+  let languageInfo: { noteLanguage: "no" | "en" | null; noteLanguageSource: "frontmatter" | "detected" | null; autoTranslate: boolean };
 
   beforeEach(() => {
     window.localStorage.clear();
@@ -97,10 +97,10 @@ describe("DocumentView translation", () => {
       id: noteDocument.id, target: "en", status: "pending", translatedBlocks: 3, totalBlocks: 12,
       title: "Hello", description: "A test", content: "# Hello\n\nThis is a test.",
     };
-    languageInfo = { noteLanguage: null, noteLanguageSource: null };
+    languageInfo = { noteLanguage: null, noteLanguageSource: null, autoTranslate: true };
     fetchMock.mockReset();
     fetchMock.mockImplementation(async (url: string) => {
-      const body = url.includes("/api/translation/settings") ? { enabled: true, available: true }
+      const body = url.includes("/api/translation/settings") ? { available: true }
         : url.includes("/api/note/language") ? { id: noteDocument.id, ...languageInfo }
         : url.includes("/prioritize") ? { queued: true } : translation;
       return new Response(JSON.stringify(body), { status: 200 });
@@ -119,7 +119,7 @@ describe("DocumentView translation", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/note/translation"))).toBe(false);
   });
 
-  it("hides the toggle for read-only files and when translation is disabled", async () => {
+  it("hides the toggle for read-only files", async () => {
     render(<DocumentView {...props({ ...noteDocument, deletable: false, movable: false })} />);
     await act(async () => {});
     expect(screen.queryByRole("group", { name: "Note language" })).toBeNull();
@@ -158,7 +158,7 @@ describe("DocumentView translation", () => {
 
   describe("known note language", () => {
     beforeEach(() => {
-      languageInfo = { noteLanguage: "no", noteLanguageSource: "detected" };
+      languageInfo = { noteLanguage: "no", noteLanguageSource: "detected", autoTranslate: true };
     });
     const pressed = (name: string) => screen.getByRole("button", { name }).getAttribute("aria-pressed");
 
@@ -211,58 +211,113 @@ describe("DocumentView translation", () => {
     await waitFor(() => expect(document.querySelector("[data-live-markdown-editor]")).not.toBeNull());
   });
 
-  it("explains the feature from an info button that only shows while it is off", async () => {
-    window.localStorage.clear();
-    resetTranslationSettingsForTests();
-    let enabled = false;
-    const puts: unknown[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (String(url).includes("/api/translation/settings")) {
-        if (init?.method === "PUT") { enabled = JSON.parse(String(init.body)).enabled; puts.push(enabled); }
-        return new Response(JSON.stringify({ enabled, available: true }), { status: 200 });
-      }
-      return new Response(JSON.stringify({ id: noteDocument.id, noteLanguage: null, noteLanguageSource: null, ...translation }), { status: 200 });
-    }));
-    render(<DocumentView {...props(noteDocument)} />);
-    const info = await screen.findByRole("button", { name: "About note translation" });
-    expect(info).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(info);
-    expect(info).toHaveAttribute("aria-expanded", "true");
-    const popover = screen.getByRole("dialog", { name: "Note translation" });
-    expect(popover).toHaveTextContent("Nothing leaves your computer");
-    expect(popover).toHaveTextContent("Translated export (More → Translate…) works even when this is off");
-    fireEvent.pointerDown(window.document.body);
-    expect(screen.queryByRole("dialog", { name: "Note translation" })).toBeNull();
-    fireEvent.click(info);
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(screen.queryByRole("dialog", { name: "Note translation" })).toBeNull();
-    expect(info).toHaveFocus();
-    fireEvent.click(info);
-    fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
-    expect(await screen.findByRole("group", { name: "Note language" })).toBeInTheDocument();
-    expect(puts).toEqual([true]);
-    expect(screen.queryByRole("button", { name: "About note translation" })).toBeNull();
-    expect(screen.queryByRole("dialog", { name: "Note translation" })).toBeNull();
-    vi.unstubAllGlobals();
-  });
+  describe("per-note auto-translate", () => {
+    let autoByNote: Record<string, boolean>;
+    let puts: { id: string; enabled: boolean }[];
+    let failPut: boolean;
+    const otherNote: ViewerDocument = { ...noteDocument, id: "/notes/other.md", title: "Other", content: "# Other" };
 
-  it("never shows the info button for drafts", async () => {
-    window.localStorage.clear();
-    resetTranslationSettingsForTests();
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ enabled: false, available: true }), { status: 200 })));
-    const draft = storedDraftDocument({ id: "untitled-2", content: "hi", createdAt: "2026-01-01", updatedAt: "2026-01-01" });
-    render(<DocumentView {...props(draft)} />);
-    await act(async () => {});
-    expect(screen.queryByRole("button", { name: "About note translation" })).toBeNull();
-    vi.unstubAllGlobals();
+    beforeEach(() => {
+      autoByNote = { [noteDocument.id]: true, [otherNote.id]: false };
+      puts = [];
+      failPut = false;
+      fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+        const u = String(url);
+        if (u.includes("/api/translation/settings")) return new Response(JSON.stringify({ available: true }), { status: 200 });
+        if (u.includes("/api/note/translation/auto")) {
+          const body = JSON.parse(String(init?.body));
+          if (failPut) return new Response(JSON.stringify({ error: "nope" }), { status: 500 });
+          puts.push(body);
+          autoByNote[body.id] = body.enabled;
+          return new Response(JSON.stringify({ id: body.id, autoTranslate: body.enabled, available: true }), { status: 200 });
+        }
+        if (u.includes("/api/note/language")) {
+          const id = new URL(u, "http://x").searchParams.get("id") ?? "";
+          return new Response(JSON.stringify({ id, noteLanguage: null, noteLanguageSource: null, autoTranslate: autoByNote[id] ?? false }), { status: 200 });
+        }
+        if (u.includes("/prioritize")) return new Response(JSON.stringify({ queued: true }), { status: 200 });
+        return new Response(JSON.stringify(translation), { status: 200 });
+      });
+    });
+
+    it("shows different toolbars for notes with auto-translate on and off", async () => {
+      const first = render(<DocumentView {...props(noteDocument)} />);
+      expect(await screen.findByRole("group", { name: "Note language" })).toBeInTheDocument();
+      expect(screen.getByRole("switch", { name: "Auto-translate this note" })).toHaveAttribute("aria-checked", "true");
+      expect(screen.getByRole("switch", { name: "Auto-translate this note" })).toHaveAttribute("title", expect.stringContaining("on for this note"));
+      expect(screen.queryByRole("button", { name: "About note translation" })).toBeNull();
+      first.unmount();
+      render(<DocumentView {...props(otherNote)} />);
+      const sw = await screen.findByRole("switch", { name: "Auto-translate this note" });
+      expect(sw).toHaveAttribute("aria-checked", "false");
+      expect(sw).toHaveAttribute("title", expect.stringContaining("off for this note"));
+      expect(screen.queryByRole("group", { name: "Note language" })).toBeNull();
+      expect(screen.getByRole("button", { name: "About note translation" })).toBeInTheDocument();
+      expect(document.querySelector("[data-live-markdown-editor]")).not.toBeNull();
+    });
+
+    it("keeps the stored language while off and restores it when turned on", async () => {
+      autoByNote[noteDocument.id] = false;
+      setNoteTranslationChoice(null, noteDocument.id, "no");
+      render(<DocumentView {...props(noteDocument)} />);
+      const sw = await screen.findByRole("switch", { name: "Auto-translate this note" });
+      expect(document.querySelector("[data-live-markdown-editor]")).not.toBeNull();
+      expect(translationCalls()).toHaveLength(0);
+      fireEvent.click(sw);
+      expect(await screen.findByRole("button", { name: "Norsk" })).toHaveAttribute("aria-pressed", "true");
+      expect(puts).toEqual([{ id: noteDocument.id, enabled: true }]);
+    });
+
+    it("rolls back with an error when the PUT fails", async () => {
+      autoByNote[noteDocument.id] = false;
+      failPut = true;
+      render(<DocumentView {...props(noteDocument)} />);
+      const sw = await screen.findByRole("switch", { name: "Auto-translate this note" });
+      fireEvent.click(sw);
+      expect(await screen.findByRole("alert")).toHaveTextContent("nope");
+      expect(screen.getByRole("switch", { name: "Auto-translate this note" })).toHaveAttribute("aria-checked", "false");
+      expect(screen.queryByRole("group", { name: "Note language" })).toBeNull();
+    });
+
+    it("explains the feature from the info button and Turn on enables only this note", async () => {
+      render(<DocumentView {...props(otherNote)} />);
+      const info = await screen.findByRole("button", { name: "About note translation" });
+      expect(info).toHaveAttribute("aria-expanded", "false");
+      fireEvent.click(info);
+      const popover = screen.getByRole("dialog", { name: "Note translation" });
+      expect(popover).toHaveTextContent("Translates this note between Norwegian and English");
+      expect(popover).toHaveTextContent("Nothing leaves your computer");
+      expect(popover).toHaveTextContent("works for any note, even with this off");
+      fireEvent.pointerDown(window.document.body);
+      expect(screen.queryByRole("dialog", { name: "Note translation" })).toBeNull();
+      fireEvent.click(info);
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(info).toHaveFocus();
+      fireEvent.click(info);
+      fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
+      expect(await screen.findByRole("group", { name: "Note language" })).toBeInTheDocument();
+      expect(puts).toEqual([{ id: otherNote.id, enabled: true }]);
+      expect(autoByNote[noteDocument.id]).toBe(true);
+      expect(screen.queryByRole("button", { name: "About note translation" })).toBeNull();
+    });
+
+    it("never shows the switch or info button for drafts", async () => {
+      const draft = storedDraftDocument({ id: "untitled-2", content: "hi", createdAt: "2026-01-01", updatedAt: "2026-01-01" });
+      render(<DocumentView {...props(draft)} />);
+      await act(async () => {});
+      expect(screen.queryByRole("switch", { name: "Auto-translate this note" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "About note translation" })).toBeNull();
+    });
   });
 
   it("restores the remembered choice and shows an error with the toggle still available", async () => {
     setNoteTranslationChoice(null, noteDocument.id, "no");
-    fetchMock.mockImplementation(async (url: string) =>
-      String(url).includes("/api/translation/settings")
-        ? new Response(JSON.stringify({ enabled: true, available: true }), { status: 200 })
-        : new Response(JSON.stringify({ error: "boom" }), { status: 500 }));
+    fetchMock.mockImplementation(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/api/translation/settings")) return new Response(JSON.stringify({ available: true }), { status: 200 });
+      if (u.includes("/api/note/language")) return new Response(JSON.stringify({ id: noteDocument.id, noteLanguage: null, noteLanguageSource: null, autoTranslate: true }), { status: 200 });
+      return new Response(JSON.stringify({ error: "boom" }), { status: 500 });
+    });
     render(<DocumentView {...props(noteDocument)} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("boom");
     expect(screen.getByRole("button", { name: "Norsk" })).toHaveAttribute("aria-pressed", "true");
@@ -270,68 +325,17 @@ describe("DocumentView translation", () => {
   });
 });
 
-describe("Background translation setting", () => {
-  it("PUTs the switch and updates the toggle visibility", async () => {
-    window.localStorage.clear();
+describe("translation availability store", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("only provides availability and refreshes it when models change", async () => {
     resetTranslationSettingsForTests();
-    let enabled = false;
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (String(url).includes("/api/translation/settings")) {
-        if (init?.method === "PUT") enabled = JSON.parse(String(init.body)).enabled;
-        return new Response(JSON.stringify({ enabled, available: true }), { status: 200 });
-      }
-      return new Response(JSON.stringify({}), { status: 200 });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const { ModelSettings } = await import("../../src/features/settings/components/ModelSettings.tsx");
-    render(
-      <>
-        <ModelSettings controls={{ status: null, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn() }} />
-        <DocumentView {...props(noteDocument)} />
-      </>,
-    );
-    const settingsSwitch = within(await screen.findByRole("group", { name: "Background translation" })).getByRole("switch");
-    const headerSwitch = await screen.findByRole("switch", { name: "Background translation" });
-    expect(settingsSwitch).not.toBeChecked();
-    expect(headerSwitch).toHaveAttribute("aria-checked", "false");
-    expect(headerSwitch).toHaveAttribute("title", expect.stringContaining("Translation off"));
-    expect(screen.queryByRole("group", { name: "Note language" })).toBeNull();
-    expect(document.querySelector("[data-live-markdown-editor]")).not.toBeNull();
-    fireEvent.click(settingsSwitch);
-    expect(await screen.findByRole("group", { name: "Note language" })).toBeInTheDocument();
-    expect(fetchMock.mock.calls.some(([url, init]) => String(url).includes("/api/translation/settings") && init?.method === "PUT")).toBe(true);
-    expect(settingsSwitch).toBeChecked();
-    expect(screen.getByRole("switch", { name: "Background translation" })).toHaveAttribute("aria-checked", "true");
-    fireEvent.click(screen.getByRole("switch", { name: "Background translation" }));
-    await waitFor(() => expect(screen.queryByRole("group", { name: "Note language" })).toBeNull());
-    expect(settingsSwitch).not.toBeChecked();
-  });
-
-  it("restores the stored language when switched back on and rolls back on a failed save", async () => {
-    window.localStorage.clear();
-    resetTranslationSettingsForTests();
-    setNoteTranslationChoice(null, noteDocument.id, "no");
-    let enabled = false;
-    let failPut = true;
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (String(url).includes("/api/translation/settings")) {
-        if (init?.method === "PUT") {
-          if (failPut) return new Response(JSON.stringify({ error: "nope" }), { status: 500 });
-          enabled = JSON.parse(String(init.body)).enabled;
-        }
-        return new Response(JSON.stringify({ enabled, available: true }), { status: 200 });
-      }
-      return new Response(JSON.stringify({ id: noteDocument.id, target: "no", status: "ready", translatedBlocks: 1, totalBlocks: 1, title: "Hei", description: "", content: "Norsk tekst" }), { status: 200 });
-    }));
-    render(<DocumentView {...props(noteDocument)} />);
-    const headerSwitch = await screen.findByRole("switch", { name: "Background translation" });
-    fireEvent.click(headerSwitch);
-    expect(await screen.findByRole("alert")).toHaveTextContent("nope");
-    expect(screen.getByRole("switch", { name: "Background translation" })).toHaveAttribute("aria-checked", "false");
-    failPut = false;
-    fireEvent.click(screen.getByRole("switch", { name: "Background translation" }));
-    expect(await screen.findByRole("button", { name: "Norsk" })).toHaveAttribute("aria-pressed", "true");
-    expect(await screen.findByText("Norsk tekst")).toBeInTheDocument();
-    vi.unstubAllGlobals();
+    let available = false;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ available }), { status: 200 })));
+    const { result } = renderHook(() => useTranslationSettings());
+    await waitFor(() => expect(result.current.settings).toEqual({ available: false }));
+    expect("setEnabled" in result.current).toBe(false);
+    available = true;
+    await act(async () => { refreshTranslationSettings(); });
+    await waitFor(() => expect(result.current.settings).toEqual({ available: true }));
   });
 });

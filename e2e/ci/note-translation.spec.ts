@@ -3,19 +3,20 @@ import { expect, test, type Page } from '@playwright/test'
 async function mockTranslation(
   page: Page,
   id: () => string,
-  initiallyEnabled = true,
+  initiallyAuto = true,
   noteLanguage: 'no' | 'en' | null = null,
 ) {
   const requests: string[] = []
-  let enabled = initiallyEnabled
+  let auto = initiallyAuto
   let polls = 0
-  await page.route('**/api/translation/settings', (route) => {
-    if (route.request().method() === 'PUT') enabled = (route.request().postDataJSON() as { enabled: boolean }).enabled
-    return route.fulfill({ json: { enabled, available: true } })
-  })
+  await page.route('**/api/translation/settings', (route) => route.fulfill({ json: { available: true } }))
   await page.route('**/api/note/language?**', (route) => route.fulfill({
-    json: { id: id(), noteLanguage, noteLanguageSource: noteLanguage ? 'detected' : null },
+    json: { id: id(), noteLanguage, noteLanguageSource: noteLanguage ? 'detected' : null, autoTranslate: auto },
   }))
+  await page.route('**/api/note/translation/auto', (route) => {
+    auto = (route.request().postDataJSON() as { enabled: boolean }).enabled
+    return route.fulfill({ json: { id: id(), autoTranslate: auto, available: true } })
+  })
   await page.route('**/api/note/translation/prioritize', (route) => route.fulfill({ status: 202, json: { queued: true } }))
   await page.route('**/api/note/translation?**', (route) => {
     const url = new URL(route.request().url())
@@ -81,7 +82,7 @@ test('switch off leaves only the switch, and turning it on restores the stored l
     }, ['folio:note-translation:v1:legacy-bundle', JSON.stringify({ [id]: 'no' })])
     await page.goto('/')
     await page.locator('.workbench-sidebar').getByRole('button', { name: title, exact: true }).click()
-    const toggle = page.getByRole('switch', { name: 'Background translation' })
+    const toggle = page.getByRole('switch', { name: 'Auto-translate this note' })
     await expect(toggle).toHaveAttribute('aria-checked', 'false')
     await expect(page.getByRole('group', { name: 'Note language' })).toHaveCount(0)
     await expect(page.locator('.document-view [data-live-markdown-editor]')).toHaveCount(1)

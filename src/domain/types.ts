@@ -227,10 +227,13 @@ export type NoteLanguageInfo = {
   id: string;
   noteLanguage: NoteTranslationTarget | null;
   noteLanguageSource: NoteLanguageSource | null;
+  /** This note is kept translated in the background. */
+  autoTranslate: boolean;
 };
 export type NoteTranslation = {
   noteLanguage?: NoteTranslationTarget | null;
   noteLanguageSource?: NoteLanguageSource | null;
+  autoTranslate?: boolean;
   id: string;
   target: NoteTranslationTarget;
   status: NoteTranslationStatus;
@@ -240,7 +243,7 @@ export type NoteTranslation = {
   description: string;
   content: string;
 };
-export type TranslationSettings = { enabled: boolean; available: boolean };
+export type TranslationSettings = { available: boolean };
 export type TranslatedExportTarget = "en" | "no" | "de" | "es" | "fr" | "fi" | "sv" | "da";
 export type TranslatedExportPhase = "queued" | "waiting" | "translating" | "finishing" | "done" | "failed" | "cancelled";
 export type TranslatedExportJob = {

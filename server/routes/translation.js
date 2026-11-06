@@ -52,10 +52,10 @@ export function registerRoutes(app, runtime) {
     try { response.json(await runtime.translation.getSettings()) } catch (error) { next(error) }
   })
 
-  app.put('/api/translation/settings', async (request, response, next) => {
+  app.put('/api/note/translation/auto', async (request, response, next) => {
     try {
       if (typeof request.body?.enabled !== 'boolean') return response.status(400).json({ error: 'enabled must be a boolean.' })
-      response.json(await runtime.translation.setEnabled(request.body.enabled))
-    } catch (error) { next(error) }
+      response.json(await runtime.translation.setAuto(String(request.body?.id || ''), request.body.enabled))
+    } catch (error) { fail(response, next, error) }
   })
 }

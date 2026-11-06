@@ -1,9 +1,9 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
 
 import { createTranslationCache } from './cache.js'
 import { createExportManager } from './export.js'
+import { createAutoTranslateStore } from './notes.js'
 import { createTextBlock, renderItems, splitBody, translatableBlocks } from './blocks.js'
 import {
   buildDirectTranslationMessages, buildTranslationMessages, maxTokensFor, parseDirectTranslation, parseTranslationOutput,
@@ -19,7 +19,8 @@ function httpError(status, message) {
 
 export function createTranslationService(runtime, options = {}) {
   const settings = { debounceMs: 2_000, backfillDelayMs: 5_000, busyPollMs: 500, statusTtlMs: 5_000, exportRetentionMs: 10 * 60_000, ...runtime.translationOptions, ...options }
-  const settingsPath = path.join(runtime.modelRoot, 'translation-settings.json')
+  const autoNotes = createAutoTranslateStore(path.join(runtime.bundleRoot, '.folio', 'translation-notes.json'))
+  const starting = new Set()
   const cache = createTranslationCache(path.join(runtime.bundleRoot, '.folio', 'translations.json'))
   const queue = []
   const priority = new Set()
@@ -41,20 +42,10 @@ export function createTranslationService(runtime, options = {}) {
     })
   }
 
-  async function isEnabled() {
-    try {
-      const saved = JSON.parse(await fs.readFile(settingsPath, 'utf8'))
-      return saved.enabled === true
-    } catch { return false }
-  }
-
-  async function setEnabled(enabled) {
-    await fs.mkdir(path.dirname(settingsPath), { recursive: true })
-    const temporaryPath = `${settingsPath}.${randomUUID()}.tmp`
-    await fs.writeFile(temporaryPath, JSON.stringify({ enabled }), 'utf8')
-    await fs.rename(temporaryPath, settingsPath)
-    if (!enabled) { queue.length = 0; priority.clear() }
-    return getSettings()
+  function track(promise) {
+    starting.add(promise)
+    void promise.catch(() => {}).finally(() => starting.delete(promise))
+    return promise
   }
 
   // The selected generation model when it is installed, otherwise null. Never downloads.
@@ -73,7 +64,7 @@ export function createTranslationService(runtime, options = {}) {
   }
 
   async function getSettings() {
-    return { enabled: await isEnabled(), available: Boolean(await installedModel({ fresh: true })) }
+    return { available: Boolean(await installedModel({ fresh: true })) }
   }
 
   async function readNote(id) {
@@ -141,7 +132,7 @@ export function createTranslationService(runtime, options = {}) {
   // Waits until user-facing model work has finished. Returns false when work should stop.
   async function waitForTurn({ force = false } = {}) {
     while (!closed) {
-      if ((!force && !(await isEnabled())) || !(await installedModel())) return false
+      if (!(await installedModel())) return false
       if (!force && exports.pending()) { await sleep(settings.busyPollMs); continue }
       if (!runtime.mlxService.isBusy?.()) return true
       await sleep(settings.busyPollMs)
@@ -150,6 +141,7 @@ export function createTranslationService(runtime, options = {}) {
   }
 
   async function processNote(id) {
+    if (!autoNotes.has(id)) return 'done'
     const version = versions.get(id) || 0
     let note
     try { note = await readNote(id) } catch { return 'done' }
@@ -160,7 +152,7 @@ export function createTranslationService(runtime, options = {}) {
       seen.add(block.hash)
       if (!cache.get(block.hash) || cache.get(block.hash).failed) {
         if (!(await waitForTurn())) return 'stop'
-        if ((versions.get(id) || 0) !== version) return 'done'
+        if ((versions.get(id) || 0) !== version || !autoNotes.has(id)) return 'done'
         if (priority.size && !priority.has(id)) return 'yield'
         const model = await installedModel()
         if (!model) return 'stop'
@@ -178,9 +170,9 @@ export function createTranslationService(runtime, options = {}) {
   }
 
   async function runQueue() {
-    await cache.load()
+    await Promise.all([cache.load(), autoNotes.load()])
     while (queue.length && !closed) {
-      if (!(await isEnabled()) || !(await installedModel())) { queue.length = 0; priority.clear(); break }
+      if (!(await installedModel())) { queue.length = 0; priority.clear(); break }
       const id = queue.shift()
       let outcome = 'done'
       try { outcome = await processNote(id) } catch (error) { console.error(`Translation of ${id} failed. ${error.message}`) }
@@ -211,45 +203,73 @@ export function createTranslationService(runtime, options = {}) {
   function enqueue(id) {
     if (closed || !validId(id)) return false
     versions.set(id, (versions.get(id) || 0) + 1)
-    clearTimeout(debounceTimers.get(id))
-    if (!settings.debounceMs) { addToQueue(id); return true }
-    const timer = setTimeout(() => { debounceTimers.delete(id); addToQueue(id) }, settings.debounceMs)
-    timer.unref?.()
-    debounceTimers.set(id, timer)
+    track(autoNotes.load().then(() => {
+      if (closed || !autoNotes.has(id)) return
+      clearTimeout(debounceTimers.get(id))
+      if (!settings.debounceMs) { addToQueue(id); return }
+      const timer = setTimeout(() => { debounceTimers.delete(id); if (autoNotes.has(id)) addToQueue(id) }, settings.debounceMs)
+      timer.unref?.()
+      debounceTimers.set(id, timer)
+    }))
     return true
   }
 
-  function prioritize(id) {
-    if (closed || !validId(id)) return false
+  function prioritizeNow(id) {
     clearTimeout(debounceTimers.get(id))
     debounceTimers.delete(id)
     priority.add(id)
     addToQueue(id, { front: true })
+  }
+
+  function prioritize(id) {
+    if (closed || !validId(id)) return false
+    track(autoNotes.load().then(() => { if (!closed && autoNotes.has(id)) prioritizeNow(id) }))
     return true
   }
 
+  async function setAuto(id, enabled) {
+    await readNote(id) // 400 for non-bundle ids, 404 for missing notes
+    await autoNotes.load()
+    await autoNotes.set(id, enabled)
+    if (enabled) prioritizeNow(id)
+    else {
+      clearTimeout(debounceTimers.get(id))
+      debounceTimers.delete(id)
+      priority.delete(id)
+      const index = queue.indexOf(id)
+      if (index >= 0) queue.splice(index, 1)
+    }
+    return { id, autoTranslate: enabled, available: Boolean(await installedModel({ fresh: true })) }
+  }
+
+  const moveNote = (oldId, newId) => track(autoNotes.load().then(() => autoNotes.move(oldId, newId)))
+  const forget = (idOrFolder) => track(autoNotes.load().then(() => autoNotes.remove(idOrFolder)))
+
   async function runBackfill() {
-    if (closed || !(await isEnabled())) return
+    if (closed) return
     const model = await installedModel()
     if (!model) return
-    await cache.load()
+    await Promise.all([cache.load(), autoNotes.load()])
     const startedAt = new Date().toISOString()
     const referenced = new Set()
     const stale = []
+    const existing = new Set()
     let complete = true
     for (const filePath of await runtime.listBundleMarkdownFiles()) {
       if (closed) return
       const id = runtime.bundleFileId(filePath)
+      existing.add(id)
       try {
         const note = await readNote(id)
         for (const block of note.blocks) referenced.add(block.hash)
-        if (!id.startsWith('/references/inbox/') && note.blocks.some((block) => needsWork(block, model.id))) stale.push(id)
+        if (autoNotes.has(id) && !id.startsWith('/references/inbox/') && note.blocks.some((block) => needsWork(block, model.id))) stale.push(id)
       } catch { complete = false }
       await new Promise((resolve) => setImmediate(resolve))
     }
     for (const id of stale) if (!queue.includes(id)) queue.push(id)
     kick()
     if (!complete) return
+    for (const id of autoNotes.ids()) if (!existing.has(id)) await autoNotes.remove(id)
     for (const [hash, entry] of Object.entries(cache.entries())) {
       if (!referenced.has(hash.split(':')[0]) && String(entry.translatedAt) < startedAt) cache.delete(hash)
     }
@@ -278,28 +298,29 @@ export function createTranslationService(runtime, options = {}) {
 
   async function language(id) {
     const note = await readNote(id)
-    await cache.load()
-    return { id, ...languageOf(note) }
+    await Promise.all([cache.load(), autoNotes.load()])
+    return { id, ...languageOf(note), autoTranslate: autoNotes.has(id) }
   }
 
   async function view(id, target) {
     if (!TARGETS.includes(target)) throw httpError(400, 'Target must be en or no.')
     const note = await readNote(id)
-    await cache.load()
+    await Promise.all([cache.load(), autoNotes.load()])
     const lookup = (block) => {
       const entry = cache.get(block.hash)
       return !entry || entry.translation == null || entry.source === target ? null : sanitizeModelText(entry.translation, block.text)
     }
     const translatedBlocks = note.blocks.filter((block) => cache.get(block.hash)).length
     const totalBlocks = note.blocks.length
-    const enabled = await isEnabled()
-    const available = enabled ? Boolean(await installedModel()) : false
+    const autoTranslate = autoNotes.has(id)
+    const available = Boolean(await installedModel())
     const ready = translatedBlocks === totalBlocks
-    if (enabled && available && !ready) prioritize(id)
+    if (autoTranslate && available && !ready) prioritizeNow(id)
     return {
       id,
       target,
-      status: !enabled ? 'disabled' : ready ? 'ready' : available ? 'pending' : 'unavailable',
+      autoTranslate,
+      status: ready ? 'ready' : !autoTranslate ? 'disabled' : available ? 'pending' : 'unavailable',
       translatedBlocks,
       totalBlocks,
       ...languageOf(note),
@@ -310,7 +331,7 @@ export function createTranslationService(runtime, options = {}) {
   }
 
   async function idle() {
-    while (running || backfill || queue.length || debounceTimers.size || exports.pending()) await (running || backfill || sleep(10))
+    while (running || backfill || queue.length || debounceTimers.size || exports.pending() || starting.size) await (running || backfill || sleep(10))
   }
 
   async function close() {
@@ -323,9 +344,9 @@ export function createTranslationService(runtime, options = {}) {
     debounceTimers.clear()
     for (const wake of [...sleepers]) wake()
     await Promise.race([Promise.allSettled([running, backfill].filter(Boolean)), new Promise((resolve) => setTimeout(resolve, 3_000).unref?.())])
-    await cache.flush()
+    await Promise.all([cache.flush(), autoNotes.flush()])
   }
 
-  return { enqueue, prioritize, startBackfill, view, getSettings, setEnabled, idle, close, validId, language,
+  return { enqueue, prioritize, startBackfill, view, getSettings, setAuto, moveNote, forget, idle, close, validId, language,
     startExport: exports.start, getExport: exports.get, cancelExport: exports.cancel }
 }

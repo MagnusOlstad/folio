@@ -57,20 +57,38 @@ test('filing stores language in frontmatter only for new no/en notes and it surv
   const moved = await (await send('/api/file/move', 'POST', { id: norwegian, directory: '/manual/curated' })).json()
   assert.equal(frontmatterOf(await fs.readFile(file(moved.newId), 'utf8')).language, 'no')
 
+  const notesFile = path.join(dataRoot, 'bundle', '.folio', 'translation-notes.json')
+  const autoIds = async (expected) => {
+    let ids = []
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      ids = Object.keys(JSON.parse(await fs.readFile(notesFile, 'utf8')).notes)
+      if (JSON.stringify(ids) === JSON.stringify(expected)) break
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    return ids
+  }
+  assert.equal((await send('/api/note/translation/auto', 'PUT', { id: moved.newId, enabled: true })).status, 200)
   const proposal = await (await send('/api/file/refile/propose', 'POST', { id: moved.newId })).json()
   const refiled = await (await send('/api/file/refile', 'POST', {
     id: moved.newId, hash: proposal.hash,
     fields: { directory: '/archive', filename: proposal.proposal.filename, title: 'Ny tittel', description: 'Ny beskrivelse.', tags: ['a'] },
   })).json()
   assert.equal(frontmatterOf(await fs.readFile(file(refiled.newId), 'utf8')).language, 'no')
+  assert.deepEqual(await autoIds([refiled.newId]), [refiled.newId], 'the auto flag follows the refile')
+  assert.equal(frontmatterOf(await fs.readFile(file(refiled.newId), 'utf8')).autoTranslate, undefined, 'never stored in the note')
 
   const detail = await (await fetch(`${base}/api/note/language?id=${encodeURIComponent(refiled.newId)}`)).json()
-  assert.deepEqual(detail, { id: refiled.newId, noteLanguage: 'no', noteLanguageSource: 'frontmatter' })
+  assert.deepEqual(detail, { id: refiled.newId, noteLanguage: 'no', noteLanguageSource: 'frontmatter', autoTranslate: true })
   const nothing = await (await fetch(`${base}/api/note/language?id=${encodeURIComponent(other)}`)).json()
-  assert.deepEqual(nothing, { id: other, noteLanguage: null, noteLanguageSource: null })
+  assert.deepEqual(nothing, { id: other, noteLanguage: null, noteLanguageSource: null, autoTranslate: false })
   assert.equal((await fetch(`${base}/api/note/language?id=untitled:1`)).status, 400)
   assert.equal((await fetch(`${base}/api/note/language?id=/missing.md`)).status, 404)
   const view = await (await fetch(`${base}/api/note/translation?id=${encodeURIComponent(english)}&target=no`)).json()
   assert.equal(view.noteLanguage, 'en')
   assert.equal(view.noteLanguageSource, 'frontmatter')
+
+  const renamed = await (await send('/api/file/rename', 'POST', { id: refiled.newId, name: 'renamed.md' })).json()
+  assert.deepEqual(await autoIds([renamed.newId]), [renamed.newId], 'the auto flag follows a rename')
+  assert.equal((await fetch(`${base}/api/note?id=${encodeURIComponent(renamed.newId)}`, { method: 'DELETE' })).status, 200)
+  assert.deepEqual(await autoIds([]), [], 'the auto flag is dropped on delete')
 })

@@ -121,10 +121,13 @@ export function fetchTranslationSettings(): Promise<TranslationSettings> {
   return api<TranslationSettings>("/api/translation/settings");
 }
 
-export function saveTranslationSettings(enabled: boolean): Promise<TranslationSettings> {
-  return api<TranslationSettings>("/api/translation/settings", {
+export function setNoteAutoTranslate(
+  id: string,
+  enabled: boolean,
+): Promise<{ id: string; autoTranslate: boolean; available: boolean }> {
+  return api<{ id: string; autoTranslate: boolean; available: boolean }>("/api/note/translation/auto", {
     method: "PUT",
-    body: JSON.stringify({ enabled }),
+    body: JSON.stringify({ id, enabled }),
   });
 }
 

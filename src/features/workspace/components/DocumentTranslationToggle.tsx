@@ -55,10 +55,10 @@ export function DocumentTranslationToggle({ enabled, saving, error, value, avail
         type="button"
         role="switch"
         aria-checked={enabled}
-        aria-label="Background translation"
+        aria-label="Auto-translate this note"
         className="document-translation-switch"
         disabled={saving}
-        title={error || (enabled ? "Translation on — turn off to stop translating notes in the background" : "Translation off — turn on to translate notes in the background")}
+        title={error || (enabled ? "Auto-translate is on for this note — kept up to date in the background" : "Auto-translate is off for this note — turn on to translate it")}
         onClick={() => turnOn(!enabled)}
       >
         <span className="document-translation-switch-track" aria-hidden="true" />
@@ -114,9 +114,9 @@ export function DocumentTranslationToggle({ enabled, saving, error, value, avail
         {popoverOpen ? (
           <div className="document-translation-popover" id={infoId} role="dialog" aria-label="Note translation">
             <h3>Note translation</h3>
-            <p>Translates your filed notes between Norwegian and English on this Mac, using your selected local model. Nothing leaves your computer.</p>
-            <p>Turn it on to translate notes in the background. Then use NO / EN to switch a note's language — the highlighted one is the note's original language, detected when it was filed.</p>
-            <p>Uses the generation model and keeps it loaded more often. Translated export (More → Translate…) works even when this is off.</p>
+            <p>Translates this note between Norwegian and English on this Mac, using your selected local model. Nothing leaves your computer.</p>
+            <p>Turn on auto-translate to keep this note translated in the background; then use NO / EN to switch language — the highlighted one is the note's original language.</p>
+            <p>Translated export (More → Translate…) works for any note, even with this off.</p>
             <button type="button" className="document-translation-popover-action" disabled={saving} onClick={() => turnOn(true)}>Turn on</button>
           </div>
         ) : null}

@@ -113,16 +113,17 @@ export function DocumentView(props: DocumentViewProps) {
 
   const draftId = isUntitledId(document.id);
   const translatable = isTranslatableDocument(document, draftId);
-  const translationState = useTranslationSettings();
-  const translationSettings = translationState.settings;
+  const translationSettings = useTranslationSettings().settings;
   const bundleId = getActiveBundleId();
   const choices = useSyncExternalStore(
     subscribeNoteTranslationChoices,
     () => readNoteTranslationChoices(bundleId),
   );
-  const toggleVisible = translatable && translationSettings !== null;
-  const translationOn = toggleVisible && translationSettings.enabled;
-  const language = useNoteLanguage(document.id, translationOn, document.content, translationOn);
+  const perNoteActive = translatable && translationSettings !== null;
+  const language = useNoteLanguage(document.id, perNoteActive, document.content);
+  const toggleVisible = perNoteActive && language.settled;
+  // Auto-translate is per note: only this note's switch decides whether NO/EN show.
+  const translationOn = toggleVisible && language.autoTranslate;
   const storedChoice = translationOn ? (choices[document.id] ?? null) : null;
   // A stored choice equal to the note's own language means "Original".
   const translationTarget = language.settled && storedChoice && storedChoice !== language.noteLanguage ? storedChoice : null;
@@ -139,14 +140,14 @@ export function DocumentView(props: DocumentViewProps) {
   }, [storedIsOriginal, bundleId, document.id]);
   const languageToggle = toggleVisible
     ? {
-        enabled: translationSettings.enabled,
-        saving: translationState.saving,
-        error: translationState.error,
-        onEnabledChange: (enabled: boolean) => void translationState.setEnabled(enabled),
+        enabled: language.autoTranslate,
+        saving: language.saving,
+        error: language.error,
+        onEnabledChange: (enabled: boolean) => void language.setAutoTranslate(enabled),
         value: translationOn ? (translationTarget ?? knownLanguage) : null,
         originalLanguage: translationOn ? knownLanguage : null,
         originalSource: knownSource,
-        available: translationSettings.available,
+        available: translationSettings?.available !== false,
         // The original's own button (or the shown translation's button) returns to Original.
         onChange: (target: NoteTranslationTarget) =>
           setNoteTranslationChoice(

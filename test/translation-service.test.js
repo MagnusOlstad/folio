@@ -38,14 +38,20 @@ function fakeMlx({ installed = true } = {}) {
   return service
 }
 
-async function setup(context, { mlx = fakeMlx(), notes = {}, enabled = true } = {}) {
+async function setup(context, { mlx = fakeMlx(), notes = {}, auto = true } = {}) {
   const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-translation-'))
   context.after(() => fs.rm(dataRoot, { recursive: true, force: true }))
   await fs.mkdir(path.join(dataRoot, 'bundle'), { recursive: true })
   const runtime = createRuntime({ FOLIO_DATA_ROOT: dataRoot, FOLIO_MODEL_ROOT: path.join(dataRoot, 'models') }, mlx)
   runtime.translation = createTranslationService(runtime, { debounceMs: 0, backfillDelayMs: 0, statusTtlMs: 0, busyPollMs: 5 })
   context.after(() => runtime.translation.close())
-  if (enabled) await runtime.translation.setEnabled(true)
+  if (auto) {
+    const ids = auto === true ? Object.keys(notes) : auto
+    await fs.mkdir(path.join(runtime.bundleRoot, '.folio'), { recursive: true })
+    await fs.writeFile(path.join(runtime.bundleRoot, '.folio', 'translation-notes.json'), JSON.stringify({
+      version: 1, notes: Object.fromEntries(ids.map((id) => [id, { autoTranslate: true, since: '2026-01-01T00:00:00.000Z' }])),
+    }))
+  }
   for (const [id, content] of Object.entries(notes)) await writeNote(runtime, id, content)
   return { runtime, mlx, dataRoot }
 }
@@ -131,18 +137,56 @@ test('persistent failures and dropped placeholders fall back to original text', 
   assert.equal(secondMlx.calls.length, 2)
 })
 
-test('disabled setting stops all generation and settings are persisted app-wide', async (context) => {
-  const { runtime, mlx } = await setup(context, { notes: { '/a.md': NOTE } })
-  assert.deepEqual(await runtime.translation.getSettings(), { enabled: true, available: true })
-  assert.deepEqual(await runtime.translation.setEnabled(false), { enabled: false, available: true })
+test('auto translate is per note: off by default, enabling translates only that note, disabling stops it', async (context) => {
+  const { runtime, mlx } = await setup(context, { auto: false, notes: { '/a.md': NOTE, '/b.md': NOTE.replace('Møtenotat', 'Annet') } })
+  assert.deepEqual(await runtime.translation.getSettings(), { available: true })
   runtime.translation.enqueue('/a.md')
-  runtime.translation.prioritize('/a.md')
+  runtime.translation.prioritize('/b.md')
   runtime.translation.startBackfill()
+  await new Promise((resolve) => setTimeout(resolve, 20))
   await runtime.translation.idle()
-  const view = await runtime.translation.view('/a.md', 'en')
-  assert.equal(view.status, 'disabled')
   assert.equal(mlx.calls.length, 0)
-  assert.ok((await fs.readFile(path.join(runtime.modelRoot, 'translation-settings.json'), 'utf8')).includes('false'))
+  const off = await runtime.translation.view('/a.md', 'en')
+  assert.equal(off.status, 'disabled')
+  assert.equal(off.autoTranslate, false)
+  assert.equal(mlx.calls.length, 0, 'viewing an auto-off note never starts model work')
+
+  assert.deepEqual(await runtime.translation.setAuto('/a.md', true), { id: '/a.md', autoTranslate: true, available: true })
+  await runtime.translation.idle()
+  assert.equal((await runtime.translation.view('/a.md', 'en')).status, 'ready')
+  assert.equal((await runtime.translation.view('/b.md', 'en')).status, 'disabled')
+  const stored = JSON.parse(await fs.readFile(path.join(runtime.bundleRoot, '.folio', 'translation-notes.json'), 'utf8'))
+  assert.deepEqual(Object.keys(stored.notes), ['/a.md'])
+  assert.equal(stored.notes['/a.md'].autoTranslate, true)
+  assert.equal(await fs.readFile(path.join(runtime.bundleRoot, 'a.md'), 'utf8'), NOTE, 'the note file is never rewritten')
+
+  let busy = true
+  mlx.isBusy = () => busy
+  await fs.writeFile(path.join(runtime.bundleRoot, 'a.md'), NOTE.replace('nice', 'cold'))
+  runtime.translation.enqueue('/a.md')
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  const before = mlx.calls.length
+  await runtime.translation.setAuto('/a.md', false)
+  busy = false
+  await runtime.translation.idle()
+  assert.equal(mlx.calls.length, before)
+  await assert.rejects(() => runtime.translation.setAuto('/missing.md', true), { status: 404 })
+  await assert.rejects(() => runtime.translation.setAuto('untitled:1', true), { status: 400 })
+})
+
+test('the auto flag follows moves and is dropped on delete or folder removal', async (context) => {
+  const { runtime } = await setup(context, { auto: ['/a.md', '/d/x.md', '/d/y.md'], notes: { '/a.md': NOTE, '/d/x.md': NOTE, '/d/y.md': NOTE } })
+  const read = async () => Object.keys(JSON.parse(await fs.readFile(path.join(runtime.bundleRoot, '.folio', 'translation-notes.json'), 'utf8')).notes).sort()
+  runtime.translation.moveNote('/a.md', '/moved/a.md')
+  await runtime.translation.forget('/d/x.md')
+  await runtime.translation.idle()
+  await runtime.translation.close()
+  assert.deepEqual(await read(), ['/d/y.md', '/moved/a.md'])
+  const second = createTranslationService(runtime, { debounceMs: 0 })
+  context.after(() => second.close())
+  await second.forget('/d/')
+  await second.close()
+  assert.deepEqual(await read(), ['/moved/a.md'])
 })
 
 test('does nothing when no generation model is installed', async (context) => {
@@ -150,7 +194,7 @@ test('does nothing when no generation model is installed', async (context) => {
   runtime.translation.enqueue('/a.md')
   await runtime.translation.idle()
   assert.equal(mlx.calls.length, 0)
-  assert.deepEqual(await runtime.translation.getSettings(), { enabled: true, available: false })
+  assert.deepEqual(await runtime.translation.getSettings(), { available: false })
   assert.equal((await runtime.translation.view('/a.md', 'en')).status, 'unavailable')
 })
 
@@ -203,7 +247,7 @@ test('routes validate input and return the translation contract', async (context
   assert.equal((await send('/api/note/translation/prioritize', 'POST', { id: '/missing.md' })).status, 404)
 
   const first = await (await get('id=/a.md&target=en')).json()
-  assert.deepEqual(Object.keys(first).sort(), ['content', 'description', 'id', 'noteLanguage', 'noteLanguageSource', 'status', 'target', 'title', 'totalBlocks', 'translatedBlocks'])
+  assert.deepEqual(Object.keys(first).sort(), ['autoTranslate', 'content', 'description', 'id', 'noteLanguage', 'noteLanguageSource', 'status', 'target', 'title', 'totalBlocks', 'translatedBlocks'])
   assert.equal(first.status, 'pending')
   await runtime.translation.idle()
   assert.equal((await (await get('id=/a.md&target=en')).json()).status, 'ready')
@@ -211,9 +255,15 @@ test('routes validate input and return the translation contract', async (context
   assert.equal(prioritized.status, 202)
   assert.deepEqual(await prioritized.json(), { queued: true })
 
-  assert.deepEqual(await (await fetch(`${base}/api/translation/settings`)).json(), { enabled: true, available: true })
-  assert.equal((await send('/api/translation/settings', 'PUT', { enabled: 'no' })).status, 400)
-  assert.deepEqual(await (await send('/api/translation/settings', 'PUT', { enabled: false })).json(), { enabled: false, available: true })
+  assert.deepEqual(await (await fetch(`${base}/api/translation/settings`)).json(), { available: true })
+  assert.equal((await send('/api/translation/settings', 'PUT', { enabled: false })).status, 404)
+  assert.equal((await send('/api/note/translation/auto', 'PUT', { id: '/a.md', enabled: 'yes' })).status, 400)
+  assert.equal((await send('/api/note/translation/auto', 'PUT', { id: 'untitled:1', enabled: true })).status, 400)
+  assert.equal((await send('/api/note/translation/auto', 'PUT', { id: '/missing.md', enabled: true })).status, 404)
+  assert.deepEqual(await (await fetch(`${base}/api/note/language?id=/a.md`)).json(),
+    { id: '/a.md', noteLanguage: 'no', noteLanguageSource: 'detected', autoTranslate: true })
+  assert.deepEqual(await (await send('/api/note/translation/auto', 'PUT', { id: '/a.md', enabled: false })).json(), { id: '/a.md', autoTranslate: false, available: true })
+  assert.equal((await (await get('id=/a.md&target=en')).json()).autoTranslate, false)
   const callsBefore = mlx.calls.length
   await send('/api/note/translation/prioritize', 'POST', { id: '/a.md' })
   await runtime.translation.idle()
@@ -250,8 +300,7 @@ async function waitForJob(translation, jobId) {
 const EXPORT_NOTE = '---\ntitle: Møtenotat\ndescription: Jeg er her\n---\n\nJeg snakket med [[Ola]] og `kode`.\n\n```\nkode\n```\n'
 
 test('export jobs run to done, cache per-language entries, and protect placeholders', async (context) => {
-  const { runtime, mlx } = await setup(context, { notes: { '/a.md': EXPORT_NOTE } })
-  await runtime.translation.setEnabled(false)
+  const { runtime, mlx } = await setup(context, { auto: false, notes: { '/a.md': EXPORT_NOTE } })
   const [started, again] = await Promise.all([
     runtime.translation.startExport('/a.md', 'de'), runtime.translation.startExport('/a.md', 'de'),
   ])
@@ -388,8 +437,8 @@ test('note language comes from frontmatter, else length-weighted cached sources,
     '/det.md': 'Jeg er her og det er bra.\n\nOk and yes.\n',
     '/tie.md': 'Jeg er her.\n\nThe cat is here.\n',
   } })
-  assert.deepEqual(await runtime.translation.language('/det.md'), { id: '/det.md', noteLanguage: null, noteLanguageSource: null })
-  assert.deepEqual(await runtime.translation.language('/fm.md'), { id: '/fm.md', noteLanguage: 'en', noteLanguageSource: 'frontmatter' })
+  assert.deepEqual(await runtime.translation.language('/det.md'), { id: '/det.md', noteLanguage: null, noteLanguageSource: null, autoTranslate: true })
+  assert.deepEqual(await runtime.translation.language('/fm.md'), { id: '/fm.md', noteLanguage: 'en', noteLanguageSource: 'frontmatter', autoTranslate: true })
   runtime.translation.enqueue('/det.md')
   runtime.translation.enqueue('/tie.md')
   await runtime.translation.idle()
@@ -436,18 +485,6 @@ test('a standalone HTML comment line does not swallow the following paragraph', 
   const { splitBody, translatableBlocks } = await import('../server/translation/blocks.js')
   const items = splitBody('<!-- note -->\nJeg er her og det er bra.\n\n<!--\nmulti\nline\n-->\nOg så mer tekst her.')
   assert.deepEqual(translatableBlocks(items).map((block) => block.text), ['Jeg er her og det er bra.', 'Og så mer tekst her.'])
-})
-
-test('background translation is off by default and respects a saved choice', async (context) => {
-  const { runtime, mlx } = await setup(context, { enabled: false, notes: { '/a.md': NOTE } })
-  assert.deepEqual(await runtime.translation.getSettings(), { enabled: false, available: true })
-  runtime.translation.enqueue('/a.md')
-  runtime.translation.startBackfill()
-  await runtime.translation.idle()
-  assert.equal(mlx.calls.length, 0)
-  assert.equal((await runtime.translation.view('/a.md', 'en')).status, 'disabled')
-  await runtime.translation.setEnabled(true)
-  assert.equal((await runtime.translation.getSettings()).enabled, true)
 })
 
 test('export jobs report phase and the last translated text', async (context) => {
