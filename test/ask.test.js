@@ -9,6 +9,7 @@ import { createFilingService } from '../server/filing/service.js'
 import { createSearchService } from '../server/knowledge/search.js'
 import { createMlxService } from '../server/mlx/service.js'
 import { configureFakeMlx, writeFakeMlxControl } from './fixtures/mlx-test-support.js'
+import { parseEntityIds } from '../server/entities/retrieval.js'
 
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -126,6 +127,40 @@ test('Ask entity scope is an intersection and returns only cited source records'
   assert.deepEqual(result.sources.map(({ id }) => id), ['/notes/acme-atlas.md'])
   assert.equal(result.scope.matchedNoteCount, 1)
   assert.deepEqual(result.scope.entityIds, ['ent-acme', 'ent-atlas'])
+})
+
+test('Ask rejects non-array entity scopes before retrieval or model work', async (context) => {
+  let retrievalCalls = 0
+  let generationCalls = 0
+  const model = { purpose: 'generation', repository: 'fixture/model' }
+  const app = express()
+  app.use(express.json())
+  registerRoutes(app, {
+    askContextLength: 4096,
+    distRoot: '/tmp/folio-test-dist',
+    answerModel: 'fixture-model',
+    answerModels: ['fixture-model'],
+    validTimeZone: (value) => value,
+    readRecords: async () => [],
+    prepareEntityScope: async (_records, ids, options) => {
+      parseEntityIds(ids, { source: options.source })
+    },
+    retrieveKnowledge: async () => { retrievalCalls += 1; return { matches: [], usedEmbeddings: false } },
+    buildKnowledgeContext: () => '[]',
+    mlxService: { modelDefinitions: { 'fixture-model': model }, async generate() { generationCalls += 1; return { text: 'should not run' } } },
+    ensureAnswerCitations: (answer) => answer,
+  })
+  const server = await listen(http.createServer(app))
+  context.after(() => close(server))
+  for (const entityIds of ['ent-acme', null, { id: 'ent-acme' }]) {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/ask`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ question: 'What did Acme decide?', entityIds }),
+    })
+    assert.equal(response.status, 400)
+  }
+  assert.equal(retrievalCalls, 0)
+  assert.equal(generationCalls, 0)
 })
 
 test('Ask context builder includes note titles without throwing', () => {

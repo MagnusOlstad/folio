@@ -23,8 +23,11 @@ app.post('/api/ask', async (request, response, next) => {
 
     const records = await readRecords()
     const hasEntityScope = Object.hasOwn(request.body || {}, 'entityIds')
-    const prepared = hasEntityScope ? await prepareEntityScope(records, request.body.entityIds, { query: question }) : null
-    const retrieval = await retrieveKnowledge(question, prepared ? prepared.records : records, now, timeZone)
+    const prepared = hasEntityScope ? await prepareEntityScope(records, request.body.entityIds, {
+      query: question, mode: 'ask', source: 'body', now, timeZone,
+    }) : null
+    const retrieval = await retrieveKnowledge(question, prepared ? prepared.records : records, now, timeZone,
+      prepared ? { queryEmbedding: prepared.queryEmbedding } : undefined)
     const matches = retrieval.matches
     const scope = prepared ? { ...prepared.scope, matchedNoteCount: matches.length } : undefined
     const retrievalLabel = retrieval.usedEmbeddings ? 'OKF + embeddings' : 'OKF metadata + keywords'

@@ -10,6 +10,7 @@ function scopedError(status, code, message) {
 export function parseEntityIds(value, { source = 'query' } = {}) {
   if (value === undefined) return null
   if (value === null) throw scopedError(400, 'INVALID_ENTITY_SCOPE', 'Provide entityIds as a non-empty list of entity IDs.')
+  if (source === 'body' && !Array.isArray(value)) throw scopedError(400, 'INVALID_ENTITY_SCOPE', 'Ask entityIds must be an array of entity IDs.')
   const values = Array.isArray(value) ? value : source === 'body'
     ? null
     : String(value).split(',')
@@ -52,8 +53,8 @@ function snippetAt(text, start, end, maxLength = 280) {
 }
 
 /** Validate selected bundle-local IDs, intersect resolved mentions, and hydrate a bounded set of real source files. */
-export async function prepareEntityScope(runtime, records, rawIds, { query = '', tag = '' } = {}) {
-  const ids = parseEntityIds(rawIds, { source: Array.isArray(rawIds) ? 'body' : 'query' })
+export async function prepareEntityScope(runtime, records, rawIds, { query = '', tag = '', source = 'query', mode = 'search', now = new Date(), timeZone } = {}) {
+  const ids = parseEntityIds(rawIds, { source })
   if (!ids) return null
   if (runtime.entityFeatureError) throw scopedError(503, 'ENTITY_FEATURE_UNAVAILABLE', runtime.entityFeatureError)
   if (typeof runtime.entityService?.getRetrievalSnapshot !== 'function') {
@@ -77,9 +78,25 @@ export async function prepareEntityScope(runtime, records, rawIds, { query = '',
   const noteIds = [...notesByEntity[0]].filter((noteId) => notesByEntity.every((set) => set.has(noteId)))
   const candidateIds = new Set(noteIds)
   const eligibleRecords = records.filter((record) => candidateIds.has(record.id))
-  const rankedCandidates = typeof runtime.rankedRecords === 'function'
-    ? await runtime.rankedRecords(query, eligibleRecords, MAX_ENTITY_SOURCE_CANDIDATES + 1, tag)
-    : eligibleRecords.sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id))
+  let rankedCandidates
+  let queryEmbedding
+  if (mode === 'ask' && typeof runtime.retrieveKnowledge === 'function') {
+    const shortlist = await runtime.retrieveKnowledge(query, eligibleRecords, now, timeZone)
+    const byId = new Map(eligibleRecords.map((record) => [record.id, record]))
+    rankedCandidates = (shortlist.candidateIds || shortlist.matches.map(({ id }) => id))
+      .slice(0, MAX_ENTITY_SOURCE_CANDIDATES + 1).map((id) => byId.get(id)).filter(Boolean)
+    queryEmbedding = shortlist.queryEmbedding
+  } else if (mode === 'ask' && typeof runtime.temporalQueryContext === 'function' && typeof runtime.temporalScore === 'function') {
+    const temporal = runtime.temporalQueryContext(query, now, timeZone)
+    rankedCandidates = [...eligibleRecords].sort((left, right) => (
+      runtime.temporalScore(right, temporal) - runtime.temporalScore(left, temporal)
+      || right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id)
+    )).slice(0, MAX_ENTITY_SOURCE_CANDIDATES + 1)
+  } else if (typeof runtime.rankedRecords === 'function') {
+    rankedCandidates = await runtime.rankedRecords(query, eligibleRecords, MAX_ENTITY_SOURCE_CANDIDATES + 1, tag)
+  } else {
+    rankedCandidates = eligibleRecords.sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id))
+  }
   const candidates = rankedCandidates.slice(0, MAX_ENTITY_SOURCE_CANDIDATES)
   const hydrated = []
   let hydrationIncomplete = rankedCandidates.length > MAX_ENTITY_SOURCE_CANDIDATES
@@ -122,6 +139,7 @@ export async function prepareEntityScope(runtime, records, rawIds, { query = '',
     records: hydrated,
     mentions,
     snapshot,
+    ...(mode === 'ask' ? { queryEmbedding } : {}),
     scope: metadataForScope(ids, ids.map((id) => entityById.get(id)), coverage, snapshot, hydrated.length,
       hydrationIncomplete),
   }

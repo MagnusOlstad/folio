@@ -304,14 +304,16 @@ function noteChunks(content, maxBytes = 1600, overlapBytes = 240) {
   return chunks.length ? chunks : [String(content).slice(0, maxBytes)]
 }
 
-async function retrieveKnowledge(question, records, now, timeZone) {
+async function retrieveKnowledge(question, records, now, timeZone, options = {}) {
   const temporal = temporalQueryContext(question, now, timeZone)
   const retrievalQuery = temporal ? `${question}\nRelevant time range: ${temporal.searchText}` : question
-  let queryEmbedding = null
-  try {
-    queryEmbedding = await embedQuery(retrievalQuery, embeddingDimension(records))
-  } catch {
-    // OKF metadata and keyword retrieval remain available without embeddings.
+  let queryEmbedding = Object.hasOwn(options, 'queryEmbedding') ? options.queryEmbedding : null
+  if (!Object.hasOwn(options, 'queryEmbedding')) {
+    try {
+      queryEmbedding = await embedQuery(retrievalQuery, embeddingDimension(records))
+    } catch {
+      // OKF metadata and keyword retrieval remain available without embeddings.
+    }
   }
 
   const chunksById = new Map()
@@ -371,7 +373,8 @@ async function retrieveKnowledge(question, records, now, timeZone) {
   if (!matches.length && bestScore >= 0.25) matches = reranked.slice(0, 1)
 
   const hasIndexedEmbeddings = records.some((record) => record.embedding || record.chunks?.some((chunk) => chunk.embedding))
-  return { matches, usedEmbeddings: Boolean(queryEmbedding && hasIndexedEmbeddings), temporal }
+  return { matches, candidateIds: candidates.map(({ id }) => id), queryEmbedding,
+    usedEmbeddings: Boolean(queryEmbedding && hasIndexedEmbeddings), temporal }
 }
 
 function validTimeZone(value) {

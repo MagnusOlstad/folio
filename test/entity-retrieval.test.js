@@ -144,7 +144,7 @@ test('entity scope ranks intersected notes before bounded current-source hydrati
     await fs.mkdir(path.dirname(filePath), { recursive: true })
     await fs.writeFile(filePath, text)
     sources.set(id, filePath)
-    records.push({ id, title: `Note ${index}`, description: '', type: 'Note', tags: [], createdAt: new Date(2026, 0, index + 1).toISOString(), content: text })
+    records.push({ id, title: `Note ${index}`, description: '', type: 'Note', tags: [], createdAt: new Date(2026, 0, 82 - index).toISOString(), content: text })
     mentions.push({ id: `mention-${index}`, noteId: id, entityId: entity.id, status: 'active', resolution: 'resolved',
       contentHash: projectMarkdown(text).contentHash, text: 'Acme', startUtf16: 0, endUtf16: 4 })
   }
@@ -159,6 +159,21 @@ test('entity scope ranks intersected notes before bounded current-source hydrati
     const result = await prepareEntityScope(runtime, records, ['ent-acme'], { query: 'needle' })
     assert.deepEqual(result.records.map(({ id }) => id), ['/notes/note-000.md'])
     assert.equal(result.scope.incomplete, false)
+
+    let embeddingCalls = 0
+    const askSearch = createSearchService({ ...createTextHelpers(), normalizeTag: runtime.normalizeTag,
+      recordIsStale: () => false, lifecycleFactor: () => 1, async embedQuery() { embeddingCalls += 1; return null },
+      embeddingDimension: () => null, cosineSimilarity: () => 0, bestSemanticChunk: () => null })
+    const askRuntime = { ...runtime, retrieveKnowledge: askSearch.retrieveKnowledge }
+    const temporalResult = await prepareEntityScope(askRuntime, records, ['ent-acme'], {
+      query: 'what happened yesterday?', mode: 'ask', source: 'body', now: new Date('2026-01-02T12:00:00Z'), timeZone: 'UTC',
+    })
+    assert.equal(temporalResult.records[0].id, '/notes/note-080.md',
+      'the existing Ask temporal/ranking candidate remains first through the bounded hydration pass')
+    assert.ok(temporalResult.records.length <= 80)
+    assert.equal(temporalResult.queryEmbedding, null)
+    assert.equal(embeddingCalls, 1, 'the final Ask ranking can reuse the shortlist embedding result')
+    assert.equal(temporalResult.scope.incomplete, false)
   } finally {
     await fs.rm(root, { recursive: true, force: true })
   }
