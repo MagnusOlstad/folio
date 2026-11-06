@@ -258,10 +258,12 @@ export function createImageFrame(
   let ocrState: OcrPreviewState = { status: "idle" };
   let preview: HTMLElement | null = null;
   const closePreview = () => {
+    const hadFocus = preview?.contains(frame.ownerDocument.activeElement) ?? false;
     preview?.remove();
     preview = null;
     view.dom.removeEventListener("keydown", onKeydown, true);
     ocrState = nextOcrState(ocrState, { type: "close" });
+    if (hadFocus) view.focus();
     view.requestMeasure();
   };
   function onKeydown(event: KeyboardEvent) {
@@ -331,6 +333,11 @@ function createOcrPreview(
   panel.className = PREVIEW_CLASS;
   panel.setAttribute("role", "region");
   panel.setAttribute("aria-label", "Extracted text");
+  // Focusing the panel takes focus off the editor content while its text is
+  // selected. CodeMirror then neither maps the browser selection onto the
+  // image line nor rewrites it, which would reveal the Markdown source and
+  // destroy this widget.
+  panel.tabIndex = -1;
 
   const body = document.createElement("pre");
   body.className = "cm-live-markdown-ocr-text";

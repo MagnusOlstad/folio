@@ -1789,6 +1789,8 @@
   color: var(--ink);
   background: var(--paper-raised);
   cursor: auto;
+  user-select: text;
+  outline: none;
 }
 
 .live-markdown-editor .cm-live-markdown-ocr-text {
@@ -1801,6 +1803,7 @@
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  cursor: text;
   user-select: text;
 }
 

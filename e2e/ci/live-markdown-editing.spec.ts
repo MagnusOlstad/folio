@@ -584,3 +584,51 @@ test("draft Find stays over the editor and reports match progress", async ({ pag
   expect(closeBox?.width).toBeGreaterThanOrEqual(32);
   expect(closeBox?.height).toBeGreaterThanOrEqual(32);
 });
+
+test("selecting text in the OCR preview keeps the panel and the editor selection", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const ocrText = "Invoice 4821\nTotal due: 129.00";
+  await page.route("**/api/assets/ocr", (route) =>
+    route.fulfill({ json: { text: ocrText, cached: false } }),
+  );
+  await openSeededNote(page, "Start Here");
+  const editor = liveEditor(page, "Start Here");
+  await editor.click();
+  await page.keyboard.press(`${modifier}+End`);
+  await page.keyboard.insertText("\n\n![shot](/assets/ocr-e2e.png)\n\nafter the image");
+  await page.keyboard.press(`${modifier}+End`);
+
+  const frame = editor.locator(".cm-live-markdown-image-frame");
+  await frame.hover();
+  await frame.getByRole("button", { name: "Extract text" }).click();
+  const preview = editor.locator(".cm-live-markdown-ocr-preview");
+  const text = preview.locator(".cm-live-markdown-ocr-text");
+  await expect(text).toHaveText(ocrText);
+
+  const box = (await text.boundingBox())!;
+  await page.mouse.move(box.x + 6, box.y + 14);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 6, box.y + box.height - 8, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(150);
+
+  await expect(preview).toBeVisible();
+  await expect(editor.locator(".cm-live-markdown-image-frame")).toHaveCount(1);
+  const selected = await editor.evaluate((element) => element.ownerDocument.getSelection()?.toString() ?? "");
+  expect(selected.trim().length).toBeGreaterThan(0);
+  expect(ocrText).toContain(selected.trim().split("\n")[0]);
+
+  // A click inside the panel must not reveal the raw image Markdown either.
+  await text.click();
+  await expect(preview).toBeVisible();
+  await expect(editor).not.toContainText("![shot](/assets/ocr-e2e.png)");
+
+  // Copy takes the selected OCR text, not the image Markdown line.
+  await text.click({ clickCount: 3 });
+  const lineSelection = await editor.evaluate((element) => element.ownerDocument.getSelection()?.toString() ?? "");
+  await page.keyboard.press(`${modifier}+c`);
+  const copied = (await page.evaluate("navigator.clipboard.readText()")) as string;
+  expect(copied).toBe(lineSelection);
+  expect(ocrText).toContain(copied.trim());
+  await expect(preview).toBeVisible();
+});
