@@ -88,6 +88,16 @@ import Testing
         #expect(entitySchemaVersion != "1")
     }
 
+    @Test func unknownEntityTypeIsRejectedByFrozenSchema() {
+        let labels = [EntityLabel(type: "vendor", description: "a company")]
+        var rejected = false
+        do {
+            _ = try EntityText.prepare(fullText: "Acme", region: EntityRegion(startUtf16: 0, endUtf16: 4),
+                                       labels: labels, encode: encode, unknownTokenID: 3, maxTokens: 512)
+        } catch { rejected = true }
+        #expect(rejected)
+    }
+
     @Test func pythonWordSplittingForDecomposedTextAndJoinControls() throws {
         let text = "Cafe\u{301} Ålesund 👩\u{200D}💻"
         let plan = try EntityText.plan(fullText: text, labels: labels, encode: encode, unknownTokenID: 3,

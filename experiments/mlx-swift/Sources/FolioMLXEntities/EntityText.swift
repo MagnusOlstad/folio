@@ -75,6 +75,7 @@ public enum EntityRuntimeError: LocalizedError {
 enum EntityText {
     static let maximumTextUTF16 = 1_000_000
     static let maximumLabels = 64
+    static let supportedTypes: Set<String> = ["person", "organization", "project", "product", "location"]
     static let addedSchemaTokenIDs = [
         "[SEP_TEXT]": 250_103,
         "[P]": 250_104,
@@ -141,6 +142,9 @@ enum EntityText {
         }
         guard Set(labels.map(\.type)).count == labels.count else {
             throw EntityRuntimeError.invalidInput("entity label types must be unique")
+        }
+        guard labels.allSatisfy({ supportedTypes.contains($0.type) }) else {
+            throw EntityRuntimeError.invalidInput("entity label type is not supported by folio-entities-v1")
         }
         guard maxTokens > 0, maxTokens <= 512 else {
             throw EntityRuntimeError.invalidInput("maxTokens must be between 1 and 512 for the pinned encoder")
