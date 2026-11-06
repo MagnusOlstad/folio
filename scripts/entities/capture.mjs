@@ -13,7 +13,14 @@ import { buildClassificationMessages, classificationSchema } from '../../server/
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const corpusPath = path.join(root, 'test/fixtures/entities/corpus.json');
 const gemma = { model: 'mlx-community/gemma-4-e4b-it-4bit', revision: '475b9088d29754a3379866cf5aeb6b41acd313c2', task: 'generation' };
-const usage = 'Usage: node scripts/entities/capture.mjs --mode gemma-baseline|gemma-entity-baseline|helper-jsonl --helper PATH --model-directory PATH --cache-root PATH --output PATH --runtime-revision SHA [--runtime-source PATH --requests PATH --task TASK --model REPO --revision SHA --declared-precision LABEL --thresholds-json JSON --chunk-budget-json JSON --warmup-count N --repeat-count N]';
+const entityLabels = [
+  { type: 'person', description: 'a named person or human individual, including first and last names' },
+  { type: 'organization', description: 'a company, institution, government body, team, or other organization' },
+  { type: 'project', description: 'a named project, initiative, event, or organized body of work' },
+  { type: 'product', description: 'a named product, software tool, service, or named technology' },
+  { type: 'location', description: 'a named geographic place, venue, or physical location' },
+];
+const usage = 'Usage: node scripts/entities/capture.mjs --mode gemma-baseline|gemma-entity-baseline|helper-jsonl|helper-entities --helper PATH --model-directory PATH --cache-root PATH --output PATH --runtime-revision SHA [--runtime-source PATH --requests PATH --task TASK --model REPO --revision SHA --declared-precision LABEL --thresholds-json JSON --chunk-budget-json JSON --warmup-count N --repeat-count N]';
 
 function parseArgs(argv) {
   const args = new Map();
@@ -74,11 +81,31 @@ function parseMentionText(text, source, types) {
   if (!output || typeof output !== 'object' || Array.isArray(output) || Object.keys(output).length !== 1 || !Array.isArray(output.mentions)) throw new Error('JSON must contain only a mentions array');
   return output.mentions.map((item, index) => {
     const required = ['endUtf16', 'startUtf16', 'text', 'type'];
-    if (!item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).sort().join(',') !== required.join(',')) throw new Error(`mention ${index} must contain only text, type, startUtf16, and endUtf16`);
+    const keys = item && typeof item === 'object' && !Array.isArray(item) ? Object.keys(item).sort() : [];
+    if (!item || typeof item !== 'object' || Array.isArray(item) || ![required, [...required, 'score'].sort()].some((allowed) => keys.join(',') === allowed.join(','))) throw new Error(`mention ${index} must contain text, type, startUtf16, and endUtf16, with optional score`);
     if (typeof item.text !== 'string' || !types.includes(item.type) || !Number.isInteger(item.startUtf16) || !Number.isInteger(item.endUtf16) || item.startUtf16 < 0 || item.endUtf16 <= item.startUtf16 || item.endUtf16 > source.length) throw new Error(`mention ${index} has invalid type or UTF-16 bounds`);
     if (source.slice(item.startUtf16, item.endUtf16) !== item.text) throw new Error(`mention ${index} text does not match its UTF-16 source span`);
+    if (Object.hasOwn(item, 'score') && (!Number.isFinite(item.score) || item.score < 0 || item.score > 1)) throw new Error(`mention ${index} has invalid score`);
     return item;
   });
+}
+function validateChunkPlan(plan, text, budget) {
+  if (!plan || !Array.isArray(plan.chunks) || plan.coverage?.complete !== true
+    || plan.coverage.startUtf16 !== 0 || plan.coverage.endUtf16 !== text.length) throw new Error('planner returned incomplete full-note coverage');
+  if (text.length && !plan.chunks.length) throw new Error('planner returned no chunks for non-empty source text');
+  let coveredUntil = 0;
+  let previousStart = -1;
+  for (const [index, chunk] of plan.chunks.entries()) {
+    if (!Number.isInteger(chunk.startUtf16) || !Number.isInteger(chunk.endUtf16) || chunk.startUtf16 < 0
+      || chunk.endUtf16 <= chunk.startUtf16 || chunk.endUtf16 > text.length || chunk.startUtf16 < previousStart || chunk.startUtf16 > coveredUntil
+      || !Number.isInteger(chunk.tokenCount) || chunk.tokenCount < 0) throw new Error(`planner chunk ${index} has an invalid or uncovered UTF-16 region`);
+    const schemaTokens = Number(chunk.schemaTokenCount ?? plan.schemaTokenCount ?? 0);
+    if (!Number.isInteger(schemaTokens) || schemaTokens < 0 || chunk.tokenCount + schemaTokens > budget.maxTokens) throw new Error(`planner chunk ${index} exceeds the configured token budget`);
+    previousStart = chunk.startUtf16;
+    coveredUntil = Math.max(coveredUntil, chunk.endUtf16);
+  }
+  if (text.length && coveredUntil !== text.length) throw new Error('planner left the end of the source text uncovered');
+  return plan.chunks;
 }
 async function processRss(pid) {
   const value = run('ps', ['-o', 'rss=', '-p', String(pid)]);
@@ -90,7 +117,7 @@ const args = parseArgs(process.argv.slice(2));
 if (args.get('--help') === 'true' || args.has('-h')) { console.log(usage); process.exit(0); }
 try {
   const mode = args.get('--mode');
-  if (!['gemma-baseline', 'gemma-entity-baseline', 'helper-jsonl'].includes(mode)) throw new Error('mode must be gemma-baseline, gemma-entity-baseline, or helper-jsonl');
+  if (!['gemma-baseline', 'gemma-entity-baseline', 'helper-jsonl', 'helper-entities'].includes(mode)) throw new Error('mode must be gemma-baseline, gemma-entity-baseline, helper-jsonl, or helper-entities');
   const required = ['--helper', '--model-directory', '--cache-root', '--output', '--runtime-revision'];
   const missing = required.filter((name) => !args.has(name));
   if (missing.length) throw new Error(`Missing required options: ${missing.join(', ')}\n${usage}`);
@@ -107,9 +134,12 @@ try {
   const repeatCount = numberOption(args, '--repeat-count', 1, 1);
   for (const filePath of [helperPath, modelDirectory, cacheRoot]) await access(filePath);
   if (mode === 'helper-jsonl' && !args.has('--requests')) throw new Error('--requests is required for helper-jsonl mode');
+  if (mode === 'helper-entities' && args.has('--requests')) throw new Error('helper-entities builds production chunk requests from the canonical corpus; --requests is not accepted');
 
   const corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
-  const requests = ['gemma-baseline', 'gemma-entity-baseline'].includes(mode)
+  const requests = mode === 'helper-entities'
+    ? corpus.cases.map((item) => ({ id: item.id, text: item.text, request: { operation: 'capture-entities' } }))
+    : ['gemma-baseline', 'gemma-entity-baseline'].includes(mode)
     ? corpus.cases.map((item) => ({ id: item.id, text: item.text, request: {
       operation: 'generate', messages: mode === 'gemma-baseline' ? buildClassificationMessages({
         schema: classificationSchema,
@@ -137,14 +167,17 @@ try {
   const model = isGemma ? gemma.model : args.get('--model');
   const revision = isGemma ? gemma.revision : args.get('--revision');
   const task = isGemma ? gemma.task : args.get('--task');
-  if (!model || !revision || !task) throw new Error('--model, --revision and --task are required in helper-jsonl mode');
+  if (!model || !revision || !task) throw new Error('--model, --revision and --task are required for entity helper capture');
   const thresholds = jsonOption(args, '--thresholds-json');
   const chunkBudget = jsonOption(args, '--chunk-budget-json');
-  if (mode === 'helper-jsonl' && (!thresholds || !chunkBudget)) throw new Error('entity helper capture requires --thresholds-json and --chunk-budget-json; enter measured/configured values explicitly');
-  if (mode === 'helper-jsonl') {
+  if (['helper-jsonl', 'helper-entities'].includes(mode) && (!thresholds || !chunkBudget)) throw new Error('entity helper capture requires --thresholds-json and --chunk-budget-json; enter measured/configured values explicitly');
+  if (['helper-jsonl', 'helper-entities'].includes(mode)) {
     for (const type of corpus.schema.types) if (!Number.isFinite(thresholds[type]) || thresholds[type] < 0 || thresholds[type] > 1) throw new Error(`--thresholds-json needs a 0..1 numeric threshold for ${type}`);
     if (!Number.isInteger(chunkBudget.maxTokens) || chunkBudget.maxTokens < 1 || chunkBudget.maxTokens > corpus.reference.maxTokens || !Number.isInteger(chunkBudget.overlapTokens) || chunkBudget.overlapTokens < 0 || chunkBudget.overlapTokens >= chunkBudget.maxTokens) throw new Error(`--chunk-budget-json requires maxTokens 1..${corpus.reference.maxTokens} and overlapTokens below maxTokens`);
   }
+  const entityConfigurationHash = thresholds && chunkBudget
+    ? createHash('sha256').update(JSON.stringify({ schemaVersion: corpus.reference.schemaVersion, labels: entityLabels, thresholds, chunkBudget })).digest('hex')
+    : null;
 
   const helperSha256 = await sha256(helperPath);
   const startedAt = performance.now();
@@ -164,7 +197,10 @@ try {
   let parseFailure = null;
   let exitInfo = null;
   helper.stderr.setEncoding('utf8');
-  helper.stderr.on('data', (part) => { diagnostics.push(part); while (diagnostics.join('').length > 12_000) diagnostics.shift(); });
+  helper.stderr.on('data', (part) => {
+    const tail = `${diagnostics.join('')}${part}`.slice(-12_000);
+    diagnostics.splice(0, diagnostics.length, tail);
+  });
   helper.once('error', (error) => readyReject(error));
   helper.once('exit', (code, signal) => {
     exitInfo = { code, signal };
@@ -175,7 +211,7 @@ try {
   });
   lineReader.on('line', (line) => {
     let message;
-    try { message = JSON.parse(line); } catch (error) {
+    try { message = JSON.parse(line); } catch {
       parseFailure = new Error(`Helper emitted non-JSON stdout: ${line.slice(0, 200)}`);
       readyReject(parseFailure);
       for (const waiter of pending.values()) waiter.reject(parseFailure);
@@ -186,7 +222,12 @@ try {
     if (message.event === 'ready') { readyMessage = message; readyResolve(message); return; }
     if (message.event === 'download-progress') return;
     const waiter = pending.get(message.id);
-    if (waiter) { clearTimeout(waiter.timer); pending.delete(message.id); message.error ? waiter.reject(new Error(message.error)) : waiter.resolve(message); }
+    if (waiter) {
+      clearTimeout(waiter.timer);
+      pending.delete(message.id);
+      if (message.error) waiter.reject(new Error(message.error));
+      else waiter.resolve(message);
+    }
   });
 
   const rssSamples = [];
@@ -198,24 +239,76 @@ try {
   const request = (payload) => new Promise((resolve, reject) => {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const started = performance.now();
+    helperRequestCount += 1;
     const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Helper request ${id} exceeded 30 minutes.`)); helper.kill('SIGTERM'); }, 30 * 60_000);
     pending.set(id, { resolve: (response) => resolve({ response, wallMs: performance.now() - started }), reject, timer });
     helper.stdin.write(`${JSON.stringify({ id, ...payload })}\n`, (error) => {
       if (error) { clearTimeout(timer); pending.delete(id); reject(error); }
     });
   });
+  const thresholdsForType = thresholds;
+  const runEntityCapture = async (entry) => {
+    const text = entry.text;
+    const payload = { text, schemaVersion: corpus.reference.schemaVersion, labels: entityLabels,
+      maxTokens: chunkBudget.maxTokens, overlapTokens: chunkBudget.overlapTokens };
+    const planned = await request({ operation: 'plan_entity_chunks', ...payload });
+    const chunks = validateChunkPlan(planned.response, text, chunkBudget);
+    const unique = new Map();
+    const chunkRuns = [];
+    for (const chunk of chunks) {
+      const measuredChunk = await request({ operation: 'extract_entities', ...payload,
+        scoreThreshold: Math.min(...Object.values(thresholdsForType)),
+        region: { startUtf16: chunk.startUtf16, endUtf16: chunk.endUtf16 } });
+      const response = measuredChunk.response;
+      if (response.coverage?.complete !== true || response.coverage.startUtf16 !== chunk.startUtf16
+        || response.coverage.endUtf16 !== chunk.endUtf16 || !Array.isArray(response.mentions)) {
+        throw new Error(`extractor returned incomplete coverage for chunk ${chunk.index ?? chunkRuns.length}`);
+      }
+      const mentions = parseMentionText(JSON.stringify({ mentions: response.mentions }), text, corpus.schema.types);
+      for (const mention of mentions) {
+        if (mention.startUtf16 < chunk.startUtf16 || mention.endUtf16 > chunk.endUtf16) throw new Error('extractor returned a mention outside its planned chunk');
+        if (Number.isFinite(mention.score) && mention.score < thresholdsForType[mention.type]) continue;
+        const key = `${mention.type}\0${mention.startUtf16}\0${mention.endUtf16}\0${mention.text}`;
+        const previous = unique.get(key);
+        if (!previous || (mention.score ?? 0) > (previous.score ?? 0)) unique.set(key, mention);
+      }
+      chunkRuns.push({ index: chunk.index ?? chunkRuns.length, startUtf16: chunk.startUtf16, endUtf16: chunk.endUtf16,
+        tokenCount: chunk.tokenCount, schemaTokenCount: chunk.schemaTokenCount ?? planned.response.schemaTokenCount ?? 0,
+        wallMs: measuredChunk.wallMs, memory: response.memory ?? null, metrics: response.metrics ?? null,
+        mentionCount: mentions.length, response });
+    }
+    const mentions = [...unique.values()].sort((left, right) => left.startUtf16 - right.startUtf16
+      || left.endUtf16 - right.endUtf16 || left.type.localeCompare(right.type));
+    const chunkPeaks = chunkRuns.map(({ metrics }) => metrics?.requestPeakActiveBytes).filter(Number.isFinite);
+    const response = {
+      mentions,
+      coverage: planned.response.coverage,
+      plan: planned.response,
+      planningWallMs: planned.wallMs,
+      chunks: chunkRuns,
+      memory: chunkRuns.at(-1)?.memory ?? planned.response.memory ?? null,
+      runtimeRevision: chunkRuns.at(-1)?.response.runtimeRevision ?? planned.response.runtimeRevision,
+      precision: chunkRuns.at(-1)?.response.precision ?? planned.response.precision,
+      metrics: chunkPeaks.length ? { requestPeakActiveBytes: Math.max(...chunkPeaks) } : null,
+    };
+    return { response, wallMs: planned.wallMs + chunkRuns.reduce((sum, chunk) => sum + chunk.wallMs, 0) };
+  };
+  let helperRequestCount = 0;
   let measurements;
+  let captureFailure = null;
   try {
     let readyTimer;
     const readyEvent = await Promise.race([ready, new Promise((_, reject) => { readyTimer = setTimeout(() => reject(new Error('Helper readiness exceeded 30 minutes.')), 30 * 60_000); })]).finally(() => clearTimeout(readyTimer));
     const coldLoadWallMs = performance.now() - startedAt;
     const warmup = [];
-    for (let index = 0; index < warmupCount; index += 1) warmup.push(await request(orderedRequests[0].request));
+    for (let index = 0; index < warmupCount; index += 1) warmup.push(mode === 'helper-entities'
+      ? await runEntityCapture(orderedRequests[0])
+      : await request(orderedRequests[0].request));
     const results = [];
     for (const entry of orderedRequests) {
       const measuredRuns = [];
       for (let repeat = 0; repeat < repeatCount; repeat += 1) {
-        const measured = await request(entry.request);
+        const measured = mode === 'helper-entities' ? await runEntityCapture(entry) : await request(entry.request);
         if (mode === 'gemma-entity-baseline') {
           try { measured.response.mentions = parseMentionText(measured.response.text ?? '', entry.text, corpus.schema.types); }
           catch (error) { measured.response.mentions = []; measured.response.mentionValidationError = error instanceof Error ? error.message : String(error); }
@@ -226,6 +319,8 @@ try {
       results.push({ id: entry.id, language: corpus.cases.find((item) => item.id === entry.id).language, text: entry.text, runs });
     }
     measurements = { readyEvent, coldLoadWallMs, warmup, results };
+  } catch (error) {
+    captureFailure = error;
   } finally {
     clearInterval(sampleTimer);
     if (helper.exitCode === null && helper.signalCode === null) {
@@ -237,10 +332,18 @@ try {
     }
     await closePromise;
   }
+  if (captureFailure) {
+    const stderr = diagnostics.join('').trim();
+    throw new Error(`${captureFailure.message}${stderr ? `\nHelper stderr:\n${stderr}` : ''}`);
+  }
   if (parseFailure) throw parseFailure;
   if (exitInfo?.code !== 0 && exitInfo?.signal !== 'SIGTERM') throw new Error(`Helper failed: ${diagnostics.join('').trim()}`);
 
   const runs = measurements.results.flatMap((item) => item.runs);
+  const measuredChunks = mode === 'helper-entities'
+    ? runs.flatMap((item) => item.response.chunks || [])
+    : [];
+  const measuredChunkWallTimes = measuredChunks.map((chunk) => chunk.wallMs);
   const wallTimes = runs.map((item) => item.wallMs);
   const responses = [...measurements.warmup, ...runs].map((item) => item.response);
   const memory = responses.map((response) => response.memory).filter(Boolean);
@@ -283,7 +386,8 @@ try {
     helperSha256, runtimeProvenanceVerified, declaredPrecision, helperReportedPrecision, precisionVerified, precision: helperReportedPrecision,
     referenceImplementation: corpus.reference.referenceImplementation,
     schemaVersion: corpus.reference.schemaVersion,
-    thresholds, chunkBudget,
+    entityLabels: ['helper-jsonl', 'helper-entities'].includes(mode) ? entityLabels : null,
+    thresholds, chunkBudget, entityConfigurationHash,
     warmupCount, repeatCount,
     host,
     helperPath,
@@ -300,6 +404,13 @@ try {
       helperReadyMemory: measurements.readyEvent.memory ?? null,
       requestWallMs: { count: wallTimes.length, median: percentile(wallTimes, 0.5), p95: percentile(wallTimes, 0.95), mean: mean(wallTimes) },
       serialCorpusInvocationsPerMinute: totalRequestSeconds ? runs.length * 60 / totalRequestSeconds : null,
+      helperRequestCount,
+      ...(mode === 'helper-entities' ? { entityChunkRequests: {
+        count: measuredChunkWallTimes.length,
+        medianWallMs: percentile(measuredChunkWallTimes, 0.5),
+        p95WallMs: percentile(measuredChunkWallTimes, 0.95),
+        meanWallMs: mean(measuredChunkWallTimes),
+      } } : {}),
       memoryBytes: { sampledPeakHelperRss: rssPeakBytes, helperPeakResident: helperPeakResidentBytes, mlxPeakActive: mlxActivePeakBytes, mlxPeakCache: mlxCachePeakBytes, mlxPeakRequestActive: mlxPeakRequestActiveBytes, mlxPeakActivePlusCache: mlxActivePeakBytes + mlxCachePeakBytes },
       rssSampleCount: rssSamples.length,
       rssSamplingAvailable: rssSamples.length > 0,
@@ -307,8 +418,8 @@ try {
     results: measurements.results.map((item) => ({ id: item.id, language: item.language, text: item.text, runs: item.runs.map(({ wallMs, response }) => ({ wallMs, helperMetrics: response.metrics ?? null, memory: response.memory, response })) })),
     limitations: [...(rssSamples.length ? [] : ['OS-level sampled RSS was unavailable; helper getrusage peakResidentBytes remains the process peak measurement.']), mode === 'gemma-baseline' ? 'Gemma filing baseline uses Folio’s existing classification prompt builder with an empty fictional filing/tag guide; it is separate from entity span quality.' : mode === 'gemma-entity-baseline' ? 'Gemma entity-span output comes from an explicit development prompt, not an existing Folio extraction feature; treat it as a prompted baseline.' : 'Raw helper responses are retained; use exact mention responses with scripts/entities/evaluate.mjs for semantic scoring.', 'This capture does not measure Electron total process footprint, responsiveness under concurrent transcription/generation, repeated model contention, real server backfill scheduling, or release budgets.'],
   };
-  if (['helper-jsonl', 'gemma-entity-baseline'].includes(mode) && measurements.results.every((item) => item.runs.at(-1)?.response?.mentions && Array.isArray(item.runs.at(-1).response.mentions))) {
-    report.predictions = { corpusVersion: corpus.version, metadata: { modelRevision: revision, runtimeRevision, schemaVersion: corpus.reference.schemaVersion, thresholds, device: `${host.cpu} (${host.architecture})`, osVersion: `${host.macOSVersion} (${host.macOSBuild})`, precision: helperReportedPrecision, precisionVerified, chunkBudget, warmupCount, repeatCount }, cases: measurements.results.map((item) => ({ id: item.id, text: item.text, mentions: item.runs.at(-1).response.mentions })) };
+  if (['helper-jsonl', 'helper-entities', 'gemma-entity-baseline'].includes(mode) && measurements.results.every((item) => item.runs.at(-1)?.response?.mentions && Array.isArray(item.runs.at(-1).response.mentions))) {
+    report.predictions = { corpusVersion: corpus.version, metadata: { modelRevision: revision, runtimeRevision, schemaVersion: corpus.reference.schemaVersion, thresholds, entityConfigurationHash, device: `${host.cpu} (${host.architecture})`, osVersion: `${host.macOSVersion} (${host.macOSBuild})`, precision: helperReportedPrecision, precisionVerified, chunkBudget, warmupCount, repeatCount }, cases: measurements.results.map((item) => ({ id: item.id, text: item.text, mentions: item.runs.at(-1).response.mentions })) };
   }
   if (report.predictions) report.semanticQuality = { source: 'manual corpus semantic annotations', exactMentions: mentionMetrics(corpus.cases.map((item) => ({ gold: item.semantic.mentions, predicted: report.predictions.cases.find((prediction) => prediction.id === item.id).mentions })), corpus), identityMetrics: 'not evaluated by this model prompt' };
   await (await import('node:fs/promises')).mkdir(path.dirname(outputPath), { recursive: true });

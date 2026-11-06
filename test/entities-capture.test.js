@@ -81,6 +81,61 @@ test('capture driver rejects incomplete entity requests before starting a helper
   assert.equal(report.completeness.complete, false);
 });
 
+test('helper startup failure preserves bounded stderr diagnostics', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'folio-entities-startup-failure-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const { mkdir } = await import('node:fs/promises');
+  const modelDirectory = path.join(directory, 'model');
+  const cacheRoot = path.join(directory, 'cache');
+  await Promise.all([mkdir(modelDirectory), mkdir(cacheRoot)]);
+  const control = path.join(directory, 'control.json');
+  await writeFile(control, JSON.stringify({ exitBeforeReady: 23 }));
+  const result = spawnSync(process.execPath, [capture,
+    '--mode', 'gemma-baseline', '--helper', helper,
+    '--model-directory', modelDirectory, '--cache-root', cacheRoot,
+    '--runtime-revision', runtimeRevision, '--warmup-count', '0', '--repeat-count', '1',
+    '--output', path.join(directory, 'unused.json'),
+  ], { cwd: root, encoding: 'utf8', timeout: 10_000, env: { ...process.env, FOLIO_MLX_FIXTURE_CONTROL: control } });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /Helper exited before capture finished/);
+  assert.match(result.stderr, /fixture exited before readiness/);
+})
+
+test('production entity capture plans chunks, extracts serially, and deduplicates overlap', { skip: process.platform !== 'darwin' }, async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'folio-entities-production-capture-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const { mkdir } = await import('node:fs/promises');
+  const modelDirectory = path.join(directory, 'model');
+  const cacheRoot = path.join(directory, 'cache');
+  await Promise.all([mkdir(modelDirectory), mkdir(cacheRoot)]);
+  const control = path.join(directory, 'control.json');
+  const log = path.join(directory, 'helper.jsonl');
+  await writeFile(control, JSON.stringify({ overlapEntityChunks: true }));
+  const output = path.join(directory, 'captures', 'entities.json');
+  const thresholds = JSON.stringify(Object.fromEntries(corpus.schema.types.map((type) => [type, 0.5])));
+  const chunkBudget = JSON.stringify({ maxTokens: 512, overlapTokens: 32 });
+  const result = spawnSync(process.execPath, [capture,
+    '--mode', 'helper-entities', '--helper', helper, '--task', 'entities',
+    '--model', 'fastino/gliner2.5-multi-v1', '--revision', '7b005274e82da37dcf1f5fd9d6a2ef413c6a004c',
+    '--model-directory', modelDirectory, '--cache-root', cacheRoot,
+    '--runtime-revision', runtimeRevision, '--thresholds-json', thresholds, '--chunk-budget-json', chunkBudget,
+    '--warmup-count', '0', '--repeat-count', '1', '--output', output,
+  ], { cwd: root, encoding: 'utf8', timeout: 60_000, env: { ...process.env, FOLIO_MLX_FIXTURE_CONTROL: control, FOLIO_MLX_FIXTURE_LOG: log } });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const report = JSON.parse(await readFile(output, 'utf8'));
+  assert.equal(report.metadata.mode, 'helper-entities');
+  assert.equal(report.metadata.entityConfigurationHash.length, 64);
+  assert.equal(report.predictions.cases.length, corpus.cases.length);
+  assert.equal(report.results[0].runs[0].response.chunks.length, 2);
+  const mentions = report.results[0].runs[0].response.mentions;
+  assert.equal(new Set(mentions.map(({ type, startUtf16, endUtf16, text }) => `${type}:${startUtf16}:${endUtf16}:${text}`)).size, mentions.length);
+  assert.ok(report.measurements.entityChunkRequests.count > corpus.cases.length);
+  const requests = (await readFile(log, 'utf8')).split('\n').filter(Boolean).map((line) => JSON.parse(line))
+    .filter((entry) => entry.event === 'request');
+  assert.equal(requests.filter((entry) => entry.operation === 'plan_entity_chunks').length, corpus.cases.length);
+  assert.ok(requests.filter((entry) => entry.operation === 'extract_entities').length > corpus.cases.length);
+})
+
 test('Gemma prompted entity baseline strictly parses and scores JSON mention output', { skip: process.platform !== 'darwin' }, async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'folio-entities-gemma-mentions-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

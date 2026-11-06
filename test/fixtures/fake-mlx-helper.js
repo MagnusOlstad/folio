@@ -138,8 +138,32 @@ for await (const line of lines) {
     else if (request.operation === 'generate' && control.failGenerate) response = { id: request.id, error: 'fixture generation error', memory }
     else if (request.operation === 'generate') response = { id: request.id, text: await generate(request.messages), memory }
     else if (request.operation === 'embed') response = { id: request.id, embeddings: await embed(request.input), memory }
-    else if (request.operation === 'plan_entity_chunks') response = { id: request.id, chunks: [{ index: 0, startUtf16: 0, endUtf16: 1, tokenCount: 1, schemaTokenCount: 1 }], coverage: { complete: true }, schemaTokenCount: 1, memory }
-    else if (request.operation === 'extract_entities') response = { id: request.id, mentions: [], coverage: { complete: true }, tokenCount: 1, metrics: { coldLoadSeconds: 0, totalRequestSeconds: 0, requestPeakActiveBytes: memory.activeBytes }, memory }
+    else if (request.operation === 'plan_entity_chunks') {
+      const control = await readControl()
+      const regions = control.overlapEntityChunks && request.text.length > 16
+        ? [{ startUtf16: 0, endUtf16: Math.floor(request.text.length / 2) + 8 }, { startUtf16: Math.max(0, Math.floor(request.text.length / 2) - 8), endUtf16: request.text.length }]
+        : [{ startUtf16: 0, endUtf16: request.text.length }]
+      response = { id: request.id, coverage: { complete: true, startUtf16: 0, endUtf16: request.text.length },
+        chunks: regions.map((region, index) => ({ index, ...region, tokenCount: 1, schemaTokenCount: 1 })), schemaTokenCount: 1, memory }
+    }
+    else if (request.operation === 'extract_entities') {
+      const region = request.region
+      const labels = [
+        ['person', /\b(?:Priya Sharma|Kari Nilsen|Jonas Berg|Erik Lund)\b/gu],
+        ['organization', /\b(?:Acme|Nordlys Labs|Fjord Analytics|Tandem\s+Co\.?|EU|NATO)\b/gu],
+        ['project', /\b(?:Project Atlas|Aurora 2040|Project Saga|Boreal Pilot)\b/gu],
+        ['product', /\b(?:Atlas dashboard|Atlas|Fjord\s+CRM|Model\s+X)\b/gu],
+        ['location', /\b(?:Oslo|Bergen|Trondheim|Nordland)\b/gu],
+      ]
+      const mentions = []
+      for (const [type, pattern] of labels) for (const match of request.text.matchAll(pattern)) {
+        const startUtf16 = match.index
+        const endUtf16 = startUtf16 + match[0].length
+        if (startUtf16 >= region.startUtf16 && endUtf16 <= region.endUtf16) mentions.push({ text: match[0], type, startUtf16, endUtf16, score: 0.9 })
+      }
+      response = { id: request.id, coverage: { complete: true, startUtf16: region.startUtf16, endUtf16: region.endUtf16 }, mentions,
+        tokenCount: 1, metrics: { coldLoadSeconds: 0, totalRequestSeconds: 0, requestPeakActiveBytes: memory.activeBytes }, memory }
+    }
     else if (request.operation === 'ocr' && task !== 'ocr') response = { id: request.id, error: 'This helper was started for another task, not ocr.', memory }
     else if (request.operation === 'ocr' && control.failOcr) response = { id: request.id, error: 'fixture ocr error', memory }
     else if (request.operation === 'ocr') {

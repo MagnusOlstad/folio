@@ -1,6 +1,6 @@
 # Entity extraction evaluation and capture
 
-This is the stage-7 measurement harness for the fictional corpus at `test/fixtures/entities/corpus.json`. The 13 cases are the only source documents used by this suite. Do not capture personal workspace notes.
+This is the stage-7 measurement harness for the fictional corpus at `test/fixtures/entities/corpus.json` (version 2). It includes a 1,400-word chunk-boundary case so the pinned production planner must split source text beyond the 512-token input budget. The 13 cases are the only source documents used by this suite. Do not capture personal workspace notes.
 
 ## Reference and runtime revisions
 
@@ -30,13 +30,13 @@ node scripts/entities/capture.mjs \
   --output /tmp/entities-gemma-baseline.json
 ```
 
-For the entity helper, `helper-jsonl` accepts a request file with `corpusVersion: 1` and one `{id, request}` entry per corpus case. Each `request` is the exact JSONL request object for the pinned helper protocol. The native extraction operation and payload are intentionally not guessed here while the Swift protocol is being completed. Pass the actual configured per-type thresholds and chunk budget; the driver rejects missing or invalid values rather than choosing defaults.
+For the production entity pipeline, `helper-entities` uses the canonical corpus directly. It asks the helper to plan each complete note, validates contiguous UTF-16 coverage and the configured token budget, extracts one planned chunk at a time, verifies exact per-chunk coverage/spans, applies the supplied per-type thresholds, and deduplicates exact overlapping mentions. Reports include plan time, per-chunk latency/metrics, note-level latency, aggregate request count, and the configuration hash for the labels, thresholds, schema, and chunk budget. `helper-jsonl` remains available for low-level request/transport captures and accepts a request file with the current `corpusVersion` and one `{id, request}` entry per case.
 
 ```sh
 node scripts/entities/capture.mjs \
-  --mode helper-jsonl \
+  --mode helper-entities \
   --helper /path/to/staged/folio-mlx \
-  --task TASK_AS_DEFINED_BY_THE_COMMITTED_SWIFT_HELPER \
+  --task entities \
   --model fastino/gliner2.5-multi-v1 \
   --revision 7b005274e82da37dcf1f5fd9d6a2ef413c6a004c \
   --model-directory /path/to/local/entity/snapshot \
@@ -45,16 +45,15 @@ node scripts/entities/capture.mjs \
   --runtime-source /Users/magnusolstad/Documents/programming/folio \
   --declared-precision "unknown; caller-supplied if known" \
   --thresholds-json '{"person":0.5,"organization":0.5,"project":0.5,"product":0.5,"location":0.5}' \
-  --chunk-budget-json '{"maxTokens":512,"overlapTokens":64}' \
-  --requests /path/to/entities-requests.json \
+  --chunk-budget-json '{"maxTokens":512,"overlapTokens":32}' \
   --warmup-count 1 \
   --repeat-count 3 \
   --output /tmp/entities-gliner-capture.json
 ```
 
-The task name and paths above are placeholders until the entity helper protocol and installed snapshot are committed. The threshold and overlap numbers illustrate CLI shape only; they are not approved calibration values or release budgets. Use values recorded from the actual runtime/configuration. The capture records model/runtime hashes, helper SHA-256, schema, thresholds, reported and caller-declared precision separately, chunk budget, warmup/repeat counts, CPU, architecture, OS version/build, total host memory, helper and snapshot paths, and timestamp. The output includes cold-load wall time, per-request wall time and helper metrics, median/p95, serial corpus invocation rate, optional sampled helper RSS, helper high-water resident memory, and MLX active/cache peaks. Per-request MLX peak active memory is reported only when the helper returns it. Missing per-request peak memory, unverified binary provenance or precision, or a dirty runtime worktree makes the capture explicitly incomplete. Helper high-water RSS and allocator readings are separately identified. This harness does not claim Electron-wide total memory.
+The task name and paths above must match the committed helper protocol and installed snapshot. The threshold and overlap numbers are provisional configuration values; they are not calibrated release thresholds or latency/RAM budgets. Use values recorded from the actual runtime/configuration. The capture records model/runtime hashes, helper SHA-256, schema, label descriptions, thresholds, reported and caller-declared precision separately, chunk budget and configuration hash, warmup/repeat counts, CPU, architecture, OS version/build, total host memory, helper and snapshot paths, and timestamp. The output includes cold-load wall time, per-note and per-chunk timing, median/p95, serial corpus notes/minute, optional sampled helper RSS, helper high-water resident memory, and MLX active/cache peaks. Per-request MLX peak active memory is reported only when the helper returns it. Missing per-request peak memory, unverified binary provenance or precision, or a dirty runtime worktree makes the capture explicitly incomplete. Helper high-water RSS and allocator readings are separately identified. This harness does not claim Electron-wide total memory.
 
-`helper-jsonl` includes an evaluator-compatible `predictions` object when every response has a `mentions` array. The driver also retains every raw response and repeat. Save capture reports outside the repository; do not commit model output logs by default.
+Both `helper-jsonl` and `helper-entities` include an evaluator-compatible `predictions` object when every response has a `mentions` array. The production mode retains the raw plan and per-chunk responses for diagnosis. Save capture reports outside the repository; do not commit model output logs by default.
 
 ## Evaluation and release evidence
 
