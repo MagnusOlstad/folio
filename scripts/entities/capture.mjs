@@ -5,7 +5,7 @@ import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { performance } from 'node:perf_hooks';
 import { cpus, platform, release, totalmem } from 'node:os';
-import { readFile, access, writeFile } from 'node:fs/promises';
+import { readFile, access, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildClassificationMessages, classificationSchema } from '../../server/knowledge/classification-output.js';
@@ -40,6 +40,15 @@ function percentile(values, fraction) {
   return sorted[Math.max(0, Math.ceil(fraction * sorted.length) - 1)];
 }
 function mean(values) { return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null; }
+async function writeJsonAtomically(filePath, value) {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  const temporaryPath = `${filePath}.${process.pid}.tmp`;
+  await writeFile(temporaryPath, `${JSON.stringify(value, null, 2)}\n`);
+  await rename(temporaryPath, filePath);
+}
+function progress(event, details = {}) {
+  process.stderr.write(`capture-progress ${JSON.stringify({ at: new Date().toISOString(), event, ...details })}\n`);
+}
 function run(command, args) {
   const result = spawnSync(command, args, { cwd: root, encoding: 'utf8' });
   if (result.status !== 0) throw new Error(result.stderr || `${command} failed`);
@@ -63,7 +72,7 @@ function mentionMetrics(rows, corpus, field, withType = true) {
   const countsFor = (group) => {
     const expected = group.flatMap((row) => row.gold);
     const predicted = group.flatMap((row) => row.predicted);
-    const key = (item) => `${item.startUtf16}:${item.endUtf16}:${withType ? item.type : ''}:${item.text}`;
+    const key = (item) => `${item.caseId}:${item.startUtf16}:${item.endUtf16}:${withType ? item.type : ''}:${item.text}`;
     const available = new Map();
     for (const item of expected) available.set(key(item), (available.get(key(item)) ?? 0) + 1);
     let tp = 0;
@@ -179,6 +188,8 @@ try {
   const entityConfigurationHash = thresholds && chunkBudget
     ? createHash('sha256').update(JSON.stringify({ schemaVersion: corpus.reference.schemaVersion, labels: entityLabels, thresholds, chunkBudget })).digest('hex')
     : null;
+  const scoreFloor = ['helper-jsonl', 'helper-entities'].includes(mode) ? Math.min(...Object.values(thresholds)) : null;
+  const partialPath = `${outputPath}.partial.json`;
 
   const helperSha256 = await sha256(helperPath);
   const startedAt = performance.now();
@@ -187,6 +198,17 @@ try {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, HF_HUB_CACHE: cacheRoot, HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1', HF_HUB_DISABLE_TELEMETRY: '1' },
   });
+  progress('started', { mode, model, cases: orderedRequests.length, repeats: repeatCount, warmups: warmupCount, partialPath });
+  const partialCapture = {
+    formatVersion: 1,
+    state: 'starting',
+    startedAt: new Date().toISOString(),
+    metadata: { mode, model, modelRevision: revision, runtimeRevision, helperSha256, schemaVersion: corpus.reference.schemaVersion,
+      corpusVersion: corpus.version, thresholds, inferenceScoreFloor: scoreFloor, chunkBudget, entityConfigurationHash,
+      warmupCount, repeatCount, helperPath, modelDirectory, cacheRoot },
+    progress: { completedCases: 0, totalCases: orderedRequests.length, completedMeasuredRuns: 0, totalMeasuredRuns: orderedRequests.length * repeatCount },
+    results: [],
+  };
   const lineReader = createInterface({ input: helper.stdout });
   const closePromise = new Promise((resolve) => helper.once('close', resolve));
   const pending = new Map();
@@ -258,7 +280,7 @@ try {
     const chunkRuns = [];
     for (const chunk of chunks) {
       const measuredChunk = await request({ operation: 'extract_entities', ...payload,
-        scoreThreshold: Math.min(...Object.values(thresholdsForType)),
+        scoreThreshold: scoreFloor,
         region: { startUtf16: chunk.startUtf16, endUtf16: chunk.endUtf16 } });
       const response = measuredChunk.response;
       if (response.coverage?.complete !== true || response.coverage.startUtf16 !== chunk.startUtf16
@@ -301,6 +323,12 @@ try {
     let readyTimer;
     const readyEvent = await Promise.race([ready, new Promise((_, reject) => { readyTimer = setTimeout(() => reject(new Error('Helper readiness exceeded 30 minutes.')), 30 * 60_000); })]).finally(() => clearTimeout(readyTimer));
     const coldLoadWallMs = performance.now() - startedAt;
+    partialCapture.state = 'running';
+    partialCapture.helperReadyAt = new Date().toISOString();
+    partialCapture.coldLoadWallMs = coldLoadWallMs;
+    partialCapture.readyEvent = readyEvent;
+    progress('ready', { mode, model, coldLoadWallMs });
+    await writeJsonAtomically(partialPath, partialCapture);
     const warmup = [];
     for (let index = 0; index < warmupCount; index += 1) warmup.push(mode === 'helper-entities'
       ? await runEntityCapture(orderedRequests[0])
@@ -309,15 +337,29 @@ try {
     for (const entry of orderedRequests) {
       const measuredRuns = [];
       for (let repeat = 0; repeat < repeatCount; repeat += 1) {
+        progress('case-start', { id: entry.id, repeat: repeat + 1, repeatCount, completedMeasuredRuns: partialCapture.progress.completedMeasuredRuns });
         const measured = mode === 'helper-entities' ? await runEntityCapture(entry) : await request(entry.request);
         if (mode === 'gemma-entity-baseline') {
           try { measured.response.mentions = parseMentionText(measured.response.text ?? '', entry.text, corpus.schema.types); }
           catch (error) { measured.response.mentions = []; measured.response.mentionValidationError = error instanceof Error ? error.message : String(error); }
         }
         measuredRuns.push(measured);
+        partialCapture.progress.completedMeasuredRuns += 1;
+        partialCapture.lastCompleted = { id: entry.id, repeat: repeat + 1, wallMs: measured.wallMs };
+        partialCapture.results = [...results, { id: entry.id, language: corpus.cases.find((item) => item.id === entry.id).language,
+          text: entry.text, runs: measuredRuns }];
+        await writeJsonAtomically(partialPath, partialCapture);
+        progress('run-complete', { id: entry.id, repeat: repeat + 1, repeatCount,
+          completedMeasuredRuns: partialCapture.progress.completedMeasuredRuns, totalMeasuredRuns: partialCapture.progress.totalMeasuredRuns,
+          wallMs: measured.wallMs });
       }
       const runs = measuredRuns;
-      results.push({ id: entry.id, language: corpus.cases.find((item) => item.id === entry.id).language, text: entry.text, runs });
+      const result = { id: entry.id, language: corpus.cases.find((item) => item.id === entry.id).language, text: entry.text, runs };
+      results.push(result);
+      partialCapture.results = results;
+      partialCapture.progress.completedCases = results.length;
+      await writeJsonAtomically(partialPath, partialCapture);
+      progress('case-complete', { id: entry.id, completedCases: results.length, totalCases: orderedRequests.length });
     }
     measurements = { readyEvent, coldLoadWallMs, warmup, results };
   } catch (error) {
@@ -335,7 +377,11 @@ try {
   }
   if (captureFailure) {
     const stderr = diagnostics.join('').trim();
-    throw new Error(`${captureFailure.message}${stderr ? `\nHelper stderr:\n${stderr}` : ''}`);
+    partialCapture.state = 'failed';
+    partialCapture.finishedAt = new Date().toISOString();
+    partialCapture.failure = { message: captureFailure.message, helperStderr: stderr || null, helperExit: exitInfo };
+    await writeJsonAtomically(partialPath, partialCapture);
+    throw new Error(`${captureFailure.message}${stderr ? `\nHelper stderr:\n${stderr}` : ''}\nPartial capture saved to ${partialPath}`);
   }
   if (parseFailure) throw parseFailure;
   if (exitInfo?.code !== 0 && exitInfo?.signal !== 'SIGTERM') throw new Error(`Helper failed: ${diagnostics.join('').trim()}`);
@@ -388,7 +434,7 @@ try {
     referenceImplementation: corpus.reference.referenceImplementation,
     schemaVersion: corpus.reference.schemaVersion,
     entityLabels: ['helper-jsonl', 'helper-entities'].includes(mode) ? entityLabels : null,
-    thresholds, chunkBudget, entityConfigurationHash,
+    thresholds, inferenceScoreFloor: scoreFloor, chunkBudget, entityConfigurationHash,
     warmupCount, repeatCount,
     host,
     helperPath,
@@ -427,11 +473,12 @@ try {
       resolverState.entities = resolved.entities;
       return { id: item.id, text: item.text, mentions: resolved.mentions };
     });
-    report.predictions = { corpusVersion: corpus.version, metadata: { modelRevision: revision, runtimeRevision, schemaVersion: corpus.reference.schemaVersion, thresholds, entityConfigurationHash, device: `${host.cpu} (${host.architecture})`, osVersion: `${host.macOSVersion} (${host.macOSBuild})`, precision: helperReportedPrecision, precisionVerified, chunkBudget, warmupCount, repeatCount, identityResolver: 'server/entities/resolution.js:resolveMentions' }, cases };
+    report.predictions = { corpusVersion: corpus.version, metadata: { modelRevision: revision, runtimeRevision, schemaVersion: corpus.reference.schemaVersion, thresholds, inferenceScoreFloor: scoreFloor, entityConfigurationHash, device: `${host.cpu} (${host.architecture})`, osVersion: `${host.macOSVersion} (${host.macOSBuild})`, precision: helperReportedPrecision, precisionVerified, chunkBudget, warmupCount, repeatCount, identityResolver: 'server/entities/resolution.js:resolveMentions' }, cases };
   }
-  if (report.predictions) report.semanticQuality = { source: 'manual corpus semantic annotations', exactMentions: mentionMetrics(corpus.cases.map((item) => ({ gold: item.semantic.mentions, predicted: report.predictions.cases.find((prediction) => prediction.id === item.id).mentions })), corpus), identity: 'computed from production resolveMentions output; user corrections are measured separately by server lifecycle tests' };
-  await (await import('node:fs/promises')).mkdir(path.dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`);
+  if (report.predictions) report.semanticQuality = { source: 'manual corpus semantic annotations', exactMentions: mentionMetrics(corpus.cases.map((item) => ({ gold: item.semantic.mentions.map((mention) => ({ ...mention, caseId: item.id })), predicted: report.predictions.cases.find((prediction) => prediction.id === item.id).mentions.map((mention) => ({ ...mention, caseId: item.id })) })), corpus), identity: 'computed from production resolveMentions output; user corrections are measured separately by server lifecycle tests' };
+  await writeJsonAtomically(outputPath, report);
+  await rm(partialPath, { force: true });
+  progress('complete', { outputPath, completedCases: measurements.results.length, helperRequestCount });
   console.log(JSON.stringify({ output: outputPath, predictionsIncluded: Boolean(report.predictions), completeness: report.completeness, measurements: report.measurements }, null, 2));
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

@@ -99,6 +99,10 @@ test('helper startup failure preserves bounded stderr diagnostics', async (t) =>
   assert.equal(result.status, 2);
   assert.match(result.stderr, /Helper exited before capture finished/);
   assert.match(result.stderr, /fixture exited before readiness/);
+  assert.match(result.stderr, /Partial capture saved to/);
+  const partial = JSON.parse(await readFile(`${path.join(directory, 'unused.json')}.partial.json`, 'utf8'));
+  assert.equal(partial.state, 'failed');
+  assert.match(partial.failure.helperStderr, /fixture exited before readiness/);
 })
 
 test('production entity capture plans chunks, extracts serially, and deduplicates overlap', { skip: process.platform !== 'darwin' }, async (t) => {
@@ -134,6 +138,11 @@ test('production entity capture plans chunks, extracts serially, and deduplicate
     .filter((entry) => entry.event === 'request');
   assert.equal(requests.filter((entry) => entry.operation === 'plan_entity_chunks').length, corpus.cases.length);
   assert.ok(requests.filter((entry) => entry.operation === 'extract_entities').length > corpus.cases.length);
+  assert.match(result.stderr, /capture-progress .*"event":"ready"/);
+  assert.match(result.stderr, /capture-progress .*"event":"run-complete"/);
+  assert.match(result.stderr, /capture-progress .*"event":"case-complete"/);
+  assert.equal(report.metadata.inferenceScoreFloor, 0.5);
+  assert.equal(await import('node:fs/promises').then(({ access }) => access(`${output}.partial.json`).then(() => true, () => false)), false);
 })
 
 test('Gemma prompted entity baseline strictly parses and scores JSON mention output', { skip: process.platform !== 'darwin' }, async (t) => {
