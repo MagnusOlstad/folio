@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 import FolioMLXAudio
 import MLX
+import MLXNN
 import MLXEmbedders
 import MLXHuggingFace
 import MLXLLM
@@ -51,6 +52,24 @@ private struct MemoryStatus: Encodable {
     let peakResidentBytes: UInt64?
 }
 
+private struct QuantizedModuleDetails: Encodable, Sendable {
+    let bits: Int
+    let groupSize: Int
+    let mode: String
+    let moduleCount: Int
+}
+
+private struct ModelPrecisionDetails: Encodable, Sendable {
+    let parameterTensorCount: Int
+    let parameterDtypes: [String]
+    let quantizedModules: [QuantizedModuleDetails]
+}
+
+private struct ModelPrecision: Sendable {
+    let label: String
+    let details: ModelPrecisionDetails
+}
+
 private struct Response: Encodable {
     let id: String?
     let model: String
@@ -60,6 +79,7 @@ private struct Response: Encodable {
     let memory: MemoryStatus
     let metrics: Metrics?
     let precision: String?
+    let precisionDetails: ModelPrecisionDetails?
     let runtimeRevision: String?
     let runtimeDirty: Bool
     let modelRevision: String?
@@ -67,6 +87,7 @@ private struct Response: Encodable {
 
     init(id: String?, model: String, text: String?, embeddings: [[Float]]?, state: String?,
          memory: MemoryStatus, metrics: Metrics?, precision: String? = nil,
+         precisionDetails: ModelPrecisionDetails? = nil,
          runtimeRevision: String? = nativeRuntimeRevision, runtimeDirty: Bool = nativeRuntimeDirty,
          modelRevision: String? = nil, referenceRevision: String? = nil) {
         self.id = id
@@ -77,6 +98,7 @@ private struct Response: Encodable {
         self.memory = memory
         self.metrics = metrics
         self.precision = precision
+        self.precisionDetails = precisionDetails
         self.runtimeRevision = runtimeRevision
         self.runtimeDirty = runtimeDirty
         self.modelRevision = modelRevision
@@ -91,13 +113,15 @@ private struct ReadyResponse: Encodable {
     let modelDirectory: String?
     let memory: MemoryStatus
     let precision: String?
+    let precisionDetails: ModelPrecisionDetails?
     let runtimeRevision: String?
     let runtimeDirty: Bool
     let modelRevision: String?
     let referenceRevision: String?
 
     init(model: String, task: String, modelDirectory: String?, memory: MemoryStatus,
-         precision: String? = nil, runtimeRevision: String? = nativeRuntimeRevision,
+         precision: String? = nil, precisionDetails: ModelPrecisionDetails? = nil,
+         runtimeRevision: String? = nativeRuntimeRevision,
          runtimeDirty: Bool = nativeRuntimeDirty, modelRevision: String? = nil,
          referenceRevision: String? = nil) {
         self.model = model
@@ -105,6 +129,7 @@ private struct ReadyResponse: Encodable {
         self.modelDirectory = modelDirectory
         self.memory = memory
         self.precision = precision
+        self.precisionDetails = precisionDetails
         self.runtimeRevision = runtimeRevision
         self.runtimeDirty = runtimeDirty
         self.modelRevision = modelRevision
@@ -541,9 +566,18 @@ private struct FolioMLX {
         Memory.clearCache()
         synchronizeDefaultStream()
         log("Model ready. Reading JSONL requests from stdin.")
+        let loadedPrecision: ModelPrecision?
+        if let generator {
+            loadedPrecision = await generator.perform { context in modelPrecision(context.model) }
+        } else if let embedder {
+            loadedPrecision = await embedder.perform { context in modelPrecision(context.model) }
+        } else {
+            loadedPrecision = nil
+        }
         writeLine(ReadyResponse(model: modelID, task: task.rawValue,
                                 modelDirectory: modelDirectory?.path, memory: memoryStatus(),
-                                precision: task == .entities ? "float32" : nil,
+                                precision: task == .entities ? "float32" : loadedPrecision?.label,
+                                precisionDetails: loadedPrecision?.details,
                                 runtimeRevision: nativeRuntimeRevision,
                                 modelRevision: revision,
                                 referenceRevision: task == .entities ? glinerReferenceRevision : nil))
@@ -559,7 +593,8 @@ private struct FolioMLX {
                 case "status":
                     writeLine(Response(id: requestID, model: modelID, text: nil, embeddings: nil,
                                        state: "loaded", memory: memoryStatus(), metrics: nil,
-                                       precision: task == .entities ? "float32" : nil,
+                                       precision: task == .entities ? "float32" : loadedPrecision?.label,
+                                       precisionDetails: loadedPrecision?.details,
                                        runtimeRevision: nativeRuntimeRevision,
                                        modelRevision: revision,
                                        referenceRevision: task == .entities ? glinerReferenceRevision : nil))
@@ -586,7 +621,8 @@ private struct FolioMLX {
                         parameters: GenerateParameters(maxTokens: requestTokens, temperature: requestTemperature),
                         noThinking: request.noThinking != false, clock: clock)
                     writeLine(generationResponse(id: requestID, model: modelID, generated: generated,
-                                                 coldLoadSeconds: coldLoadSeconds, clock: clock))
+                                                 coldLoadSeconds: coldLoadSeconds, clock: clock,
+                                                 precision: loadedPrecision))
                 case "ocr":
                     guard task == .ocr, let generator else { throw modelTaskError("ocr") }
                     guard let imagePath = request.imagePath, !imagePath.isEmpty else {
@@ -612,7 +648,8 @@ private struct FolioMLX {
                         parameters: GenerateParameters(maxTokens: requestTokens, temperature: 0),
                         noThinking: false, clock: clock)
                     writeLine(generationResponse(id: requestID, model: modelID, generated: generated,
-                                                 coldLoadSeconds: coldLoadSeconds, clock: clock))
+                                                 coldLoadSeconds: coldLoadSeconds, clock: clock,
+                                                 precision: loadedPrecision))
                 case "embed":
                     guard task == .embedding, let embedder else { throw modelTaskError("embedding") }
                     guard let input = request.input, !input.isEmpty,
@@ -625,7 +662,9 @@ private struct FolioMLX {
                     Memory.clearCache()
                     synchronizeDefaultStream()
                     writeLine(Response(id: requestID, model: modelID, text: nil, embeddings: vectors,
-                                       state: nil, memory: memoryStatus(), metrics: nil))
+                                       state: nil, memory: memoryStatus(), metrics: nil,
+                                       precision: loadedPrecision?.label,
+                                       precisionDetails: loadedPrecision?.details))
                 case "transcribe":
                     guard task == .transcription, let whisper else { throw modelTaskError("transcription") }
                     guard let audioPath = request.audioPath, !audioPath.isEmpty else {
@@ -708,7 +747,8 @@ private func transcribeAudio(_ whisper: WhisperModel, from url: URL, requestID: 
 }
 
 private func generationResponse(id: String?, model: String, generated: GenerationOutput,
-                                coldLoadSeconds: Double, clock: ContinuousClock) -> Response {
+                                coldLoadSeconds: Double, clock: ContinuousClock,
+                                precision: ModelPrecision? = nil) -> Response {
     synchronizeDefaultStream()
     let cleanupStarted = clock.now
     Memory.clearCache()
@@ -724,7 +764,8 @@ private func generationResponse(id: String?, model: String, generated: Generatio
         tokensPerSecond: generated.tokensPerSecond,
         requestPeakActiveBytes: generated.requestPeakActiveBytes)
     return Response(id: id, model: model, text: generated.text, embeddings: nil,
-                    state: nil, memory: memory, metrics: metrics)
+                    state: nil, memory: memory, metrics: metrics,
+                    precision: precision?.label, precisionDetails: precision?.details)
 }
 
 private func generate(model: ModelContainer, system: String?, prompt: String,
@@ -800,6 +841,41 @@ private func embed(_ input: [String], using model: EmbedderModelContainer) async
 
 private func modelTaskError(_ task: String) -> NSError {
     NSError(domain: "FolioMLX", code: 14, userInfo: [NSLocalizedDescriptionKey: "This helper was started for another task, not \(task)."])
+}
+
+private func modelPrecision(_ model: Module) -> ModelPrecision? {
+    let parameters = model.parameters().flattenedValues()
+    guard !parameters.isEmpty else { return nil }
+
+    let parameterDtypes = Array(Set(parameters.map { String(describing: $0.dtype) })).sorted()
+    let quantized = model.namedModules().compactMap { _, module -> QuantizedModuleDetails? in
+        guard let module = module as? Quantized else { return nil }
+        return QuantizedModuleDetails(bits: module.bits, groupSize: module.groupSize,
+                                      mode: String(describing: module.mode), moduleCount: 1)
+    }
+    let quantizedGroups = Dictionary(grouping: quantized) {
+        "\($0.bits):\($0.groupSize):\($0.mode)"
+    }.values.map { group in
+        guard let first = group.first else { preconditionFailure("empty quantization group") }
+        return QuantizedModuleDetails(bits: first.bits, groupSize: first.groupSize,
+                                      mode: first.mode, moduleCount: group.count)
+    }.sorted {
+        ($0.bits, $0.groupSize, $0.mode) < ($1.bits, $1.groupSize, $1.mode)
+    }
+
+    let label: String
+    if quantizedGroups.isEmpty {
+        label = parameterDtypes.count == 1 ? parameterDtypes[0] : "mixed"
+    } else {
+        let formats = quantizedGroups.map {
+            "\($0.bits)-bit \($0.mode) (group size \($0.groupSize), \($0.moduleCount) modules)"
+        }.joined(separator: ", ")
+        label = "\(parameterDtypes.joined(separator: "+")); \(formats)"
+    }
+    return ModelPrecision(label: label,
+                          details: ModelPrecisionDetails(parameterTensorCount: parameters.count,
+                                                        parameterDtypes: parameterDtypes,
+                                                        quantizedModules: quantizedGroups))
 }
 
 private func entityRequestError(_ message: String) -> NSError {
