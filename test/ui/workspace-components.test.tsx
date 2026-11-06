@@ -176,6 +176,26 @@ describe("workspace editor components", () => {
     }
   });
 
+  it("starts the native updater when the server reports a release but the updater is idle", async () => {
+    const previousFolio = window.folio;
+    const startUpdate = vi.fn().mockResolvedValue(null);
+    window.folio = {
+      getUpdateState: vi.fn().mockResolvedValue({ status: "idle", version: null, percent: null, error: null }),
+      startUpdate,
+      onUpdateState: () => vi.fn(),
+    };
+    try {
+      render(<UpdateControlsHarness versionInfo={{ version: "1.0.0", repo: "owner/repo", latest: "1.2.3", latestUrl: "https://example.test/release", updateAvailable: true }} />);
+      const button = await screen.findByRole("button", { name: "Download update: version 1.2.3" });
+      expect(button).toHaveTextContent("Update to v1.2.3");
+      expect(screen.queryByRole("link", { name: /Update to version/ })).not.toBeInTheDocument();
+      fireEvent.click(button);
+      expect(startUpdate).toHaveBeenCalledOnce();
+    } finally {
+      window.folio = previousFolio;
+    }
+  });
+
   it("keeps the release page link when the desktop updater is unavailable", () => {
     const previousFolio = window.folio;
     window.folio = undefined;
