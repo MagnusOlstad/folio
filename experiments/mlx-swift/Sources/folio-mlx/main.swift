@@ -12,8 +12,9 @@ import Tokenizers
 import MLXAudioCore
 import MLXAudioSTT
 import FolioMLXProgress
+import FolioMLXEntities
 
-private enum TaskKind: String { case generation, embedding, transcription, ocr }
+private enum TaskKind: String { case generation, embedding, transcription, ocr, entities }
 
 private let ocrDefaultMaxTokens = 4096
 // LightOnOCR was trained on ~1540px page renders, so small screenshots must be upscaled (and large
@@ -36,6 +37,12 @@ private struct Request: Decodable {
     let audioPath: String?
     let imagePath: String?
     let prompt: String?
+    let text: String?
+    let schemaVersion: String?
+    let labels: [EntityLabel]?
+    let region: EntityRegion?
+    let overlapTokens: Int?
+    let scoreThreshold: Float?
 }
 
 private struct MemoryStatus: Encodable {
@@ -52,6 +59,29 @@ private struct Response: Encodable {
     let state: String?
     let memory: MemoryStatus
     let metrics: Metrics?
+    let precision: String?
+    let runtimeRevision: String?
+    let runtimeDirty: Bool
+    let modelRevision: String?
+    let referenceRevision: String?
+
+    init(id: String?, model: String, text: String?, embeddings: [[Float]]?, state: String?,
+         memory: MemoryStatus, metrics: Metrics?, precision: String? = nil,
+         runtimeRevision: String? = nativeRuntimeRevision, runtimeDirty: Bool = nativeRuntimeDirty,
+         modelRevision: String? = nil, referenceRevision: String? = nil) {
+        self.id = id
+        self.model = model
+        self.text = text
+        self.embeddings = embeddings
+        self.state = state
+        self.memory = memory
+        self.metrics = metrics
+        self.precision = precision
+        self.runtimeRevision = runtimeRevision
+        self.runtimeDirty = runtimeDirty
+        self.modelRevision = modelRevision
+        self.referenceRevision = referenceRevision
+    }
 }
 
 private struct ReadyResponse: Encodable {
@@ -60,6 +90,26 @@ private struct ReadyResponse: Encodable {
     let task: String
     let modelDirectory: String?
     let memory: MemoryStatus
+    let precision: String?
+    let runtimeRevision: String?
+    let runtimeDirty: Bool
+    let modelRevision: String?
+    let referenceRevision: String?
+
+    init(model: String, task: String, modelDirectory: String?, memory: MemoryStatus,
+         precision: String? = nil, runtimeRevision: String? = nativeRuntimeRevision,
+         runtimeDirty: Bool = nativeRuntimeDirty, modelRevision: String? = nil,
+         referenceRevision: String? = nil) {
+        self.model = model
+        self.task = task
+        self.modelDirectory = modelDirectory
+        self.memory = memory
+        self.precision = precision
+        self.runtimeRevision = runtimeRevision
+        self.runtimeDirty = runtimeDirty
+        self.modelRevision = modelRevision
+        self.referenceRevision = referenceRevision
+    }
 }
 
 private struct DownloadProgressResponse: Encodable {
@@ -80,6 +130,31 @@ private struct ErrorResponse: Encodable {
     let id: String?
     let error: String
     let memory: MemoryStatus
+}
+
+private struct EntityResponse: Encodable {
+    let id: String?
+    let model: String
+    let mentions: [EntityMention]
+    let coverage: EntityCoverage
+    let tokenCount: Int
+    let metrics: EntityMetrics
+    let memory: MemoryStatus
+}
+
+private struct EntityPlanResponse: Encodable {
+    let id: String?
+    let model: String
+    let chunks: [EntityChunkPlan]
+    let coverage: EntityCoverage
+    let schemaTokenCount: Int
+    let memory: MemoryStatus
+}
+
+private struct EntityMetrics: Encodable {
+    let coldLoadSeconds: Double
+    let totalRequestSeconds: Double
+    let requestPeakActiveBytes: Int
 }
 
 private struct Metrics: Encodable {
@@ -257,6 +332,21 @@ private func installWhisperSnapshot(_ variant: WhisperVariant) async throws -> U
     return modelDirectory
 }
 
+private func installEntitySnapshot() async throws -> URL {
+    let cache = localHubCache()
+    let repository = try modelRepository(glinerMultiModelID)
+    let directory = try await HubClient(cache: cache).downloadSnapshot(
+        of: repository, revision: glinerMultiRevision, matching: glinerMultiRequiredFiles,
+        progressHandler: { progress in writeDownloadProgress(progress, scope: "model") })
+    writeDownloadStageCompletion(scope: "model", directory: directory, files: glinerMultiRequiredFiles)
+    let expected = try cache.snapshotPath(repo: repository, kind: .model, commitHash: glinerMultiRevision)
+    guard directory.standardizedFileURL == expected.standardizedFileURL else {
+        throw NSError(domain: "FolioMLX", code: 29,
+                      userInfo: [NSLocalizedDescriptionKey: "HubClient returned an unexpected GLiNER2.5 snapshot path"])
+    }
+    return directory
+}
+
 private func memoryStatus() -> MemoryStatus {
     let memory = Memory.snapshot()
     var usage = rusage()
@@ -291,7 +381,7 @@ private struct FolioMLX {
             let value = arguments.removeFirst()
             switch option {
             case "--task":
-                guard let parsed = TaskKind(rawValue: value) else { throw NSError(domain: "FolioMLX", code: 2, userInfo: [NSLocalizedDescriptionKey: "task must be generation, embedding, transcription, or ocr"]) }
+                guard let parsed = TaskKind(rawValue: value) else { throw NSError(domain: "FolioMLX", code: 2, userInfo: [NSLocalizedDescriptionKey: "task must be generation, embedding, transcription, ocr, or entities"]) }
                 task = parsed
             case "--model": modelID = value; modelWasProvided = true
             case "--revision": revision = value; revisionWasProvided = true
@@ -342,6 +432,27 @@ private struct FolioMLX {
                 }
                 try validateWhisperSnapshot(modelDirectory, variant: variant)
             }
+        } else if task == .entities {
+            if !modelWasProvided && !revisionWasProvided {
+                modelID = glinerMultiModelID
+                revision = glinerMultiRevision
+            } else if modelWasProvided && !revisionWasProvided && modelID == glinerMultiModelID {
+                revision = glinerMultiRevision
+            } else if !modelWasProvided && revisionWasProvided && revision == glinerMultiRevision {
+                modelID = glinerMultiModelID
+            }
+            guard modelID == glinerMultiModelID, revision == glinerMultiRevision else {
+                throw NSError(domain: "FolioMLX", code: 26,
+                              userInfo: [NSLocalizedDescriptionKey: "entities requires the pinned GLiNER2.5 Multi model and revision"])
+            }
+            guard operation == nil || operation == "install" else {
+                throw NSError(domain: "FolioMLX", code: 27,
+                              userInfo: [NSLocalizedDescriptionKey: "entities only supports --operation install"])
+            }
+            if operation != "install", modelDirectory == nil {
+                throw NSError(domain: "FolioMLX", code: 28,
+                              userInfo: [NSLocalizedDescriptionKey: "entities extraction requires an installed local --model-directory; use --operation install to download the pinned snapshot"])
+            }
         } else if operation != nil {
             throw NSError(domain: "FolioMLX", code: 9,
                           userInfo: [NSLocalizedDescriptionKey: "--operation is only supported with --task transcription"])
@@ -354,12 +465,16 @@ private struct FolioMLX {
                                     modelDirectory: modelDirectory.path, memory: memoryStatus()))
             return
         }
+        if task == .entities, operation == "install" {
+            modelDirectory = try await installEntitySnapshot()
+        }
 
         let clock = ContinuousClock()
         let processStarted = clock.now
         let generator: ModelContainer?
         let embedder: EmbedderModelContainer?
         let whisper: WhisperModel?
+        let entities: GLiNER2MultiRuntime?
         if task == .generation || task == .ocr {
             log("Loading \(task == .ocr ? "OCR" : "generation") model \(modelID)…")
             // Pick the factory explicitly: linking MLXVLM adds its factory to the global
@@ -387,6 +502,7 @@ private struct FolioMLX {
             }
             embedder = nil
             whisper = nil
+            entities = nil
         } else {
             if task == .transcription {
                 log("Loading transcription model \(modelID)…")
@@ -396,6 +512,14 @@ private struct FolioMLX {
                 whisper = try await WhisperModel.fromDirectory(modelDirectory, cache: localHubCache())
                 generator = nil
                 embedder = nil
+                entities = nil
+            } else if task == .entities {
+                log("Loading GLiNER2.5 Multi model \(modelID)…")
+                guard let modelDirectory else { fatalError("validated entity snapshot was not provided") }
+                entities = try await GLiNER2MultiRuntime.load(from: modelDirectory)
+                generator = nil
+                embedder = nil
+                whisper = nil
             } else {
                 log("Loading embedding model \(modelID)…")
                 if let modelDirectory {
@@ -409,6 +533,7 @@ private struct FolioMLX {
                 }
                 generator = nil
                 whisper = nil
+                entities = nil
             }
         }
         let coldLoadSeconds = seconds(from: processStarted, to: clock.now)
@@ -417,7 +542,11 @@ private struct FolioMLX {
         synchronizeDefaultStream()
         log("Model ready. Reading JSONL requests from stdin.")
         writeLine(ReadyResponse(model: modelID, task: task.rawValue,
-                                modelDirectory: modelDirectory?.path, memory: memoryStatus()))
+                                modelDirectory: modelDirectory?.path, memory: memoryStatus(),
+                                precision: task == .entities ? "float32" : nil,
+                                runtimeRevision: nativeRuntimeRevision,
+                                modelRevision: revision,
+                                referenceRevision: task == .entities ? glinerReferenceRevision : nil))
 
         while let line = readLine() {
             guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
@@ -426,10 +555,14 @@ private struct FolioMLX {
             do {
                 let request = try JSONDecoder().decode(Request.self, from: Data(line.utf8))
                 requestID = request.id
-                switch request.operation ?? (task == .generation ? "generate" : (task == .embedding ? "embed" : (task == .ocr ? "ocr" : "transcribe"))) {
+                switch request.operation ?? (task == .generation ? "generate" : (task == .embedding ? "embed" : (task == .ocr ? "ocr" : (task == .entities ? "extract_entities" : "transcribe")))) {
                 case "status":
                     writeLine(Response(id: requestID, model: modelID, text: nil, embeddings: nil,
-                                       state: "loaded", memory: memoryStatus(), metrics: nil))
+                                       state: "loaded", memory: memoryStatus(), metrics: nil,
+                                       precision: task == .entities ? "float32" : nil,
+                                       runtimeRevision: nativeRuntimeRevision,
+                                       modelRevision: revision,
+                                       referenceRevision: task == .entities ? glinerReferenceRevision : nil))
                 case "shutdown":
                     writeLine(Response(id: requestID, model: modelID, text: nil, embeddings: nil,
                                        state: "stopped", memory: memoryStatus(), metrics: nil))
@@ -508,6 +641,38 @@ private struct FolioMLX {
                     synchronizeDefaultStream()
                     writeLine(Response(id: requestID, model: modelID, text: output,
                                        embeddings: nil, state: nil, memory: memoryStatus(), metrics: nil))
+                case "plan_entity_chunks":
+                    guard task == .entities, let entities else { throw modelTaskError("entities") }
+                    guard let text = request.text, let schemaVersion = request.schemaVersion,
+                          let labels = request.labels else {
+                        throw entityRequestError("text, schemaVersion, and labels are required")
+                    }
+                    let plan = try entities.planEntityChunks(text: text, schemaVersion: schemaVersion,
+                                                             labels: labels,
+                                                             maxTokens: request.maxTokens ?? entityDefaultTokenBudget,
+                                                             overlapTokens: request.overlapTokens ?? 32)
+                    writeLine(EntityPlanResponse(id: requestID, model: modelID, chunks: plan.chunks,
+                                                 coverage: plan.coverage,
+                                                 schemaTokenCount: plan.schemaTokenCount,
+                                                 memory: memoryStatus()))
+                case "extract_entities":
+                    guard task == .entities, let entities else { throw modelTaskError("entities") }
+                    guard let text = request.text, let schemaVersion = request.schemaVersion,
+                          let labels = request.labels else {
+                        throw entityRequestError("text, schemaVersion, and labels are required")
+                    }
+                    Memory.peakMemory = 0
+                    let result = try entities.extractEntities(text: text, schemaVersion: schemaVersion,
+                                                              labels: labels, region: request.region,
+                                                              maxTokens: request.maxTokens ?? entityDefaultTokenBudget,
+                                                              scoreThreshold: request.scoreThreshold ?? 0.5)
+                    synchronizeDefaultStream()
+                    let metrics = EntityMetrics(coldLoadSeconds: coldLoadSeconds,
+                                                totalRequestSeconds: result.requestSeconds,
+                                                requestPeakActiveBytes: result.requestPeakActiveBytes)
+                    writeLine(EntityResponse(id: requestID, model: modelID, mentions: result.mentions,
+                                             coverage: result.coverage, tokenCount: result.tokenCount,
+                                             metrics: metrics, memory: memoryStatus()))
                 default:
                     throw NSError(domain: "FolioMLX", code: 13, userInfo: [NSLocalizedDescriptionKey: "unknown operation"])
                 }
@@ -635,6 +800,10 @@ private func embed(_ input: [String], using model: EmbedderModelContainer) async
 
 private func modelTaskError(_ task: String) -> NSError {
     NSError(domain: "FolioMLX", code: 14, userInfo: [NSLocalizedDescriptionKey: "This helper was started for another task, not \(task)."])
+}
+
+private func entityRequestError(_ message: String) -> NSError {
+    NSError(domain: "FolioMLX", code: 28, userInfo: [NSLocalizedDescriptionKey: message])
 }
 
 private func synchronizeDefaultStream() {

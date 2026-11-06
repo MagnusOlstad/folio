@@ -262,6 +262,8 @@ PRODUCT="$PRODUCTS_DIR/folio-mlx"
 FRAMEWORK_SOURCE="$PRODUCTS_DIR/Cmlx.framework"
 [[ -f "$PRODUCT" ]] || die "SwiftPM did not produce folio-mlx"
 [[ -d "$FRAMEWORK_SOURCE" ]] || die "SwiftPM did not produce the Cmlx framework"
+[[ -f "$EXPERIMENT_DIR/THIRD_PARTY_NOTICES.md" ]] \
+    || die "the third-party notices file is missing"
 
 # Stage in the ignored cache and publish only after the full tree passes its
 # audits. MLX_NATIVE_APP_OUTPUT can point to a separate unused location.
@@ -274,6 +276,7 @@ FRAMEWORKS_DIR="$CONTENTS/Frameworks"
 RESOURCES_DIR="$CONTENTS/Resources"
 mkdir -p "$MACOS_DIR" "$FRAMEWORKS_DIR" "$RESOURCES_DIR"
 cp "$PRODUCT" "$MACOS_DIR/folio-mlx"
+cp "$EXPERIMENT_DIR/THIRD_PARTY_NOTICES.md" "$RESOURCES_DIR/THIRD_PARTY_NOTICES.md"
 cp -R "$FRAMEWORK_SOURCE" "$FRAMEWORKS_DIR/"
 bundle_count=0
 for bundle in "$PRODUCTS_DIR"/*.bundle; do

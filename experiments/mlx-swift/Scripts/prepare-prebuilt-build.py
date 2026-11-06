@@ -91,6 +91,26 @@ def main() -> None:
     build.mkdir(parents=True, exist_ok=True)
     (build / "Sources").mkdir(exist_ok=True)
     copy_tree(experiment / "Sources", build / "Sources")
+    repository = experiment.parents[1]
+    try:
+        revision = subprocess.check_output(
+            ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True
+        ).strip()
+        dirty = bool(subprocess.check_output(
+            ["git", "-C", str(repository), "status", "--porcelain", "--untracked-files=all"],
+            text=True,
+        ).strip())
+    except (OSError, subprocess.CalledProcessError):
+        revision, dirty = "unknown", True
+    provenance = build / "Sources" / "folio-mlx" / "NativeBuildProvenance.swift"
+    provenance.write_text(
+        "enum NativeBuildProvenance {\n"
+        f'    static let revision = "{revision}"\n'
+        f"    static let dirty = {'true' if dirty else 'false'}\n"
+        "}\n"
+        "let nativeRuntimeRevision = NativeBuildProvenance.revision\n"
+        "let nativeRuntimeDirty = NativeBuildProvenance.dirty\n"
+    )
     test_sources = experiment / "Tests"
     if test_sources.is_dir():
         copy_tree(test_sources, build / "Tests")

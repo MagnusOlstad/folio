@@ -14,15 +14,29 @@ let package = Package(
     targets: [
         .target(name: "FolioMLXAudio"),
         .target(name: "FolioMLXProgress"),
+        .target(
+            name: "FolioMLXEntities",
+            dependencies: [
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+                .product(name: "Tokenizers", package: "swift-transformers"),
+            ]
+        ),
         .testTarget(
             name: "FolioMLXProgressTests",
             dependencies: ["FolioMLXProgress"]
+        ),
+        .testTarget(
+            name: "FolioMLXEntitiesTests",
+            dependencies: ["FolioMLXEntities"],
+            resources: [.copy("Fixtures/gliner25-reference-parity.json")]
         ),
         .executableTarget(
             name: "folio-mlx",
             dependencies: [
                 "FolioMLXProgress",
                 "FolioMLXAudio",
+                "FolioMLXEntities",
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "MLXEmbedders", package: "mlx-swift-lm"),

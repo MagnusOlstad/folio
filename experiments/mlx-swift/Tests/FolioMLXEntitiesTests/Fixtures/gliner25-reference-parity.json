@@ -1,0 +1,4653 @@
+{
+  "formatVersion": 1,
+  "model": "fastino/gliner2.5-multi-v1",
+  "modelRevision": "7b005274e82da37dcf1f5fd9d6a2ef413c6a004c",
+  "reference": "Blaizzy/mlx-vlm",
+  "referenceRevision": "4857a6b018e5e214616bbfa8f0f6da92af258ba2",
+  "referenceMLX": "0.32.4",
+  "nativeMLX": "0.31.3",
+  "checkpointTensorDtype": "float32",
+  "tokenizerJSONSHA256": "c62446df87ae18ec98b133f8f84fc449a07cc89bbf8ef192a4cb5f9c53777a7a",
+  "scoreAbsoluteTolerance": 1e-05,
+  "cases": [
+    {
+      "id": "en-meeting-core",
+      "text": "Priya Sharma from Acme opened Project Atlas in Atlas. The Atlas dashboard belongs to Acme.",
+      "schemaVersion": "folio-entities-v1",
+      "labels": [
+        {
+          "type": "person",
+          "description": "a named person or human individual, including first and last names"
+        },
+        {
+          "type": "organization",
+          "description": "a company, institution, government body, team, or other organization"
+        },
+        {
+          "type": "project",
+          "description": "a named project, initiative, event, or organized body of work"
+        },
+        {
+          "type": "product",
+          "description": "a named product, software tool, service, or named technology"
+        },
+        {
+          "type": "location",
+          "description": "a named geographic place, venue, or physical location"
+        }
+      ],
+      "maxTokens": 512,
+      "overlapTokens": 32,
+      "expected": {
+        "inputIds": [
+          275,
+          250104,
+          260,
+          266,
+          188457,
+          250111,
+          2986,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          2986,
+          632,
+          6911,
+          6921,
+          262,
+          260,
+          7036,
+          2263,
+          306,
+          3168,
+          41617,
+          250111,
+          29661,
+          268,
+          260,
+          263,
+          5836,
+          262,
+          73569,
+          262,
+          13750,
+          8659,
+          262,
+          4645,
+          262,
+          632,
+          1905,
+          29661,
+          250111,
+          6246,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          6246,
+          262,
+          260,
+          51357,
+          262,
+          10276,
+          262,
+          632,
+          4827,
+          346,
+          8659,
+          305,
+          2405,
+          250111,
+          5690,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          5690,
+          262,
+          6297,
+          16081,
+          262,
+          2946,
+          262,
+          632,
+          260,
+          55979,
+          16186,
+          250111,
+          8939,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          260,
+          158070,
+          2555,
+          262,
+          260,
+          19367,
+          262,
+          632,
+          260,
+          28224,
+          8939,
+          275,
+          250106,
+          2986,
+          250106,
+          29661,
+          250106,
+          6246,
+          250106,
+          5690,
+          250106,
+          8939,
+          260,
+          272,
+          260,
+          272,
+          250103,
+          260,
+          166259,
+          260,
+          219397,
+          703,
+          2778,
+          646,
+          260,
+          53572,
+          6246,
+          143957,
+          282,
+          143957,
+          260,
+          261,
+          288,
+          143957,
+          260,
+          55754,
+          391,
+          95020,
+          289,
+          2778,
+          646,
+          260,
+          261
+        ],
+        "markerPositions": [
+          1,
+          97,
+          99,
+          101,
+          103,
+          105
+        ],
+        "wordPositions": [
+          112,
+          114,
+          116,
+          117,
+          119,
+          121,
+          122,
+          123,
+          124,
+          125,
+          127,
+          128,
+          129,
+          131,
+          133,
+          134,
+          136
+        ],
+        "wordOffsets": [
+          {
+            "startUtf16": 0,
+            "endUtf16": 5
+          },
+          {
+            "startUtf16": 6,
+            "endUtf16": 12
+          },
+          {
+            "startUtf16": 13,
+            "endUtf16": 17
+          },
+          {
+            "startUtf16": 18,
+            "endUtf16": 22
+          },
+          {
+            "startUtf16": 23,
+            "endUtf16": 29
+          },
+          {
+            "startUtf16": 30,
+            "endUtf16": 37
+          },
+          {
+            "startUtf16": 38,
+            "endUtf16": 43
+          },
+          {
+            "startUtf16": 44,
+            "endUtf16": 46
+          },
+          {
+            "startUtf16": 47,
+            "endUtf16": 52
+          },
+          {
+            "startUtf16": 52,
+            "endUtf16": 53
+          },
+          {
+            "startUtf16": 54,
+            "endUtf16": 57
+          },
+          {
+            "startUtf16": 58,
+            "endUtf16": 63
+          },
+          {
+            "startUtf16": 64,
+            "endUtf16": 73
+          },
+          {
+            "startUtf16": 74,
+            "endUtf16": 81
+          },
+          {
+            "startUtf16": 82,
+            "endUtf16": 84
+          },
+          {
+            "startUtf16": 85,
+            "endUtf16": 89
+          },
+          {
+            "startUtf16": 89,
+            "endUtf16": 90
+          }
+        ],
+        "mentions": [
+          {
+            "startUtf16": 0,
+            "endUtf16": 12,
+            "type": "person",
+            "text": "Priya Sharma",
+            "score": 0.9986743330955505
+          },
+          {
+            "startUtf16": 85,
+            "endUtf16": 89,
+            "type": "organization",
+            "text": "Acme",
+            "score": 0.9965607523918152
+          },
+          {
+            "startUtf16": 18,
+            "endUtf16": 22,
+            "type": "organization",
+            "text": "Acme",
+            "score": 0.9955145120620728
+          },
+          {
+            "startUtf16": 38,
+            "endUtf16": 43,
+            "type": "project",
+            "text": "Atlas",
+            "score": 0.9731243252754211
+          },
+          {
+            "startUtf16": 47,
+            "endUtf16": 52,
+            "type": "project",
+            "text": "Atlas",
+            "score": 0.9428389668464661
+          },
+          {
+            "startUtf16": 58,
+            "endUtf16": 63,
+            "type": "project",
+            "text": "Atlas",
+            "score": 0.9077788591384888
+          },
+          {
+            "startUtf16": 58,
+            "endUtf16": 73,
+            "type": "product",
+            "text": "Atlas dashboard",
+            "score": 0.800632655620575
+          }
+        ]
+      }
+    },
+    {
+      "id": "no-daglig",
+      "text": "Kari Nord fra Fjord Labs jobber med prosjekt Nordlys i Tromsø.",
+      "schemaVersion": "folio-entities-v1",
+      "labels": [
+        {
+          "type": "person",
+          "description": "a named person or human individual, including first and last names"
+        },
+        {
+          "type": "organization",
+          "description": "a company, institution, government body, team, or other organization"
+        },
+        {
+          "type": "project",
+          "description": "a named project, initiative, event, or organized body of work"
+        },
+        {
+          "type": "product",
+          "description": "a named product, software tool, service, or named technology"
+        },
+        {
+          "type": "location",
+          "description": "a named geographic place, venue, or physical location"
+        }
+      ],
+      "maxTokens": 512,
+      "overlapTokens": 32,
+      "expected": {
+        "inputIds": [
+          275,
+          250104,
+          260,
+          266,
+          188457,
+          250111,
+          2986,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          2986,
+          632,
+          6911,
+          6921,
+          262,
+          260,
+          7036,
+          2263,
+          306,
+          3168,
+          41617,
+          250111,
+          29661,
+          268,
+          260,
+          263,
+          5836,
+          262,
+          73569,
+          262,
+          13750,
+          8659,
+          262,
+          4645,
+          262,
+          632,
+          1905,
+          29661,
+          250111,
+          6246,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          6246,
+          262,
+          260,
+          51357,
+          262,
+          10276,
+          262,
+          632,
+          4827,
+          346,
+          8659,
+          305,
+          2405,
+          250111,
+          5690,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          5690,
+          262,
+          6297,
+          16081,
+          262,
+          2946,
+          262,
+          632,
+          260,
+          55979,
+          16186,
+          250111,
+          8939,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          260,
+          158070,
+          2555,
+          262,
+          260,
+          19367,
+          262,
+          632,
+          260,
+          28224,
+          8939,
+          275,
+          250106,
+          2986,
+          250106,
+          29661,
+          250106,
+          6246,
+          250106,
+          5690,
+          250106,
+          8939,
+          260,
+          272,
+          260,
+          272,
+          250103,
+          31834,
+          12425,
+          1059,
+          260,
+          85617,
+          260,
+          15346,
+          7189,
+          296,
+          500,
+          112885,
+          12425,
+          485,
+          264,
+          260,
+          267,
+          112772,
+          41563,
+          260,
+          261
+        ],
+        "markerPositions": [
+          1,
+          97,
+          99,
+          101,
+          103,
+          105
+        ],
+        "wordPositions": [
+          112,
+          113,
+          114,
+          115,
+          117,
+          119,
+          121,
+          122,
+          123,
+          126,
+          128,
+          130
+        ],
+        "wordOffsets": [
+          {
+            "startUtf16": 0,
+            "endUtf16": 4
+          },
+          {
+            "startUtf16": 5,
+            "endUtf16": 9
+          },
+          {
+            "startUtf16": 10,
+            "endUtf16": 13
+          },
+          {
+            "startUtf16": 14,
+            "endUtf16": 19
+          },
+          {
+            "startUtf16": 20,
+            "endUtf16": 24
+          },
+          {
+            "startUtf16": 25,
+            "endUtf16": 31
+          },
+          {
+            "startUtf16": 32,
+            "endUtf16": 35
+          },
+          {
+            "startUtf16": 36,
+            "endUtf16": 44
+          },
+          {
+            "startUtf16": 45,
+            "endUtf16": 52
+          },
+          {
+            "startUtf16": 53,
+            "endUtf16": 54
+          },
+          {
+            "startUtf16": 55,
+            "endUtf16": 61
+          },
+          {
+            "startUtf16": 61,
+            "endUtf16": 62
+          }
+        ],
+        "mentions": [
+          {
+            "startUtf16": 0,
+            "endUtf16": 9,
+            "type": "person",
+            "text": "Kari Nord",
+            "score": 0.9978252053260803
+          },
+          {
+            "startUtf16": 14,
+            "endUtf16": 24,
+            "type": "organization",
+            "text": "Fjord Labs",
+            "score": 0.9972873330116272
+          },
+          {
+            "startUtf16": 36,
+            "endUtf16": 52,
+            "type": "project",
+            "text": "prosjekt Nordlys",
+            "score": 0.9779666066169739
+          },
+          {
+            "startUtf16": 55,
+            "endUtf16": 61,
+            "type": "location",
+            "text": "Tromsø",
+            "score": 0.9981659650802612
+          }
+        ]
+      }
+    },
+    {
+      "id": "mixed-brief",
+      "text": "Acme flytter piloten til Project Atlas på mandag, sa Priya Sharma. Vi må avklare med Oslo-kontoret.",
+      "schemaVersion": "folio-entities-v1",
+      "labels": [
+        {
+          "type": "person",
+          "description": "a named person or human individual, including first and last names"
+        },
+        {
+          "type": "organization",
+          "description": "a company, institution, government body, team, or other organization"
+        },
+        {
+          "type": "project",
+          "description": "a named project, initiative, event, or organized body of work"
+        },
+        {
+          "type": "product",
+          "description": "a named product, software tool, service, or named technology"
+        },
+        {
+          "type": "location",
+          "description": "a named geographic place, venue, or physical location"
+        }
+      ],
+      "maxTokens": 512,
+      "overlapTokens": 32,
+      "expected": {
+        "inputIds": [
+          275,
+          250104,
+          260,
+          266,
+          188457,
+          250111,
+          2986,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          2986,
+          632,
+          6911,
+          6921,
+          262,
+          260,
+          7036,
+          2263,
+          306,
+          3168,
+          41617,
+          250111,
+          29661,
+          268,
+          260,
+          263,
+          5836,
+          262,
+          73569,
+          262,
+          13750,
+          8659,
+          262,
+          4645,
+          262,
+          632,
+          1905,
+          29661,
+          250111,
+          6246,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          6246,
+          262,
+          260,
+          51357,
+          262,
+          10276,
+          262,
+          632,
+          4827,
+          346,
+          8659,
+          305,
+          2405,
+          250111,
+          5690,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          5690,
+          262,
+          6297,
+          16081,
+          262,
+          2946,
+          262,
+          632,
+          260,
+          55979,
+          16186,
+          250111,
+          8939,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          260,
+          158070,
+          2555,
+          262,
+          260,
+          19367,
+          262,
+          632,
+          260,
+          28224,
+          8939,
+          275,
+          250106,
+          2986,
+          250106,
+          29661,
+          250106,
+          6246,
+          250106,
+          5690,
+          250106,
+          8939,
+          260,
+          272,
+          260,
+          272,
+          250103,
+          2778,
+          646,
+          62636,
+          287,
+          18148,
+          279,
+          501,
+          6246,
+          143957,
+          483,
+          260,
+          104613,
+          260,
+          262,
+          328,
+          260,
+          166259,
+          260,
+          219397,
+          260,
+          261,
+          626,
+          3409,
+          527,
+          33657,
+          500,
+          23410,
+          265,
+          109268,
+          260,
+          261
+        ],
+        "markerPositions": [
+          1,
+          97,
+          99,
+          101,
+          103,
+          105
+        ],
+        "wordPositions": [
+          112,
+          114,
+          116,
+          118,
+          119,
+          120,
+          121,
+          122,
+          124,
+          126,
+          127,
+          129,
+          131,
+          133,
+          134,
+          135,
+          137,
+          138,
+          141
+        ],
+        "wordOffsets": [
+          {
+            "startUtf16": 0,
+            "endUtf16": 4
+          },
+          {
+            "startUtf16": 5,
+            "endUtf16": 12
+          },
+          {
+            "startUtf16": 13,
+            "endUtf16": 20
+          },
+          {
+            "startUtf16": 21,
+            "endUtf16": 24
+          },
+          {
+            "startUtf16": 25,
+            "endUtf16": 32
+          },
+          {
+            "startUtf16": 33,
+            "endUtf16": 38
+          },
+          {
+            "startUtf16": 39,
+            "endUtf16": 41
+          },
+          {
+            "startUtf16": 42,
+            "endUtf16": 48
+          },
+          {
+            "startUtf16": 48,
+            "endUtf16": 49
+          },
+          {
+            "startUtf16": 50,
+            "endUtf16": 52
+          },
+          {
+            "startUtf16": 53,
+            "endUtf16": 58
+          },
+          {
+            "startUtf16": 59,
+            "endUtf16": 65
+          },
+          {
+            "startUtf16": 65,
+            "endUtf16": 66
+          },
+          {
+            "startUtf16": 67,
+            "endUtf16": 69
+          },
+          {
+            "startUtf16": 70,
+            "endUtf16": 72
+          },
+          {
+            "startUtf16": 73,
+            "endUtf16": 80
+          },
+          {
+            "startUtf16": 81,
+            "endUtf16": 84
+          },
+          {
+            "startUtf16": 85,
+            "endUtf16": 98
+          },
+          {
+            "startUtf16": 98,
+            "endUtf16": 99
+          }
+        ],
+        "mentions": [
+          {
+            "startUtf16": 53,
+            "endUtf16": 65,
+            "type": "person",
+            "text": "Priya Sharma",
+            "score": 0.9912827610969543
+          },
+          {
+            "startUtf16": 0,
+            "endUtf16": 4,
+            "type": "organization",
+            "text": "Acme",
+            "score": 0.9686397314071655
+          },
+          {
+            "startUtf16": 85,
+            "endUtf16": 98,
+            "type": "organization",
+            "text": "Oslo-kontoret",
+            "score": 0.8898190259933472
+          },
+          {
+            "startUtf16": 25,
+            "endUtf16": 38,
+            "type": "project",
+            "text": "Project Atlas",
+            "score": 0.8085596561431885
+          }
+        ]
+      }
+    },
+    {
+      "id": "ambiguous-first-names",
+      "text": "Alex met Alex after Priya called Priya. Keep each first-name-only mention unresolved.",
+      "schemaVersion": "folio-entities-v1",
+      "labels": [
+        {
+          "type": "person",
+          "description": "a named person or human individual, including first and last names"
+        },
+        {
+          "type": "organization",
+          "description": "a company, institution, government body, team, or other organization"
+        },
+        {
+          "type": "project",
+          "description": "a named project, initiative, event, or organized body of work"
+        },
+        {
+          "type": "product",
+          "description": "a named product, software tool, service, or named technology"
+        },
+        {
+          "type": "location",
+          "description": "a named geographic place, venue, or physical location"
+        }
+      ],
+      "maxTokens": 512,
+      "overlapTokens": 32,
+      "expected": {
+        "inputIds": [
+          275,
+          250104,
+          260,
+          266,
+          188457,
+          250111,
+          2986,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          2986,
+          632,
+          6911,
+          6921,
+          262,
+          260,
+          7036,
+          2263,
+          306,
+          3168,
+          41617,
+          250111,
+          29661,
+          268,
+          260,
+          263,
+          5836,
+          262,
+          73569,
+          262,
+          13750,
+          8659,
+          262,
+          4645,
+          262,
+          632,
+          1905,
+          29661,
+          250111,
+          6246,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          6246,
+          262,
+          260,
+          51357,
+          262,
+          10276,
+          262,
+          632,
+          4827,
+          346,
+          8659,
+          305,
+          2405,
+          250111,
+          5690,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          5690,
+          262,
+          6297,
+          16081,
+          262,
+          2946,
+          262,
+          632,
+          260,
+          55979,
+          16186,
+          250111,
+          8939,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          260,
+          158070,
+          2555,
+          262,
+          260,
+          19367,
+          262,
+          632,
+          260,
+          28224,
+          8939,
+          275,
+          250106,
+          2986,
+          250106,
+          29661,
+          250106,
+          6246,
+          250106,
+          5690,
+          250106,
+          8939,
+          260,
+          272,
+          260,
+          272,
+          250103,
+          100643,
+          825,
+          100643,
+          3355,
+          260,
+          166259,
+          260,
+          13076,
+          260,
+          166259,
+          260,
+          261,
+          9159,
+          260,
+          3152,
+          2263,
+          265,
+          1162,
+          265,
+          8918,
+          19931,
+          336,
+          188351,
+          286,
+          260,
+          261
+        ],
+        "markerPositions": [
+          1,
+          97,
+          99,
+          101,
+          103,
+          105
+        ],
+        "wordPositions": [
+          112,
+          113,
+          114,
+          115,
+          116,
+          118,
+          120,
+          122,
+          124,
+          125,
+          127,
+          132,
+          133,
+          136
+        ],
+        "wordOffsets": [
+          {
+            "startUtf16": 0,
+            "endUtf16": 4
+          },
+          {
+            "startUtf16": 5,
+            "endUtf16": 8
+          },
+          {
+            "startUtf16": 9,
+            "endUtf16": 13
+          },
+          {
+            "startUtf16": 14,
+            "endUtf16": 19
+          },
+          {
+            "startUtf16": 20,
+            "endUtf16": 25
+          },
+          {
+            "startUtf16": 26,
+            "endUtf16": 32
+          },
+          {
+            "startUtf16": 33,
+            "endUtf16": 38
+          },
+          {
+            "startUtf16": 38,
+            "endUtf16": 39
+          },
+          {
+            "startUtf16": 40,
+            "endUtf16": 44
+          },
+          {
+            "startUtf16": 45,
+            "endUtf16": 49
+          },
+          {
+            "startUtf16": 50,
+            "endUtf16": 65
+          },
+          {
+            "startUtf16": 66,
+            "endUtf16": 73
+          },
+          {
+            "startUtf16": 74,
+            "endUtf16": 84
+          },
+          {
+            "startUtf16": 84,
+            "endUtf16": 85
+          }
+        ],
+        "mentions": [
+          {
+            "startUtf16": 0,
+            "endUtf16": 4,
+            "type": "person",
+            "text": "Alex",
+            "score": 0.9970693588256836
+          },
+          {
+            "startUtf16": 9,
+            "endUtf16": 13,
+            "type": "person",
+            "text": "Alex",
+            "score": 0.9969333410263062
+          },
+          {
+            "startUtf16": 20,
+            "endUtf16": 25,
+            "type": "person",
+            "text": "Priya",
+            "score": 0.9965572357177734
+          },
+          {
+            "startUtf16": 33,
+            "endUtf16": 38,
+            "type": "person",
+            "text": "Priya",
+            "score": 0.9953833818435669
+          }
+        ]
+      }
+    },
+    {
+      "id": "negated-identity",
+      "text": "Priya Sharma did not approve the launch. Priya Shah approved it; they are different people.",
+      "schemaVersion": "folio-entities-v1",
+      "labels": [
+        {
+          "type": "person",
+          "description": "a named person or human individual, including first and last names"
+        },
+        {
+          "type": "organization",
+          "description": "a company, institution, government body, team, or other organization"
+        },
+        {
+          "type": "project",
+          "description": "a named project, initiative, event, or organized body of work"
+        },
+        {
+          "type": "product",
+          "description": "a named product, software tool, service, or named technology"
+        },
+        {
+          "type": "location",
+          "description": "a named geographic place, venue, or physical location"
+        }
+      ],
+      "maxTokens": 512,
+      "overlapTokens": 32,
+      "expected": {
+        "inputIds": [
+          275,
+          250104,
+          260,
+          266,
+          188457,
+          250111,
+          2986,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          2986,
+          632,
+          6911,
+          6921,
+          262,
+          260,
+          7036,
+          2263,
+          306,
+          3168,
+          41617,
+          250111,
+          29661,
+          268,
+          260,
+          263,
+          5836,
+          262,
+          73569,
+          262,
+          13750,
+          8659,
+          262,
+          4645,
+          262,
+          632,
+          1905,
+          29661,
+          250111,
+          6246,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          6246,
+          262,
+          260,
+          51357,
+          262,
+          10276,
+          262,
+          632,
+          4827,
+          346,
+          8659,
+          305,
+          2405,
+          250111,
+          5690,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          5690,
+          262,
+          6297,
+          16081,
+          262,
+          2946,
+          262,
+          632,
+          260,
+          55979,
+          16186,
+          250111,
+          8939,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          260,
+          158070,
+          2555,
+          262,
+          260,
+          19367,
+          262,
+          632,
+          260,
+          28224,
+          8939,
+          275,
+          250106,
+          2986,
+          250106,
+          29661,
+          250106,
+          6246,
+          250106,
+          5690,
+          250106,
+          8939,
+          260,
+          272,
+          260,
+          272,
+          250103,
+          260,
+          166259,
+          260,
+          219397,
+          3032,
+          777,
+          260,
+          209307,
+          288,
+          27398,
+          260,
+          261,
+          260,
+          166259,
+          90401,
+          260,
+          62399,
+          610,
+          260,
+          297,
+          288,
+          277,
+          419,
+          5674,
+          2560,
+          260,
+          261
+        ],
+        "markerPositions": [
+          1,
+          97,
+          99,
+          101,
+          103,
+          105
+        ],
+        "wordPositions": [
+          112,
+          114,
+          116,
+          117,
+          118,
+          120,
+          121,
+          122,
+          124,
+          126,
+          127,
+          129,
+          130,
+          132,
+          134,
+          135,
+          136,
+          137
+        ],
+        "wordOffsets": [
+          {
+            "startUtf16": 0,
+            "endUtf16": 5
+          },
+          {
+            "startUtf16": 6,
+            "endUtf16": 12
+          },
+          {
+            "startUtf16": 13,
+            "endUtf16": 16
+          },
+          {
+            "startUtf16": 17,
+            "endUtf16": 20
+          },
+          {
+            "startUtf16": 21,
+            "endUtf16": 28
+          },
+          {
+            "startUtf16": 29,
+            "endUtf16": 32
+          },
+          {
+            "startUtf16": 33,
+            "endUtf16": 39
+          },
+          {
+            "startUtf16": 39,
+            "endUtf16": 40
+          },
+          {
+            "startUtf16": 41,
+            "endUtf16": 46
+          },
+          {
+            "startUtf16": 47,
+            "endUtf16": 51
+          },
+          {
+            "startUtf16": 52,
+            "endUtf16": 60
+          },
+          {
+            "startUtf16": 61,
+            "endUtf16": 63
+          },
+          {
+            "startUtf16": 63,
+            "endUtf16": 64
+          },
+          {
+            "startUtf16": 65,
+            "endUtf16": 69
+          },
+          {
+            "startUtf16": 70,
+            "endUtf16": 73
+          },
+          {
+            "startUtf16": 74,
+            "endUtf16": 83
+          },
+          {
+            "startUtf16": 84,
+            "endUtf16": 90
+          },
+          {
+            "startUtf16": 90,
+            "endUtf16": 91
+          }
+        ],
+        "mentions": [
+          {
+            "startUtf16": 0,
+            "endUtf16": 12,
+            "type": "person",
+            "text": "Priya Sharma",
+            "score": 0.997046709060669
+          },
+          {
+            "startUtf16": 41,
+            "endUtf16": 51,
+            "type": "person",
+            "text": "Priya Shah",
+            "score": 0.9896034598350525
+          },
+          {
+            "startUtf16": 33,
+            "endUtf16": 39,
+            "type": "project",
+            "text": "launch",
+            "score": 0.8973216414451599
+          }
+        ]
+      }
+    },
+    {
+      "id": "no-entities",
+      "text": "Keep the room quiet, charge the recorder, and review the outline tomorrow.",
+      "schemaVersion": "folio-entities-v1",
+      "labels": [
+        {
+          "type": "person",
+          "description": "a named person or human individual, including first and last names"
+        },
+        {
+          "type": "organization",
+          "description": "a company, institution, government body, team, or other organization"
+        },
+        {
+          "type": "project",
+          "description": "a named project, initiative, event, or organized body of work"
+        },
+        {
+          "type": "product",
+          "description": "a named product, software tool, service, or named technology"
+        },
+        {
+          "type": "location",
+          "description": "a named geographic place, venue, or physical location"
+        }
+      ],
+      "maxTokens": 512,
+      "overlapTokens": 32,
+      "expected": {
+        "inputIds": [
+          275,
+          250104,
+          260,
+          266,
+          188457,
+          250111,
+          2986,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          2986,
+          632,
+          6911,
+          6921,
+          262,
+          260,
+          7036,
+          2263,
+          306,
+          3168,
+          41617,
+          250111,
+          29661,
+          268,
+          260,
+          263,
+          5836,
+          262,
+          73569,
+          262,
+          13750,
+          8659,
+          262,
+          4645,
+          262,
+          632,
+          1905,
+          29661,
+          250111,
+          6246,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          6246,
+          262,
+          260,
+          51357,
+          262,
+          10276,
+          262,
+          632,
+          4827,
+          346,
+          8659,
+          305,
+          2405,
+          250111,
+          5690,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          5690,
+          262,
+          6297,
+          16081,
+          262,
+          2946,
+          262,
+          632,
+          260,
+          55979,
+          16186,
+          250111,
+          8939,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          260,
+          158070,
+          2555,
+          262,
+          260,
+          19367,
+          262,
+          632,
+          260,
+          28224,
+          8939,
+          275,
+          250106,
+          2986,
+          250106,
+          29661,
+          250106,
+          6246,
+          250106,
+          5690,
+          250106,
+          8939,
+          260,
+          272,
+          260,
+          272,
+          250103,
+          9159,
+          288,
+          6369,
+          35743,
+          260,
+          262,
+          11752,
+          288,
+          260,
+          232530,
+          260,
+          262,
+          306,
+          4303,
+          288,
+          260,
+          68432,
+          260,
+          82549,
+          260,
+          261
+        ],
+        "markerPositions": [
+          1,
+          97,
+          99,
+          101,
+          103,
+          105
+        ],
+        "wordPositions": [
+          112,
+          113,
+          114,
+          115,
+          116,
+          118,
+          119,
+          120,
+          122,
+          124,
+          125,
+          126,
+          127,
+          129,
+          131
+        ],
+        "wordOffsets": [
+          {
+            "startUtf16": 0,
+            "endUtf16": 4
+          },
+          {
+            "startUtf16": 5,
+            "endUtf16": 8
+          },
+          {
+            "startUtf16": 9,
+            "endUtf16": 13
+          },
+          {
+            "startUtf16": 14,
+            "endUtf16": 19
+          },
+          {
+            "startUtf16": 19,
+            "endUtf16": 20
+          },
+          {
+            "startUtf16": 21,
+            "endUtf16": 27
+          },
+          {
+            "startUtf16": 28,
+            "endUtf16": 31
+          },
+          {
+            "startUtf16": 32,
+            "endUtf16": 40
+          },
+          {
+            "startUtf16": 40,
+            "endUtf16": 41
+          },
+          {
+            "startUtf16": 42,
+            "endUtf16": 45
+          },
+          {
+            "startUtf16": 46,
+            "endUtf16": 52
+          },
+          {
+            "startUtf16": 53,
+            "endUtf16": 56
+          },
+          {
+            "startUtf16": 57,
+            "endUtf16": 64
+          },
+          {
+            "startUtf16": 65,
+            "endUtf16": 73
+          },
+          {
+            "startUtf16": 73,
+            "endUtf16": 74
+          }
+        ],
+        "mentions": []
+      }
+    },
+    {
+      "id": "unicode-offsets",
+      "text": "🧭 Café notes: Zoë met 李雷 at Montréal; évidence stayed in the log.",
+      "schemaVersion": "folio-entities-v1",
+      "labels": [
+        {
+          "type": "person",
+          "description": "a named person or human individual, including first and last names"
+        },
+        {
+          "type": "organization",
+          "description": "a company, institution, government body, team, or other organization"
+        },
+        {
+          "type": "project",
+          "description": "a named project, initiative, event, or organized body of work"
+        },
+        {
+          "type": "product",
+          "description": "a named product, software tool, service, or named technology"
+        },
+        {
+          "type": "location",
+          "description": "a named geographic place, venue, or physical location"
+        }
+      ],
+      "maxTokens": 512,
+      "overlapTokens": 32,
+      "expected": {
+        "inputIds": [
+          275,
+          250104,
+          260,
+          266,
+          188457,
+          250111,
+          2986,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          2986,
+          632,
+          6911,
+          6921,
+          262,
+          260,
+          7036,
+          2263,
+          306,
+          3168,
+          41617,
+          250111,
+          29661,
+          268,
+          260,
+          263,
+          5836,
+          262,
+          73569,
+          262,
+          13750,
+          8659,
+          262,
+          4645,
+          262,
+          632,
+          1905,
+          29661,
+          250111,
+          6246,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          6246,
+          262,
+          260,
+          51357,
+          262,
+          10276,
+          262,
+          632,
+          4827,
+          346,
+          8659,
+          305,
+          2405,
+          250111,
+          5690,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          5690,
+          262,
+          6297,
+          16081,
+          262,
+          2946,
+          262,
+          632,
+          260,
+          55979,
+          16186,
+          250111,
+          8939,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          260,
+          158070,
+          2555,
+          262,
+          260,
+          19367,
+          262,
+          632,
+          260,
+          28224,
+          8939,
+          275,
+          250106,
+          2986,
+          250106,
+          29661,
+          250106,
+          6246,
+          250106,
+          5690,
+          250106,
+          8939,
+          260,
+          272,
+          260,
+          272,
+          250103,
+          260,
+          3,
+          29924,
+          31419,
+          260,
+          268,
+          1512,
+          707,
+          825,
+          95290,
+          23143,
+          345,
+          15116,
+          64602,
+          260,
+          297,
+          260,
+          266,
+          1731,
+          260,
+          105255,
+          7187,
+          346,
+          282,
+          288,
+          10967,
+          260,
+          261
+        ],
+        "markerPositions": [
+          1,
+          97,
+          99,
+          101,
+          103,
+          105
+        ],
+        "wordPositions": [
+          112,
+          114,
+          115,
+          116,
+          118,
+          120,
+          121,
+          123,
+          124,
+          126,
+          128,
+          130,
+          131,
+          133,
+          135,
+          136,
+          137,
+          138
+        ],
+        "wordOffsets": [
+          {
+            "startUtf16": 0,
+            "endUtf16": 2
+          },
+          {
+            "startUtf16": 3,
+            "endUtf16": 7
+          },
+          {
+            "startUtf16": 8,
+            "endUtf16": 13
+          },
+          {
+            "startUtf16": 13,
+            "endUtf16": 14
+          },
+          {
+            "startUtf16": 15,
+            "endUtf16": 18
+          },
+          {
+            "startUtf16": 19,
+            "endUtf16": 22
+          },
+          {
+            "startUtf16": 23,
+            "endUtf16": 25
+          },
+          {
+            "startUtf16": 26,
+            "endUtf16": 28
+          },
+          {
+            "startUtf16": 29,
+            "endUtf16": 37
+          },
+          {
+            "startUtf16": 37,
+            "endUtf16": 38
+          },
+          {
+            "startUtf16": 39,
+            "endUtf16": 40
+          },
+          {
+            "startUtf16": 40,
+            "endUtf16": 41
+          },
+          {
+            "startUtf16": 41,
+            "endUtf16": 48
+          },
+          {
+            "startUtf16": 49,
+            "endUtf16": 55
+          },
+          {
+            "startUtf16": 56,
+            "endUtf16": 58
+          },
+          {
+            "startUtf16": 59,
+            "endUtf16": 62
+          },
+          {
+            "startUtf16": 63,
+            "endUtf16": 66
+          },
+          {
+            "startUtf16": 66,
+            "endUtf16": 67
+          }
+        ],
+        "mentions": [
+          {
+            "startUtf16": 15,
+            "endUtf16": 18,
+            "type": "person",
+            "text": "Zoë",
+            "score": 0.9839779138565063
+          },
+          {
+            "startUtf16": 23,
+            "endUtf16": 25,
+            "type": "person",
+            "text": "李雷",
+            "score": 0.960774838924408
+          },
+          {
+            "startUtf16": 29,
+            "endUtf16": 37,
+            "type": "location",
+            "text": "Montréal",
+            "score": 0.9975614547729492
+          }
+        ]
+      }
+    },
+    {
+      "id": "transcription-ocr-noise",
+      "text": "Transcription: Preea Sharma called Acme (OCR: Acmе) about Atlas, ikke Project Atlas.",
+      "schemaVersion": "folio-entities-v1",
+      "labels": [
+        {
+          "type": "person",
+          "description": "a named person or human individual, including first and last names"
+        },
+        {
+          "type": "organization",
+          "description": "a company, institution, government body, team, or other organization"
+        },
+        {
+          "type": "project",
+          "description": "a named project, initiative, event, or organized body of work"
+        },
+        {
+          "type": "product",
+          "description": "a named product, software tool, service, or named technology"
+        },
+        {
+          "type": "location",
+          "description": "a named geographic place, venue, or physical location"
+        }
+      ],
+      "maxTokens": 512,
+      "overlapTokens": 32,
+      "expected": {
+        "inputIds": [
+          275,
+          250104,
+          260,
+          266,
+          188457,
+          250111,
+          2986,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          2986,
+          632,
+          6911,
+          6921,
+          262,
+          260,
+          7036,
+          2263,
+          306,
+          3168,
+          41617,
+          250111,
+          29661,
+          268,
+          260,
+          263,
+          5836,
+          262,
+          73569,
+          262,
+          13750,
+          8659,
+          262,
+          4645,
+          262,
+          632,
+          1905,
+          29661,
+          250111,
+          6246,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          6246,
+          262,
+          260,
+          51357,
+          262,
+          10276,
+          262,
+          632,
+          4827,
+          346,
+          8659,
+          305,
+          2405,
+          250111,
+          5690,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          5690,
+          262,
+          6297,
+          16081,
+          262,
+          2946,
+          262,
+          632,
+          260,
+          55979,
+          16186,
+          250111,
+          8939,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          260,
+          158070,
+          2555,
+          262,
+          260,
+          19367,
+          262,
+          632,
+          260,
+          28224,
+          8939,
+          275,
+          250106,
+          2986,
+          250106,
+          29661,
+          250106,
+          6246,
+          250106,
+          5690,
+          250106,
+          8939,
+          260,
+          272,
+          260,
+          272,
+          250103,
+          1913,
+          138546,
+          260,
+          268,
+          787,
+          266,
+          263,
+          260,
+          219397,
+          260,
+          13076,
+          2778,
+          646,
+          275,
+          30563,
+          287,
+          260,
+          268,
+          260,
+          263,
+          1381,
+          325,
+          260,
+          272,
+          1389,
+          143957,
+          260,
+          262,
+          1166,
+          6246,
+          143957,
+          260,
+          261
+        ],
+        "markerPositions": [
+          1,
+          97,
+          99,
+          101,
+          103,
+          105
+        ],
+        "wordPositions": [
+          112,
+          114,
+          116,
+          119,
+          121,
+          123,
+          125,
+          126,
+          128,
+          130,
+          134,
+          136,
+          137,
+          138,
+          140,
+          141,
+          142,
+          143
+        ],
+        "wordOffsets": [
+          {
+            "startUtf16": 0,
+            "endUtf16": 13
+          },
+          {
+            "startUtf16": 13,
+            "endUtf16": 14
+          },
+          {
+            "startUtf16": 15,
+            "endUtf16": 20
+          },
+          {
+            "startUtf16": 21,
+            "endUtf16": 27
+          },
+          {
+            "startUtf16": 28,
+            "endUtf16": 34
+          },
+          {
+            "startUtf16": 35,
+            "endUtf16": 39
+          },
+          {
+            "startUtf16": 40,
+            "endUtf16": 41
+          },
+          {
+            "startUtf16": 41,
+            "endUtf16": 44
+          },
+          {
+            "startUtf16": 44,
+            "endUtf16": 45
+          },
+          {
+            "startUtf16": 46,
+            "endUtf16": 50
+          },
+          {
+            "startUtf16": 50,
+            "endUtf16": 51
+          },
+          {
+            "startUtf16": 52,
+            "endUtf16": 57
+          },
+          {
+            "startUtf16": 58,
+            "endUtf16": 63
+          },
+          {
+            "startUtf16": 63,
+            "endUtf16": 64
+          },
+          {
+            "startUtf16": 65,
+            "endUtf16": 69
+          },
+          {
+            "startUtf16": 70,
+            "endUtf16": 77
+          },
+          {
+            "startUtf16": 78,
+            "endUtf16": 83
+          },
+          {
+            "startUtf16": 83,
+            "endUtf16": 84
+          }
+        ],
+        "mentions": [
+          {
+            "startUtf16": 15,
+            "endUtf16": 27,
+            "type": "person",
+            "text": "Preea Sharma",
+            "score": 0.9926154017448425
+          },
+          {
+            "startUtf16": 58,
+            "endUtf16": 63,
+            "type": "project",
+            "text": "Atlas",
+            "score": 0.9414382576942444
+          },
+          {
+            "startUtf16": 78,
+            "endUtf16": 83,
+            "type": "project",
+            "text": "Atlas",
+            "score": 0.9134863018989563
+          }
+        ]
+      }
+    },
+    {
+      "id": "short-capture",
+      "text": "Ask Sam at Northstar about Atlas.",
+      "schemaVersion": "folio-entities-v1",
+      "labels": [
+        {
+          "type": "person",
+          "description": "a named person or human individual, including first and last names"
+        },
+        {
+          "type": "organization",
+          "description": "a company, institution, government body, team, or other organization"
+        },
+        {
+          "type": "project",
+          "description": "a named project, initiative, event, or organized body of work"
+        },
+        {
+          "type": "product",
+          "description": "a named product, software tool, service, or named technology"
+        },
+        {
+          "type": "location",
+          "description": "a named geographic place, venue, or physical location"
+        }
+      ],
+      "maxTokens": 512,
+      "overlapTokens": 32,
+      "expected": {
+        "inputIds": [
+          275,
+          250104,
+          260,
+          266,
+          188457,
+          250111,
+          2986,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          2986,
+          632,
+          6911,
+          6921,
+          262,
+          260,
+          7036,
+          2263,
+          306,
+          3168,
+          41617,
+          250111,
+          29661,
+          268,
+          260,
+          263,
+          5836,
+          262,
+          73569,
+          262,
+          13750,
+          8659,
+          262,
+          4645,
+          262,
+          632,
+          1905,
+          29661,
+          250111,
+          6246,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          6246,
+          262,
+          260,
+          51357,
+          262,
+          10276,
+          262,
+          632,
+          4827,
+          346,
+          8659,
+          305,
+          2405,
+          250111,
+          5690,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          5690,
+          262,
+          6297,
+          16081,
+          262,
+          2946,
+          262,
+          632,
+          260,
+          55979,
+          16186,
+          250111,
+          8939,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          260,
+          158070,
+          2555,
+          262,
+          260,
+          19367,
+          262,
+          632,
+          260,
+          28224,
+          8939,
+          275,
+          250106,
+          2986,
+          250106,
+          29661,
+          250106,
+          6246,
+          250106,
+          5690,
+          250106,
+          8939,
+          260,
+          272,
+          260,
+          272,
+          250103,
+          17025,
+          2291,
+          345,
+          54835,
+          4535,
+          1389,
+          143957,
+          260,
+          261
+        ],
+        "markerPositions": [
+          1,
+          97,
+          99,
+          101,
+          103,
+          105
+        ],
+        "wordPositions": [
+          112,
+          113,
+          114,
+          115,
+          117,
+          118,
+          119
+        ],
+        "wordOffsets": [
+          {
+            "startUtf16": 0,
+            "endUtf16": 3
+          },
+          {
+            "startUtf16": 4,
+            "endUtf16": 7
+          },
+          {
+            "startUtf16": 8,
+            "endUtf16": 10
+          },
+          {
+            "startUtf16": 11,
+            "endUtf16": 20
+          },
+          {
+            "startUtf16": 21,
+            "endUtf16": 26
+          },
+          {
+            "startUtf16": 27,
+            "endUtf16": 32
+          },
+          {
+            "startUtf16": 32,
+            "endUtf16": 33
+          }
+        ],
+        "mentions": [
+          {
+            "startUtf16": 4,
+            "endUtf16": 7,
+            "type": "person",
+            "text": "Sam",
+            "score": 0.9921420216560364
+          },
+          {
+            "startUtf16": 11,
+            "endUtf16": 20,
+            "type": "organization",
+            "text": "Northstar",
+            "score": 0.9781661033630371
+          },
+          {
+            "startUtf16": 27,
+            "endUtf16": 32,
+            "type": "product",
+            "text": "Atlas",
+            "score": 0.9440659880638123
+          }
+        ]
+      }
+    },
+    {
+      "id": "appended-daily-notes",
+      "text": "Morning: Priya Sharma met Acme in Oslo.\n\n--- Appended capture ---\nKari Nord skrev at Atlas fortsatt venter.",
+      "schemaVersion": "folio-entities-v1",
+      "labels": [
+        {
+          "type": "person",
+          "description": "a named person or human individual, including first and last names"
+        },
+        {
+          "type": "organization",
+          "description": "a company, institution, government body, team, or other organization"
+        },
+        {
+          "type": "project",
+          "description": "a named project, initiative, event, or organized body of work"
+        },
+        {
+          "type": "product",
+          "description": "a named product, software tool, service, or named technology"
+        },
+        {
+          "type": "location",
+          "description": "a named geographic place, venue, or physical location"
+        }
+      ],
+      "maxTokens": 512,
+      "overlapTokens": 32,
+      "expected": {
+        "inputIds": [
+          275,
+          250104,
+          260,
+          266,
+          188457,
+          250111,
+          2986,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          2986,
+          632,
+          6911,
+          6921,
+          262,
+          260,
+          7036,
+          2263,
+          306,
+          3168,
+          41617,
+          250111,
+          29661,
+          268,
+          260,
+          263,
+          5836,
+          262,
+          73569,
+          262,
+          13750,
+          8659,
+          262,
+          4645,
+          262,
+          632,
+          1905,
+          29661,
+          250111,
+          6246,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          6246,
+          262,
+          260,
+          51357,
+          262,
+          10276,
+          262,
+          632,
+          4827,
+          346,
+          8659,
+          305,
+          2405,
+          250111,
+          5690,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          5690,
+          262,
+          6297,
+          16081,
+          262,
+          2946,
+          262,
+          632,
+          260,
+          55979,
+          16186,
+          250111,
+          8939,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          260,
+          158070,
+          2555,
+          262,
+          260,
+          19367,
+          262,
+          632,
+          260,
+          28224,
+          8939,
+          275,
+          250106,
+          2986,
+          250106,
+          29661,
+          250106,
+          6246,
+          250106,
+          5690,
+          250106,
+          8939,
+          260,
+          272,
+          260,
+          272,
+          250103,
+          25470,
+          260,
+          268,
+          260,
+          166259,
+          260,
+          219397,
+          825,
+          2778,
+          646,
+          282,
+          23410,
+          260,
+          261,
+          260,
+          265,
+          260,
+          265,
+          260,
+          265,
+          260,
+          16273,
+          346,
+          260,
+          61081,
+          260,
+          265,
+          260,
+          265,
+          260,
+          265,
+          31834,
+          12425,
+          260,
+          38326,
+          345,
+          143957,
+          333,
+          38271,
+          260,
+          67454,
+          260,
+          261
+        ],
+        "markerPositions": [
+          1,
+          97,
+          99,
+          101,
+          103,
+          105
+        ],
+        "wordPositions": [
+          112,
+          113,
+          115,
+          117,
+          119,
+          120,
+          122,
+          123,
+          124,
+          126,
+          128,
+          130,
+          132,
+          135,
+          137,
+          139,
+          141,
+          143,
+          144,
+          145,
+          147,
+          148,
+          149,
+          151,
+          153
+        ],
+        "wordOffsets": [
+          {
+            "startUtf16": 0,
+            "endUtf16": 7
+          },
+          {
+            "startUtf16": 7,
+            "endUtf16": 8
+          },
+          {
+            "startUtf16": 9,
+            "endUtf16": 14
+          },
+          {
+            "startUtf16": 15,
+            "endUtf16": 21
+          },
+          {
+            "startUtf16": 22,
+            "endUtf16": 25
+          },
+          {
+            "startUtf16": 26,
+            "endUtf16": 30
+          },
+          {
+            "startUtf16": 31,
+            "endUtf16": 33
+          },
+          {
+            "startUtf16": 34,
+            "endUtf16": 38
+          },
+          {
+            "startUtf16": 38,
+            "endUtf16": 39
+          },
+          {
+            "startUtf16": 41,
+            "endUtf16": 42
+          },
+          {
+            "startUtf16": 42,
+            "endUtf16": 43
+          },
+          {
+            "startUtf16": 43,
+            "endUtf16": 44
+          },
+          {
+            "startUtf16": 45,
+            "endUtf16": 53
+          },
+          {
+            "startUtf16": 54,
+            "endUtf16": 61
+          },
+          {
+            "startUtf16": 62,
+            "endUtf16": 63
+          },
+          {
+            "startUtf16": 63,
+            "endUtf16": 64
+          },
+          {
+            "startUtf16": 64,
+            "endUtf16": 65
+          },
+          {
+            "startUtf16": 66,
+            "endUtf16": 70
+          },
+          {
+            "startUtf16": 71,
+            "endUtf16": 75
+          },
+          {
+            "startUtf16": 76,
+            "endUtf16": 81
+          },
+          {
+            "startUtf16": 82,
+            "endUtf16": 84
+          },
+          {
+            "startUtf16": 85,
+            "endUtf16": 90
+          },
+          {
+            "startUtf16": 91,
+            "endUtf16": 99
+          },
+          {
+            "startUtf16": 100,
+            "endUtf16": 106
+          },
+          {
+            "startUtf16": 106,
+            "endUtf16": 107
+          }
+        ],
+        "mentions": [
+          {
+            "startUtf16": 66,
+            "endUtf16": 75,
+            "type": "person",
+            "text": "Kari Nord",
+            "score": 0.995174765586853
+          },
+          {
+            "startUtf16": 9,
+            "endUtf16": 21,
+            "type": "person",
+            "text": "Priya Sharma",
+            "score": 0.9936959147453308
+          },
+          {
+            "startUtf16": 26,
+            "endUtf16": 30,
+            "type": "organization",
+            "text": "Acme",
+            "score": 0.9609081149101257
+          },
+          {
+            "startUtf16": 85,
+            "endUtf16": 90,
+            "type": "product",
+            "text": "Atlas",
+            "score": 0.9670755863189697
+          },
+          {
+            "startUtf16": 34,
+            "endUtf16": 38,
+            "type": "location",
+            "text": "Oslo",
+            "score": 0.9987877011299133
+          }
+        ]
+      }
+    },
+    {
+      "id": "chunk-boundary",
+      "text": "Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Context Priya Sharma spoke with Acme about Project Atlas. Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context Closing context ",
+      "schemaVersion": "folio-entities-v1",
+      "labels": [
+        {
+          "type": "person",
+          "description": "a named person or human individual, including first and last names"
+        },
+        {
+          "type": "organization",
+          "description": "a company, institution, government body, team, or other organization"
+        },
+        {
+          "type": "project",
+          "description": "a named project, initiative, event, or organized body of work"
+        },
+        {
+          "type": "product",
+          "description": "a named product, software tool, service, or named technology"
+        },
+        {
+          "type": "location",
+          "description": "a named geographic place, venue, or physical location"
+        }
+      ],
+      "maxTokens": 512,
+      "overlapTokens": 32,
+      "expected": {
+        "inputIds": [
+          275,
+          250104,
+          260,
+          266,
+          188457,
+          250111,
+          2986,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          2986,
+          632,
+          6911,
+          6921,
+          262,
+          260,
+          7036,
+          2263,
+          306,
+          3168,
+          41617,
+          250111,
+          29661,
+          268,
+          260,
+          263,
+          5836,
+          262,
+          73569,
+          262,
+          13750,
+          8659,
+          262,
+          4645,
+          262,
+          632,
+          1905,
+          29661,
+          250111,
+          6246,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          6246,
+          262,
+          260,
+          51357,
+          262,
+          10276,
+          262,
+          632,
+          4827,
+          346,
+          8659,
+          305,
+          2405,
+          250111,
+          5690,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          5690,
+          262,
+          6297,
+          16081,
+          262,
+          2946,
+          262,
+          632,
+          260,
+          55979,
+          16186,
+          250111,
+          8939,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          260,
+          158070,
+          2555,
+          262,
+          260,
+          19367,
+          262,
+          632,
+          260,
+          28224,
+          8939,
+          275,
+          250106,
+          2986,
+          250106,
+          29661,
+          250106,
+          6246,
+          250106,
+          5690,
+          250106,
+          8939,
+          260,
+          272,
+          260,
+          272,
+          250103,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          19731,
+          260,
+          166259,
+          260,
+          219397,
+          260,
+          62435,
+          515,
+          2778,
+          646,
+          1389,
+          6246,
+          143957,
+          260,
+          261,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731,
+          318,
+          68006,
+          19731
+        ],
+        "markerPositions": [
+          1,
+          97,
+          99,
+          101,
+          103,
+          105
+        ],
+        "wordPositions": [
+          112,
+          113,
+          114,
+          115,
+          116,
+          117,
+          118,
+          119,
+          120,
+          121,
+          122,
+          123,
+          124,
+          125,
+          126,
+          127,
+          128,
+          129,
+          130,
+          131,
+          132,
+          133,
+          134,
+          135,
+          136,
+          137,
+          138,
+          139,
+          140,
+          141,
+          142,
+          143,
+          144,
+          145,
+          146,
+          147,
+          148,
+          149,
+          150,
+          151,
+          152,
+          153,
+          154,
+          155,
+          156,
+          157,
+          158,
+          159,
+          160,
+          162,
+          164,
+          166,
+          167,
+          169,
+          170,
+          171,
+          172,
+          174,
+          176,
+          177,
+          179,
+          180,
+          182,
+          183,
+          185,
+          186,
+          188,
+          189,
+          191,
+          192,
+          194,
+          195,
+          197,
+          198,
+          200,
+          201,
+          203,
+          204,
+          206,
+          207,
+          209,
+          210,
+          212,
+          213,
+          215,
+          216,
+          218,
+          219,
+          221,
+          222,
+          224,
+          225,
+          227,
+          228,
+          230,
+          231,
+          233,
+          234,
+          236,
+          237,
+          239,
+          240,
+          242,
+          243,
+          245,
+          246,
+          248,
+          249,
+          251,
+          252,
+          254,
+          255,
+          257,
+          258,
+          260,
+          261,
+          263,
+          264,
+          266,
+          267,
+          269,
+          270,
+          272,
+          273,
+          275,
+          276,
+          278,
+          279,
+          281,
+          282,
+          284,
+          285,
+          287,
+          288,
+          290,
+          291,
+          293,
+          294,
+          296,
+          297,
+          299,
+          300,
+          302,
+          303,
+          305,
+          306,
+          308,
+          309,
+          311,
+          312,
+          314,
+          315,
+          317
+        ],
+        "wordOffsets": [
+          {
+            "startUtf16": 0,
+            "endUtf16": 7
+          },
+          {
+            "startUtf16": 8,
+            "endUtf16": 15
+          },
+          {
+            "startUtf16": 16,
+            "endUtf16": 23
+          },
+          {
+            "startUtf16": 24,
+            "endUtf16": 31
+          },
+          {
+            "startUtf16": 32,
+            "endUtf16": 39
+          },
+          {
+            "startUtf16": 40,
+            "endUtf16": 47
+          },
+          {
+            "startUtf16": 48,
+            "endUtf16": 55
+          },
+          {
+            "startUtf16": 56,
+            "endUtf16": 63
+          },
+          {
+            "startUtf16": 64,
+            "endUtf16": 71
+          },
+          {
+            "startUtf16": 72,
+            "endUtf16": 79
+          },
+          {
+            "startUtf16": 80,
+            "endUtf16": 87
+          },
+          {
+            "startUtf16": 88,
+            "endUtf16": 95
+          },
+          {
+            "startUtf16": 96,
+            "endUtf16": 103
+          },
+          {
+            "startUtf16": 104,
+            "endUtf16": 111
+          },
+          {
+            "startUtf16": 112,
+            "endUtf16": 119
+          },
+          {
+            "startUtf16": 120,
+            "endUtf16": 127
+          },
+          {
+            "startUtf16": 128,
+            "endUtf16": 135
+          },
+          {
+            "startUtf16": 136,
+            "endUtf16": 143
+          },
+          {
+            "startUtf16": 144,
+            "endUtf16": 151
+          },
+          {
+            "startUtf16": 152,
+            "endUtf16": 159
+          },
+          {
+            "startUtf16": 160,
+            "endUtf16": 167
+          },
+          {
+            "startUtf16": 168,
+            "endUtf16": 175
+          },
+          {
+            "startUtf16": 176,
+            "endUtf16": 183
+          },
+          {
+            "startUtf16": 184,
+            "endUtf16": 191
+          },
+          {
+            "startUtf16": 192,
+            "endUtf16": 199
+          },
+          {
+            "startUtf16": 200,
+            "endUtf16": 207
+          },
+          {
+            "startUtf16": 208,
+            "endUtf16": 215
+          },
+          {
+            "startUtf16": 216,
+            "endUtf16": 223
+          },
+          {
+            "startUtf16": 224,
+            "endUtf16": 231
+          },
+          {
+            "startUtf16": 232,
+            "endUtf16": 239
+          },
+          {
+            "startUtf16": 240,
+            "endUtf16": 247
+          },
+          {
+            "startUtf16": 248,
+            "endUtf16": 255
+          },
+          {
+            "startUtf16": 256,
+            "endUtf16": 263
+          },
+          {
+            "startUtf16": 264,
+            "endUtf16": 271
+          },
+          {
+            "startUtf16": 272,
+            "endUtf16": 279
+          },
+          {
+            "startUtf16": 280,
+            "endUtf16": 287
+          },
+          {
+            "startUtf16": 288,
+            "endUtf16": 295
+          },
+          {
+            "startUtf16": 296,
+            "endUtf16": 303
+          },
+          {
+            "startUtf16": 304,
+            "endUtf16": 311
+          },
+          {
+            "startUtf16": 312,
+            "endUtf16": 319
+          },
+          {
+            "startUtf16": 320,
+            "endUtf16": 327
+          },
+          {
+            "startUtf16": 328,
+            "endUtf16": 335
+          },
+          {
+            "startUtf16": 336,
+            "endUtf16": 343
+          },
+          {
+            "startUtf16": 344,
+            "endUtf16": 351
+          },
+          {
+            "startUtf16": 352,
+            "endUtf16": 359
+          },
+          {
+            "startUtf16": 360,
+            "endUtf16": 367
+          },
+          {
+            "startUtf16": 368,
+            "endUtf16": 375
+          },
+          {
+            "startUtf16": 376,
+            "endUtf16": 383
+          },
+          {
+            "startUtf16": 384,
+            "endUtf16": 389
+          },
+          {
+            "startUtf16": 390,
+            "endUtf16": 396
+          },
+          {
+            "startUtf16": 397,
+            "endUtf16": 402
+          },
+          {
+            "startUtf16": 403,
+            "endUtf16": 407
+          },
+          {
+            "startUtf16": 408,
+            "endUtf16": 412
+          },
+          {
+            "startUtf16": 413,
+            "endUtf16": 418
+          },
+          {
+            "startUtf16": 419,
+            "endUtf16": 426
+          },
+          {
+            "startUtf16": 427,
+            "endUtf16": 432
+          },
+          {
+            "startUtf16": 432,
+            "endUtf16": 433
+          },
+          {
+            "startUtf16": 434,
+            "endUtf16": 441
+          },
+          {
+            "startUtf16": 442,
+            "endUtf16": 449
+          },
+          {
+            "startUtf16": 450,
+            "endUtf16": 457
+          },
+          {
+            "startUtf16": 458,
+            "endUtf16": 465
+          },
+          {
+            "startUtf16": 466,
+            "endUtf16": 473
+          },
+          {
+            "startUtf16": 474,
+            "endUtf16": 481
+          },
+          {
+            "startUtf16": 482,
+            "endUtf16": 489
+          },
+          {
+            "startUtf16": 490,
+            "endUtf16": 497
+          },
+          {
+            "startUtf16": 498,
+            "endUtf16": 505
+          },
+          {
+            "startUtf16": 506,
+            "endUtf16": 513
+          },
+          {
+            "startUtf16": 514,
+            "endUtf16": 521
+          },
+          {
+            "startUtf16": 522,
+            "endUtf16": 529
+          },
+          {
+            "startUtf16": 530,
+            "endUtf16": 537
+          },
+          {
+            "startUtf16": 538,
+            "endUtf16": 545
+          },
+          {
+            "startUtf16": 546,
+            "endUtf16": 553
+          },
+          {
+            "startUtf16": 554,
+            "endUtf16": 561
+          },
+          {
+            "startUtf16": 562,
+            "endUtf16": 569
+          },
+          {
+            "startUtf16": 570,
+            "endUtf16": 577
+          },
+          {
+            "startUtf16": 578,
+            "endUtf16": 585
+          },
+          {
+            "startUtf16": 586,
+            "endUtf16": 593
+          },
+          {
+            "startUtf16": 594,
+            "endUtf16": 601
+          },
+          {
+            "startUtf16": 602,
+            "endUtf16": 609
+          },
+          {
+            "startUtf16": 610,
+            "endUtf16": 617
+          },
+          {
+            "startUtf16": 618,
+            "endUtf16": 625
+          },
+          {
+            "startUtf16": 626,
+            "endUtf16": 633
+          },
+          {
+            "startUtf16": 634,
+            "endUtf16": 641
+          },
+          {
+            "startUtf16": 642,
+            "endUtf16": 649
+          },
+          {
+            "startUtf16": 650,
+            "endUtf16": 657
+          },
+          {
+            "startUtf16": 658,
+            "endUtf16": 665
+          },
+          {
+            "startUtf16": 666,
+            "endUtf16": 673
+          },
+          {
+            "startUtf16": 674,
+            "endUtf16": 681
+          },
+          {
+            "startUtf16": 682,
+            "endUtf16": 689
+          },
+          {
+            "startUtf16": 690,
+            "endUtf16": 697
+          },
+          {
+            "startUtf16": 698,
+            "endUtf16": 705
+          },
+          {
+            "startUtf16": 706,
+            "endUtf16": 713
+          },
+          {
+            "startUtf16": 714,
+            "endUtf16": 721
+          },
+          {
+            "startUtf16": 722,
+            "endUtf16": 729
+          },
+          {
+            "startUtf16": 730,
+            "endUtf16": 737
+          },
+          {
+            "startUtf16": 738,
+            "endUtf16": 745
+          },
+          {
+            "startUtf16": 746,
+            "endUtf16": 753
+          },
+          {
+            "startUtf16": 754,
+            "endUtf16": 761
+          },
+          {
+            "startUtf16": 762,
+            "endUtf16": 769
+          },
+          {
+            "startUtf16": 770,
+            "endUtf16": 777
+          },
+          {
+            "startUtf16": 778,
+            "endUtf16": 785
+          },
+          {
+            "startUtf16": 786,
+            "endUtf16": 793
+          },
+          {
+            "startUtf16": 794,
+            "endUtf16": 801
+          },
+          {
+            "startUtf16": 802,
+            "endUtf16": 809
+          },
+          {
+            "startUtf16": 810,
+            "endUtf16": 817
+          },
+          {
+            "startUtf16": 818,
+            "endUtf16": 825
+          },
+          {
+            "startUtf16": 826,
+            "endUtf16": 833
+          },
+          {
+            "startUtf16": 834,
+            "endUtf16": 841
+          },
+          {
+            "startUtf16": 842,
+            "endUtf16": 849
+          },
+          {
+            "startUtf16": 850,
+            "endUtf16": 857
+          },
+          {
+            "startUtf16": 858,
+            "endUtf16": 865
+          },
+          {
+            "startUtf16": 866,
+            "endUtf16": 873
+          },
+          {
+            "startUtf16": 874,
+            "endUtf16": 881
+          },
+          {
+            "startUtf16": 882,
+            "endUtf16": 889
+          },
+          {
+            "startUtf16": 890,
+            "endUtf16": 897
+          },
+          {
+            "startUtf16": 898,
+            "endUtf16": 905
+          },
+          {
+            "startUtf16": 906,
+            "endUtf16": 913
+          },
+          {
+            "startUtf16": 914,
+            "endUtf16": 921
+          },
+          {
+            "startUtf16": 922,
+            "endUtf16": 929
+          },
+          {
+            "startUtf16": 930,
+            "endUtf16": 937
+          },
+          {
+            "startUtf16": 938,
+            "endUtf16": 945
+          },
+          {
+            "startUtf16": 946,
+            "endUtf16": 953
+          },
+          {
+            "startUtf16": 954,
+            "endUtf16": 961
+          },
+          {
+            "startUtf16": 962,
+            "endUtf16": 969
+          },
+          {
+            "startUtf16": 970,
+            "endUtf16": 977
+          },
+          {
+            "startUtf16": 978,
+            "endUtf16": 985
+          },
+          {
+            "startUtf16": 986,
+            "endUtf16": 993
+          },
+          {
+            "startUtf16": 994,
+            "endUtf16": 1001
+          },
+          {
+            "startUtf16": 1002,
+            "endUtf16": 1009
+          },
+          {
+            "startUtf16": 1010,
+            "endUtf16": 1017
+          },
+          {
+            "startUtf16": 1018,
+            "endUtf16": 1025
+          },
+          {
+            "startUtf16": 1026,
+            "endUtf16": 1033
+          },
+          {
+            "startUtf16": 1034,
+            "endUtf16": 1041
+          },
+          {
+            "startUtf16": 1042,
+            "endUtf16": 1049
+          },
+          {
+            "startUtf16": 1050,
+            "endUtf16": 1057
+          },
+          {
+            "startUtf16": 1058,
+            "endUtf16": 1065
+          },
+          {
+            "startUtf16": 1066,
+            "endUtf16": 1073
+          },
+          {
+            "startUtf16": 1074,
+            "endUtf16": 1081
+          },
+          {
+            "startUtf16": 1082,
+            "endUtf16": 1089
+          },
+          {
+            "startUtf16": 1090,
+            "endUtf16": 1097
+          },
+          {
+            "startUtf16": 1098,
+            "endUtf16": 1105
+          },
+          {
+            "startUtf16": 1106,
+            "endUtf16": 1113
+          },
+          {
+            "startUtf16": 1114,
+            "endUtf16": 1121
+          },
+          {
+            "startUtf16": 1122,
+            "endUtf16": 1129
+          },
+          {
+            "startUtf16": 1130,
+            "endUtf16": 1137
+          },
+          {
+            "startUtf16": 1138,
+            "endUtf16": 1145
+          },
+          {
+            "startUtf16": 1146,
+            "endUtf16": 1153
+          },
+          {
+            "startUtf16": 1154,
+            "endUtf16": 1161
+          },
+          {
+            "startUtf16": 1162,
+            "endUtf16": 1169
+          },
+          {
+            "startUtf16": 1170,
+            "endUtf16": 1177
+          },
+          {
+            "startUtf16": 1178,
+            "endUtf16": 1185
+          },
+          {
+            "startUtf16": 1186,
+            "endUtf16": 1193
+          },
+          {
+            "startUtf16": 1194,
+            "endUtf16": 1201
+          }
+        ],
+        "mentions": [
+          {
+            "startUtf16": 384,
+            "endUtf16": 396,
+            "type": "person",
+            "text": "Priya Sharma",
+            "score": 0.9997447729110718
+          },
+          {
+            "startUtf16": 408,
+            "endUtf16": 412,
+            "type": "organization",
+            "text": "Acme",
+            "score": 0.9957547187805176
+          },
+          {
+            "startUtf16": 427,
+            "endUtf16": 432,
+            "type": "project",
+            "text": "Atlas",
+            "score": 0.894142746925354
+          }
+        ]
+      }
+    },
+    {
+      "id": "name-product-collision",
+      "text": "Atlas called Atlas support from Atlas Labs; Project Atlas is still a separate initiative.",
+      "schemaVersion": "folio-entities-v1",
+      "labels": [
+        {
+          "type": "person",
+          "description": "a named person or human individual, including first and last names"
+        },
+        {
+          "type": "organization",
+          "description": "a company, institution, government body, team, or other organization"
+        },
+        {
+          "type": "project",
+          "description": "a named project, initiative, event, or organized body of work"
+        },
+        {
+          "type": "product",
+          "description": "a named product, software tool, service, or named technology"
+        },
+        {
+          "type": "location",
+          "description": "a named geographic place, venue, or physical location"
+        }
+      ],
+      "maxTokens": 512,
+      "overlapTokens": 32,
+      "expected": {
+        "inputIds": [
+          275,
+          250104,
+          260,
+          266,
+          188457,
+          250111,
+          2986,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          2986,
+          632,
+          6911,
+          6921,
+          262,
+          260,
+          7036,
+          2263,
+          306,
+          3168,
+          41617,
+          250111,
+          29661,
+          268,
+          260,
+          263,
+          5836,
+          262,
+          73569,
+          262,
+          13750,
+          8659,
+          262,
+          4645,
+          262,
+          632,
+          1905,
+          29661,
+          250111,
+          6246,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          6246,
+          262,
+          260,
+          51357,
+          262,
+          10276,
+          262,
+          632,
+          4827,
+          346,
+          8659,
+          305,
+          2405,
+          250111,
+          5690,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          5690,
+          262,
+          6297,
+          16081,
+          262,
+          2946,
+          262,
+          632,
+          260,
+          55979,
+          16186,
+          250111,
+          8939,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          260,
+          158070,
+          2555,
+          262,
+          260,
+          19367,
+          262,
+          632,
+          260,
+          28224,
+          8939,
+          275,
+          250106,
+          2986,
+          250106,
+          29661,
+          250106,
+          6246,
+          250106,
+          5690,
+          250106,
+          8939,
+          260,
+          272,
+          260,
+          272,
+          250103,
+          143957,
+          260,
+          13076,
+          143957,
+          2479,
+          703,
+          143957,
+          260,
+          15346,
+          260,
+          297,
+          6246,
+          143957,
+          340,
+          5388,
+          260,
+          263,
+          260,
+          40336,
+          260,
+          51357,
+          260,
+          261
+        ],
+        "markerPositions": [
+          1,
+          97,
+          99,
+          101,
+          103,
+          105
+        ],
+        "wordPositions": [
+          112,
+          113,
+          115,
+          116,
+          117,
+          118,
+          119,
+          121,
+          123,
+          124,
+          125,
+          126,
+          127,
+          129,
+          131,
+          133
+        ],
+        "wordOffsets": [
+          {
+            "startUtf16": 0,
+            "endUtf16": 5
+          },
+          {
+            "startUtf16": 6,
+            "endUtf16": 12
+          },
+          {
+            "startUtf16": 13,
+            "endUtf16": 18
+          },
+          {
+            "startUtf16": 19,
+            "endUtf16": 26
+          },
+          {
+            "startUtf16": 27,
+            "endUtf16": 31
+          },
+          {
+            "startUtf16": 32,
+            "endUtf16": 37
+          },
+          {
+            "startUtf16": 38,
+            "endUtf16": 42
+          },
+          {
+            "startUtf16": 42,
+            "endUtf16": 43
+          },
+          {
+            "startUtf16": 44,
+            "endUtf16": 51
+          },
+          {
+            "startUtf16": 52,
+            "endUtf16": 57
+          },
+          {
+            "startUtf16": 58,
+            "endUtf16": 60
+          },
+          {
+            "startUtf16": 61,
+            "endUtf16": 66
+          },
+          {
+            "startUtf16": 67,
+            "endUtf16": 68
+          },
+          {
+            "startUtf16": 69,
+            "endUtf16": 77
+          },
+          {
+            "startUtf16": 78,
+            "endUtf16": 88
+          },
+          {
+            "startUtf16": 88,
+            "endUtf16": 89
+          }
+        ],
+        "mentions": [
+          {
+            "startUtf16": 32,
+            "endUtf16": 42,
+            "type": "organization",
+            "text": "Atlas Labs",
+            "score": 0.9941160082817078
+          },
+          {
+            "startUtf16": 52,
+            "endUtf16": 57,
+            "type": "project",
+            "text": "Atlas",
+            "score": 0.9092454314231873
+          },
+          {
+            "startUtf16": 13,
+            "endUtf16": 18,
+            "type": "project",
+            "text": "Atlas",
+            "score": 0.8906891345977783
+          },
+          {
+            "startUtf16": 0,
+            "endUtf16": 5,
+            "type": "project",
+            "text": "Atlas",
+            "score": 0.8405721187591553
+          },
+          {
+            "startUtf16": 32,
+            "endUtf16": 37,
+            "type": "project",
+            "text": "Atlas",
+            "score": 0.6002458333969116
+          },
+          {
+            "startUtf16": 13,
+            "endUtf16": 26,
+            "type": "product",
+            "text": "Atlas support",
+            "score": 0.5655173063278198
+          }
+        ]
+      }
+    },
+    {
+      "id": "acme-directory-only",
+      "text": "Acme appears in the vendor directory. No project or meeting context was recorded.",
+      "schemaVersion": "folio-entities-v1",
+      "labels": [
+        {
+          "type": "person",
+          "description": "a named person or human individual, including first and last names"
+        },
+        {
+          "type": "organization",
+          "description": "a company, institution, government body, team, or other organization"
+        },
+        {
+          "type": "project",
+          "description": "a named project, initiative, event, or organized body of work"
+        },
+        {
+          "type": "product",
+          "description": "a named product, software tool, service, or named technology"
+        },
+        {
+          "type": "location",
+          "description": "a named geographic place, venue, or physical location"
+        }
+      ],
+      "maxTokens": 512,
+      "overlapTokens": 32,
+      "expected": {
+        "inputIds": [
+          275,
+          250104,
+          260,
+          266,
+          188457,
+          250111,
+          2986,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          2986,
+          632,
+          6911,
+          6921,
+          262,
+          260,
+          7036,
+          2263,
+          306,
+          3168,
+          41617,
+          250111,
+          29661,
+          268,
+          260,
+          263,
+          5836,
+          262,
+          73569,
+          262,
+          13750,
+          8659,
+          262,
+          4645,
+          262,
+          632,
+          1905,
+          29661,
+          250111,
+          6246,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          6246,
+          262,
+          260,
+          51357,
+          262,
+          10276,
+          262,
+          632,
+          4827,
+          346,
+          8659,
+          305,
+          2405,
+          250111,
+          5690,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          5690,
+          262,
+          6297,
+          16081,
+          262,
+          2946,
+          262,
+          632,
+          260,
+          55979,
+          16186,
+          250111,
+          8939,
+          268,
+          260,
+          263,
+          260,
+          55979,
+          260,
+          158070,
+          2555,
+          262,
+          260,
+          19367,
+          262,
+          632,
+          260,
+          28224,
+          8939,
+          275,
+          250106,
+          2986,
+          250106,
+          29661,
+          250106,
+          6246,
+          250106,
+          5690,
+          250106,
+          8939,
+          260,
+          272,
+          260,
+          272,
+          250103,
+          2778,
+          646,
+          260,
+          15485,
+          264,
+          282,
+          288,
+          260,
+          73377,
+          260,
+          15145,
+          260,
+          261,
+          376,
+          6246,
+          632,
+          19621,
+          19731,
+          640,
+          8450,
+          346,
+          260,
+          261
+        ],
+        "markerPositions": [
+          1,
+          97,
+          99,
+          101,
+          103,
+          105
+        ],
+        "wordPositions": [
+          112,
+          114,
+          117,
+          118,
+          119,
+          121,
+          123,
+          125,
+          126,
+          127,
+          128,
+          129,
+          130,
+          131,
+          133
+        ],
+        "wordOffsets": [
+          {
+            "startUtf16": 0,
+            "endUtf16": 4
+          },
+          {
+            "startUtf16": 5,
+            "endUtf16": 12
+          },
+          {
+            "startUtf16": 13,
+            "endUtf16": 15
+          },
+          {
+            "startUtf16": 16,
+            "endUtf16": 19
+          },
+          {
+            "startUtf16": 20,
+            "endUtf16": 26
+          },
+          {
+            "startUtf16": 27,
+            "endUtf16": 36
+          },
+          {
+            "startUtf16": 36,
+            "endUtf16": 37
+          },
+          {
+            "startUtf16": 38,
+            "endUtf16": 40
+          },
+          {
+            "startUtf16": 41,
+            "endUtf16": 48
+          },
+          {
+            "startUtf16": 49,
+            "endUtf16": 51
+          },
+          {
+            "startUtf16": 52,
+            "endUtf16": 59
+          },
+          {
+            "startUtf16": 60,
+            "endUtf16": 67
+          },
+          {
+            "startUtf16": 68,
+            "endUtf16": 71
+          },
+          {
+            "startUtf16": 72,
+            "endUtf16": 80
+          },
+          {
+            "startUtf16": 80,
+            "endUtf16": 81
+          }
+        ],
+        "mentions": [
+          {
+            "startUtf16": 20,
+            "endUtf16": 36,
+            "type": "organization",
+            "text": "vendor directory",
+            "score": 0.7016496658325195
+          }
+        ]
+      }
+    }
+  ]
+}

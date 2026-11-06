@@ -149,3 +149,49 @@ management.
 Diagnostics go to stderr. A fresh generation session is released and MLX's
 allocator cache is cleared after every request, including failures; the model
 remains loaded until the service's keep-alive expires or the user stops it.
+
+## GLiNER2.5 Multi entities
+
+Entity extraction uses `fastino/gliner2.5-multi-v1` at immutable revision
+`7b005274e82da37dcf1f5fd9d6a2ef413c6a004c`. The checkpoint contains 334 F32
+tensors. The native DeBERTa and GLiNER boundary/scoring implementation follows
+the pinned `Blaizzy/mlx-vlm` reference at
+`4857a6b018e5e214616bbfa8f0f6da92af258ba2`; its MIT notice is shipped in
+`Resources/THIRD_PARTY_NOTICES.md`. The checkpoint license is Apache-2.0.
+
+Use `--task entities --model fastino/gliner2.5-multi-v1` with the pinned
+revision. `--operation install` is the only operation that downloads model
+assets; it emits ready and remains in the JSONL loop. Ordinary startup requires
+`--model-directory` and stays offline. Requests use
+`schemaVersion: "folio-entities-v1"` and the fixed five entity types (`person`,
+`organization`, `project`, `product`, `location`) with explicit descriptions.
+`plan_entity_chunks` accepts text, labels, `maxTokens` (1–512), and
+`overlapTokens`; `tokenCount` counts text tokens only and `schemaTokenCount` is
+reported separately. It returns complete half-open UTF-16 regions, including a
+single zero-text-token region for whitespace-only input. Send each region to
+`extract_entities` to keep requests within the bounded input budget. Results
+use exact original-text UTF-16 offsets and include coverage. Inputs above the
+one-million UTF-16-unit cap and malformed regions are rejected rather than
+truncated.
+
+`Tests/FolioMLXEntitiesTests/Fixtures/gliner25-reference-parity.json` records
+outputs from the pinned Python reference and model snapshot for 13 fictional
+cases. The native F32 implementation matched all 46 mention span/type/text
+triples with maximum absolute score delta `0.00000691` (fixture tolerance
+`0.00001`). Token IDs, marker positions, word positions, and UTF-16-converted
+word offsets matched all 13 cases. The reference used MLX 0.32.4 and Swift
+Cmlx uses 0.31.3; the fixture preserves this measured kernel-version context.
+
+Reproduce the full extraction comparison on an Apple Silicon Mac with the
+pinned model installed and the native helper built:
+
+```sh
+python3 experiments/mlx-swift/Scripts/test-gliner25-parity.py \
+  --helper experiments/mlx-swift/.cache/native-build/out/Products/Debug/folio-mlx \
+  --model-directory /path/to/fastino-gliner2.5-multi-v1
+```
+
+The fixture contains the exact fictional inputs, schema labels, pinned Python
+reference token IDs/word mappings, and expected mention outputs. The runner
+checks every mention key, confidence tolerance, and reference input token
+count against the helper.
