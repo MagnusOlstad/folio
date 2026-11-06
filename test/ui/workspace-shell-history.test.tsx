@@ -22,7 +22,7 @@ function shellProps(options: {
   rightPaneOpen?: boolean;
   activeGroupId?: string;
   primaryId?: string | null;
-  documents?: Record<string, { title: string; deletable: boolean }>;
+  documents?: Record<string, { id: string; title: string; content: string; deletable: boolean }>;
   loadingDocuments?: Set<string>;
   beforeHistoryRestore?: (id: string) => Promise<void>;
   historyRestored?: (id: string) => Promise<void>;
@@ -45,8 +45,8 @@ function shellProps(options: {
         ],
         activeGroupId: options.activeGroupId ?? "primary",
         documents: options.documents ?? {
-          [noteId]: { title: "Current note", deletable: true },
-          [otherNoteId]: { title: "Other note", deletable: true },
+          [noteId]: { id: noteId, title: "Current note", content: "Current content", deletable: true },
+          [otherNoteId]: { id: otherNoteId, title: "Other note", content: "Other content", deletable: true },
         },
         loadingDocuments: options.loadingDocuments ?? new Set(),
         drafts: {},

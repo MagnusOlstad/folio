@@ -31,6 +31,7 @@ describe("EntitiesPanel", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<EntitiesPanel bundleId="bundle-a" note={{ id: "note-a", title: "Acme launch", content: "Acme" }} draft={undefined} onReveal={vi.fn()} onOpenNote={onOpenNote} onCreateNote={vi.fn(async () => null)} onOpenSettings={vi.fn()} scope={{ bundleId: "bundle-a", entityIds: [], entities: [], toggleEntity, clear: vi.fn() }} />);
 
+    await screen.findByRole("checkbox", { name: "Include Acme in scope" });
     expect((await screen.findAllByRole("button", { name: "Acme" })).length).toBeGreaterThan(0);
     expect(screen.getByText("Atlas planning")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Atlas planning" }));
@@ -119,4 +120,38 @@ describe("EntitiesPanel", () => {
     const atlasDetail = await screen.findByRole("generic", { name: "Atlas details" });
     expect(within(atlasDetail).getByLabelText("Rename")).toHaveValue("Atlas");
   });
+
+  it("drops an in-flight entity page when the search filter changes", async () => {
+    let resolveOldPage: ((response: Response) => void) | undefined;
+    const delayedOldPage = new Promise<Response>((resolve) => { resolveOldPage = resolve; });
+    const first: EntityPageItem = { id: "entity-first", label: "First result", type: "organization", aliases: [], mentionCount: 1, noteCount: 1, createdAt: "", updatedAt: "" };
+    const filtered: EntityPageItem = { id: "entity-filtered", label: "Filtered result", type: "organization", aliases: [], mentionCount: 1, noteCount: 1, createdAt: "", updatedAt: "" };
+    const stale: EntityPageItem = { id: "entity-stale", label: "Stale page result", type: "organization", aliases: [], mentionCount: 1, noteCount: 1, createdAt: "", updatedAt: "" };
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/settings")) return Promise.resolve(json({ enabled: true, modelId: "gliner25multi" }));
+      if (url.includes("/corrections/latest")) return Promise.resolve(json({ revision: 1, undoToken: null }));
+      if (url.includes("/jobs")) return Promise.resolve(json({ items: [], nextCursor: null, mode: "running" }));
+      if (url.includes("/related")) return Promise.resolve(json({ items: [], nextCursor: null }));
+      if (url.includes("/mentions?")) return Promise.resolve(json({ items: [], staleCount: 0, freshness: "current", coverage: null }));
+      if (url.includes("cursor=old-page")) return delayedOldPage;
+      if (url.includes("q=Filtered")) return Promise.resolve(json({ items: [filtered], nextCursor: null, coverage: null }));
+      return Promise.resolve(json({ items: [first], nextCursor: "old-page", coverage: null }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<EntitiesPanel bundleId="bundle-a" note={null} draft={undefined} onReveal={vi.fn()} onOpenNote={vi.fn()} onCreateNote={vi.fn(async () => null)} onOpenSettings={vi.fn()} scope={{ bundleId: "bundle-a", entityIds: [], entities: [], toggleEntity: vi.fn(), clear: vi.fn() }} />);
+
+    expect(await screen.findByRole("button", { name: "First result" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Load more entities" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("cursor=old-page"), expect.anything()));
+    fireEvent.change(screen.getByRole("textbox", { name: "Search entities" }), { target: { value: "Filtered" } });
+    expect(await screen.findByRole("button", { name: "Filtered result" })).toBeVisible();
+    resolveOldPage?.(json({ items: [stale], nextCursor: null, coverage: null }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Stale page result" })).not.toBeInTheDocument());
+  });
 });
+
+type EntityPageItem = { id: string; label: string; type: "organization"; aliases: string[]; mentionCount: number; noteCount: number; createdAt: string; updatedAt: string };
+function json(value: unknown) {
+  return new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } });
+}

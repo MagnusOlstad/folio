@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Entity, EntityCorrectionCommand, EntityCoverage, EntityJob, EntityJobMode, EntityMention, EntityNoteMentions, EntityRelatedSuggestion } from "../../../domain/entities.ts";
 import { entityApiForBundle } from "../../../lib/entities-api.ts";
 import { apiForBundle } from "../../../lib/api.ts";
@@ -35,6 +35,10 @@ export function EntitiesPanel({ bundleId, note, draft, onReveal, onOpenNote, onC
   const detailRequest = useRef(0);
   const activeDetailId = useRef<string | null>(null);
   const entityPagesLoaded = useRef(0);
+  const entityRequestEpoch = useRef(0);
+  const entityFilterKey = JSON.stringify([query, typeFilter, activityFilter]);
+  const entityFilterKeyRef = useRef(entityFilterKey);
+  useLayoutEffect(() => { entityFilterKeyRef.current = entityFilterKey; }, [entityFilterKey]);
   const jobPagesLoaded = useRef(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -65,7 +69,6 @@ export function EntitiesPanel({ bundleId, note, draft, onReveal, onOpenNote, onC
     if (!api) return;
     const controller = new AbortController();
     void api.settings({ signal: controller.signal }).then(setSettings).catch((caught) => { if (!controller.signal.aborted) setError(errorText(caught)); });
-    void api.list({ limit: 30, signal: controller.signal }).then((page) => { entityPagesLoaded.current = 0; setEntities(page.items); setNextEntityCursor(page.nextCursor); setCoverage(page.coverage); }).catch((caught) => { if (!controller.signal.aborted) setError(errorText(caught)); });
     void api.latestUndo({ signal: controller.signal }).then((undo) => { setRevision(undo.revision); setUndoToken(undo.undoToken); }).catch((caught) => { if (!controller.signal.aborted) setError(errorText(caught)); });
     void api.jobs(undefined, 8, { signal: controller.signal }).then((page) => { jobPagesLoaded.current = 0; setJobs(page.items); setNextJobCursor(page.nextCursor); setJobMode(page.mode); }).catch((caught) => { if (!controller.signal.aborted) setError(errorText(caught)); });
     if (noteId) {
@@ -78,13 +81,20 @@ export function EntitiesPanel({ bundleId, note, draft, onReveal, onOpenNote, onC
   useEffect(() => {
     if (!api) return;
     const controller = new AbortController();
+    const requestEpoch = entityRequestEpoch.current;
+    const requestFilterKey = entityFilterKey;
+    entityPagesLoaded.current = 0;
     const timer = window.setTimeout(() => {
       void api.list({ q: query, type: typeFilter || undefined, activity: activityFilter, limit: 30, signal: controller.signal }).then((page) => {
-        if (!controller.signal.aborted) { setEntities(page.items); setNextEntityCursor(page.nextCursor); }
+        if (!controller.signal.aborted && requestEpoch === entityRequestEpoch.current && requestFilterKey === entityFilterKeyRef.current) {
+          setEntities(page.items);
+          setNextEntityCursor(page.nextCursor);
+          setCoverage(page.coverage);
+        }
       }).catch((caught) => { if (!controller.signal.aborted) setError(errorText(caught)); });
     }, 180);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [api, query, typeFilter, activityFilter]);
+  }, [api, entityFilterKey, query, typeFilter, activityFilter]);
 
   useEffect(() => {
     if (!api) return;
@@ -93,6 +103,8 @@ export function EntitiesPanel({ bundleId, note, draft, onReveal, onOpenNote, onC
     let signature = "";
     let controller: AbortController | null = null;
     const poll = async () => {
+      const requestEpoch = entityRequestEpoch.current;
+      const requestFilterKey = entityFilterKeyRef.current;
       controller = new AbortController();
       try {
         const [jobResult, settingsResult] = await Promise.allSettled([
@@ -119,11 +131,12 @@ export function EntitiesPanel({ bundleId, note, draft, onReveal, onOpenNote, onC
           ]);
           if (stopped) return;
           if (listResult.status === "fulfilled") {
-            setEntities((current) => mergeFirstPage(current, listResult.value.items));
-            if (entityPagesLoaded.current === 0) setNextEntityCursor(listResult.value.nextCursor);
-            setCoverage(listResult.value.coverage);
-          }
-          else if (!controller.signal.aborted) setError(errorText(listResult.reason));
+            if (requestEpoch === entityRequestEpoch.current && requestFilterKey === entityFilterKeyRef.current) {
+              setEntities((current) => mergeFirstPage(current, listResult.value.items));
+              if (entityPagesLoaded.current === 0) setNextEntityCursor(listResult.value.nextCursor);
+              setCoverage(listResult.value.coverage);
+            }
+          } else if (!controller.signal.aborted) setError(errorText(listResult.reason));
           if (noteResult.status === "fulfilled" && noteResult.value) { setMentions(noteResult.value.items); setNoteCoverage(noteResult.value); }
           else if (noteResult.status === "rejected" && !controller.signal.aborted) setError(errorText(noteResult.reason));
           if (relatedResult.status === "fulfilled") setRelated(relatedResult.value?.items ?? []);
@@ -138,10 +151,12 @@ export function EntitiesPanel({ bundleId, note, draft, onReveal, onOpenNote, onC
     };
     void poll();
     return () => { stopped = true; if (timer !== null) window.clearTimeout(timer); controller?.abort(); };
-  }, [api, noteId, query, typeFilter, activityFilter]);
+  }, [api, entityFilterKey, noteId, query, typeFilter, activityFilter]);
 
   async function refresh() {
     if (!api) return;
+    const capturedEntityEpoch = entityRequestEpoch.current;
+    const capturedEntityFilterKey = entityFilterKeyRef.current;
     const capturedDetailRequest = detailRequest.current;
     const capturedDetailId = detail?.id && activeDetailId.current === detail.id ? detail.id : null;
     const [entityResult, undoResult, mentionResult, relatedResult, detailResult] = await Promise.allSettled([
@@ -150,7 +165,8 @@ export function EntitiesPanel({ bundleId, note, draft, onReveal, onOpenNote, onC
       note ? api.related(note.id, undefined, 8) : Promise.resolve(null),
       detail ? api.detail(detail.id) : Promise.resolve(null),
     ]);
-    if (entityResult.status === "fulfilled") {
+    if (entityResult.status === "fulfilled" && capturedEntityEpoch === entityRequestEpoch.current
+      && capturedEntityFilterKey === entityFilterKeyRef.current) {
       setEntities((current) => mergeFirstPage(current, entityResult.value.items));
       if (entityPagesLoaded.current === 0) setNextEntityCursor(entityResult.value.nextCursor);
       setCoverage(entityResult.value.coverage);
@@ -199,7 +215,15 @@ export function EntitiesPanel({ bundleId, note, draft, onReveal, onOpenNote, onC
   }
   async function loadMoreEntities() {
     if (!api || !nextEntityCursor) return;
-    try { const page = await api.list({ q: query, type: typeFilter || undefined, activity: activityFilter, limit: 30, cursor: nextEntityCursor }); setEntities((current) => appendUnique(current, page.items)); entityPagesLoaded.current += 1; setNextEntityCursor(page.nextCursor); }
+    const requestEpoch = entityRequestEpoch.current;
+    const requestFilterKey = entityFilterKeyRef.current;
+    try {
+      const page = await api.list({ q: query, type: typeFilter || undefined, activity: activityFilter, limit: 30, cursor: nextEntityCursor });
+      if (requestEpoch !== entityRequestEpoch.current || requestFilterKey !== entityFilterKeyRef.current) return;
+      setEntities((current) => appendUnique(current, page.items));
+      entityPagesLoaded.current += 1;
+      setNextEntityCursor(page.nextCursor);
+    }
     catch (caught) { setError(errorText(caught)); }
   }
   async function undoLatest() {
@@ -219,7 +243,7 @@ export function EntitiesPanel({ bundleId, note, draft, onReveal, onOpenNote, onC
     <div className="entities-analysis-setting"><label><input type="checkbox" checked={settings?.enabled ?? false} disabled={!settings || busy} onChange={(event) => void changeEnabled(event.target.checked)} /> Analyze this bundle</label><button type="button" disabled={busy || !note} onClick={() => void runJob({ noteIds: note ? [note.id] : undefined, force: true, reason: "manual" })}>Analyze current note</button><button type="button" disabled={busy} onClick={() => void runJob({ force: true, reason: "rebuild" })}>Rebuild index</button><button type="button" disabled={busy || !undoToken} onClick={() => void undoLatest()}>Undo last correction</button></div>
     {note ? <div className="entities-current"><h3>In this note</h3>{draft !== undefined && <p role="status">Save this draft to refresh entity matches.</p>}{draft === undefined && noteCoverage?.freshness === "stale" && <p role="status">Entity matches are out of date and need analysis.</p>}{noteCoverage?.staleCount ? <p role="status">{noteCoverage.staleCount} stale mentions are hidden until this note is analyzed.</p> : null}{grouped.length === 0 && <p role={jobs.some((job) => job.items.some((item) => item.noteId === note.id && item.state === "failed")) ? "alert" : "status"}>{jobs.some((job) => job.items.some((item) => item.noteId === note.id && item.state === "failed")) ? (jobs.flatMap((job) => job.items).find((item) => item.noteId === note.id && item.state === "failed")?.error || "Analysis failed for this note. Retry the job from Analysis jobs.") : jobs.some((job) => job.items.some((item) => item.noteId === note.id && ["queued", "running", "paused"].includes(item.state))) ? "Analysis is in progress for this note." : dismissedGrouped.length ? "No active mentions. Dismissed mentions can be restored below." : settings?.enabled ? "No resolved entities found yet." : "Turn on analysis for this bundle to find entities in this note."}</p>}{grouped.map((group) => <section key={group.type}><h4>{group.label}</h4><ul>{group.mentions.map((mention) => <li key={mention.id}><button className="entity-mention-link" type="button" disabled={draft !== undefined} onClick={() => onReveal(mention)}>{mention.text}</button><span>{mention.resolution === "ambiguous" ? "Needs review" : mention.resolution}</span><button type="button" disabled={busy} onClick={() => void correct({ type: "dismiss", mentionIds: [mention.id] })}>Dismiss</button>{mention.resolution !== "resolved" && <><select aria-label={`Assign ${mention.text} to an entity`} defaultValue="" onChange={(event) => { if (event.target.value) void correct({ type: "reassign", mentionIds: [mention.id], entityId: event.target.value }); }}><option value="">Choose identity…</option>{entities.filter((entity) => entity.type === mention.type).map((entity) => <option key={entity.id} value={entity.id}>{entity.label}</option>)}</select><button type="button" disabled={busy} onClick={() => { const label = window.prompt("Name for this distinct identity", mention.text); if (label?.trim()) void correct({ type: "split", mentionIds: [mention.id], label: label.trim(), entityType: mention.type }); }}>Create distinct identity</button></>}</li>)}</ul></section>)}{dismissedGrouped.length > 0 && <section aria-label="Dismissed mentions"><h4>Dismissed mentions</h4>{dismissedGrouped.map((group) => <div key={group.type}><h5>{group.label}</h5><ul>{group.mentions.map((mention) => <li key={mention.id}><button className="entity-mention-link" type="button" disabled={draft !== undefined} onClick={() => onReveal(mention)}>{mention.text}</button><button type="button" disabled={busy} onClick={() => void correct({ type: "restore", mentionIds: [mention.id] })}>Restore</button></li>)}</ul></div>)}</section>}</div> : <p className="entities-empty">Open a note to see its entities and related notes.</p>}
     {note && <section className="entities-related"><h3>Related notes</h3><p>Notes that mention the same entities. Shared mentions are evidence of co-occurrence, not a relationship.</p>{related.length ? <ul>{related.map((item) => <li key={item.noteId}><button type="button" className="entity-note-link" onClick={() => onOpenNote(item.noteId)}>{item.title}</button>{item.noteDate && <time>{item.noteDate}</time>}<span>{item.sharedEntities.map((entity) => entity.label).join(", ")}</span><button type="button" disabled={busy} onClick={() => void correct({ type: "dismiss-related", noteId: note.id, relatedNoteId: item.noteId })}>Dismiss</button></li>)}</ul> : <p>No shared-entity suggestions.</p>}</section>}
-    <section className="entities-browser"><h3>Browse entities</h3><label>Search entities<input value={query} onChange={(event) => { setQuery(event.target.value); setNextEntityCursor(null); }} placeholder="Search names and aliases" /></label><label>Type<select value={typeFilter} onChange={(event) => { setTypeFilter(event.target.value as Entity["type"] | ""); setNextEntityCursor(null); }}><option value="">All types</option>{["person", "organization", "project", "product", "location"].map((type) => <option key={type} value={type}>{type}</option>)}</select></label><label>Activity<select value={activityFilter} onChange={(event) => { setActivityFilter(event.target.value as typeof activityFilter); setNextEntityCursor(null); }}><option value="active">Active</option><option value="stale">Stale</option><option value="all">All</option></select></label><p>{selected.length ? `Selected for search scope: ${selectedEntities.map((entity) => entity.label).join(", ")}` : "Select entities to scope a future search or Ask request."}</p>{selected.length > 0 && <button type="button" onClick={clearScope}>Clear scope</button>}<ul>{filtered.map((entity) => <li key={entity.id}><input aria-label={`Include ${entity.label} in scope`} type="checkbox" checked={selected.includes(entity.id)} onChange={(event) => toggleEntity(entity, event.target.checked)} /><button type="button" onClick={() => openEntityDetail(entity)}>{entity.label}</button><span>{entity.type} · {entity.noteCount} notes</span></li>)}</ul>{nextEntityCursor && <button type="button" onClick={() => void loadMoreEntities()}>Load more entities</button>}{detail && <EntityDetail key={`${detail.id}:${detailRevision}`} bundleId={bundleId} entity={detail} api={api} onClose={closeEntityDetail} onCommand={correct} busy={busy} currentNoteId={note?.id ?? null} entities={entities} onReveal={onReveal} onOpenNote={onOpenNote} onCreateNote={onCreateNote} />}</section>
+    <section className="entities-browser"><h3>Browse entities</h3><label>Search entities<input value={query} onChange={(event) => { setQuery(event.target.value); setEntities([]); setNextEntityCursor(null); entityPagesLoaded.current = 0; entityRequestEpoch.current += 1; }} placeholder="Search names and aliases" /></label><label>Type<select value={typeFilter} onChange={(event) => { setTypeFilter(event.target.value as Entity["type"] | ""); setEntities([]); setNextEntityCursor(null); entityPagesLoaded.current = 0; entityRequestEpoch.current += 1; }}><option value="">All types</option>{["person", "organization", "project", "product", "location"].map((type) => <option key={type} value={type}>{type}</option>)}</select></label><label>Activity<select value={activityFilter} onChange={(event) => { setActivityFilter(event.target.value as typeof activityFilter); setEntities([]); setNextEntityCursor(null); entityPagesLoaded.current = 0; entityRequestEpoch.current += 1; }}><option value="active">Active</option><option value="stale">Stale</option><option value="all">All</option></select></label><p>{selected.length ? `Selected for search scope: ${selectedEntities.map((entity) => entity.label).join(", ")}` : "Select entities to scope a future search or Ask request."}</p>{selected.length > 0 && <button type="button" onClick={clearScope}>Clear scope</button>}<ul>{filtered.map((entity) => <li key={entity.id}><input aria-label={`Include ${entity.label} in scope`} type="checkbox" checked={selected.includes(entity.id)} onChange={(event) => toggleEntity(entity, event.target.checked)} /><button type="button" onClick={() => openEntityDetail(entity)}>{entity.label}</button><span>{entity.type} · {entity.noteCount} notes</span></li>)}</ul>{nextEntityCursor && <button type="button" onClick={() => void loadMoreEntities()}>Load more entities</button>}{detail && <EntityDetail key={`${detail.id}:${detailRevision}`} bundleId={bundleId} entity={detail} api={api} onClose={closeEntityDetail} onCommand={correct} busy={busy} currentNoteId={note?.id ?? null} entities={entities} onReveal={onReveal} onOpenNote={onOpenNote} onCreateNote={onCreateNote} />}</section>
     <section className="entities-jobs"><h3>Analysis jobs</h3>{coverage && <p role="status">Coverage: {coverage.processed}/{coverage.eligible} processed · {coverage.pending} pending · {coverage.stale} stale · {coverage.failed} failed{jobMode ? ` · ${jobMode.replaceAll("_", " ")}` : ""}</p>}{jobs.length ? <ul>{jobs.map((job) => <li key={job.id}><span>{job.reason}: {job.state} ({job.completed}/{job.total})</span><div>{job.state === "running" ? <button type="button" onClick={() => void actOnJob(job.id, "pause")}>Pause</button> : job.state === "paused" || job.state === "failed" || job.state === "partial" ? <button type="button" onClick={() => void actOnJob(job.id, "resume")}>{job.state === "failed" || job.state === "partial" ? "Retry failed" : "Resume"}</button> : null}{["queued", "running", "paused"].includes(job.state) && <button type="button" onClick={() => void actOnJob(job.id, "cancel")}>Cancel</button>}</div></li>)}</ul> : <p>No analysis jobs.</p>}{nextJobCursor && <button type="button" onClick={() => void loadMoreJobs()}>Load more jobs</button>}</section>
   </section>;
 }
