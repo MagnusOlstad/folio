@@ -1,18 +1,22 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
-import type { TranslatedExportJob, ViewerDocument } from "../../../domain/types.ts";
+import type { TranslatedExportJob, TranslatedExportPhase, ViewerDocument } from "../../../domain/types.ts";
 import { ApiError, cancelTranslatedExport, fetchTranslatedExport, startTranslatedExport } from "../../../lib/api.ts";
 import {
   TRANSLATED_EXPORT_DESTINATIONS,
   TRANSLATED_EXPORT_LANGUAGES,
+  formatElapsed,
   readTranslatedExportPreferences,
+  translatedExportDoneText,
+  translatedExportPhaseText,
   writeTranslatedExportPreferences,
   type TranslatedExportDeliver,
 } from "../model/translated-export.ts";
-import { translatedProgressLabel } from "../model/note-translation.ts";
+import { TranslationProgress } from "./TranslationProgress.tsx";
 
 export const TRANSLATED_EXPORT_POLL_MS = 1500;
+export const TRANSLATED_EXPORT_SUCCESS_MS = 1200;
 
 type Props = {
   document: ViewerDocument;
@@ -22,7 +26,15 @@ type Props = {
 
 type Phase =
   | { kind: "idle" }
-  | { kind: "running"; jobId: string | null; translated: number; total: number }
+  | {
+      kind: "running";
+      jobId: string | null;
+      translated: number;
+      total: number;
+      phase?: TranslatedExportPhase;
+      last?: string | null;
+    }
+  | { kind: "done" }
   | { kind: "error"; message: string; noModel: boolean };
 
 export function TranslatedExportDialog({ document: note, onClose, onDeliver }: Props) {
@@ -34,6 +46,8 @@ export function TranslatedExportDialog({ document: note, onClose, onDeliver }: P
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const jobIdRef = useRef<string | null>(null);
   const deliveredRef = useRef(false);
+  const resultRef = useRef<TranslatedExportJob | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const running = phase.kind === "running";
   const jobId = running ? phase.jobId : null;
 
@@ -50,6 +64,28 @@ export function TranslatedExportDialog({ document: note, onClose, onDeliver }: P
   }, []);
 
   useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => setElapsed((seconds) => seconds + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [running]);
+
+  function finish() {
+    const job = resultRef.current;
+    if (!job || deliveredRef.current) return;
+    deliveredRef.current = true;
+    onClose();
+    void onDeliver(note, job, job.target, destination);
+  }
+
+  useEffect(() => {
+    if (phase.kind !== "done") return;
+    const timer = window.setTimeout(finish, TRANSLATED_EXPORT_SUCCESS_MS);
+    return () => window.clearTimeout(timer);
+    // finish reads only refs and props fixed for the job's lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase.kind]);
+
+  useEffect(() => {
     if (!jobId) return;
     const controller = new AbortController();
     let timer: number | undefined;
@@ -58,14 +94,12 @@ export function TranslatedExportDialog({ document: note, onClose, onDeliver }: P
         const job: TranslatedExportJob = await fetchTranslatedExport(jobId, controller.signal);
         if (controller.signal.aborted) return;
         if (job.status === "running") {
-          setPhase({ kind: "running", jobId, translated: job.translatedBlocks, total: job.totalBlocks });
+          setPhase({ kind: "running", jobId, translated: job.translatedBlocks, total: job.totalBlocks, phase: job.phase, last: job.lastTranslated });
           timer = window.setTimeout(poll, TRANSLATED_EXPORT_POLL_MS);
         } else if (job.status === "done") {
           jobIdRef.current = null;
-          if (deliveredRef.current) return;
-          deliveredRef.current = true;
-          onClose();
-          void onDeliver(note, job, job.target, destination);
+          resultRef.current = job;
+          setPhase({ kind: "done" });
         } else {
           jobIdRef.current = null;
           setPhase({
@@ -96,11 +130,13 @@ export function TranslatedExportDialog({ document: note, onClose, onDeliver }: P
   async function start() {
     writeTranslatedExportPreferences({ target, destination });
     deliveredRef.current = false;
+    resultRef.current = null;
+    setElapsed(0);
     setPhase({ kind: "running", jobId: null, translated: 0, total: 0 });
     try {
       const job = await startTranslatedExport(note.id, target);
       jobIdRef.current = job.jobId;
-      setPhase({ kind: "running", jobId: job.jobId, translated: job.translatedBlocks, total: job.totalBlocks });
+      setPhase({ kind: "running", jobId: job.jobId, translated: job.translatedBlocks, total: job.totalBlocks, phase: job.phase, last: job.lastTranslated });
     } catch (error) {
       setPhase({
         kind: "error",
@@ -121,7 +157,8 @@ export function TranslatedExportDialog({ document: note, onClose, onDeliver }: P
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
-      cancelAndClose();
+      if (phase.kind === "done") finish();
+      else cancelAndClose();
       return;
     }
     if (event.key !== "Tab") return;
@@ -142,7 +179,7 @@ export function TranslatedExportDialog({ document: note, onClose, onDeliver }: P
   }
 
   return createPortal(
-    <div className="translated-export-layer" onPointerDown={(event) => { if (event.target === event.currentTarget && !running) onClose(); }}>
+    <div className="translated-export-layer" onPointerDown={(event) => { if (event.target === event.currentTarget && !running && phase.kind !== "done") onClose(); }}>
       <div
         ref={rootRef}
         className="translated-export-dialog"
@@ -153,7 +190,7 @@ export function TranslatedExportDialog({ document: note, onClose, onDeliver }: P
       >
         <h2 id={titleId}>Translate and export</h2>
         <p className="translated-export-note">{note.title}</p>
-        <fieldset disabled={running}>
+        <fieldset disabled={running || phase.kind === "done"}>
           <legend>Language</legend>
           <div className="translated-export-options">
             {TRANSLATED_EXPORT_LANGUAGES.map((language) => (
@@ -173,7 +210,7 @@ export function TranslatedExportDialog({ document: note, onClose, onDeliver }: P
             ))}
           </div>
         </fieldset>
-        <fieldset disabled={running}>
+        <fieldset disabled={running || phase.kind === "done"}>
           <legend>Destination</legend>
           <div className="translated-export-options">
             {TRANSLATED_EXPORT_DESTINATIONS.map((option) => (
@@ -190,9 +227,25 @@ export function TranslatedExportDialog({ document: note, onClose, onDeliver }: P
           </div>
         </fieldset>
         {phase.kind === "running" ? (
-          <p className="translation-status" role="status">
-            {phase.total > 0 ? translatedProgressLabel(phase.translated, phase.total) : "Starting translation…"}
-          </p>
+          <div className="translated-export-progress">
+            <TranslationProgress
+              value={phase.translated}
+              max={phase.total}
+              indeterminate={phase.phase === "queued" || phase.phase === "waiting" || phase.total === 0}
+              label={translatedExportPhaseText({
+                phase: phase.phase,
+                translated: phase.translated,
+                total: phase.total,
+                languageName: TRANSLATED_EXPORT_LANGUAGES.find((language) => language.target === target)?.native ?? target,
+                destination,
+              })}
+            />
+            <p className="translated-export-elapsed">Elapsed {formatElapsed(elapsed)}</p>
+            {phase.last ? <p className="translated-export-preview" lang={target}>{phase.last}</p> : null}
+          </div>
+        ) : null}
+        {phase.kind === "done" ? (
+          <p className="translation-status is-done" role="status">{translatedExportDoneText(destination)}</p>
         ) : null}
         {phase.kind === "error" ? (
           <p className="translation-status is-error" role="alert">
@@ -201,7 +254,7 @@ export function TranslatedExportDialog({ document: note, onClose, onDeliver }: P
           </p>
         ) : null}
         <div className="translated-export-actions">
-          {running ? (
+          {phase.kind === "done" ? null : running ? (
             <button type="button" onClick={cancelAndClose}>Cancel</button>
           ) : (
             <>

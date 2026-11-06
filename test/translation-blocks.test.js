@@ -99,3 +99,20 @@ test('placeholder spacing is repaired in both directions only where the source h
   assert.equal(restoreText('**<x1/>** and (<x2/>) [text](<x3/>)', tight.tokens, tight.text), '**`kode`** and ([[lenke]]) [text](https://a.example)')
   assert.equal(restoreText('<x1/> and', protectText('`a` og').tokens, '<x1/> og'), '`a` and')
 })
+
+test('delimiter echoes and wrapping quotes are stripped unless the source has them', async () => {
+  const { parseDirectTranslation, parseTranslationOutput, sanitizeModelText, buildTranslationMessages } = await import('../server/translation/prompt.js')
+  assert.equal(buildTranslationMessages('Hei').at(-1).content.endsWith('<text>\nHei\n</text>'), true)
+  for (const echoed of ['Hallo\n>>>', '<<<\nHallo', '<<<\nHallo\n>>>', 'Hallo>>>', '<<<Hallo', '<text>\nHallo\n</text>', '"Hallo"', '`Hallo`', '>>>']) {
+    assert.equal(sanitizeModelText(echoed, 'Hei'), echoed === '>>>' ? '' : 'Hallo', echoed)
+  }
+  assert.equal(parseDirectTranslation('<<<\nHallo\n>>>', [], 'Hei', 'Hei'), 'Hallo')
+  assert.equal(parseDirectTranslation('```\nHallo\n>>>\n```', [], 'Hei', 'Hei'), 'Hallo')
+  const json = JSON.stringify({ source: 'no', translation: '<<<\nHello\n>>>' })
+  assert.deepEqual(parseTranslationOutput(json, [], 'Hei', 'Hei'), { source: 'no', translation: 'Hello' })
+  // legitimate delimiters in the source are kept
+  assert.equal(sanitizeModelText('>>> prompt\n>>>', '>>> prompt\n>>>'), '>>> prompt\n>>>')
+  assert.equal(sanitizeModelText('"quoted" text "end"', '"quoted" text "end"'), '"quoted" text "end"')
+  assert.equal(sanitizeModelText('`code`', '`code`'), '`code`')
+  assert.equal(sanitizeModelText('"Hello"', '"Hei"'), '"Hello"')
+})

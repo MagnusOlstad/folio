@@ -8,10 +8,13 @@ async function mockExport(page: Page, id: string) {
   }))
   await page.route('**/api/note/translation/export/job-1', (route) => {
     polls += 1
+    const base = { jobId: 'job-1', id, target: 'de', totalBlocks: 2 }
     return route.fulfill({
       json: polls < 2
-        ? { jobId: 'job-1', id, target: 'de', status: 'running', translatedBlocks: 1, totalBlocks: 2 }
-        : { jobId: 'job-1', id, target: 'de', status: 'done', translatedBlocks: 2, totalBlocks: 2, title: 'Deutscher Titel', description: 'Beschreibung', content: 'Erster Absatz.\n\nZweiter Absatz.' },
+        ? { ...base, status: 'running', phase: 'waiting', translatedBlocks: 0, lastTranslated: null }
+        : polls < 3
+          ? { ...base, status: 'running', phase: 'translating', translatedBlocks: 1, lastTranslated: 'Erster Absatz.' }
+          : { ...base, status: 'done', phase: 'done', translatedBlocks: 2, title: 'Deutscher Titel', description: 'Beschreibung', content: 'Erster Absatz.\n\nZweiter Absatz.' },
     })
   })
 }
@@ -37,7 +40,11 @@ test('translated export downloads a suffixed Markdown file and can open a new dr
     await dialog.getByRole('radio', { name: 'Markdown file' }).check()
     const download = page.waitForEvent('download')
     await dialog.getByRole('button', { name: 'Translate' }).click()
-    await expect(dialog.getByText('Translating 1 of 2 paragraphs…')).toBeVisible({ timeout: 5_000 })
+    await expect(dialog.getByRole('progressbar')).toBeVisible({ timeout: 5_000 })
+    await expect(dialog.getByText(/^Waiting for the model…/)).toBeVisible({ timeout: 5_000 })
+    await expect(dialog.getByText('Translating paragraph 2 of 2 into Deutsch…')).toBeVisible({ timeout: 5_000 })
+    await expect(dialog.getByText('Erster Absatz.')).toBeVisible()
+    await expect(dialog.getByText('Done — saving your Markdown file')).toBeVisible({ timeout: 5_000 })
     expect((await download).suggestedFilename()).toBe(`${title}.de.md`)
     await expect(dialog).toHaveCount(0)
 

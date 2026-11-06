@@ -137,6 +137,8 @@ describe("DocumentView translation", () => {
     fireEvent.click(screen.getByRole("button", { name: "English" }));
     expect(screen.getByRole("button", { name: "English" })).toHaveAttribute("aria-pressed", "true");
     expect(await screen.findByText("Translating 3 of 12 paragraphs…")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "3");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuemax", "12");
     expect(await screen.findByText("This is a test.")).toBeInTheDocument();
     expect(screen.getAllByRole("heading", { name: "Hello" }).length).toBeGreaterThan(0);
     expect(screen.getByText("A test")).toBeInTheDocument();
@@ -207,6 +209,52 @@ describe("DocumentView translation", () => {
     expect(await screen.findByText("This is a test.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "English" }));
     await waitFor(() => expect(document.querySelector("[data-live-markdown-editor]")).not.toBeNull());
+  });
+
+  it("explains the feature from an info button that only shows while it is off", async () => {
+    window.localStorage.clear();
+    resetTranslationSettingsForTests();
+    let enabled = false;
+    const puts: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("/api/translation/settings")) {
+        if (init?.method === "PUT") { enabled = JSON.parse(String(init.body)).enabled; puts.push(enabled); }
+        return new Response(JSON.stringify({ enabled, available: true }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ id: noteDocument.id, noteLanguage: null, noteLanguageSource: null, ...translation }), { status: 200 });
+    }));
+    render(<DocumentView {...props(noteDocument)} />);
+    const info = await screen.findByRole("button", { name: "About note translation" });
+    expect(info).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(info);
+    expect(info).toHaveAttribute("aria-expanded", "true");
+    const popover = screen.getByRole("dialog", { name: "Note translation" });
+    expect(popover).toHaveTextContent("Nothing leaves your computer");
+    expect(popover).toHaveTextContent("Translated export (More → Translate…) works even when this is off");
+    fireEvent.pointerDown(window.document.body);
+    expect(screen.queryByRole("dialog", { name: "Note translation" })).toBeNull();
+    fireEvent.click(info);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Note translation" })).toBeNull();
+    expect(info).toHaveFocus();
+    fireEvent.click(info);
+    fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
+    expect(await screen.findByRole("group", { name: "Note language" })).toBeInTheDocument();
+    expect(puts).toEqual([true]);
+    expect(screen.queryByRole("button", { name: "About note translation" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Note translation" })).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("never shows the info button for drafts", async () => {
+    window.localStorage.clear();
+    resetTranslationSettingsForTests();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ enabled: false, available: true }), { status: 200 })));
+    const draft = storedDraftDocument({ id: "untitled-2", content: "hi", createdAt: "2026-01-01", updatedAt: "2026-01-01" });
+    render(<DocumentView {...props(draft)} />);
+    await act(async () => {});
+    expect(screen.queryByRole("button", { name: "About note translation" })).toBeNull();
+    vi.unstubAllGlobals();
   });
 
   it("restores the remembered choice and shows an error with the toggle still available", async () => {

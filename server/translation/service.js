@@ -7,7 +7,7 @@ import { createExportManager } from './export.js'
 import { createTextBlock, renderItems, splitBody, translatableBlocks } from './blocks.js'
 import {
   buildDirectTranslationMessages, buildTranslationMessages, maxTokensFor, parseDirectTranslation, parseTranslationOutput,
-  sameTranslationText, TranslationOutputError,
+  sameTranslationText, sanitizeModelText, TranslationOutputError,
 } from './prompt.js'
 
 const TARGETS = ['en', 'no']
@@ -44,8 +44,8 @@ export function createTranslationService(runtime, options = {}) {
   async function isEnabled() {
     try {
       const saved = JSON.parse(await fs.readFile(settingsPath, 'utf8'))
-      return saved.enabled !== false
-    } catch { return true }
+      return saved.enabled === true
+    } catch { return false }
   }
 
   async function setEnabled(enabled) {
@@ -88,7 +88,8 @@ export function createTranslationService(runtime, options = {}) {
       throw error
     }
     const parsed = runtime.parseMarkdownFile(markdown, filePath)
-    const items = splitBody(parsed.content)
+    // Translate the same cleaned body the app shows and indexes (no capture markers or generated wrappers).
+    const items = splitBody(runtime.indexedConceptContent(parsed.content))
     return {
       title: parsed.title,
       description: parsed.description,
@@ -287,7 +288,7 @@ export function createTranslationService(runtime, options = {}) {
     await cache.load()
     const lookup = (block) => {
       const entry = cache.get(block.hash)
-      return !entry || entry.translation == null || entry.source === target ? null : entry.translation
+      return !entry || entry.translation == null || entry.source === target ? null : sanitizeModelText(entry.translation, block.text)
     }
     const translatedBlocks = note.blocks.filter((block) => cache.get(block.hash)).length
     const totalBlocks = note.blocks.length

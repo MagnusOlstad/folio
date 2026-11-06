@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
 
 import { protectText, renderItems } from './blocks.js'
-import { buildLanguageMessages, EXPORT_LANGUAGES, maxTokensFor, parseDirectTranslation, TranslationOutputError } from './prompt.js'
+import {
+  buildLanguageMessages, EXPORT_LANGUAGES, maxTokensFor, parseDirectTranslation, sanitizeModelText, TranslationOutputError,
+} from './prompt.js'
 
 export const MAIN_CACHE_TARGETS = ['en', 'no']
 
@@ -23,7 +25,7 @@ export function createExportManager({ runtime, cache, readNote, installedModel, 
     return (block) => {
       const entry = entryFor(block, target)
       if (!entry || entry.translation == null) return null
-      return MAIN_CACHE_TARGETS.includes(target) && entry.source === target ? null : entry.translation
+      return MAIN_CACHE_TARGETS.includes(target) && entry.source === target ? null : sanitizeModelText(entry.translation, block.text)
     }
   }
 
@@ -48,7 +50,7 @@ export function createExportManager({ runtime, cache, readNote, installedModel, 
   }
 
   function summary(job) {
-    const base = { jobId: job.jobId, id: job.id, target: job.target, status: job.status, translatedBlocks: job.translatedBlocks, totalBlocks: job.totalBlocks, failedBlocks: job.failedBlocks || 0 }
+    const base = { jobId: job.jobId, id: job.id, target: job.target, status: job.status, translatedBlocks: job.translatedBlocks, totalBlocks: job.totalBlocks, failedBlocks: job.failedBlocks || 0, phase: job.phase, lastTranslated: job.lastTranslated || null }
     if (job.status === 'done') return { ...base, title: job.title, description: job.description, content: job.content }
     if (job.status === 'failed') return { ...base, error: job.error }
     return base
@@ -56,6 +58,7 @@ export function createExportManager({ runtime, cache, readNote, installedModel, 
 
   function finish(job, status) {
     job.status = status
+    job.phase = status
     const timer = setTimeout(() => { jobs.delete(job.jobId); timers.delete(timer) }, retentionMs)
     timer.unref?.()
     timers.add(timer)
@@ -63,6 +66,7 @@ export function createExportManager({ runtime, cache, readNote, installedModel, 
 
   async function runJob(job) {
     try {
+      job.phase = 'waiting'
       const note = await readNote(job.id)
       await cache.load()
       const model = await installedModel({ fresh: true })
@@ -84,8 +88,10 @@ export function createExportManager({ runtime, cache, readNote, installedModel, 
         seen.add(block.hash)
         if (done(block)) continue
         if (job.status !== 'running') return
+        job.phase = 'waiting'
         if (!(await waitForTurn({ force: true }))) throw new Error('The translation model is not available.')
         if (job.status !== 'running') return
+        job.phase = 'translating'
         let mainEntry = cache.get(block.hash)
         if (!mainEntry || (mainEntry.failed && mainEntry.modelId !== model.id)) {
           mainEntry = await translateBlock(block, model.id)
@@ -95,9 +101,12 @@ export function createExportManager({ runtime, cache, readNote, installedModel, 
         if (!MAIN_CACHE_TARGETS.includes(job.target)) {
           cache.set(cacheKey(block, job.target), await translateToLanguage(block, job.target, model.id, mainEntry))
         }
+        const translated = entryFor(block, job.target)?.translation
+        if (translated) job.lastTranslated = translated.replace(/\s+/g, ' ').trim().slice(0, 160)
         job.translatedBlocks = count()
       }
       if (job.status !== 'running') return
+      job.phase = 'finishing'
       const lookup = lookupFor(job.target)
       job.title = (note.titleBlock && lookup(note.titleBlock)) || note.title
       job.description = (note.descriptionBlock && lookup(note.descriptionBlock)) || note.description
@@ -131,7 +140,7 @@ export function createExportManager({ runtime, cache, readNote, installedModel, 
     await cache.load()
     const existing = [...jobs.values()].find((job) => job.id === id && job.target === target && job.status === 'running')
     if (existing) return summary(existing)
-    const job = { jobId: randomUUID(), id, target, status: 'running', translatedBlocks: 0, totalBlocks: note.blocks.length }
+    const job = { jobId: randomUUID(), id, target, status: 'running', phase: 'queued', lastTranslated: null, translatedBlocks: 0, totalBlocks: note.blocks.length }
     jobs.set(job.jobId, job)
     waiting.push(job)
     kick()

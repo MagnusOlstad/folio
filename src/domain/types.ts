@@ -242,7 +242,11 @@ export type NoteTranslation = {
 };
 export type TranslationSettings = { enabled: boolean; available: boolean };
 export type TranslatedExportTarget = "en" | "no" | "de" | "es" | "fr" | "fi" | "sv" | "da";
+export type TranslatedExportPhase = "queued" | "waiting" | "translating" | "finishing" | "done" | "failed" | "cancelled";
 export type TranslatedExportJob = {
+  phase?: TranslatedExportPhase;
+  /** Latest translated paragraph (at most 160 characters). */
+  lastTranslated?: string | null;
   jobId: string;
   id: string;
   target: TranslatedExportTarget;

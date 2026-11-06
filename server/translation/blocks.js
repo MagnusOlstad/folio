@@ -144,6 +144,13 @@ export function splitBody(body) {
       continue
     }
     if (!line.trim()) { pushRaw(line); continue }
+    if (/^\s{0,3}<!--/.test(line)) {
+      // CommonMark HTML block type 2 ends at the line containing the closing marker.
+      pushRaw(line)
+      let closed = line.includes('-->', line.indexOf('<!--') + 4)
+      while (!closed && index + 1 < lines.length) { index += 1; items.push({ raw: lines[index] }); closed = lines[index].includes('-->') }
+      continue
+    }
     if (HTML_START.test(line)) {
       pushRaw(line)
       while (index + 1 < lines.length && lines[index + 1].trim()) { index += 1; items.push({ raw: lines[index] }) }

@@ -18,7 +18,7 @@ function fakeMlx({ installed = true } = {}) {
     behavior,
     status: async () => ({ available: true, models: [{ id: 'gemma4', purpose: 'generation', selected: true, installed }] }),
     generate: async (messages) => {
-      const text = messages.at(-1).content.match(/<<<\n([\s\S]*)\n>>>/)[1]
+      const text = messages.at(-1).content.match(/<text>\n([\s\S]*)\n<\/text>/)[1]
       calls.push(text)
       ;(behavior.prompts ||= []).push(messages.at(-1).content)
       behavior.onCall?.()
@@ -38,13 +38,14 @@ function fakeMlx({ installed = true } = {}) {
   return service
 }
 
-async function setup(context, { mlx = fakeMlx(), notes = {} } = {}) {
+async function setup(context, { mlx = fakeMlx(), notes = {}, enabled = true } = {}) {
   const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-translation-'))
   context.after(() => fs.rm(dataRoot, { recursive: true, force: true }))
   await fs.mkdir(path.join(dataRoot, 'bundle'), { recursive: true })
   const runtime = createRuntime({ FOLIO_DATA_ROOT: dataRoot, FOLIO_MODEL_ROOT: path.join(dataRoot, 'models') }, mlx)
   runtime.translation = createTranslationService(runtime, { debounceMs: 0, backfillDelayMs: 0, statusTtlMs: 0, busyPollMs: 5 })
   context.after(() => runtime.translation.close())
+  if (enabled) await runtime.translation.setEnabled(true)
   for (const [id, content] of Object.entries(notes)) await writeNote(runtime, id, content)
   return { runtime, mlx, dataRoot }
 }
@@ -398,4 +399,92 @@ test('note language comes from frontmatter, else length-weighted cached sources,
   assert.equal((await runtime.translation.view('/det.md', 'en')).noteLanguage, 'no')
   const tie = await runtime.translation.language('/tie.md')
   assert.equal(tie.noteLanguage === null, tie.noteLanguageSource === null)
+})
+
+const CAPTURE = (id, text) => `<!-- folio:capture:confirmation:${id}:start -->\n${text}\n<!-- folio:capture:confirmation:${id}:end -->`
+const ID_A = 'e13334ea48c53b9398767ae7'
+const ID_B = 'a13334ea48c53b9398767ae8'
+
+test('filed captures are translated without markers or generated wrappers', async (context) => {
+  const body = `# Captured note\n\n${CAPTURE(ID_A, 'Møte med regnskapsføreren er neste uke.')}\n\n<!-- folio:generated-related:start -->\n# Related\n\n- [Other](/other.md) - Related\n<!-- folio:generated-related:end -->`
+  const aggregate = `# Todo\n\n${CAPTURE(ID_A, 'Jeg er klar og det er bra.')}\n\n---\n\n${CAPTURE(ID_B, 'The cat is here.')}`
+  const { runtime, mlx } = await setup(context, { notes: {
+    '/c.md': `---\ntitle: Møte\n---\n\n${body}\n`,
+    '/todo-list.md': `---\ntitle: Todo\n---\n\n${aggregate}\n`,
+  } })
+  runtime.translation.enqueue('/c.md')
+  runtime.translation.enqueue('/todo-list.md')
+  await runtime.translation.idle()
+  const view = await runtime.translation.view('/c.md', 'en')
+  assert.equal(view.status, 'ready')
+  assert.match(view.content, /^EN: Møte med regnskapsføreren er neste uke\.$/m)
+  assert.doesNotMatch(view.content, /folio:|Captured note|Related/)
+  assert.ok(mlx.calls.includes('Møte med regnskapsføreren er neste uke.'))
+  const todo = await runtime.translation.view('/todo-list.md', 'en')
+  assert.match(todo.content, /EN: Jeg er klar og det er bra\./)
+  assert.match(todo.content, /The cat is here\./)
+  const todoNo = await runtime.translation.view('/todo-list.md', 'no')
+  assert.match(todoNo.content, /NO: The cat is here\./)
+  assert.doesNotMatch(todo.content + todoNo.content, /folio:capture/)
+  const job = await runtime.translation.startExport('/c.md', 'de')
+  const done = await waitForJob(runtime.translation, job.jobId)
+  assert.match(done.content, /DIRECT: EN: Møte med regnskapsføreren/)
+  assert.doesNotMatch(done.content, /folio:|Captured note|Related/)
+})
+
+test('a standalone HTML comment line does not swallow the following paragraph', async () => {
+  const { splitBody, translatableBlocks } = await import('../server/translation/blocks.js')
+  const items = splitBody('<!-- note -->\nJeg er her og det er bra.\n\n<!--\nmulti\nline\n-->\nOg så mer tekst her.')
+  assert.deepEqual(translatableBlocks(items).map((block) => block.text), ['Jeg er her og det er bra.', 'Og så mer tekst her.'])
+})
+
+test('background translation is off by default and respects a saved choice', async (context) => {
+  const { runtime, mlx } = await setup(context, { enabled: false, notes: { '/a.md': NOTE } })
+  assert.deepEqual(await runtime.translation.getSettings(), { enabled: false, available: true })
+  runtime.translation.enqueue('/a.md')
+  runtime.translation.startBackfill()
+  await runtime.translation.idle()
+  assert.equal(mlx.calls.length, 0)
+  assert.equal((await runtime.translation.view('/a.md', 'en')).status, 'disabled')
+  await runtime.translation.setEnabled(true)
+  assert.equal((await runtime.translation.getSettings()).enabled, true)
+})
+
+test('export jobs report phase and the last translated text', async (context) => {
+  const { runtime, mlx } = await setup(context, { notes: { '/a.md': NOTE } })
+  let busy = true
+  mlx.isBusy = () => busy
+  const first = await runtime.translation.startExport('/a.md', 'de')
+  const second = await runtime.translation.startExport('/a.md', 'fr')
+  assert.equal(first.phase, 'waiting')
+  assert.equal(second.phase, 'queued')
+  assert.equal(first.lastTranslated, null)
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  assert.equal(runtime.translation.getExport(first.jobId).phase, 'waiting')
+  assert.equal(runtime.translation.getExport(second.jobId).phase, 'queued')
+  const phases = new Set()
+  mlx.behavior.onCall = () => phases.add(runtime.translation.getExport(first.jobId).phase)
+  busy = false
+  const done = await waitForJob(runtime.translation, first.jobId)
+  assert.ok(phases.has('translating'))
+  assert.equal(done.phase, 'done')
+  assert.ok(done.lastTranslated && done.lastTranslated.length <= 160 && !/<x\d+\/>/.test(done.lastTranslated))
+  assert.equal((await waitForJob(runtime.translation, second.jobId)).phase, 'done')
+})
+
+test('cached translations with delimiter echoes are sanitized on read', async (context) => {
+  const { runtime } = await setup(context, { notes: { '/a.md': 'Jeg er her.\n' } })
+  runtime.translation.enqueue('/a.md')
+  await runtime.translation.idle()
+  const file = path.join(runtime.bundleRoot, '.folio', 'translations.json')
+  await runtime.translation.close()
+  const saved = JSON.parse(await fs.readFile(file, 'utf8'))
+  for (const entry of Object.values(saved.entries)) if (entry.translation) entry.translation = `<<<\n${entry.translation}\n>>>`
+  await fs.writeFile(file, JSON.stringify(saved))
+  const fresh = await setup(context, { notes: { '/a.md': 'Jeg er her.\n' } })
+  await fs.mkdir(path.join(fresh.runtime.bundleRoot, '.folio'), { recursive: true })
+  await fs.writeFile(path.join(fresh.runtime.bundleRoot, '.folio', 'translations.json'), JSON.stringify(saved))
+  const view = await fresh.runtime.translation.view('/a.md', 'en')
+  assert.doesNotMatch(view.content, /<<<|>>>/)
+  assert.match(view.content, /EN: Jeg er her\./)
 })

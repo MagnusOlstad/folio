@@ -2,6 +2,34 @@ import { restoreText } from './blocks.js'
 
 export class TranslationOutputError extends Error {}
 
+// The source is wrapped in <text> tags (less echo-prone than bare delimiters); the sanitizer below
+// also removes echoed <text>, </text>, <<< and >>> that the source itself did not have.
+export const wrapText = (text) => `<text>\n${text}\n</text>`
+
+const OPENERS = ['<text>', '<<<']
+const CLOSERS = ['</text>', '>>>']
+
+// Removes delimiter echoes and wrapping quotes/backticks the model added around the translation.
+export function sanitizeModelText(value, source = '') {
+  const original = String(source).trim()
+  let text = String(value).trim()
+  for (let changed = true; changed;) {
+    changed = false
+    for (const [list, atStart] of [[OPENERS, true], [CLOSERS, false]]) {
+      for (const delimiter of list) {
+        if (atStart ? original.startsWith(delimiter) : original.endsWith(delimiter)) continue
+        if (atStart && text.startsWith(delimiter)) { text = text.slice(delimiter.length).trim(); changed = true }
+        if (!atStart && text.endsWith(delimiter)) { text = text.slice(0, -delimiter.length).trim(); changed = true }
+      }
+    }
+  }
+  for (const [open, close] of [['"', '"'], ['`', '`'], ['“', '”'], ['«', '»']]) {
+    if (text.length > 1 && text.startsWith(open) && text.endsWith(close)
+      && !(original.startsWith(open) && original.endsWith(close))) { text = text.slice(1, -1).trim(); break }
+  }
+  return text
+}
+
 export function buildTranslationMessages(protectedText) {
   return [
     {
@@ -16,7 +44,7 @@ export function buildTranslationMessages(protectedText) {
         'Reply with ONLY one JSON object and no other text: {"source":"no"|"en"|"other","translation":"..."|null}.',
       ].join('\n'),
     },
-    { role: 'user', content: `Text to translate:\n<<<\n${protectedText}\n>>>` },
+    { role: 'user', content: `Text to translate:\n${wrapText(protectedText)}` },
   ]
 }
 
@@ -48,7 +76,8 @@ export function parseTranslationOutput(text, tokens, original, protectedSource =
     || Object.keys(result).sort().join() !== 'source,translation') {
     throw new TranslationOutputError('Translation JSON does not match the schema.')
   }
-  const { source, translation } = result
+  const { source } = result
+  const translation = typeof result.translation === 'string' ? sanitizeModelText(result.translation, protectedSource || original) : result.translation
   if (!['no', 'en', 'other'].includes(source)) throw new TranslationOutputError('Unknown source language.')
   if (source === 'other') return { source, translation: null }
   if (typeof translation !== 'string' || !translation.trim()) throw new TranslationOutputError('Missing translation.')
@@ -68,12 +97,12 @@ export function buildDirectTranslationMessages(source, protectedText) {
   const [from, to] = source === 'en' ? ['English', 'Norwegian Bokmål'] : ['Norwegian', 'English']
   return [
     { role: 'system', content: `You are a precise translation engine. Translate the user's ${from} text into ${to}. Keep placeholders like <x1/> exactly as written, and preserve Markdown formatting, names and numbers. Reply with only the translation, no quotes or explanation.` },
-    { role: 'user', content: `Translate the following ${from} text into ${to}:\n<<<\n${protectedText}\n>>>` },
+    { role: 'user', content: `Translate the following ${from} text into ${to}:\n${wrapText(protectedText)}` },
   ]
 }
 
 export function parseDirectTranslation(text, tokens, original, protectedSource) {
-  const cleaned = stripReasoning(text).replace(/^```\w*\n?|\n?```$/g, '').replace(/^<<<\n?|\n?>>>$/g, '').trim()
+  const cleaned = sanitizeModelText(stripReasoning(text).replace(/^```\w*\n?|\n?```$/g, ''), protectedSource || original).trim()
   if (!cleaned || cleaned.length > original.length * 6 + 200) throw new TranslationOutputError('Invalid direct translation.')
   const restored = restoreText(cleaned, tokens, protectedSource)
   if (restored === null) throw new TranslationOutputError('Translation dropped a placeholder.')
@@ -88,6 +117,6 @@ export function buildLanguageMessages(language, protectedText, sourceLanguage = 
   const subject = sourceLanguage ? `${sourceLanguage} text` : 'text'
   return [
     { role: 'system', content: `You are a precise translation engine. Translate the following text into ${language}. If it is already in ${language}, return it unchanged. Keep placeholders like <x1/> exactly as written, preserve inline Markdown formatting, names and numbers. Reply with only the translation, no quotes or explanation.` },
-    { role: 'user', content: `Translate the following ${subject} into ${language}:\n<<<\n${protectedText}\n>>>` },
+    { role: 'user', content: `Translate the following ${subject} into ${language}:\n${wrapText(protectedText)}` },
   ]
 }

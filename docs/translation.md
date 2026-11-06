@@ -4,6 +4,7 @@ Filed bundle notes are translated between Norwegian and English in the backgroun
 
 ## Behavior
 
+- The text translated is the cleaned body the app shows and indexes (`indexedConceptContent`): capture markers, the generated `# Captured note` / `# Summary` heading and the generated related section are removed, so they never appear in views or exports. A standalone `<!-- ... -->` comment line is a passthrough item and never swallows the paragraph after it.
 - Each note is split into paragraph-level blocks (headings, paragraphs, list items, blockquote groups) plus its title and description. Markers, indentation, checkbox prefixes and `>` prefixes stay outside the translated text.
 - Fenced code, HTML blocks, tables, horizontal rules, reference definitions and blank lines are never translated.
 - Inline code, URLs, link targets, `[[wikilinks]]` and image references are replaced by `<xN/>` placeholders before translation and restored afterwards. If the model drops or invents a placeholder, the block's translation is rejected.
@@ -26,7 +27,7 @@ A single serial queue per bundle processes one block per `generate` call and wai
 { "version": 1, "entries": { "<sha256 of normalized text>": { "source": "no", "translation": "...", "modelId": "gemma4", "translatedAt": "ISO date" } } }
 ```
 
-Writes are atomic (temp file + rename). Because entries are keyed by text hash, they survive note moves and renames. The app-wide `enabled` setting lives in `<modelRoot>/translation-settings.json` beside the generation-model selection.
+Writes are atomic (temp file + rename). Because entries are keyed by text hash, they survive note moves and renames. The app-wide `enabled` setting lives in `<modelRoot>/translation-settings.json` beside the generation-model selection. Background translation is **off by default**: with no settings file `enabled` is `false`; a saved choice is respected. Explicit exports and language detection on filing do not depend on it.
 
 ## API
 
@@ -39,7 +40,7 @@ Writes are atomic (temp file + rename). Because entries are keyed by text hash, 
 An explicit, on-demand export translates one filed note into `en` (English), `no` (Norwegian Bokmål), `de` (German), `es` (Spanish), `fr` (French), `fi` (Finnish), `sv` (Swedish) or `da` (Danish). It works even when background translation is switched off, but still needs an installed, selected generation model and never downloads anything.
 
 - `POST /api/note/translation/export` with `{ id, target }` returns 202 `{ jobId, id, target, status: 'running', translatedBlocks, totalBlocks }`. An identical running job is returned instead of starting another. 400 for an invalid target or non-bundle id, 404 for a missing note, 503 when no generation model is installed.
-- `GET /api/note/translation/export/:jobId` returns the job with `status` `running|done|failed|cancelled` and an additive `failedBlocks` (blocks that fell back to the original after retries); `title`, `description` and `content` (Markdown body) appear only when `done`, `error` only when `failed`. 404 for unknown or expired jobs (kept 10 minutes after finishing).
+- `GET /api/note/translation/export/:jobId` returns the job with `status` `running|done|failed|cancelled` and additive `phase` (`queued` behind another export, `waiting` for user-facing model work or model load, `translating`, `finishing`, then the final status), `lastTranslated` (plain text of the most recent translated block, at most 160 characters, or `null`; also on the POST response) and `failedBlocks` (blocks that fell back to the original after retries); `title`, `description` and `content` (Markdown body) appear only when `done`, `error` only when `failed`. 404 for unknown or expired jobs (kept 10 minutes after finishing).
 - `DELETE /api/note/translation/export/:jobId` cancels between blocks and returns `{ jobId, status: 'cancelled' }` (idempotent, 404 if unknown). A job that already finished keeps its `done`/`failed` status, which the response reports.
 
 Jobs are in memory, run one at a time per bundle (FIFO) and take priority over the background queue, which pauses meanwhile; they still wait for user-facing model work. `en` and `no` reuse the main cache with the same detect-and-translate path. Other languages pivot through English: the main-cache entry is ensured first, then the English text (the original for English blocks, the cached English translation for Norwegian ones, or the original without a source label for `other`/failed blocks) is translated with a prompt that names the source language. Placeholders are re-protected on the English text and restored exactly. Entries record `pivot: 'en' | null`, and language entries without a `pivot` field are treated as stale and redone, and are cached in the same file as `<hash>:<lang>` entries (`{ translation, modelId, translatedAt, failed? }`). After one retry an invalid block falls back to the original text. Pruning keeps language entries whose base hash is still referenced.

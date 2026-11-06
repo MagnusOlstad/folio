@@ -1,4 +1,4 @@
-import type { TranslatedExportJob, TranslatedExportTarget, ViewerDocument } from "../../../domain/types.ts";
+import type { TranslatedExportJob, TranslatedExportPhase, TranslatedExportTarget, ViewerDocument } from "../../../domain/types.ts";
 import { serializeDraft } from "../../../lib/workspace.ts";
 import { readStorageItem, writeStorageItem } from "../../../lib/storage.ts";
 import {
@@ -74,12 +74,55 @@ export function translatedLanguageName(target: TranslatedExportTarget): string {
 
 export type TranslatedExportResult = Pick<TranslatedExportJob, "title" | "description" | "content" | "failedBlocks">;
 
+/**
+ * Defensive guard: drops capture/generated-related comments and a generated
+ * `# Captured note` / `# Summary` wrapper heading that must not reach exports.
+ */
+export function withoutGeneratedMarkers(content: string): string {
+  return content
+    .replace(/\n?<!-- folio:generated-related:start -->[\s\S]*?<!-- folio:generated-related:end -->\n?/gi, "\n")
+    .replace(/[ \t]*<!-- folio:(?:capture|generated-related):[^>]*?-->[ \t]*\n?/g, "")
+    .replace(/^\s*# (?:Captured note|Summary)[ \t]*\n+/i, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/^\s*\n/, "");
+}
+
+export function formatElapsed(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+export function translatedExportPhaseText(input: {
+  phase: TranslatedExportPhase | undefined;
+  translated: number;
+  total: number;
+  languageName: string;
+  destination: TranslatedExportDestination;
+}): string {
+  const { phase, translated, total, languageName, destination } = input;
+  if (phase === "queued") return "Waiting for another export to finish…";
+  if (phase === "waiting") return "Waiting for the model… (loading it or finishing other work)";
+  if (phase === "finishing") {
+    const what = destination === "markdown" ? "Markdown file" : destination === "pdf" ? "PDF" : destination === "clipboard" ? "clipboard text" : "draft";
+    return `Preparing your ${what}…`;
+  }
+  if (total > 0) return `Translating paragraph ${Math.min(translated + 1, total)} of ${total} into ${languageName}…`;
+  return "Starting translation…";
+}
+
+export function translatedExportDoneText(destination: TranslatedExportDestination): string {
+  if (destination === "draft") return "Done — opened as a new draft";
+  if (destination === "clipboard") return "Done — copied to the clipboard";
+  if (destination === "pdf") return "Done — preparing your PDF";
+  return "Done — saving your Markdown file";
+}
+
 export function translatedExportSnapshot(document: ViewerDocument, result: TranslatedExportResult): NoteExportSnapshot {
   return {
     id: document.id,
     title: result.title?.trim() || document.title.trim() || "Untitled",
     description: result.description ?? document.description,
-    content: result.content ?? document.content,
+    content: withoutGeneratedMarkers(result.content ?? document.content),
     draft: false,
   };
 }

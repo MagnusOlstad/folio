@@ -12,6 +12,7 @@ import {
   translatedProgressLabel,
 } from "../model/note-translation.ts";
 import type { TranslatedExportDeliver } from "../model/translated-export.ts";
+import { TranslationProgress } from "./TranslationProgress.tsx";
 import { RenderedMarkdown } from "./RenderedMarkdown.tsx";
 import { isUntitledId } from "../../../lib/workspace.ts";
 import { DocumentBody } from "./DocumentBody.tsx";
@@ -203,14 +204,21 @@ export function DocumentView(props: DocumentViewProps) {
         )}
         {translationTarget ? (
           <div className="document-content read-only translated-note" lang={translationTarget}>
-            {translationNotice && (
+            {translated?.status === "pending" && !translation.error ? (
+              <TranslationProgress
+                compact
+                value={translated.translatedBlocks}
+                max={translated.totalBlocks}
+                label={translationNotice}
+              />
+            ) : translationNotice ? (
               <p
                 className={`translation-status${translation.error ? " is-error" : ""}`}
                 role={translation.error ? "alert" : "status"}
               >
                 {translationNotice}
               </p>
-            )}
+            ) : null}
             <RenderedMarkdown
               key={`${document.id}:${translationTarget}`}
               document={translatedDocument}

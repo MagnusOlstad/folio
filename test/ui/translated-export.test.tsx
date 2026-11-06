@@ -7,7 +7,9 @@ import { translatedExportFilename } from "../../src/features/workspace/model/not
 import {
   TRANSLATED_EXPORT_STORAGE_KEY,
   deliverTranslatedExport,
+  formatElapsed,
   parseTranslatedExportPreferences,
+  withoutGeneratedMarkers,
   translatedDraftContent,
 } from "../../src/features/workspace/model/translated-export.ts";
 
@@ -51,6 +53,43 @@ describe("translated export model", () => {
     expect(deps.exportSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Gaustatoppen Berg", content: result.content }), "markdown", "Gaustatoppen.de.md", note.id, "");
     await deliverTranslatedExport(deps, note, result, "de", "pdf");
     expect(deps.exportSnapshot).toHaveBeenLastCalledWith(expect.anything(), "pdf", "Gaustatoppen.de.pdf", note.id, "");
+  });
+});
+
+describe("generated marker guard", () => {
+  it("strips capture and generated-related comments and the wrapper heading", () => {
+    const dirty = [
+      "# Captured note",
+      "",
+      "<!-- folio:capture:confirmation:0123456789abcdef01234567:start -->",
+      "Erster Absatz.",
+      "<!-- folio:capture:confirmation:0123456789abcdef01234567:end -->",
+      "",
+      "<!-- folio:generated-related:start -->",
+      "## Related",
+      "- [[x]]",
+      "<!-- folio:generated-related:end -->",
+      "",
+      "Zweiter Absatz.",
+    ].join("\n");
+    const clean = withoutGeneratedMarkers(dirty);
+    expect(clean).not.toContain("folio:");
+    expect(clean).not.toContain("Captured note");
+    expect(clean).not.toContain("Related");
+    expect(clean).toBe("Erster Absatz.\n\nZweiter Absatz.");
+    expect(withoutGeneratedMarkers("# Summary\n\nText")).toBe("Text");
+    expect(withoutGeneratedMarkers("# Mein Titel\n\nText")).toBe("# Mein Titel\n\nText");
+  });
+
+  it("applies to delivered snapshots and drafts", async () => {
+    const deps = { exportSnapshot: vi.fn(async () => {}), createDraft: vi.fn(), setMessage: vi.fn() };
+    await deliverTranslatedExport(deps, note, { ...result, content: "# Captured note\n\n<!-- folio:capture:x:start -->\nText" }, "de", "draft");
+    expect(deps.createDraft).toHaveBeenCalledWith("\n# Gaustatoppen Berg\n\nText");
+  });
+
+  it("formats elapsed time", () => {
+    expect(formatElapsed(23)).toBe("0:23");
+    expect(formatElapsed(125)).toBe("2:05");
   });
 });
 
@@ -144,11 +183,51 @@ describe("translated export dialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Translate" }));
     await tick(0);
     await tick();
-    expect(screen.getByText("Translating 4 of 12 paragraphs…")).toBeInTheDocument();
+    expect(screen.getByText("Translating paragraph 5 of 12 into Deutsch…")).toBeInTheDocument();
     await tick();
+    expect(screen.getByText("Done — opened as a new draft")).toBeInTheDocument();
+    expect(onDeliver).not.toHaveBeenCalled();
+    await tick(1300);
     expect(onDeliver).toHaveBeenCalledWith(note, expect.objectContaining({ content: result.content }), "de", "draft");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(JSON.parse(window.localStorage.getItem(TRANSLATED_EXPORT_STORAGE_KEY) ?? "{}")).toEqual({ target: "de", destination: "draft" });
+  });
+
+  it("shows a determinate bar, phase text, elapsed time and the latest translated paragraph", async () => {
+    jobs = [
+      job({ phase: "queued", translatedBlocks: 0, totalBlocks: 12 }),
+      job({ phase: "waiting", translatedBlocks: 0, totalBlocks: 12 }),
+      job({ phase: "translating", translatedBlocks: 3, totalBlocks: 12, lastTranslated: "Ein Berg im Süden." }),
+      job({ phase: "finishing", translatedBlocks: 12, totalBlocks: 12 }),
+      job({ status: "done", phase: "done", translatedBlocks: 12, ...result }),
+    ];
+    // jsdom's requestAnimationFrame uses setInterval, so only this test fakes it.
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    renderMenu();
+    openDialog();
+    fireEvent.click(screen.getByRole("radio", { name: "Deutsch" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Markdown file" }));
+    fireEvent.click(screen.getByRole("button", { name: "Translate" }));
+    await tick(0);
+    expect(screen.getByRole("radio", { name: "Deutsch" })).toBeDisabled();
+    await tick();
+    expect(screen.getByText("Waiting for another export to finish…")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toHaveClass("is-indeterminate");
+    await tick();
+    expect(screen.getByText(/^Waiting for the model…/)).toBeInTheDocument();
+    expect(screen.getByText("Elapsed 0:03")).toBeInTheDocument();
+    await tick();
+    const bar = screen.getByRole("progressbar");
+    expect(bar).toHaveAttribute("aria-valuenow", "3");
+    expect(bar).toHaveAttribute("aria-valuemax", "12");
+    expect(screen.getByText("Translating paragraph 4 of 12 into Deutsch…")).toBeInTheDocument();
+    const preview = screen.getByText("Ein Berg im Süden.");
+    expect(preview).toHaveAttribute("lang", "de");
+    await tick();
+    expect(screen.getByText("Preparing your Markdown file…")).toBeInTheDocument();
+    await tick();
+    expect(screen.getByText("Done — saving your Markdown file")).toBeInTheDocument();
   });
 
   it("cancels the running job with DELETE and closes", async () => {
