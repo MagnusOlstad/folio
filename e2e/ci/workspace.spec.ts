@@ -154,7 +154,11 @@ test('shows only selected local models in the workspace and keeps the full catal
   await expect(settingsModels.getByRole('radio', { name: /Qwen 3\.5 4B/ })).toBeVisible()
   await expect(settingsModels.getByRole('radio', { name: /Llama 3\.2 3B/ })).toBeVisible()
   await expect(settingsModels.getByText(/LightOnOCR 3 1B/)).toBeVisible()
-  await expect(settingsModels.locator('.model-settings-row')).toHaveCount(7)
+  await expect(settingsModels.locator('.model-settings-row')).toHaveCount(8)
+  const entityModel = settingsModels.getByRole('group', { name: 'Entity extraction' })
+  await expect(entityModel.getByText(/GLiNER 2\.5 Multi/)).toBeVisible()
+  await expect(entityModel.getByRole('radio')).toHaveCount(0)
+  await expect(entityModel.getByRole('checkbox', { name: 'Analyze this bundle' })).toBeVisible()
 })
 
 test('first-open model setup opens the real model settings controls', async ({ page }) => {
