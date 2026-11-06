@@ -21,7 +21,7 @@ export function registerRoutes(app, runtime) {
   app.get('/api/entities/mentions', async (request, response) => {
     try {
       if (typeof request.query.noteId !== 'string') { response.status(400).json({ error: 'noteId is required.' }); return }
-      response.json(await service.getMentionsForNote(request.query.noteId))
+      response.json(await service.getMentionsForNote(request.query.noteId, { includeDismissed: request.query.includeDismissed === 'true' }))
     } catch (error) { sendError(response, error) }
   })
   app.get('/api/entities', async (request, response) => {

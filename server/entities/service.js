@@ -192,15 +192,17 @@ export function createEntityService(runtime) {
       : commit()
   }
 
-  async function getMentionsForNote(noteId) {
+  async function getMentionsForNote(noteId, options = {}) {
     const { content } = await sourceForNote(noteId)
     const projection = projectMarkdown(content, { frontmatter: false })
     const { index } = await readCurrent()
     const coverage = index.coverage[noteId] || null
-    const items = index.mentions.filter((mention) => mention.noteId === noteId).map((mention) => ({ ...mention,
-      freshness: mention.contentHash === projection.contentHash && projection.text.slice(mention.startUtf16, mention.endUtf16) === mention.text ? 'current' : 'stale' }))
     const currentProjection = coverage?.contentHash === projection.contentHash && coverage?.projectionHash === projection.projectionHash && coverage?.projectionVersion === projection.version
-    return { items: items.filter((mention) => mention.freshness === 'current' && mention.status === 'active'), staleCount: items.filter((mention) => mention.freshness === 'stale').length, freshness: currentProjection ? 'current' : 'stale', coverage }
+    const items = index.mentions.filter((mention) => mention.noteId === noteId).map((mention) => ({ ...mention,
+      freshness: currentProjection && mention.contentHash === projection.contentHash && mention.projectionVersion === projection.version
+        && projection.text.slice(mention.startUtf16, mention.endUtf16) === mention.text ? 'current' : 'stale' }))
+    return { items: items.filter((mention) => mention.freshness === 'current' && (options.includeDismissed || mention.status === 'active')),
+      staleCount: items.filter((mention) => mention.freshness === 'stale').length, freshness: currentProjection ? 'current' : 'stale', coverage }
   }
 
   async function freshnessForNotes(noteIds, index) {
@@ -251,15 +253,17 @@ export function createEntityService(runtime) {
     const items = materialized.filter((entity) => (!options.type || entity.type === options.type)
       && (!query || `${entity.label} ${entity.aliases.join(' ')}`.toLocaleLowerCase().includes(query)))
       .sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id))
-    return { ...page(items, options.cursor, options.limit), revision: state.revision, indexRevision: index.revision, stale: Boolean(index.stale), coverage: getCoverage(index, records, freshness) }
+    const entityPage = page(items, options.cursor, options.limit)
+    return { ...entityPage, items: entityPage.items.map((entity) => withNoteLinks(entity, state)), revision: state.revision, indexRevision: index.revision, stale: Boolean(index.stale), coverage: getCoverage(index, records, freshness) }
   }
 
   async function getEntity(id) {
     const { index, state } = await readCurrent()
     const currentMentions = await freshMentions(index)
     const entity = materializeEntities(currentMentions, state).find((item) => item.id === id)
+      || (() => { const stale = state.entities.find((item) => item.id === id); return stale ? { ...stale, mentionCount: 0, noteCount: 0 } : null })()
     if (!entity) throw Object.assign(new Error('Entity not found.'), { status: 404 })
-    return { ...entity, noteIds: [...new Set(currentMentions.filter((mention) => mention.entityId === id).map((mention) => mention.noteId))].sort(), revision: state.revision }
+    return { ...withNoteLinks(entity, state), noteIds: [...new Set(index.mentions.filter((mention) => mention.entityId === id).map((mention) => mention.noteId))].sort(), revision: state.revision }
   }
 
   async function listMentions(id, options = {}) {
@@ -312,6 +316,7 @@ export function createEntityService(runtime) {
         if (noteId === relatedNoteId) throw Object.assign(new Error('Choose two different notes.'), { status: 400 })
         await sourceForNote(noteId); await sourceForNote(relatedNoteId)
       }
+      if (command?.type === 'link-note') await sourceForNote(validRelatedNoteId(command.noteId))
       const beforeState = { entities: structuredClone(state.entities), doNotMerge: structuredClone(state.doNotMerge), noteLinks: structuredClone(state.noteLinks), mentionDecisions: structuredClone(state.mentionDecisions || []), relatedDismissals: structuredClone(state.relatedDismissals || []) }
       const beforeMentions = new Map(index.mentions.map((mention) => [mention.id, mention]))
       const applied = applyEntityCommand({ command, mentions: index.mentions, userState: state, bundleId: storage.bundleId })
@@ -354,14 +359,11 @@ export function createEntityService(runtime) {
       restored.revision = state.revision + 1
       restored.corrections = state.corrections.slice(0, -1)
       const priorIds = new Set(restored.entities.map((entity) => entity.id))
-      const priorLabels = new Set(restored.entities.flatMap((entity) => [entity.label, ...(entity.aliases || [])].map((label) => entityKey(entity.type, label))))
+      const createdByUndoneCommand = new Set(record.inverse?.type === 'restore-split' && record.inverse.entityId ? [record.inverse.entityId] : [])
       for (const entity of state.entities) {
-        if (priorIds.has(entity.id)) continue
-        const identityKey = entityKey(entity.type, entity.label)
-        if (priorLabels.has(identityKey)) continue
+        if (priorIds.has(entity.id) || createdByUndoneCommand.has(entity.id)) continue
         restored.entities.push(structuredClone(entity))
         priorIds.add(entity.id)
-        priorLabels.add(identityKey)
       }
       for (const before of record.beforeMentions || []) {
         const mention = index.mentions.find((item) => item.id === before.mentionId)
@@ -427,6 +429,7 @@ export function createEntityService(runtime) {
         } else mention.status = 'stale'
       }
       const remapId = (id) => movedMentionIds.get(id) || id
+      const remapNoteId = (id) => id === oldNoteId ? newNoteId : id
       const remapMentionFields = (value) => {
         if (!value || typeof value !== 'object') return
         if (Array.isArray(value)) { for (const item of value) remapMentionFields(item); return }
@@ -441,11 +444,15 @@ export function createEntityService(runtime) {
         remapMentionFields(correction.beforeMentions)
         remapMentionFields(correction.beforeState?.mentionDecisions)
         for (const link of correction.beforeState?.noteLinks || []) if (link.noteId === oldNoteId) link.noteId = newNoteId
+        for (const dismissal of correction.beforeState?.relatedDismissals || []) if (Array.isArray(dismissal.noteIds)) dismissal.noteIds = dismissal.noteIds.map(remapNoteId).sort()
         if (correction.command?.noteId === oldNoteId) correction.command.noteId = newNoteId
+        if (correction.command?.relatedNoteId === oldNoteId) correction.command.relatedNoteId = newNoteId
         if (correction.inverse?.noteId === oldNoteId) correction.inverse.noteId = newNoteId
+        if (correction.inverse?.relatedNoteId === oldNoteId) correction.inverse.relatedNoteId = newNoteId
       }
       if (index.coverage[oldNoteId]) { index.coverage[newNoteId] = { ...index.coverage[oldNoteId], contentHash: projection.contentHash, projectionHash: projection.projectionHash, projectionVersion: projection.version, sourceGeneration }; delete index.coverage[oldNoteId] }
       for (const link of state.noteLinks) if (link.noteId === oldNoteId) link.noteId = newNoteId
+      for (const dismissal of state.relatedDismissals || []) if (Array.isArray(dismissal.noteIds)) dismissal.noteIds = dismissal.noteIds.map(remapNoteId).sort()
       await refreshIndex(index, state); await storage.writeUserState(state); await storage.writeIndex(index)
     })
   }
@@ -520,6 +527,11 @@ export function createEntityService(runtime) {
     applyCorrection: commitCorrection, undoCorrection, replaceNoteMentions, forgetNote, migrateNote,
     exportUserMetadata, importUserMetadata, restoreBundleSidecar, resolveEntityKey: entityKey,
     getAnalysisSettings, getAnalysisSettingsSnapshot, setAnalysisEnabled, enableAnalysisAfterInstall, onAnalysisSettingsChange }
+}
+
+function withNoteLinks(entity, state) {
+  const linkedNoteIds = [...new Set((state.noteLinks || []).filter((link) => link.entityId === entity.id).map((link) => link.noteId))].sort()
+  return { ...entity, linkedNoteIds, linkedNoteId: linkedNoteIds[0] || null }
 }
 
 function validRelatedNoteId(value) {

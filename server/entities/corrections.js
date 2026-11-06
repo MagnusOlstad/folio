@@ -74,7 +74,7 @@ export function applyEntityCommand({ command, mentions, userState, bundleId }) {
         const created = { id: entityId(), type, label, aliases: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), identitySource: 'user' }
         entities.push(created)
         inverse = { type: 'restore-split', mentionIds: chosen.map((mention) => mention.id), assignments: chosen.map((mention) => ({ mentionId: mention.id, entityId: mention.entityId, resolution: mention.resolution, resolutionProvenance: mention.resolutionProvenance })), entityId: created.id }
-        for (const mention of chosen) { mention.entityId = created.id; mention.resolution = 'resolved'; mention.resolutionProvenance = 'user' }
+        for (const mention of chosen) { mention.entityId = created.id; mention.type = type; mention.resolution = 'resolved'; mention.resolutionProvenance = 'user' }
       } else {
         const destination = command.entityId ? entity(command.entityId) : null
         inverse = { type: 'reassign', mentionIds: chosen.map((mention) => mention.id), assignments: chosen.map((mention) => ({ mentionId: mention.id, entityId: mention.entityId, resolution: mention.resolution, resolutionProvenance: mention.resolutionProvenance })) }

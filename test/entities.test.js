@@ -258,6 +258,59 @@ test('queued source generation mismatch blocks an otherwise identical extraction
   assert.deepEqual(result, { applied: false, stale: true })
 })
 
+test('note matches can restore dismissed mentions and hide stale projection versions', async (t) => {
+  const data = await fixture()
+  t.after(() => fs.rm(data.root, { recursive: true, force: true }))
+  const service = createEntityService(data.runtime)
+  const projection = projectMarkdown(data.content)
+  await service.replaceNoteMentions('/meeting.md', [mentionFrom(projection, 'Acmé', 'organization')])
+  const mention = (await service.getMentionsForNote('/meeting.md')).items[0]
+  const dismissed = await service.applyCorrection({ expectedRevision: 0, command: { type: 'dismiss', mentionIds: [mention.id] } })
+  assert.equal((await service.getMentionsForNote('/meeting.md')).items.length, 0)
+  assert.equal((await service.getMentionsForNote('/meeting.md', { includeDismissed: true })).items[0].status, 'dismissed')
+
+  const index = await service.storage.readIndex()
+  index.mentions[0].projectionVersion = 1
+  await service.storage.writeIndex(index)
+  const stale = await service.getMentionsForNote('/meeting.md', { includeDismissed: true })
+  assert.equal(stale.items.length, 0)
+  assert.equal(stale.staleCount, 1)
+  assert.equal(dismissed.revision, 1)
+})
+
+test('entities with stale source mentions remain available for detail and explicit note links survive restart', async (t) => {
+  const data = await fixture()
+  t.after(() => fs.rm(data.root, { recursive: true, force: true }))
+  let service = createEntityService(data.runtime)
+  await service.replaceNoteMentions('/meeting.md', [mentionFrom(projectMarkdown(data.content), 'Acmé', 'organization')])
+  const mention = (await service.getMentionsForNote('/meeting.md')).items[0]
+  const entityId = mention.entityId
+  await service.applyCorrection({ expectedRevision: 0, command: { type: 'link-note', entityId, noteId: '/meeting.md' } })
+  service = createEntityService(data.runtime)
+  assert.deepEqual((await service.getEntity(entityId)).linkedNoteIds, ['/meeting.md'])
+  await service.applyCorrection({ expectedRevision: 1, command: { type: 'unlink-note', entityId, noteId: '/meeting.md' } })
+  assert.deepEqual((await service.getEntity(entityId)).linkedNoteIds, [])
+
+  await data.runtime.setContent('The source changed after extraction.')
+  const staleEntity = await service.getEntity(entityId)
+  assert.equal(staleEntity.id, entityId)
+  assert.equal(staleEntity.noteCount, 0)
+})
+
+test('splitting a mention with a requested type retypes its occurrence consistently', async (t) => {
+  const data = await fixture()
+  t.after(() => fs.rm(data.root, { recursive: true, force: true }))
+  const service = createEntityService(data.runtime)
+  const projection = projectMarkdown(data.content)
+  await service.replaceNoteMentions('/meeting.md', [mentionFrom(projection, 'Acmé', 'organization')])
+  const mention = (await service.getMentionsForNote('/meeting.md')).items[0]
+  const split = await service.applyCorrection({ expectedRevision: 0, command: { type: 'split', mentionIds: [mention.id], label: 'Acme project', entityType: 'project' } })
+  const updated = (await service.getMentionsForNote('/meeting.md')).items[0]
+  assert.equal(updated.type, 'project')
+  assert.equal((await service.getEntity(updated.entityId)).type, 'project')
+  assert.equal(split.revision, 1)
+})
+
 test('retrieval snapshot retains durable empty identities but only fresh active resolved mentions', async (t) => {
   const data = await fixture()
   t.after(() => fs.rm(data.root, { recursive: true, force: true }))
@@ -297,6 +350,24 @@ test('related suggestions are distinct-note co-mentions and durable dismissals r
   assert.equal(dismissed.revision, 1)
   assert.equal((await related.listRelated({ noteId: '/meeting.md' })).items.length, 0)
   assert.equal((await service.getLatestCorrectionUndoState()).undoToken, dismissed.undoToken)
+})
+
+test('related-note dismissals and their undo snapshots follow a note move', async (t) => {
+  const data = await fixture()
+  t.after(() => fs.rm(data.root, { recursive: true, force: true }))
+  await data.runtime.addNote('/second.md', 'Another note.')
+  const service = createEntityService(data.runtime)
+  const projection = projectMarkdown(data.content)
+  await service.replaceNoteMentions('/meeting.md', [mentionFrom(projection, 'Acmé', 'organization')])
+  const entity = (await service.listEntities()).items[0]
+  const dismissed = await service.applyCorrection({ expectedRevision: 0, command: { type: 'dismiss-related', noteId: '/meeting.md', relatedNoteId: '/second.md' } })
+  const renamed = await service.applyCorrection({ expectedRevision: dismissed.revision, command: { type: 'rename', entityId: entity.id, label: 'Acme Research' } })
+
+  await data.runtime.moveTo('/moved.md')
+  await service.migrateNote('/meeting.md', '/moved.md')
+  assert.deepEqual(await service.getRelatedDismissals('/moved.md'), ['/second.md'])
+  await service.undoCorrection({ expectedRevision: renamed.revision, undoToken: renamed.undoToken })
+  assert.deepEqual(await service.getRelatedDismissals('/moved.md'), ['/second.md'])
 })
 
 test('extraction commit waits for queued Markdown save before validating its source', async (t) => {
