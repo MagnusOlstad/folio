@@ -237,7 +237,7 @@ test('Whisper installation aggregates model and tokenizer scopes and resets prog
   let inProgress
   while (Date.now() < deadline) {
     inProgress = await service.status()
-    if (inProgress.installing) break
+    if (inProgress.installing && inProgress.downloadedBytes > 0) break
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
   assert.equal(inProgress?.downloadedBytes, 1_000)
