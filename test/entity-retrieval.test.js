@@ -144,7 +144,7 @@ test('entity scope ranks intersected notes before bounded current-source hydrati
     await fs.mkdir(path.dirname(filePath), { recursive: true })
     await fs.writeFile(filePath, text)
     sources.set(id, filePath)
-    records.push({ id, title: `Note ${index}`, description: '', type: 'Note', tags: [], createdAt: new Date(2026, 0, 82 - index).toISOString(), content: text })
+    records.push({ id, title: `Note ${index}`, description: '', type: 'Note', tags: [], createdAt: new Date(Date.UTC(2026, 0, 81 - index)).toISOString(), content: text })
     mentions.push({ id: `mention-${index}`, noteId: id, entityId: entity.id, status: 'active', resolution: 'resolved',
       contentHash: projectMarkdown(text).contentHash, text: 'Acme', startUtf16: 0, endUtf16: 4 })
   }
