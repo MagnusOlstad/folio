@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.0](https://github.com/MagnusOlstad/folio/compare/v0.7.8...v0.8.0) (2026-11-06)
+
+
+### Features
+
+* **translation:** add note translation and translated export ([#139](https://github.com/MagnusOlstad/folio/issues/139)) ([96582f1](https://github.com/MagnusOlstad/folio/commit/96582f11ce680509898ef9387688cf8f6b95a91d))
+
+
+### Bug Fixes
+
+* **deps:** update packages to resolve npm audit vulnerabilities ([#144](https://github.com/MagnusOlstad/folio/issues/144)) ([0e52764](https://github.com/MagnusOlstad/folio/commit/0e52764436d31f84384587af36b0a6dc600b6ce4))
+* **editor:** keep ocr preview open while selecting text ([#148](https://github.com/MagnusOlstad/folio/issues/148)) ([ab6ad49](https://github.com/MagnusOlstad/folio/commit/ab6ad49715f1702b67920662181ccfae4022b780))
+* **updater:** use native update button when updater state is stale ([#143](https://github.com/MagnusOlstad/folio/issues/143)) ([a00e55a](https://github.com/MagnusOlstad/folio/commit/a00e55aa01ce1c67c17d948bb40c2682385fff78))
+
 ## [0.7.8](https://github.com/MagnusOlstad/folio/compare/v0.7.7...v0.7.8) (2026-11-05)
 
 
