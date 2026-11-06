@@ -426,6 +426,20 @@
   flex: 1;
 }
 
+.entity-scope-notice {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.65rem 0;
+  padding: 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--surface-alt);
+  font-size: 0.85rem;
+}
+
+.entity-scope-notice p { margin: 0; }
+.entity-scope-notice button { justify-self: start; }
+
 .sidebar-result {
   width: 100%;
   padding: 13px;

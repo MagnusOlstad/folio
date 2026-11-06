@@ -7,6 +7,7 @@ import { WorkspaceSidebar } from "../../src/features/sidebar/WorkspaceSidebar.ts
 import type { WorkspaceSidebarProps } from "../../src/features/sidebar/WorkspaceSidebar.tsx";
 import { buildFileTree } from "../../src/lib/tree.ts";
 import type { ExplorerFileActions } from "../../src/features/workspace/model/explorer.ts";
+import type { EntityScopeMetadata } from "../../src/domain/entities.ts";
 
 const note: Note = {
   id: "/notes/preview.md",
@@ -66,6 +67,8 @@ function sidebarProps(
     setSearchResults: vi.fn(),
     searchTag: vi.fn(),
     searchResults: [searchResult],
+    searchScope: null,
+    entityScope: { bundleId: null, entities: [], entityIds: [], toggleEntity: vi.fn(), clear: vi.fn() },
     selectedAnswerModel: MLX_GENERATION_MODEL.id,
     asking: false,
     question: "",
@@ -118,6 +121,22 @@ describe("WorkspaceSidebar preview navigation", () => {
       "dateTime",
       "2026-09-12T08:30:00.000Z",
     );
+  });
+
+  it("shows intersection scope and incomplete coverage with an explicit clear action", () => {
+    const props = sidebarProps(vi.fn());
+    const clear = vi.fn();
+    props.entityScope = { bundleId: "bundle-a", entities: [{ id: "acme", label: "Acme", type: "organization" }], entityIds: ["acme"], toggleEntity: vi.fn(), clear };
+    props.searchScope = {
+      entityIds: ["acme"], entities: [{ id: "acme", label: "Acme", type: "organization" }],
+      coverage: { eligible: 4, processed: 3, stale: 1, failed: 0, pending: 0 }, incomplete: true,
+      matchedNoteCount: 2, revision: 5, indexRevision: 4,
+    } satisfies EntityScopeMetadata;
+    render(<WorkspaceSidebar {...props} />);
+    expect(screen.getByLabelText("Entity intersection scope")).toHaveTextContent("Intersection scope: Acme");
+    expect(screen.getByText(/2 matching notes · 3\/4 analyzed · results may be incomplete/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Clear entity scope" }));
+    expect(clear).toHaveBeenCalledOnce();
   });
 
   it("omits a missing or invalid search result date", () => {

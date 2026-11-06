@@ -1,3 +1,5 @@
+import type { EntityScopeMetadata } from "./entities.ts";
+
 export type Note = {
   id: string;
   rawId: string | null;
@@ -27,6 +29,7 @@ export type Relationship = {
 };
 
 export type SearchResult = Note & { snippet: string; score: number };
+export type ScopedSearchResponse = { items: SearchResult[]; scope: EntityScopeMetadata };
 export type NoteDetail = Note & {
   content: string;
   movable: boolean;
@@ -199,6 +202,7 @@ export type AskResult = {
   sources: Note[];
   model: string;
   retrieval: string;
+  scope?: EntityScopeMetadata;
 };
 export type SidebarMode = "explore" | "search" | "ask";
 export type TabGroup = {

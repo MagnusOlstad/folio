@@ -81,6 +81,16 @@ export type EntityCoverage = {
   pending: number;
 };
 
+export type EntityScopeMetadata = {
+  entityIds: string[];
+  entities: Pick<Entity, "id" | "label" | "type">[];
+  coverage: EntityCoverage;
+  incomplete: boolean;
+  matchedNoteCount: number;
+  revision: number;
+  indexRevision: number;
+};
+
 export type EntityJobReason = "save" | "capture" | "import" | "transcription" | "ocr" | "enablement" | "startup" | "rebuild" | "history-restore" | "manual" | "move";
 
 export type EntityJobItem = {

@@ -12,6 +12,7 @@ import type { NoteExportFormat } from "../model/note-export.ts";
 import type { WorkspaceSidebarProps } from "../../sidebar/WorkspaceSidebar.tsx";
 import type { WorkspaceDocumentState } from "./useWorkspaceDocumentState.ts";
 import type { WorkspaceExplorerState } from "./useWorkspaceExplorerState.ts";
+import type { useEntityScope } from "./useEntityScope.ts";
 import type { ReturnTypeOfWorkspaceModels } from "./useWorkspaceModels.ts";
 import type { useBundleSetup } from "../../settings/hooks/useBundleSetup.ts";
 
@@ -34,6 +35,7 @@ type Options = {
   bundleSetup: ReturnType<typeof useBundleSetup>;
   openSettings: () => void;
   isDocumentDirty: (id: string) => boolean;
+  entityScope: ReturnType<typeof useEntityScope>;
 };
 
 export function useWorkspaceSidebarProps({
@@ -55,6 +57,7 @@ export function useWorkspaceSidebarProps({
   bundleSetup,
   openSettings,
   isDocumentDirty,
+  entityScope,
 }: Options): {
   sidebar: WorkspaceSidebarProps;
   moveBundleFile: ReturnType<typeof useWorkspaceBundleActions>["moveBundleFile"];
@@ -186,6 +189,8 @@ export function useWorkspaceSidebarProps({
       setSearchResults: discovery.setSearchResults,
       searchTag: discovery.searchTag,
       searchResults: discovery.searchResults,
+      searchScope: discovery.searchScope,
+      entityScope,
       selectedAnswerModel: models.selectedAnswerModel,
       asking: discovery.asking,
       question: discovery.question,

@@ -71,7 +71,8 @@ export function useWorkspaceController(): WorkspaceShellProps {
   const editorFocusRequestIdRef = useRef(0);
   const embeddingRevisionsRef = useRef(new Map<string, number>());
   const embeddingFinalizationsRef = useRef(new Map<string, Promise<void>>());
-  const explorer = useWorkspaceExplorerState(setMessage, initialWorkspaceState, rendererBundleId);
+  const entityScope = useEntityScope(bundleSetup.activeBundleId);
+  const explorer = useWorkspaceExplorerState(setMessage, initialWorkspaceState, rendererBundleId, entityScope);
   const {
     files: explorerFiles,
     setExplorerScrollTop,
@@ -118,7 +119,6 @@ export function useWorkspaceController(): WorkspaceShellProps {
   });
   const layout = useWorkspaceLayout(initialWorkspaceState?.splitPosition);
   const models = useWorkspaceModels(setMessage, bundleSetup.ready && bundleSetup.bundles.length > 0, bundleSetup.activeBundleId);
-  const entityScope = useEntityScope(bundleSetup.activeBundleId);
   const tabs = useWorkspaceTabs({
     documents: documents.documents,
     drafts: documents.drafts,
@@ -651,6 +651,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
       return navigation.openDocument(...args);
     },
     bundleSetup: settingsBundleSetup,
+    entityScope,
     openSettings: () => openSettings(),
   });
   const settingsBundleSetupWithReindex = {

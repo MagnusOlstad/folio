@@ -3,11 +3,13 @@ import type { BundleDirectory, BundleFile, Note, SidebarMode } from "../../../do
 import { loadExpandedDirectoryState } from "../../../lib/storage.ts";
 import { useWorkspaceDiscovery } from "./useWorkspaceDiscovery.ts";
 import type { WorkspaceSessionState } from "../model/workspace-state.ts";
+import type { useEntityScope } from "./useEntityScope.ts";
 
 export function useWorkspaceExplorerState(
   setMessage: (message: string) => void,
   initialState?: WorkspaceSessionState | null,
   bundleId = "legacy-bundle",
+  entityScope?: ReturnType<typeof useEntityScope>,
 ) {
   const [initialExpandedDirectoryState] = useState(() => loadExpandedDirectoryState(bundleId));
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>(
@@ -51,7 +53,7 @@ export function useWorkspaceExplorerState(
   );
   const [movingFileId, setMovingFileId] = useState<string | null>(null);
   const [reindexing, setReindexing] = useState(false);
-  const discovery = useWorkspaceDiscovery({ setMessage, setSidebarMode });
+  const discovery = useWorkspaceDiscovery({ setMessage, setSidebarMode, bundleId, entityScope });
 
   return {
     sidebarMode,

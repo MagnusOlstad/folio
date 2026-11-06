@@ -18,6 +18,8 @@ import { WorkspaceExplorer } from "../workspace/components/WorkspaceExplorer.tsx
 import { PanelHeightHandle } from "../workspace/components/PanelHeightHandle.tsx";
 import { usePanelHeightResize } from "../workspace/hooks/usePanelHeightResize.ts";
 import type { ExplorerFileActions } from "../workspace/model/explorer.ts";
+import type { EntityScopeMetadata } from "../../domain/entities.ts";
+import type { useEntityScope } from "../workspace/hooks/useEntityScope.ts";
 
 type OpenDocument = (
   id: string,
@@ -65,6 +67,8 @@ export type WorkspaceSidebarProps = {
   setSearchResults: Dispatch<SetStateAction<SearchResult[]>>;
   searchTag: (tag: string) => void;
   searchResults: SearchResult[];
+  searchScope: EntityScopeMetadata | null;
+  entityScope: ReturnType<typeof useEntityScope>;
   selectedAnswerModel: MlxModelId;
   asking: boolean;
   question: string;
@@ -91,6 +95,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
     sidebarMode, setSidebarMode, openDocument, notes, searchInputRef, searchQuery,
     setSearchQuery, selectedTag, searching, searchNotes, availableTags,
     setSelectedTag, setSearchResults, searchTag, searchResults,
+    searchScope, entityScope,
     selectedAnswerModel, asking, question, setQuestion,
     selectedAnswerModelMissing, askNotes, answer, conceptUrl, formatDate,
   } = props;
@@ -142,11 +147,12 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
               />
               <button
                 type="submit"
-                disabled={(!searchQuery.trim() && !selectedTag) || searching}
+                disabled={(!searchQuery.trim() && !selectedTag && entityScope.entityIds.length === 0) || searching}
               >
                 {searching ? "..." : "Go"}
               </button>
             </form>
+            <EntityScopeNotice entities={entityScope.entities} metadata={searchScope} onClear={() => { entityScope.clear(); setSearchResults([]); }} />
             {availableTags.length > 0 && (
               <div className="sidebar-tags" aria-label="Filter by tag">
                 <button
@@ -234,6 +240,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                 {asking ? "Thinking..." : "Ask notes"}
               </button>
             </form>
+            <EntityScopeNotice entities={entityScope.entities} metadata={answer?.scope ?? null} onClear={entityScope.clear} />
             <div className="sidebar-answer">
               {answer ? (
                 <>
@@ -343,4 +350,15 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
       </section>
     </aside>
   );
+}
+
+function EntityScopeNotice({ entities, metadata, onClear }: { entities: { id: string; label: string; type: string }[]; metadata: EntityScopeMetadata | null; onClear: () => void }) {
+  if (!entities.length && !metadata) return null;
+  const labels = metadata?.entities.map((entity) => entity.label) ?? entities.map((entity) => entity.label);
+  const coverage = metadata?.coverage;
+  return <section className="entity-scope-notice" aria-label="Entity intersection scope">
+    <p><strong>Intersection scope:</strong> {labels.join(" + ")}</p>
+    {coverage && <p role={metadata.incomplete ? "status" : undefined}>{metadata.matchedNoteCount} matching notes · {coverage.processed}/{coverage.eligible} analyzed{metadata.incomplete ? " · results may be incomplete" : ""}</p>}
+    <button type="button" onClick={onClear}>Clear entity scope</button>
+  </section>;
 }
