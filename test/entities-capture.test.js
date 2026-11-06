@@ -32,7 +32,10 @@ test('capture driver records actual helper timing and memory without classifying
   assert.ok(report.measurements.coldLoadWallMs > 0);
   assert.equal(report.measurements.rssSamplingAvailable, report.measurements.memoryBytes.sampledPeakHelperRss !== null);
   assert.ok(report.measurements.memoryBytes.helperPeakResident > 0);
-  assert.ok(report.measurements.memoryBytes.mlxPeakActivePlusCache > 0);
+  assert.ok(report.measurements.memoryBytes.mlxPeakObservedActivePlusCache > 0);
+  assert.ok(report.measurements.warmupRequestWallMs.mean > 0);
+  assert.ok(report.measurements.firstUsableLatencyWallMs > report.measurements.coldLoadWallMs);
+  assert.ok(report.measurements.firstMeasuredResultLatencyWallMs > 0);
   assert.equal(report.results.length, corpus.cases.length);
   assert.equal(report.predictions, undefined);
   assert.equal(report.completeness.complete, false);

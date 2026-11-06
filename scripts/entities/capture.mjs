@@ -401,9 +401,12 @@ try {
   const mlxActivePeakBytes = Math.max(...numberValues('activeBytes'));
   const mlxCachePeakBytes = Math.max(...numberValues('cacheBytes'));
   const helperPeakResidentBytes = Math.max(...numberValues('peakResidentBytes'));
+  const mlxPeakObservedActivePlusCache = Math.max(...memory.map((item) => item.activeBytes + item.cacheBytes).filter(Number.isFinite));
   const requestMlxPeaks = responses.map((response) => response.metrics?.requestPeakActiveBytes).filter((value) => Number.isFinite(value));
   const mlxPeakRequestActiveBytes = requestMlxPeaks.length ? Math.max(...requestMlxPeaks) : null;
   const totalRequestSeconds = wallTimes.reduce((sum, value) => sum + value, 0) / 1000;
+  const warmupWallTimes = measurements.warmup.map((item) => item.wallMs);
+  const firstUsableRequest = measurements.warmup[0] || runs[0] || null;
   const host = {
     architecture: process.arch,
     platform: platform(),
@@ -449,6 +452,10 @@ try {
     measurements: {
       coldLoadWallMs: measurements.coldLoadWallMs,
       helperReadyMemory: measurements.readyEvent.memory ?? null,
+      warmupRequestWallMs: { count: warmupWallTimes.length, median: percentile(warmupWallTimes, 0.5), p95: percentile(warmupWallTimes, 0.95), mean: mean(warmupWallTimes) },
+      firstUsableLatencyWallMs: firstUsableRequest ? measurements.coldLoadWallMs + firstUsableRequest.wallMs : null,
+      firstMeasuredResultLatencyWallMs: runs[0] ? measurements.coldLoadWallMs + runs[0].wallMs : null,
+      warmupRequests: measurements.warmup.map(({ wallMs, response }) => ({ wallMs, helperMetrics: response.metrics ?? null, memory: response.memory ?? null })),
       requestWallMs: { count: wallTimes.length, median: percentile(wallTimes, 0.5), p95: percentile(wallTimes, 0.95), mean: mean(wallTimes) },
       serialCorpusInvocationsPerMinute: totalRequestSeconds ? runs.length * 60 / totalRequestSeconds : null,
       helperRequestCount,
@@ -458,7 +465,7 @@ try {
         p95WallMs: percentile(measuredChunkWallTimes, 0.95),
         meanWallMs: mean(measuredChunkWallTimes),
       } } : {}),
-      memoryBytes: { sampledPeakHelperRss: rssPeakBytes, helperPeakResident: helperPeakResidentBytes, mlxPeakActive: mlxActivePeakBytes, mlxPeakCache: mlxCachePeakBytes, mlxPeakRequestActive: mlxPeakRequestActiveBytes, mlxPeakActivePlusCache: mlxActivePeakBytes + mlxCachePeakBytes },
+      memoryBytes: { sampledPeakHelperRss: rssPeakBytes, helperPeakResident: helperPeakResidentBytes, mlxPeakActive: mlxActivePeakBytes, mlxPeakCache: mlxCachePeakBytes, mlxPeakRequestActive: mlxPeakRequestActiveBytes, mlxPeakObservedActivePlusCache },
       rssSampleCount: rssSamples.length,
       rssSamplingAvailable: rssSamples.length > 0,
     },
