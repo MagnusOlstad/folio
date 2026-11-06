@@ -291,9 +291,13 @@ private func loadPinnedTokenizer(from snapshot: URL) async throws -> any Tokeniz
     defer { try? FileManager.default.removeItem(at: adapter) }
     try JSONSerialization.data(withJSONObject: json, options: [.sortedKeys])
         .write(to: adapter.appendingPathComponent("tokenizer_config.json"), options: .atomic)
-    try FileManager.default.copyItem(at: snapshot.appendingPathComponent("tokenizer.json"),
-                                     to: adapter.appendingPathComponent("tokenizer.json"))
+    try copySnapshotAssetResolvingSymlinks(snapshot.appendingPathComponent("tokenizer.json"),
+                                           to: adapter.appendingPathComponent("tokenizer.json"))
     return try await AutoTokenizer.from(modelFolder: adapter, strict: true)
+}
+
+func copySnapshotAssetResolvingSymlinks(_ source: URL, to destination: URL) throws {
+    try FileManager.default.copyItem(at: source.resolvingSymlinksInPath(), to: destination)
 }
 
 private func resolveFlatOverlaps(_ spans: [(score: Float, start: Int, end: Int)]) -> [(score: Float, start: Int, end: Int)] {

@@ -107,4 +107,28 @@ import Testing
         #expect(plan.chunks == [EntityChunkPlan(index: 0, startUtf16: 0, endUtf16: (text as NSString).length,
                                                 tokenCount: 0, schemaTokenCount: plan.schemaTokenCount)])
     }
+
+    @Test func tokenizerAssetCopyResolvesHFRelativeBlobSymlink() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("folio-gliner-symlink-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = root.appendingPathComponent("models--fastino--gliner2.5-multi-v1", isDirectory: true)
+        let blobs = repository.appendingPathComponent("blobs", isDirectory: true)
+        let snapshot = repository.appendingPathComponent(
+            "snapshots/7b005274e82da37dcf1f5fd9d6a2ef413c6a004c", isDirectory: true)
+        let adapter = root.appendingPathComponent("adapter", isDirectory: true)
+        try FileManager.default.createDirectory(at: blobs, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: snapshot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: adapter, withIntermediateDirectories: true)
+        let blob = blobs.appendingPathComponent("tokenizer-sha")
+        let link = snapshot.appendingPathComponent("tokenizer.json")
+        let copy = adapter.appendingPathComponent("tokenizer.json")
+        try Data(#"{"vocab":[]}"#.utf8).write(to: blob)
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "../../blobs/tokenizer-sha")
+
+        try copySnapshotAssetResolvingSymlinks(link, to: copy)
+
+        #expect(try Data(contentsOf: copy) == Data(#"{"vocab":[]}"#.utf8))
+        #expect((try FileManager.default.attributesOfItem(atPath: copy.path)[.type] as? FileAttributeType) == .typeRegular)
+    }
 }
