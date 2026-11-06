@@ -128,6 +128,31 @@ test('dismiss decisions survive derived-index loss and undo survives service res
   assert.equal((await service.getEntity(entity.id)).label, entity.label)
 })
 
+test('renaming one same-name person does not turn their old name into a shared alias', async (t) => {
+  const data = await fixture()
+  t.after(() => fs.rm(data.root, { recursive: true, force: true }))
+  await data.runtime.setContent('Priya Sharma met Priya Sharma.')
+  const service = createEntityService(data.runtime)
+  const projection = projectMarkdown(data.content)
+  const occurrences = [
+    mentionFrom(projection, 'Priya Sharma', 'person', 0),
+    mentionFrom(projection, 'Priya Sharma', 'person', 13),
+  ]
+  await service.replaceNoteMentions('/meeting.md', occurrences)
+  const initial = (await service.getMentionsForNote('/meeting.md')).items
+  assert.equal(initial.length, 2)
+  assert.notEqual(initial[0].entityId, initial[1].entityId)
+  const renamed = await service.applyCorrection({ expectedRevision: 0, command: { type: 'rename', entityId: initial[0].entityId, label: 'Priya S.' } })
+  assert.deepEqual((await service.getEntity(initial[0].entityId)).aliases, [])
+
+  await service.replaceNoteMentions('/meeting.md', occurrences)
+  const reextracted = (await service.getMentionsForNote('/meeting.md')).items
+  assert.deepEqual(reextracted.map((item) => item.entityId), initial.map((item) => item.entityId))
+  assert.equal((await service.getEntity(initial[0].entityId)).label, 'Priya S.')
+  assert.equal((await service.getEntity(initial[1].entityId)).label, 'Priya Sharma')
+  assert.equal(renamed.revision, 1)
+})
+
 test('correction undo locators follow a moved note through re-extraction', async (t) => {
   const data = await fixture()
   t.after(() => fs.rm(data.root, { recursive: true, force: true }))

@@ -25,7 +25,7 @@ export function applyEntityCommand({ command, mentions, userState, bundleId }) {
       const target = entity(command.entityId); const label = normalizeEntityLabel(command.label)
       if (!label || label.length > 160) throw new Error('Entity label must contain 1 to 160 characters.')
       inverse = { type: 'rename', entityId: target.id, label: target.label }
-      if (entityKey(target.type, target.label) !== entityKey(target.type, label)
+      if (target.type !== 'person' && entityKey(target.type, target.label) !== entityKey(target.type, label)
         && !target.aliases.some((alias) => entityKey(target.type, alias) === entityKey(target.type, target.label))) target.aliases.push(target.label)
       target.label = label; target.updatedAt = new Date().toISOString(); break
     }
