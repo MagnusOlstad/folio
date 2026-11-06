@@ -10,6 +10,7 @@ import { createBundleRuntimeManager } from '../server/bundles/registry.js'
 import { registerRoutes } from '../server/routes/entities.js'
 
 import { createEntityService } from '../server/entities/service.js'
+import { createRelatedEntityService } from '../server/entities/related.js'
 import { mapProjectedSpan, projectMarkdown } from '../server/entities/projection.js'
 
 async function fixture(bundleId = 'bundle-one') {
@@ -20,18 +21,25 @@ async function fixture(bundleId = 'bundle-one') {
   let content = '🙂 Acmé met Priya Sharma.'
   let activeNotePath = notePath
   let activeNoteId = '/meeting.md'
+  const extraNotes = new Map()
   await fs.writeFile(notePath, `---\ntitle: meeting\n---\n${content}`)
   const runtime = {
     dataRoot: root,
     bundleRoot: notesRoot,
     historyBundleId: bundleId,
-    resolveBundleMarkdownPath: (noteId) => noteId === activeNoteId ? activeNotePath : null,
+    resolveBundleMarkdownPath: (noteId) => noteId === activeNoteId ? activeNotePath : extraNotes.get(noteId) || null,
     assertNoBundleSymlinks: async () => {},
     readRecords: async () => [{ id: activeNoteId, content: 'stale cached body' }],
     parseMarkdownFile: (raw) => ({ content: raw.replace(/^---\n[\s\S]*?\n---\n/u, '') }),
     normalizeMarkdownBreaks: (value) => value,
     indexedConceptContent: (value) => value.trim(),
     async setContent(value) { content = value; await fs.writeFile(activeNotePath, `---\ntitle: meeting\n---\n${value}`) },
+    async addNote(noteId, value) {
+      const target = path.join(notesRoot, path.basename(noteId))
+      await fs.writeFile(target, value)
+      extraNotes.set(noteId, target)
+      return target
+    },
     async moveTo(newId) {
       const nextPath = path.join(notesRoot, path.basename(newId))
       await fs.rename(activeNotePath, nextPath)
@@ -234,6 +242,63 @@ test('source changes reject old extraction even when the search cache is behind'
   assert.equal((await service.listEntities()).items.length, 0)
 })
 
+test('queued source generation mismatch blocks an otherwise identical extraction commit', async (t) => {
+  const data = await fixture()
+  t.after(() => fs.rm(data.root, { recursive: true, force: true }))
+  const service = createEntityService(data.runtime)
+  const projection = projectMarkdown(data.content)
+  const mention = mentionFrom(projection, 'Acmé', 'organization')
+  const stat = await fs.stat(data.notePath)
+  const generation = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`
+  await fs.utimes(data.notePath, new Date(stat.atimeMs), new Date(stat.mtimeMs + 2_000))
+  const result = await service.replaceNoteMentions('/meeting.md', [mention], {
+    expectedSourceGeneration: generation,
+    extractionFingerprint: { inputHash: projection.projectionHash },
+  })
+  assert.deepEqual(result, { applied: false, stale: true })
+})
+
+test('retrieval snapshot retains durable empty identities but only fresh active resolved mentions', async (t) => {
+  const data = await fixture()
+  t.after(() => fs.rm(data.root, { recursive: true, force: true }))
+  const service = createEntityService(data.runtime)
+  const projection = projectMarkdown(data.content)
+  await service.replaceNoteMentions('/meeting.md', [mentionFrom(projection, 'Acmé', 'organization')])
+  const active = await service.getRetrievalSnapshot()
+  assert.equal(active.mentions.length, 1)
+  const id = active.mentions[0].entityId
+  await service.applyCorrection({ expectedRevision: 0, command: { type: 'dismiss', mentionIds: [active.mentions[0].id] } })
+  const dismissed = await service.getRetrievalSnapshot()
+  assert.deepEqual(dismissed.mentions, [])
+  assert.ok(dismissed.entities.some((entity) => entity.id === id && entity.mentionCount === 0 && entity.noteCount === 0))
+  assert.equal(dismissed.revision, 1)
+})
+
+test('related suggestions are distinct-note co-mentions and durable dismissals remove the pair', async (t) => {
+  const data = await fixture()
+  t.after(() => fs.rm(data.root, { recursive: true, force: true }))
+  const secondPath = path.join(path.dirname(data.notePath), 'second.md')
+  await fs.writeFile(secondPath, '---\ntitle: Atlas planning\n---\n🙂 Acmé met Priya Sharma.')
+  data.runtime.resolveBundleMarkdownPath = (noteId) => noteId === '/meeting.md' ? data.notePath : noteId === '/second.md' ? secondPath : null
+  data.runtime.readRecords = async () => [
+    { id: '/meeting.md', title: 'Acme meeting', createdAt: '2026-11-01', relationships: [] },
+    { id: '/second.md', title: 'Atlas planning', createdAt: '2026-11-02', relationships: [] },
+  ]
+  const service = createEntityService(data.runtime)
+  const related = createRelatedEntityService(data.runtime, service)
+  const projection = projectMarkdown(data.content)
+  await service.replaceNoteMentions('/meeting.md', [mentionFrom(projection, 'Acmé', 'organization')])
+  await service.replaceNoteMentions('/second.md', [mentionFrom(projection, 'Acmé', 'organization')])
+  const suggestions = await related.listRelated({ noteId: '/meeting.md' })
+  assert.equal(suggestions.items.length, 1)
+  assert.equal(suggestions.items[0].title, 'Atlas planning')
+  assert.deepEqual(suggestions.items[0].sharedEntities.map((entity) => entity.label), ['Acmé'])
+  const dismissed = await service.applyCorrection({ expectedRevision: 0, command: { type: 'dismiss-related', noteId: '/meeting.md', relatedNoteId: '/second.md' } })
+  assert.equal(dismissed.revision, 1)
+  assert.equal((await related.listRelated({ noteId: '/meeting.md' })).items.length, 0)
+  assert.equal((await service.getLatestCorrectionUndoState()).undoToken, dismissed.undoToken)
+})
+
 test('extraction commit waits for queued Markdown save before validating its source', async (t) => {
   const data = await fixture()
   t.after(() => fs.rm(data.root, { recursive: true, force: true }))
@@ -327,6 +392,34 @@ test('backup sidecar restore keeps stable IDs and corrections in the restored bu
   assert.equal((await restoredService.exportUserMetadata()).bundleId, 'restored-bundle')
 })
 
+test('two-hop metadata export rebinds nested undo entities to the restored bundle', async (t) => {
+  const original = await fixture('original-bundle')
+  const restored = await fixture('restored-bundle')
+  const movedAgain = await fixture('moved-again-bundle')
+  t.after(async () => Promise.all([original, restored, movedAgain].map((data) => fs.rm(data.root, { recursive: true, force: true }))))
+
+  const sourceService = createEntityService(original.runtime)
+  const originalProjection = projectMarkdown(original.content)
+  await sourceService.replaceNoteMentions('/meeting.md', [mentionFrom(originalProjection, 'Acmé', 'organization')])
+  const sourceEntity = (await sourceService.listEntities()).items[0]
+  await sourceService.applyCorrection({ expectedRevision: 0, command: { type: 'rename', entityId: sourceEntity.id, label: 'Acme Research' } })
+
+  const restoredService = createEntityService(restored.runtime)
+  await restoredService.importUserMetadata(await sourceService.exportUserMetadata())
+  await restoredService.replaceNoteMentions('/meeting.md', [mentionFrom(projectMarkdown(restored.content), 'Acmé', 'organization')])
+  const latestEntity = (await restoredService.listEntities()).items[0]
+  const secondCorrection = await restoredService.applyCorrection({ expectedRevision: 1, command: { type: 'add-alias', entityId: latestEntity.id, alias: 'Acme Labs' } })
+
+  const movedAgainService = createEntityService(movedAgain.runtime)
+  await movedAgainService.importUserMetadata(await restoredService.exportUserMetadata())
+  await movedAgainService.replaceNoteMentions('/meeting.md', [mentionFrom(projectMarkdown(movedAgain.content), 'Acmé', 'organization')])
+  await movedAgainService.undoCorrection({ expectedRevision: secondCorrection.revision, undoToken: secondCorrection.undoToken })
+  const undone = (await movedAgainService.listEntities()).items[0]
+  assert.equal(undone.id, sourceEntity.id)
+  assert.equal(undone.label, 'Acme Research')
+  assert.deepEqual(undone.aliases, ['Acmé'])
+})
+
 test('merge, split, and retype decisions replay after re-extraction', async (t) => {
   const data = await fixture()
   t.after(() => fs.rm(data.root, { recursive: true, force: true }))
@@ -361,6 +454,36 @@ test('merge, split, and retype decisions replay after re-extraction', async (t) 
   assert.equal(after.items.find((mention) => mention.startUtf16 === acmeSecond.startUtf16)?.type, 'project')
   assert.equal(retyped.revision, separate.revision + 1)
   assert.ok(acmeMention && secondMention && betaMention && priyaEntity)
+})
+
+test('undoing a merge re-resolves mentions extracted afterward against restored identities', async (t) => {
+  const data = await fixture()
+  t.after(() => fs.rm(data.root, { recursive: true, force: true }))
+  const service = createEntityService(data.runtime)
+  await data.runtime.setContent('Acmé works with Beta.')
+  const firstProjection = projectMarkdown(data.content)
+  await service.replaceNoteMentions('/meeting.md', [
+    mentionFrom(firstProjection, 'Acmé', 'organization'),
+    mentionFrom(firstProjection, 'Beta', 'organization'),
+  ])
+  const initialMentions = (await service.getMentionsForNote('/meeting.md')).items
+  const initial = (await service.listEntities()).items
+  const acme = initial.find((entity) => entity.id === initialMentions.find((mention) => mention.text === 'Acmé')?.entityId)
+  const beta = initial.find((entity) => entity.id === initialMentions.find((mention) => mention.text === 'Beta')?.entityId)
+  assert.ok(acme && beta)
+  const merge = await service.applyCorrection({ expectedRevision: 0, command: { type: 'merge', entityId: beta.id, targetEntityId: acme.id } })
+
+  const secondBody = 'Beta presented a new plan.'
+  await data.runtime.addNote('/second.md', secondBody)
+  const secondProjection = projectMarkdown(secondBody, { frontmatter: false })
+  await service.replaceNoteMentions('/second.md', [mentionFrom(secondProjection, 'Beta', 'organization')])
+  const secondMention = (await service.getMentionsForNote('/second.md')).items[0]
+  assert.equal(secondMention.entityId, acme.id, 'the merged alias resolves to the merge target before undo')
+
+  await service.undoCorrection({ expectedRevision: merge.revision, undoToken: merge.undoToken })
+  const restoredMention = (await service.getMentionsForNote('/second.md')).items[0]
+  assert.equal(restoredMention.entityId, beta.id, 'undo restores source identity resolution for later extracted mentions')
+  assert.ok((await service.getEntity(beta.id)), 'the merged source identity is restored')
 })
 
 test('a correction ledger revision repairs an index left behind by a crash', async (t) => {

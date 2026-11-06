@@ -5,7 +5,7 @@ import { projectMarkdown } from './projection.js'
 export const ENTITY_SCHEMA_VERSION = 'folio-entities-v1'
 export const ENTITY_MODEL_ID = 'gliner25multi'
 export const ENTITY_MODEL_REVISION = '7b005274e82da37dcf1f5fd9d6a2ef413c6a004c'
-export const ENTITY_PREPROCESSING_VERSION = 'folio-entity-preprocessing-v1'
+export const ENTITY_PREPROCESSING_VERSION = 'folio-entity-preprocessing-v2'
 export const ENTITY_MAX_TOKENS = 512
 export const ENTITY_OVERLAP_TOKENS = 32
 export const ENTITY_TYPE_THRESHOLDS = Object.freeze({
@@ -50,7 +50,7 @@ export async function readEntitySource(runtime, noteId) {
   }
   const parsed = runtime.parseMarkdownFile(rawMarkdown, filePath)
   const content = runtime.indexedConceptContent(parsed.content)
-  const projection = projectMarkdown(content)
+  const projection = projectMarkdown(content, { frontmatter: false })
   return {
     noteId,
     stale: false,

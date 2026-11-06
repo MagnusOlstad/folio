@@ -1,9 +1,9 @@
 import { contentHash } from './model.js'
 
-export const PROJECTION_VERSION = 1
+export const PROJECTION_VERSION = 2
 
 /** Keeps a stable raw-Markdown coordinate space. Block locators are 1-based line IDs. */
-export function projectMarkdown(content) {
+export function projectMarkdown(content, { frontmatter = true } = {}) {
   const raw = String(content ?? '')
   const lines = raw.split('\n')
   const blocks = []
@@ -11,16 +11,16 @@ export function projectMarkdown(content) {
   const kept = []
   let offset = 0
   let projectedOffset = 0
-  let frontmatter = lines[0]?.trim() === '---'
+  let skippingFrontmatter = frontmatter && lines[0]?.trim() === '---'
   let generatedRelated = false
   let activeCaptureId = null
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]
-    if (index === 0 && frontmatter) { offset += line.length + 1; continue }
-    if (frontmatter) {
+    if (index === 0 && skippingFrontmatter) { offset += line.length + 1; continue }
+    if (skippingFrontmatter) {
       const close = line.trim() === '---' || line.trim() === '...'
       offset += line.length + 1
-      if (close) frontmatter = false
+      if (close) skippingFrontmatter = false
       continue
     }
     if (line.includes('<!-- folio:generated-related:start -->')) generatedRelated = true

@@ -109,6 +109,20 @@ export function applyEntityCommand({ command, mentions, userState, bundleId }) {
       userState = { ...userState, entities, noteLinks }
       break
     }
+    case 'dismiss-related': {
+      const noteId = String(command.noteId || '')
+      const relatedNoteId = String(command.relatedNoteId || '')
+      if (!noteId.startsWith('/') || !relatedNoteId.startsWith('/') || noteId === relatedNoteId
+        || noteId.includes('..') || relatedNoteId.includes('..') || noteId.includes('\\') || relatedNoteId.includes('\\')) {
+        throw new Error('Choose two valid, different bundle notes.')
+      }
+      const noteIds = [noteId, relatedNoteId].sort()
+      const exists = (userState.relatedDismissals || []).some((item) => item.noteIds?.[0] === noteIds[0] && item.noteIds?.[1] === noteIds[1])
+      const relatedDismissals = exists ? [...(userState.relatedDismissals || [])] : [...(userState.relatedDismissals || []), { noteIds, dismissedAt: new Date().toISOString() }]
+      userState = { ...userState, entities, relatedDismissals }
+      inverse = { type: 'dismiss-related', noteId, relatedNoteId }
+      break
+    }
     default: throw new Error(`Unknown entity correction command: ${String(command.type || '')}`)
   }
   void bundleId

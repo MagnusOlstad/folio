@@ -1,3 +1,6 @@
+import { createEntityPresentation } from '../entities/presentation.js'
+import { createRelatedEntityService } from '../entities/related.js'
+
 function sendError(response, error) {
   response.status(error.status || 400).json({ code: error.code || 'ENTITY_REQUEST_FAILED', error: error.message || 'Entity request failed.', ...(error.revision === undefined ? {} : { revision: error.revision }) })
 }
@@ -5,6 +8,8 @@ function sendError(response, error) {
 export function registerRoutes(app, runtime) {
   const service = runtime.entityService
   if (!service) throw new Error('Entity service is not configured.')
+  const presentation = createEntityPresentation(runtime, service)
+  const related = createRelatedEntityService(runtime, service)
   app.get('/api/entities/settings', async (_request, response) => {
     try { response.json(await service.getAnalysisSettings()) }
     catch (error) { sendError(response, error) }
@@ -21,7 +26,7 @@ export function registerRoutes(app, runtime) {
   })
   app.get('/api/entities', async (request, response) => {
     try {
-      const result = await service.listEntities({ q: request.query.q, type: request.query.type, cursor: request.query.cursor, limit: request.query.limit })
+      const result = await service.listEntities({ q: request.query.q, type: request.query.type, activity: request.query.activity, cursor: request.query.cursor, limit: request.query.limit })
       response.json(result)
     } catch (error) { sendError(response, error) }
   })
@@ -34,6 +39,14 @@ export function registerRoutes(app, runtime) {
     try { response.json(await service.undoCorrection({ expectedRevision: request.body?.expectedRevision, undoToken: request.body?.undoToken })) }
     catch (error) { sendError(response, error) }
   })
+  app.get('/api/entities/corrections/latest', async (_request, response) => {
+    try { response.json(await service.getLatestCorrectionUndoState()) }
+    catch (error) { sendError(response, error) }
+  })
+  app.get('/api/entities/related', async (request, response) => {
+    try { response.json(await related.listRelated({ noteId: request.query.noteId, cursor: request.query.cursor, limit: request.query.limit })) }
+    catch (error) { sendError(response, error) }
+  })
   app.get('/api/entities/metadata', async (_request, response) => {
     try { response.json(await service.exportUserMetadata()) }
     catch (error) { sendError(response, error) }
@@ -43,7 +56,7 @@ export function registerRoutes(app, runtime) {
     catch (error) { sendError(response, error) }
   })
   app.get('/api/entities/:entityId/mentions', async (request, response) => {
-    try { response.json(await service.listMentions(request.params.entityId, request.query)) }
+    try { response.json(await presentation.mentions(request.params.entityId, request.query)) }
     catch (error) { sendError(response, error) }
   })
   app.get('/api/entities/:entityId', async (request, response) => {

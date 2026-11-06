@@ -112,7 +112,8 @@ export function createEntityService(runtime) {
   async function replaceNoteMentions(noteId, extractedMentions, options = {}) {
     const commit = () => storage.withLock(async () => {
       const { content, sourceGeneration } = await sourceForNote(noteId)
-      const projection = projectMarkdown(content)
+      if (options.expectedSourceGeneration !== undefined && options.expectedSourceGeneration !== sourceGeneration) return { applied: false, stale: true }
+      const projection = projectMarkdown(content, { frontmatter: false })
       if (options.contentHash && options.contentHash !== projection.contentHash) return { applied: false, stale: true }
       const fingerprint = options.extractionFingerprint || extractedMentions[0]?.extractionFingerprint
       if (!fingerprint || typeof fingerprint !== 'object' || fingerprint.inputHash !== projection.projectionHash) {
@@ -178,7 +179,7 @@ export function createEntityService(runtime) {
       }
       index.mentions = [...index.mentions.filter((mention) => mention.noteId !== noteId), ...accepted]
       index.coverage[noteId] = { contentHash: projection.contentHash, projectionHash: projection.projectionHash, sourceGeneration,
-        extractionFingerprint: fingerprint, status: 'complete', updatedAt: new Date().toISOString() }
+        extractionFingerprint: fingerprint, projectionVersion: projection.version, status: 'complete', updatedAt: new Date().toISOString() }
       await refreshIndex(index, state)
       await storage.writeUserState(state)
       await storage.writeIndex(index)
@@ -193,19 +194,20 @@ export function createEntityService(runtime) {
 
   async function getMentionsForNote(noteId) {
     const { content } = await sourceForNote(noteId)
-    const projection = projectMarkdown(content)
+    const projection = projectMarkdown(content, { frontmatter: false })
     const { index } = await readCurrent()
     const coverage = index.coverage[noteId] || null
     const items = index.mentions.filter((mention) => mention.noteId === noteId).map((mention) => ({ ...mention,
       freshness: mention.contentHash === projection.contentHash && projection.text.slice(mention.startUtf16, mention.endUtf16) === mention.text ? 'current' : 'stale' }))
-    return { items: items.filter((mention) => mention.freshness === 'current' && mention.status === 'active'), staleCount: items.filter((mention) => mention.freshness === 'stale').length, freshness: coverage?.contentHash === projection.contentHash ? 'current' : 'stale', coverage }
+    const currentProjection = coverage?.contentHash === projection.contentHash && coverage?.projectionHash === projection.projectionHash && coverage?.projectionVersion === projection.version
+    return { items: items.filter((mention) => mention.freshness === 'current' && mention.status === 'active'), staleCount: items.filter((mention) => mention.freshness === 'stale').length, freshness: currentProjection ? 'current' : 'stale', coverage }
   }
 
   async function freshnessForNotes(noteIds, index) {
     return new Map(await mapConcurrent([...new Set(noteIds)], 16, async (noteId) => {
       try {
         const generation = await sourceGenerationFor(noteId)
-        return [noteId, index.coverage[noteId]?.sourceGeneration === generation]
+        return [noteId, index.coverage[noteId]?.sourceGeneration === generation && index.coverage[noteId]?.projectionVersion === 2]
       } catch { return [noteId, false] }
     }))
   }
@@ -235,7 +237,16 @@ export function createEntityService(runtime) {
     const { index, state } = await readCurrent()
     const records = await runtime.readRecords()
     const freshness = await freshnessForNotes([...records.map((record) => record.id), ...index.mentions.map((mention) => mention.noteId)], index)
-    const materialized = materializeEntities(await freshMentions(index, freshness), state)
+    const active = materializeEntities(await freshMentions(index, freshness), state)
+    const staleMentions = index.mentions.filter((mention) => freshness.get(mention.noteId) !== true && mention.status === 'active')
+    const stale = materializeEntities(staleMentions, state)
+    const base = options.activity === 'stale' ? stale : active
+    const entitiesById = new Map(base.map((entity) => [entity.id, entity]))
+    if (options.activity === 'all') for (const entity of stale) if (!entitiesById.has(entity.id)) entitiesById.set(entity.id, entity)
+    if (!options.activity || options.activity === 'all') for (const entity of state.entities) {
+      if (!entitiesById.has(entity.id) && (entity.identitySource === 'user' || options.activity === 'all')) entitiesById.set(entity.id, { ...entity, mentionCount: 0, noteCount: 0 })
+    }
+    const materialized = [...entitiesById.values()]
     const query = String(options.q || '').trim().toLocaleLowerCase()
     const items = materialized.filter((entity) => (!options.type || entity.type === options.type)
       && (!query || `${entity.label} ${entity.aliases.join(' ')}`.toLocaleLowerCase().includes(query)))
@@ -258,11 +269,50 @@ export function createEntityService(runtime) {
     return { ...page(items, options.cursor, options.limit), indexRevision: index.revision }
   }
 
+  async function getRetrievalSnapshot() {
+    const { index, state } = await readCurrent()
+    const records = await runtime.readRecords()
+    const noteIds = [...new Set([...records.map((record) => record.id), ...index.mentions.map((mention) => mention.noteId)])]
+    const freshness = await freshnessForNotes(noteIds, index)
+    const mentions = (await freshMentions(index, freshness)).filter((mention) => mention.resolution === 'resolved' && typeof mention.entityId === 'string' && mention.entityId)
+    return {
+      entities: state.entities.map((entity) => ({ ...entity, mentionCount: 0, noteCount: 0 })),
+      mentions,
+      coverage: getCoverage(index, records, freshness),
+      revision: state.revision,
+      indexRevision: index.revision,
+      stale: Boolean(index.stale) || noteIds.some((noteId) => freshness.get(noteId) !== true),
+    }
+  }
+
+  async function getLatestCorrectionUndoState() {
+    const state = await storage.readUserState()
+    return { revision: state.revision, undoToken: state.corrections.at(-1)?.undoToken || null }
+  }
+
+  async function getRelatedDismissals(noteId) {
+    const state = await storage.readUserState()
+    return (state.relatedDismissals || []).flatMap((item) => {
+      if (item.noteIds?.includes(noteId)) return item.noteIds.filter((id) => id !== noteId)
+      return []
+    })
+  }
+  async function getNoteEntityLinks(noteId) {
+    const state = await storage.readUserState()
+    return (state.noteLinks || []).filter((link) => link.noteId === noteId).map((link) => link.entityId)
+  }
+
   async function commitCorrection({ expectedRevision, command }) {
     return storage.withLock(async () => {
       const { index, state } = await readCurrent({ persist: true })
       if (!Number.isInteger(expectedRevision) || expectedRevision !== state.revision) throw Object.assign(new Error('Entity correction revision conflict.'), { status: 409, code: 'REVISION_CONFLICT', revision: state.revision })
-      const beforeState = { entities: structuredClone(state.entities), doNotMerge: structuredClone(state.doNotMerge), noteLinks: structuredClone(state.noteLinks), mentionDecisions: structuredClone(state.mentionDecisions || []) }
+      if (command?.type === 'dismiss-related') {
+        const noteId = validRelatedNoteId(command.noteId)
+        const relatedNoteId = validRelatedNoteId(command.relatedNoteId)
+        if (noteId === relatedNoteId) throw Object.assign(new Error('Choose two different notes.'), { status: 400 })
+        await sourceForNote(noteId); await sourceForNote(relatedNoteId)
+      }
+      const beforeState = { entities: structuredClone(state.entities), doNotMerge: structuredClone(state.doNotMerge), noteLinks: structuredClone(state.noteLinks), mentionDecisions: structuredClone(state.mentionDecisions || []), relatedDismissals: structuredClone(state.relatedDismissals || []) }
       const beforeMentions = new Map(index.mentions.map((mention) => [mention.id, mention]))
       const applied = applyEntityCommand({ command, mentions: index.mentions, userState: state, bundleId: storage.bundleId })
       index.mentions = applied.mentions
@@ -303,17 +353,28 @@ export function createEntityService(runtime) {
       const restored = { ...state, ...structuredClone(record.beforeState) }
       restored.revision = state.revision + 1
       restored.corrections = state.corrections.slice(0, -1)
-      const decisionById = new Map((restored.mentionDecisions || []).map((decision) => [decision.mentionId, decision]))
-      for (const mention of index.mentions) {
-        const decision = decisionById.get(mention.id)
-        if (decision) Object.assign(mention, { entityId: decision.entityId, resolution: decision.resolution, status: decision.status, resolutionProvenance: 'user' })
+      const priorIds = new Set(restored.entities.map((entity) => entity.id))
+      const priorLabels = new Set(restored.entities.flatMap((entity) => [entity.label, ...(entity.aliases || [])].map((label) => entityKey(entity.type, label))))
+      for (const entity of state.entities) {
+        if (priorIds.has(entity.id)) continue
+        const identityKey = entityKey(entity.type, entity.label)
+        if (priorLabels.has(identityKey)) continue
+        restored.entities.push(structuredClone(entity))
+        priorIds.add(entity.id)
+        priorLabels.add(identityKey)
       }
       for (const before of record.beforeMentions || []) {
         const mention = index.mentions.find((item) => item.id === before.mentionId)
         if (mention) Object.assign(mention, before)
-        decisionById.set(before.mentionId, { mentionId: before.mentionId, entityId: before.entityId, resolution: before.resolution, status: before.status, resolutionProvenance: 'user', correctedType: before.type })
       }
-      restored.mentionDecisions = [...decisionById.values()]
+      const decisionById = new Map((restored.mentionDecisions || []).map((decision) => [decision.mentionId, decision]))
+      for (const decision of decisionById.values()) {
+        const mention = index.mentions.find((item) => item.id === decision.mentionId)
+        if (mention) Object.assign(mention, { entityId: decision.entityId, resolution: decision.resolution, status: decision.status, resolutionProvenance: 'user', ...(decision.correctedType ? { type: decision.correctedType } : {}) })
+      }
+      const resolved = resolveMentions(index.mentions, restored)
+      index.mentions = resolved.mentions
+      restored.entities = resolved.entities
       index.revision += 1; index.appliedCorrectionRevision = restored.revision; index.entities = materializeEntities(index.mentions, restored)
       await storage.writeUserState(restored); await storage.writeIndex(index)
       return { revision: restored.revision, indexRevision: index.revision }
@@ -332,7 +393,7 @@ export function createEntityService(runtime) {
   async function migrateNote(oldNoteId, newNoteId) {
     return storage.withLock(async () => {
       const { content: targetContent, sourceGeneration } = await sourceForNote(newNoteId)
-      const projection = projectMarkdown(targetContent)
+      const projection = projectMarkdown(targetContent, { frontmatter: false })
       const { index, state } = await readCurrent({ persist: true })
       const movedMentionIds = new Map()
       const movedMentions = index.mentions.filter((item) => item.noteId === oldNoteId)
@@ -383,7 +444,7 @@ export function createEntityService(runtime) {
         if (correction.command?.noteId === oldNoteId) correction.command.noteId = newNoteId
         if (correction.inverse?.noteId === oldNoteId) correction.inverse.noteId = newNoteId
       }
-      if (index.coverage[oldNoteId]) { index.coverage[newNoteId] = { ...index.coverage[oldNoteId], contentHash: projection.contentHash, projectionHash: projection.projectionHash, sourceGeneration }; delete index.coverage[oldNoteId] }
+      if (index.coverage[oldNoteId]) { index.coverage[newNoteId] = { ...index.coverage[oldNoteId], contentHash: projection.contentHash, projectionHash: projection.projectionHash, projectionVersion: projection.version, sourceGeneration }; delete index.coverage[oldNoteId] }
       for (const link of state.noteLinks) if (link.noteId === oldNoteId) link.noteId = newNoteId
       await refreshIndex(index, state); await storage.writeUserState(state); await storage.writeIndex(index)
     })
@@ -423,7 +484,16 @@ export function createEntityService(runtime) {
     return storage.withLock(async () => {
       const state = { ...value.userState, bundleId: storage.bundleId }
       state.entities = state.entities.map((entity) => ({ ...entity, bundleId: storage.bundleId }))
-      state.corrections = state.corrections.map((correction) => ({ ...correction, bundleId: storage.bundleId }))
+      state.corrections = state.corrections.map((correction) => ({
+        ...correction,
+        bundleId: storage.bundleId,
+        beforeState: correction.beforeState ? {
+          ...correction.beforeState,
+          bundleId: storage.bundleId,
+          entities: (correction.beforeState.entities || []).map((entity) => ({ ...entity, bundleId: storage.bundleId })),
+        } : correction.beforeState,
+        inverse: correction.inverse?.entity ? { ...correction.inverse, entity: { ...correction.inverse.entity, bundleId: storage.bundleId } } : correction.inverse,
+      }))
       const index = { version: 1, bundleId: storage.bundleId, revision: 0, mentions: [], entities: [], coverage: {}, stale: true }
       await storage.writeUserState(state); await storage.writeIndex(index)
     })
@@ -446,8 +516,14 @@ export function createEntityService(runtime) {
     }
   }
 
-  return { bundleId: storage.bundleId, storage, listEntities, getEntity, listMentions, getMentionsForNote,
+  return { bundleId: storage.bundleId, storage, listEntities, getEntity, listMentions, getMentionsForNote, getRetrievalSnapshot, getLatestCorrectionUndoState, getRelatedDismissals, getNoteEntityLinks,
     applyCorrection: commitCorrection, undoCorrection, replaceNoteMentions, forgetNote, migrateNote,
     exportUserMetadata, importUserMetadata, restoreBundleSidecar, resolveEntityKey: entityKey,
     getAnalysisSettings, getAnalysisSettingsSnapshot, setAnalysisEnabled, enableAnalysisAfterInstall, onAnalysisSettingsChange }
+}
+
+function validRelatedNoteId(value) {
+  const noteId = String(value || '')
+  if (!noteId.startsWith('/') || noteId.includes('..') || noteId.includes('\\') || noteId.includes('\0')) throw Object.assign(new Error('Invalid related note ID.'), { status: 400 })
+  return noteId
 }
