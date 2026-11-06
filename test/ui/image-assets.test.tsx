@@ -229,6 +229,19 @@ describe("LiveMarkdownEditor image text extraction", () => {
     expect(root.querySelector(".cm-live-markdown-ocr-preview")).toBeNull();
   });
 
+  it("makes the preview focusable so selecting its text does not move the editor selection", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ocrResponse()));
+    render(<LiveMarkdownEditor value="![shot](/assets/a.png)" onChange={vi.fn()} ariaLabel="Focus note" />);
+    const root = screen.getByLabelText("Focus note");
+    fireEvent.click(label(root, "Extract text")!);
+    await waitFor(() => expect(root.querySelector(".cm-live-markdown-ocr-preview")).not.toBeNull());
+    const preview = root.querySelector<HTMLElement>(".cm-live-markdown-ocr-preview")!;
+    expect(preview.tabIndex).toBe(-1);
+    preview.focus();
+    fireEvent.keyDown(preview, { key: "Escape" });
+    expect(root.querySelector(".cm-live-markdown-ocr-preview")).toBeNull();
+  });
+
   it("closes the preview with Escape", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ocrResponse()));
     render(<LiveMarkdownEditor value="![shot](/assets/a.png)" onChange={vi.fn()} ariaLabel="Esc note" />);
