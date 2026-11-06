@@ -257,6 +257,7 @@ export function EditorGroup({
             }
             onDelete={actions.deleteFiledNote}
             onExport={actions.exportDocument}
+            onTranslatedExport={actions.deliverTranslatedExport}
             filing={
               model.filingOwnerGroupIds[document.id] === group.id
                 ? model.filingQueues[document.id]?.[0]

@@ -491,6 +491,6 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   }
 
   return { status, install, load, unload, remove, selectGenerationModel, selectedGenerationModel,
-    selectTranscriptionModel, selectedTranscriptionModel, generate, embed, transcribe, extractText, close, withModelActivity, registerExternalModel, keepAliveMs: warmKeepAliveMs,
+    selectTranscriptionModel, selectedTranscriptionModel, generate, embed, transcribe, extractText, close, isBusy: () => [...modelActivities.values()].some((count) => count > 0), withModelActivity, registerExternalModel, keepAliveMs: warmKeepAliveMs,
     modelDefinitions: MODEL_DEFINITIONS }
 }

@@ -42,6 +42,12 @@ function renderSettings(overrides: Partial<ModelSettingsControls> = {}) {
 }
 
 describe("model settings", () => {
+  it("has no app-wide background translation switch (auto-translate is per note)", () => {
+    renderSettings();
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.queryByRole("group", { name: "Background translation" })).toBeNull();
+  });
+
   it("lists LightOnOCR and installs it from settings", () => {
     const { install } = renderSettings();
     expect(screen.getByText("LightOnOCR 3 1B")).toBeInTheDocument();

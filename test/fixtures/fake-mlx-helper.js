@@ -57,7 +57,7 @@ function classify(content) {
   if (content.includes('Attribution title')) return { kind: 'note', path: ['attribution'], title: 'Attribution Title', type: 'Note', description: 'Agent title.', tags: ['agent'] }
   if (content.includes('Attribution path')) return { kind: 'note', path: ['attribution'], title: 'Attribution Path', type: 'Note', description: 'Agent path.', tags: ['agent'] }
   if (content.includes('Marker collision capture')) return { kind: 'note', path: ['marker-tests'], title: 'Captured note', type: 'Note', description: 'Marker placement regression.', tags: [] }
-  return { kind: 'note', path: ['meeting-notes', 'morning-meeting'], title: 'Morning<br>launch meeting', type: 'Meeting Note', description: 'The morning meeting covered the launch<br />and its follow-up.', tags: ['launch', 'morning'] }
+  return { kind: 'note', path: ['meeting-notes', 'morning-meeting'], title: 'Morning<br>launch meeting', type: 'Meeting Note', description: 'The morning meeting covered the launch<br />and its follow-up.', tags: ['launch', 'morning'], language: 'en' }
 }
 
 function noteFromPrompt(messages) {

@@ -1,3 +1,21 @@
+import type {
+  NoteLanguageInfo,
+  NoteTranslation,
+  NoteTranslationTarget,
+  TranslatedExportJob,
+  TranslatedExportTarget,
+  TranslationSettings,
+} from "../domain/types.ts";
+
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 let activeBundleId: string | null = null;
 
 export function setActiveBundleId(bundleId: string | null) {
@@ -56,7 +74,7 @@ export async function api<T>(url: string, options?: RequestInit): Promise<T> {
         : [502, 503, 504].includes(response.status)
           ? "The local FolioNotes service is not ready yet."
           : `Request failed (${response.status}).`;
-    throw new Error(error);
+    throw new ApiError(error, response.status);
   }
   return result as T;
 }
@@ -79,4 +97,57 @@ export async function apiWithRetry<T>(
     }
   }
   throw lastError;
+}
+
+export function fetchNoteTranslation(
+  id: string,
+  target: NoteTranslationTarget,
+  signal?: AbortSignal,
+): Promise<NoteTranslation> {
+  return api<NoteTranslation>(
+    `/api/note/translation?id=${encodeURIComponent(id)}&target=${target}`,
+    { signal },
+  );
+}
+
+export function prioritizeNoteTranslation(id: string): Promise<{ queued: boolean }> {
+  return api<{ queued: boolean }>("/api/note/translation/prioritize", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+  });
+}
+
+export function fetchTranslationSettings(): Promise<TranslationSettings> {
+  return api<TranslationSettings>("/api/translation/settings");
+}
+
+export function setNoteAutoTranslate(
+  id: string,
+  enabled: boolean,
+): Promise<{ id: string; autoTranslate: boolean; available: boolean }> {
+  return api<{ id: string; autoTranslate: boolean; available: boolean }>("/api/note/translation/auto", {
+    method: "PUT",
+    body: JSON.stringify({ id, enabled }),
+  });
+}
+
+export function startTranslatedExport(id: string, target: TranslatedExportTarget): Promise<TranslatedExportJob> {
+  return api<TranslatedExportJob>("/api/note/translation/export", {
+    method: "POST",
+    body: JSON.stringify({ id, target }),
+  });
+}
+
+export function fetchTranslatedExport(jobId: string, signal?: AbortSignal): Promise<TranslatedExportJob> {
+  return api<TranslatedExportJob>(`/api/note/translation/export/${encodeURIComponent(jobId)}`, { signal });
+}
+
+export function cancelTranslatedExport(jobId: string): Promise<{ jobId: string; status: "cancelled" }> {
+  return api<{ jobId: string; status: "cancelled" }>(`/api/note/translation/export/${encodeURIComponent(jobId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function fetchNoteLanguage(id: string, signal?: AbortSignal): Promise<NoteLanguageInfo> {
+  return api<NoteLanguageInfo>(`/api/note/language?id=${encodeURIComponent(id)}`, { signal });
 }

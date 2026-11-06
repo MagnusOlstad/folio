@@ -1,5 +1,6 @@
-import type { ViewerDocument } from "../../../domain/types.ts";
+import type { NoteLanguageSource, NoteTranslationTarget, ViewerDocument } from "../../../domain/types.ts";
 import type { MetadataField } from "../types.ts";
+import { DocumentTranslationToggle } from "./DocumentTranslationToggle.tsx";
 
 type DocumentHeaderProps = {
   groupId: string;
@@ -18,9 +19,18 @@ type DocumentHeaderProps = {
     field: MetadataField,
     value: string,
   ) => void;
-  onRefile?: (document: ViewerDocument) => void;
-  refileDisabled?: boolean;
   readOnly?: boolean;
+  languageToggle?: {
+    enabled: boolean;
+    saving: boolean;
+    error: string;
+    onEnabledChange: (enabled: boolean) => void;
+    value: NoteTranslationTarget | null;
+    available: boolean;
+    originalLanguage: NoteTranslationTarget | null;
+    originalSource: NoteLanguageSource | null;
+    onChange: (target: NoteTranslationTarget) => void;
+  };
 };
 
 export function DocumentHeader({
@@ -31,15 +41,20 @@ export function DocumentHeader({
   onBeginEditing,
   onChangeDraft,
   onFinishEditing,
-  onRefile = () => {},
-  refileDisabled = false,
   readOnly = false,
+  languageToggle,
 }: DocumentHeaderProps) {
   const titleKey = `${groupId}:${document.id}:title`;
   const descriptionKey = `${groupId}:${document.id}:description`;
+  const hasToolbar = Boolean(languageToggle);
 
   return (
-    <header className="document-heading">
+    <header className={`document-heading${hasToolbar ? " has-toolbar" : ""}`}>
+      {hasToolbar ? (
+        <div className="document-toolbar" role="toolbar" aria-label="Note actions">
+          {languageToggle ? <DocumentTranslationToggle {...languageToggle} /> : null}
+        </div>
+      ) : null}
       <p>
         {document.type}
         {document.stale ? " / stale" : ""}
@@ -130,9 +145,6 @@ export function DocumentHeader({
         </button>
       ) : document.description ? (
         <span>{document.description}</span>
-      ) : null}
-      {!readOnly && document.deletable && document.movable ? (
-        <button type="button" className="document-refile-button" onClick={() => onRefile(document)} disabled={refileDisabled}>Refile</button>
       ) : null}
     </header>
   );

@@ -2,6 +2,7 @@ import path from 'node:path'
 import { buildClassificationMessages } from './classification-output.js'
 import { classificationSchema, ClassificationOutputError, parseClassificationOutput } from './classification-output.js'
 import { annotateRelativeDates } from './relative-dates.js'
+import { detectLanguageHeuristic } from '../core/language.js'
 
 export function createClassificationService(runtime) {
   const { mlxService, normalizeInlineText,
@@ -261,6 +262,7 @@ function addRelativeDateMetadata(result, content, options) {
   return {
     concept: {
       ...result.concept,
+      language: result.concept.language || detectLanguageHeuristic(content),
       description: annotateRelativeDates(result.concept.description, content, {
       now: options.now,
       timeZone: options.timeZone || 'UTC',

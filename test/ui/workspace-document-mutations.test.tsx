@@ -6,7 +6,7 @@ const { mockApi } = vi.hoisted(() => ({
   mockApi: vi.fn(),
 }));
 
-vi.mock("../../src/lib/api.ts", () => ({ api: mockApi }));
+vi.mock("../../src/lib/api.ts", () => ({ api: mockApi, getActiveBundleId: () => null }));
 
 import type { BundleFile, Note, NoteDetail, NoteUpdateResult, TabGroup, ViewerDocument } from "../../src/domain/types.ts";
 import { useWorkspaceDocumentMutations } from "../../src/features/workspace/hooks/useWorkspaceDocumentMutations.ts";

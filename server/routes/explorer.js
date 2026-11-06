@@ -158,6 +158,7 @@ export function registerRoutes(app, runtime) {
             throw error
           }
           committed = true
+          runtime.translation?.forget(`${id}/`)
           const warnings = []
           try {
             await runtime.history.reconcile(`Deleted folder ${id}`)
@@ -307,6 +308,8 @@ export function registerRoutes(app, runtime) {
       const current = records.find((record) => record.id === moveResult.newId) || moveResult.record
       const graph = await relationshipIndex()
       if (moveResult.warning) void refreshMissingEmbeddingsInBackground()
+      runtime.translation?.moveNote(moveResult.oldId, moveResult.newId)
+      runtime.translation?.enqueue(moveResult.newId)
       response.json({
         oldId: moveResult.oldId,
         newId: moveResult.newId,

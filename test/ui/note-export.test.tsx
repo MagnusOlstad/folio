@@ -1,7 +1,7 @@
-import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ViewerDocument } from "../../src/domain/types.ts";
-import { NoteExportMenu } from "../../src/features/workspace/components/NoteExportMenu.tsx";
+import { NoteMoreMenu } from "../../src/features/workspace/components/NoteMoreMenu.tsx";
 import { NoteExportPreview } from "../../src/features/workspace/components/NoteExportPreview.tsx";
 import { useNoteExport, waitForExportAssets } from "../../src/features/workspace/hooks/useNoteExport.ts";
 import { remarkPreserveBlankLines } from "../../src/features/workspace/model/export-spacing.ts";
@@ -100,28 +100,89 @@ describe("withoutLeadingTitleHeading", () => {
   });
 });
 
-describe("NoteExportMenu", () => {
-  it("keeps formats behind one accessible control and closes on Escape", () => {
+describe("NoteMoreMenu", () => {
+  const renderMenu = (props: Partial<React.ComponentProps<typeof NoteMoreMenu>> = {}) => {
     const onExport = vi.fn();
+    const onRefile = vi.fn();
     render(
-      <NoteExportMenu
+      <NoteMoreMenu
         title="Export note"
         exporting={false}
         onExport={onExport}
+        refile={{ onRefile, disabled: false }}
+        {...props}
       />,
     );
+    return { onExport, onRefile, trigger: screen.getByRole("button", { name: "More actions" }) };
+  };
 
-    const trigger = screen.getByRole("button", { name: "Export" });
+  it("keeps refile, export formats and translate behind one accessible control", () => {
+    const { onExport, trigger } = renderMenu({
+      translate: { document, available: true, onDeliver: vi.fn(async () => {}) },
+    });
+    expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    expect(trigger).toHaveTextContent("More");
     fireEvent.click(trigger);
-    expect(screen.getByRole("menu", { name: "Export Export note" })).toBeVisible();
+    const menu = screen.getByRole("menu", { name: "More actions for Export note" });
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Refile…", "Markdown", "PDF", "Translate…"]);
+    expect(within(within(menu).getByRole("group", { name: "Export" })).getAllByRole("menuitem")).toHaveLength(2);
+    expect(within(menu).getAllByRole("separator")).toHaveLength(2);
     fireEvent.click(screen.getByRole("menuitem", { name: "Markdown" }));
     expect(onExport).toHaveBeenCalledWith("markdown");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
 
+  it("opens upward and anchors to the trigger's right edge", () => {
+    const { trigger } = renderMenu();
     fireEvent.click(trigger);
+    expect(screen.getByRole("menu")).toHaveClass("note-more-options");
+    expect(screen.getByRole("menu").parentElement).toHaveClass("note-more-menu");
+  });
+
+  it("omits Refile where it is not offered and disables it with a reason in translated views", () => {
+    const first = renderMenu({ refile: undefined });
+    fireEvent.click(first.trigger);
+    expect(screen.queryByRole("menuitem", { name: "Refile…" })).toBeNull();
+    cleanup();
+    renderMenu({ refile: { onRefile: vi.fn(), disabled: true, reason: "Switch back to the original to refile" } });
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    const item = screen.getByRole("menuitem", { name: "Refile…" });
+    expect(item).toBeDisabled();
+    expect(item).toHaveAttribute("title", "Switch back to the original to refile");
+  });
+
+  it("runs Refile from the menu", () => {
+    const { onRefile, trigger } = renderMenu();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Refile…" }));
+    expect(onRefile).toHaveBeenCalled();
+  });
+
+  it("navigates with the keyboard, skipping disabled items, and Escape returns focus", () => {
+    const { trigger } = renderMenu({ refile: { onRefile: vi.fn(), disabled: true } });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    const menu = screen.getByRole("menu");
+    const markdown = screen.getByRole("menuitem", { name: "Markdown" });
+    const pdf = screen.getByRole("menuitem", { name: "PDF" });
+    markdown.focus();
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(pdf).toHaveFocus();
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(markdown).toHaveFocus();
+    fireEvent.keyDown(menu, { key: "End" });
+    expect(pdf).toHaveFocus();
+    fireEvent.keyDown(menu, { key: "Home" });
+    expect(markdown).toHaveFocus();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+  });
+
+  it("shows Exporting… and disables the trigger while exporting", () => {
+    const { trigger } = renderMenu({ exporting: true });
+    expect(trigger).toBeDisabled();
+    expect(trigger).toHaveTextContent("Exporting…");
   });
 });
 

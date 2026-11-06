@@ -7,9 +7,12 @@ export const classificationSchema = {
     type: { type: 'string', minLength: 1, maxLength: 80 },
     description: { type: 'string', minLength: 1, maxLength: 240 },
     tags: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 60 }, maxItems: 6 },
+    language: { type: 'string', enum: ['no', 'en', 'other'] },
   }, required: ['kind', 'path', 'title', 'type', 'description', 'tags'] } },
   required: ['concept'],
 }
+
+const LANGUAGES = ['no', 'en', 'other']
 
 export class ClassificationOutputError extends Error {
   constructor(message) {
@@ -40,7 +43,7 @@ export function parseClassificationOutput(text) {
     throw new ClassificationOutputError('The classifier response must contain one concept object.')
   }
   const expected = ['description', 'kind', 'path', 'tags', 'title', 'type']
-  if (Object.keys(result).length !== 1 || Object.keys(concept).some((key) => !expected.includes(key))
+  if (Object.keys(result).length !== 1 || Object.keys(concept).some((key) => !expected.includes(key) && key !== 'language')
     || expected.some((key) => !(key in concept))) {
     throw new ClassificationOutputError('The classifier response does not match the metadata schema.')
   }
@@ -55,15 +58,18 @@ export function parseClassificationOutput(text) {
     || tags.some((tag) => typeof tag !== 'string' || !tag.trim() || tag.length > 60)) {
     throw new ClassificationOutputError('The classifier returned metadata with invalid field values.')
   }
-  return { concept }
+  // language is optional: a missing or invalid value is dropped so the caller can use the heuristic fallback.
+  const valid = { ...concept }
+  if (!LANGUAGES.includes(concept.language)) delete valid.language
+  return { concept: valid }
 }
 
 export function buildClassificationMessages({ schema, filingGuide, tagGuide, content, steering = '', dateContext = '', modelId = '' }) {
   const modelSpecificOutputGuidance = modelId === 'llama32'
     ? [
       'The output rules are validation requirements, not an answer template. Never return field definitions, constraints, or schema keywords such as properties, required, enum, additionalProperties, or a top-level type of object.',
-      'Return exactly one JSON object with the single top-level key concept. Its only keys must be kind, path, title, type, description, and tags; do not add date, metadata, or any other key. Use one to five lowercase path components of at most 80 characters, a title of at most 100 characters, a type of at most 80 characters, a description of at most 240 characters, and zero to six lowercase tags of at most 60 characters.',
-      'Return one populated instance with real metadata values. Example shape only; replace every value with metadata grounded in the note: {"concept":{"kind":"note","path":["topic"],"title":"A title","type":"Note","description":"One factual sentence.","tags":["topic"]}}.',
+      'Return exactly one JSON object with the single top-level key concept. Its only keys must be kind, path, title, type, description, tags, and language (no, en, or other); do not add date, metadata, or any other key. Use one to five lowercase path components of at most 80 characters, a title of at most 100 characters, a type of at most 80 characters, a description of at most 240 characters, and zero to six lowercase tags of at most 60 characters.',
+      'Return one populated instance with real metadata values. Example shape only; replace every value with metadata grounded in the note: {"concept":{"kind":"note","path":["topic"],"title":"A title","type":"Note","description":"One factual sentence.","tags":["topic"],"language":"en"}}.',
     ]
     : []
   return [
@@ -90,9 +96,10 @@ export function buildClassificationMessages({ schema, filingGuide, tagGuide, con
         'type: a concise human-readable concept type.',
         'path: one to five lowercase directory names from broad to specific. Do not include a filename, date, todo-list, or daily date.',
         'tags: zero to six distinct lowercase search terms grounded in the note, one or two words each. Prefer exact relevant candidates.',
+        'language: the predominant language of the note body: "no" for Norwegian (Bokmål or Nynorsk), "en" for English, otherwise "other".',
         'Relative date context gives deterministic interpretations for words such as today and tomorrow. When useful, write the resolved date parenthetically in metadata (for example, tomorrow (2026-10-02)); leave the source note text untouched.',
         modelId === 'llama32'
-          ? 'Return one JSON object with exactly one concept object. The concept must contain exactly these keys: kind, path, title, type, description, and tags. Add no other keys, markdown, or explanation.'
+          ? 'Return one JSON object with exactly one concept object. The concept must contain exactly these keys: kind, path, title, type, description, tags, and language ("no", "en", or "other"). Add no other keys, markdown, or explanation.'
           : `Return one JSON object matching this schema exactly, with no markdown or explanation: ${JSON.stringify(schema)}`,
         ...modelSpecificOutputGuidance,
       ].join('\n'),

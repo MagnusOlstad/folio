@@ -6,6 +6,7 @@ import type {
 } from "../../domain/types.ts";
 import type { FilingFields, FilingQueueEntry } from "./model/filing.ts";
 import type { NoteExportFormat } from "./model/note-export.ts";
+import type { TranslatedExportDeliver } from "./model/translated-export.ts";
 import type { RefileEntries, RefileFields } from "./model/refile.ts";
 
 export type TabDrag = { documentId: string; groupId: string };
@@ -100,6 +101,7 @@ export type EditorWorkspaceActions = {
     document: ViewerDocument,
     format: NoteExportFormat,
   ) => void;
+  deliverTranslatedExport: TranslatedExportDeliver;
   beforeHistoryRestore: (documentId: string) => Promise<void>;
   historyRestored: (documentId: string) => Promise<void>;
   notifyMessage: (message: string) => void;

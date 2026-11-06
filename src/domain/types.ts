@@ -220,3 +220,46 @@ export type ExpandedDirectoryState = {
 export type MarkdownNode = {
   position?: { start: { line: number }; end: { line: number } };
 };
+export type NoteTranslationTarget = "en" | "no";
+export type NoteTranslationStatus = "ready" | "pending" | "disabled" | "unavailable";
+export type NoteLanguageSource = "frontmatter" | "detected";
+export type NoteLanguageInfo = {
+  id: string;
+  noteLanguage: NoteTranslationTarget | null;
+  noteLanguageSource: NoteLanguageSource | null;
+  /** This note is kept translated in the background. */
+  autoTranslate: boolean;
+};
+export type NoteTranslation = {
+  noteLanguage?: NoteTranslationTarget | null;
+  noteLanguageSource?: NoteLanguageSource | null;
+  autoTranslate?: boolean;
+  id: string;
+  target: NoteTranslationTarget;
+  status: NoteTranslationStatus;
+  translatedBlocks: number;
+  totalBlocks: number;
+  title: string;
+  description: string;
+  content: string;
+};
+export type TranslationSettings = { available: boolean };
+export type TranslatedExportTarget = "en" | "no" | "de" | "es" | "fr" | "fi" | "sv" | "da";
+export type TranslatedExportPhase = "queued" | "waiting" | "translating" | "finishing" | "done" | "failed" | "cancelled";
+export type TranslatedExportJob = {
+  phase?: TranslatedExportPhase;
+  /** Latest translated paragraph (at most 160 characters). */
+  lastTranslated?: string | null;
+  jobId: string;
+  id: string;
+  target: TranslatedExportTarget;
+  status: "running" | "done" | "failed" | "cancelled";
+  translatedBlocks: number;
+  totalBlocks: number;
+  /** Paragraphs kept in the original language after the model failed. */
+  failedBlocks?: number;
+  title?: string;
+  description?: string;
+  content?: string;
+  error?: string;
+};

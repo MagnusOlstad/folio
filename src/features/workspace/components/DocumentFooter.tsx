@@ -7,8 +7,11 @@ import {
   isUntitledId,
 } from "../../../lib/workspace.ts";
 import { NoteDeleteConfirmation } from "./NoteDeleteConfirmation.tsx";
-import { NoteExportMenu } from "./NoteExportMenu.tsx";
+import { NoteMoreMenu } from "./NoteMoreMenu.tsx";
 import type { NoteExportFormat } from "../model/note-export.ts";
+import { isTranslatableDocument } from "../model/note-translation.ts";
+import { useTranslationSettings } from "../hooks/useTranslationSettings.ts";
+import type { TranslatedExportDeliver } from "../model/translated-export.ts";
 
 type DocumentFooterProps = {
   groupId: string;
@@ -37,6 +40,11 @@ type DocumentFooterProps = {
     targetGroupId?: string,
   ) => Promise<void>;
   onExport: (document: ViewerDocument, format: NoteExportFormat) => void;
+  onTranslatedExport?: TranslatedExportDeliver;
+  onRefile?: (document: ViewerDocument) => void;
+  refileDisabled?: boolean;
+  /** True while a translated (read-only) view is shown. */
+  refileTranslated?: boolean;
 };
 
 export function DocumentFooter({
@@ -62,7 +70,12 @@ export function DocumentFooter({
   onDelete,
   onOpenDocument,
   onExport,
+  onTranslatedExport,
+  onRefile,
+  refileDisabled = false,
+  refileTranslated = false,
 }: DocumentFooterProps) {
+  const translationSettings = useTranslationSettings().settings;
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<string | null>(null);
   const frontmatterLinks = Array.from(
     new Map(
@@ -195,11 +208,25 @@ export function DocumentFooter({
               )}
             </>
           )}
-          <NoteExportMenu
+          <NoteMoreMenu
             title={document.title}
             exporting={exporting}
             disabled={readOnly}
             onExport={(format) => onExport(document, format)}
+            refile={
+              onRefile && !readOnly && document.deletable && document.movable
+                ? {
+                    onRefile: () => onRefile(document),
+                    disabled: refileDisabled || refileTranslated,
+                    reason: refileTranslated ? "Switch back to the original to refile" : undefined,
+                  }
+                : undefined
+            }
+            translate={
+              onTranslatedExport && !readOnly && isTranslatableDocument(document, isUntitledId(document.id))
+                ? { document, available: translationSettings?.available !== false, onDeliver: onTranslatedExport }
+                : undefined
+            }
           />
         </div>
       </div>

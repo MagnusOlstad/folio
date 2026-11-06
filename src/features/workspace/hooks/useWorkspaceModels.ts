@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MLX_GENERATION_MODEL } from "../../../domain/types.ts";
 import type { MlxModelId, MlxStatus, MlxTranscriptionModelId, VersionInfo } from "../../../domain/types.ts";
 import { api, apiWithRetry } from "../../../lib/api.ts";
+import { refreshTranslationSettings } from "./useTranslationSettings.ts";
 
 type ModelAction = "install" | "load" | "unload" | "remove" | "select" | "select-transcription";
 
@@ -55,6 +56,17 @@ export function useWorkspaceModels(setMessage: (message: string) => void, enable
     }, 2_000);
     return () => window.clearInterval(timer);
   }, [enabled, refreshMlxStatus]);
+
+  const generationSignature = mlxStatus
+    ? `${mlxStatus.selectedGenerationModel}:${mlxStatus.models.filter((model) => model.purpose === "generation" && model.installed).map((model) => model.id).join(",")}`
+    : null;
+  const previousSignatureRef = useRef<string | null>(null);
+  useEffect(() => {
+    // Translation availability follows the selected generation model's install state.
+    if (previousSignatureRef.current !== null && generationSignature !== null && generationSignature !== previousSignatureRef.current)
+      refreshTranslationSettings();
+    if (generationSignature !== null) previousSignatureRef.current = generationSignature;
+  }, [generationSignature]);
 
   async function runMlxAction(id: MlxModelId, action: ModelAction) {
     if (actionRef.current) return;

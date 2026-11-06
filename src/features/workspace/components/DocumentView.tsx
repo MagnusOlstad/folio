@@ -1,5 +1,19 @@
-import { useLayoutEffect, useRef } from "react";
-import type { ViewerDocument } from "../../../domain/types.ts";
+import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
+import type { NoteTranslationTarget, ViewerDocument } from "../../../domain/types.ts";
+import { getActiveBundleId } from "../../../lib/api.ts";
+import { useNoteLanguage } from "../hooks/useNoteLanguage.ts";
+import { useNoteTranslation } from "../hooks/useNoteTranslation.ts";
+import { useTranslationSettings } from "../hooks/useTranslationSettings.ts";
+import {
+  isTranslatableDocument,
+  readNoteTranslationChoices,
+  setNoteTranslationChoice,
+  subscribeNoteTranslationChoices,
+  translatedProgressLabel,
+} from "../model/note-translation.ts";
+import type { TranslatedExportDeliver } from "../model/translated-export.ts";
+import { TranslationProgress } from "./TranslationProgress.tsx";
+import { RenderedMarkdown } from "./RenderedMarkdown.tsx";
 import { isUntitledId } from "../../../lib/workspace.ts";
 import { DocumentBody } from "./DocumentBody.tsx";
 import { DocumentFooter } from "./DocumentFooter.tsx";
@@ -74,6 +88,7 @@ export type DocumentViewProps = {
   onFinishTagEditing: (document: ViewerDocument, value: string) => void;
   onDelete: (document: ViewerDocument) => Promise<void>;
   onExport: (document: ViewerDocument, format: NoteExportFormat) => void;
+  onTranslatedExport?: TranslatedExportDeliver;
   filing: FilingQueueEntry | undefined;
   refile: RefileEntry | undefined;
   focusFiling: boolean;
@@ -96,6 +111,73 @@ export function DocumentView(props: DocumentViewProps) {
     if (scroll) scroll.scrollTop = getScrollTop(document.id);
   }, [document.id, getScrollTop]);
 
+  const draftId = isUntitledId(document.id);
+  const translatable = isTranslatableDocument(document, draftId);
+  const translationSettings = useTranslationSettings().settings;
+  const bundleId = getActiveBundleId();
+  const choices = useSyncExternalStore(
+    subscribeNoteTranslationChoices,
+    () => readNoteTranslationChoices(bundleId),
+  );
+  const perNoteActive = translatable && translationSettings !== null;
+  const language = useNoteLanguage(document.id, perNoteActive, document.content);
+  const toggleVisible = perNoteActive && language.settled;
+  // Auto-translate is per note: only this note's switch decides whether NO/EN show.
+  const translationOn = toggleVisible && language.autoTranslate;
+  const storedChoice = translationOn ? (choices[document.id] ?? null) : null;
+  // A stored choice equal to the note's own language means "Original".
+  const translationTarget = language.settled && storedChoice && storedChoice !== language.noteLanguage ? storedChoice : null;
+  const translation = useNoteTranslation(document.id, translationTarget, document.content);
+  const knownLanguage = translation.translation?.noteLanguage !== undefined
+    ? translation.translation.noteLanguage
+    : language.noteLanguage;
+  const knownSource = translation.translation?.noteLanguageSource !== undefined
+    ? translation.translation.noteLanguageSource
+    : language.noteLanguageSource;
+  const storedIsOriginal = storedChoice !== null && storedChoice === language.noteLanguage;
+  useEffect(() => {
+    if (storedIsOriginal) setNoteTranslationChoice(bundleId, document.id, null);
+  }, [storedIsOriginal, bundleId, document.id]);
+  const languageToggle = toggleVisible
+    ? {
+        enabled: language.autoTranslate,
+        saving: language.saving,
+        error: language.error,
+        onEnabledChange: (enabled: boolean) => void language.setAutoTranslate(enabled),
+        value: translationOn ? (translationTarget ?? knownLanguage) : null,
+        originalLanguage: translationOn ? knownLanguage : null,
+        originalSource: knownSource,
+        available: translationSettings?.available !== false,
+        // The original's own button (or the shown translation's button) returns to Original.
+        onChange: (target: NoteTranslationTarget) =>
+          setNoteTranslationChoice(
+            bundleId,
+            document.id,
+            target === knownLanguage || target === translationTarget ? null : target,
+          ),
+      }
+    : undefined;
+  const translated = translation.translation;
+  const translatedDocument: ViewerDocument = {
+    ...document,
+    title: translated?.title || document.title,
+    description: translated ? translated.description : document.description,
+    content: translated?.content ?? document.content,
+    deletable: false,
+    movable: false,
+  };
+  const translationNotice = !translationTarget
+    ? ""
+    : translation.error
+      ? `${translation.error} Switch to Original to keep working.`
+      : !translated
+        ? "Loading translation…"
+        : translated.status === "pending"
+          ? translatedProgressLabel(translated.translatedBlocks, translated.totalBlocks)
+          : translated.status === "ready"
+            ? ""
+            : "Translation is unavailable. Install a generation model in Settings.";
+
   return (
     <article
       className={`document-view ${isUntitledId(document.id) ? "untitled" : ""}`}
@@ -111,16 +193,43 @@ export function DocumentView(props: DocumentViewProps) {
         {!isUntitledId(document.id) && (
           <DocumentHeader
             groupId={props.groupId}
-            document={document}
+            document={translationTarget ? translatedDocument : document}
+            readOnly={Boolean(translationTarget)}
+            languageToggle={languageToggle}
             editingKey={props.editingMetadataKey}
             drafts={props.metadataDrafts}
             onBeginEditing={props.onBeginMetadataEditing}
             onChangeDraft={props.onChangeMetadataDraft}
             onFinishEditing={props.onFinishMetadataEditing}
-            onRefile={(target) => props.onStartRefile(target.id)}
-            refileDisabled={props.refile?.status === "preparing" || props.refile?.status === "proposing" || props.refile?.status === "submitting"}
           />
         )}
+        {translationTarget ? (
+          <div className="document-content read-only translated-note" lang={translationTarget}>
+            {translated?.status === "pending" && !translation.error ? (
+              <TranslationProgress
+                compact
+                value={translated.translatedBlocks}
+                max={translated.totalBlocks}
+                label={translationNotice}
+              />
+            ) : translationNotice ? (
+              <p
+                className={`translation-status${translation.error ? " is-error" : ""}`}
+                role={translation.error ? "alert" : "status"}
+              >
+                {translationNotice}
+              </p>
+            ) : null}
+            <RenderedMarkdown
+              key={`${document.id}:${translationTarget}`}
+              document={translatedDocument}
+              groupId={props.groupId}
+              saving
+              onOpenDocument={props.onOpenDocument}
+              onToggleTask={async () => {}}
+            />
+          </div>
+        ) : (
         <DocumentBody
           groupId={props.groupId}
           document={document}
@@ -139,6 +248,7 @@ export function DocumentView(props: DocumentViewProps) {
           onOpenDocument={props.onOpenDocument}
           onToggleTask={props.onToggleTask}
         />
+        )}
       </div>
       {props.filing && (
         <FilingConfirmation
@@ -174,6 +284,10 @@ export function DocumentView(props: DocumentViewProps) {
         onFileDraft={props.onFileDraft}
         onDelete={props.onDelete}
         onExport={props.onExport}
+        onTranslatedExport={props.onTranslatedExport}
+        onRefile={(target) => props.onStartRefile(target.id)}
+        refileDisabled={props.refile?.status === "preparing" || props.refile?.status === "proposing" || props.refile?.status === "submitting"}
+        refileTranslated={Boolean(translationTarget)}
         onOpenDocument={props.onOpenDocument}
       />
       {props.refile && (

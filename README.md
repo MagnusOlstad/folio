@@ -10,7 +10,7 @@ FolioNotes is a local-first personal notetaker with one Markdown capture field. 
 - Open-ended hierarchical filing based on the whole note, with opening labels and headings treated as strong routing guidance.
 - Special aggregate concepts: explicit todos append to `/todo-list.md`, while explicit daily notes append to `/daily/YYYY-MM-DD.md` in the browser's local timezone.
 - Lightweight vocabulary reuse: the classifier receives capped guides of existing paths and types plus tags retrieved from lexically and semantically similar notes, favoring established terminology without closing the taxonomy.
-- OKF v0.2 Markdown with provenance, generation metadata, lifecycle state, indexes, and logs.
+- OKF v0.2 Markdown with provenance, generation metadata, lifecycle state, an optional `language: no|en` detected when a note is filed, indexes, and logs.
 - Automatic link and backlink indexing from Markdown links and `sources[].resource` provenance, with generated title-mention links recalculated after edits and reindexing.
 - Semantic relationship suggestions that become Markdown links only after confirmation.
 - Hybrid retrieval through OKF metadata, lifecycle, relationships, keywords, and persisted EmbeddingGemma chunk embeddings generated through Swift MLX.
@@ -24,6 +24,7 @@ FolioNotes is a local-first personal notetaker with one Markdown capture field. 
 - Refile saved notes through a review dialog that proposes a path and metadata update. Discard leaves the note unchanged; accepted moves keep the note's history and restore older content at its current path.
 - Settings organized into Bundles, Models, Appearance, and Backup. Choose, download, and remove Qwen 3.5 4B 4-bit, Llama 3.2 3B Instruct 4-bit, or Gemma 4 for generation; EmbeddingGemma remains the fixed embedding model. Downloads show cache progress and can be retried.
 - Lifecycle controls for `draft`, `stable`, `deprecated`, and `stale_after`, with stale and deprecated concepts ranked lower in retrieval.
+- Optional per-note background Norwegian/English translation of filed notes (off by default for every note) and on-demand translated export with the selected local generation model, so a read-only translated view opens instantly. Drafts are never sent and nothing is downloaded; see [docs/translation.md](docs/translation.md).
 - Local filesystem storage. No cloud service or account is required.
 - Import AAC, AIFF, FLAC, M4A, MP3, and WAV files from the Transcription tab in the right pane. FolioNotes downloads pinned `mlx-community/whisper-large-v3-turbo` weights on request, transcribes locally on Apple Silicon, and opens an editable Markdown note with the source filename, import time, duration, and source-note link. Regenerate its concise summary with the selected local text model.
 
