@@ -322,6 +322,16 @@ test('entities with stale source mentions remain available for detail and explic
   assert.equal(staleEntity.noteCount, 0)
 })
 
+test('entity list summaries include representative source-note titles for identity pickers', async (t) => {
+  const data = await fixture()
+  t.after(() => fs.rm(data.root, { recursive: true, force: true }))
+  data.runtime.readRecords = async () => [{ id: '/meeting.md', title: 'Acme quarterly review', content: 'stale cached body' }]
+  const service = createEntityService(data.runtime)
+  await service.replaceNoteMentions('/meeting.md', [mentionFrom(projectMarkdown(data.content), 'Acme', 'organization')])
+  const entity = (await service.listEntities()).items[0]
+  assert.equal(entity.representativeNoteTitle, 'Acme quarterly review')
+})
+
 test('splitting a mention with a requested type retypes its occurrence consistently', async (t) => {
   const data = await fixture()
   t.after(() => fs.rm(data.root, { recursive: true, force: true }))

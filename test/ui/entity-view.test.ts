@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EntityMention } from "../../src/domain/entities.ts";
-import { exactMentionRange, groupMentionsByType, visibleResolution } from "../../src/features/workspace/model/entity-view.ts";
+import { exactMentionRange, groupDismissedMentionsByType, groupMentionsByType, mergeFirstPage, visibleResolution } from "../../src/features/workspace/model/entity-view.ts";
 
 function mention(overrides: Partial<EntityMention> = {}): EntityMention {
   return {
@@ -23,6 +23,12 @@ describe("entity view helpers", () => {
   it("groups only active mentions and keeps ambiguous resolution visible", () => {
     const items = [mention(), mention({ id: "m2", type: "person", resolution: "ambiguous" }), mention({ id: "m3", status: "dismissed" })];
     expect(groupMentionsByType(items).map((group) => [group.type, group.mentions.length])).toEqual([["person", 1], ["organization", 1]]);
+    expect(groupDismissedMentionsByType(items).map((group) => [group.label, group.mentions.length])).toEqual([["Organizations", 1]]);
     expect(visibleResolution(items[1])).toBe("Ambiguous identity");
+  });
+
+  it("refreshes a paged list's first page while retaining loaded later rows", () => {
+    expect(mergeFirstPage([{ id: "a" }, { id: "b" }, { id: "c" }], [{ id: "a", label: "Updated" }, { id: "d" }]))
+      .toEqual([{ id: "a", label: "Updated" }, { id: "d" }, { id: "b" }, { id: "c" }]);
   });
 });

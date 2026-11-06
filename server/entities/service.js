@@ -181,7 +181,8 @@ export function createEntityService(runtime) {
     const { index, state } = await readCurrent()
     const records = await runtime.readRecords()
     const freshness = await freshnessForNotes([...records.map((record) => record.id), ...index.mentions.map((mention) => mention.noteId)], index)
-    const active = materializeEntities(await freshMentions(index, freshness), state)
+    const activeMentions = await freshMentions(index, freshness)
+    const active = materializeEntities(activeMentions, state)
     const staleMentions = index.mentions.filter((mention) => freshness.get(mention.noteId) !== true && mention.status === 'active')
     const stale = materializeEntities(staleMentions, state)
     const base = options.activity === 'stale' ? stale : active
@@ -190,7 +191,12 @@ export function createEntityService(runtime) {
     if (!options.activity || options.activity === 'all') for (const entity of state.entities) {
       if (!entitiesById.has(entity.id) && (entity.identitySource === 'user' || options.activity === 'all')) entitiesById.set(entity.id, { ...entity, mentionCount: 0, noteCount: 0 })
     }
-    const materialized = [...entitiesById.values()]
+    const titlesByNote = new Map(records.map((record) => [record.id, record.title || record.id]))
+    const sourceTitleByEntity = new Map()
+    for (const mention of [...activeMentions, ...staleMentions]) {
+      if (mention.entityId && !sourceTitleByEntity.has(mention.entityId)) sourceTitleByEntity.set(mention.entityId, titlesByNote.get(mention.noteId) || mention.noteId)
+    }
+    const materialized = [...entitiesById.values()].map((entity) => ({ ...entity, representativeNoteTitle: sourceTitleByEntity.get(entity.id) || null }))
     const query = String(options.q || '').trim().toLocaleLowerCase()
     const items = materialized.filter((entity) => (!options.type || entity.type === options.type)
       && (!query || `${entity.label} ${entity.aliases.join(' ')}`.toLocaleLowerCase().includes(query)))

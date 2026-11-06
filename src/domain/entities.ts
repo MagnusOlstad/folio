@@ -67,6 +67,7 @@ export type Entity = {
   linkedNoteIds?: string[];
   mentionCount: number;
   noteCount: number;
+  representativeNoteTitle?: string | null;
   createdAt: string;
   updatedAt: string;
   identitySource?: "model" | "rule" | "user";

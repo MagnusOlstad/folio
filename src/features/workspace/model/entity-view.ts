@@ -18,6 +18,14 @@ export function groupMentionsByType(mentions: readonly EntityMention[]) {
   })).filter((group) => group.mentions.length > 0);
 }
 
+export function groupDismissedMentionsByType(mentions: readonly EntityMention[]) {
+  return ENTITY_TYPE_ORDER.map((type) => ({
+    type,
+    label: ENTITY_TYPE_LABELS[type],
+    mentions: mentions.filter((mention) => mention.type === type && mention.status === "dismissed"),
+  })).filter((group) => group.mentions.length > 0);
+}
+
 export function exactMentionRange(mention: EntityMention, content: string) {
   const { displayStartUtf16: from, displayEndUtf16: to } = mention;
   if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to <= from || to > content.length) return null;
@@ -37,4 +45,11 @@ export function visibleResolution(mention: EntityMention) {
   if (mention.resolution === "ambiguous") return "Ambiguous identity";
   if (mention.resolution === "unresolved") return "Unresolved identity";
   return "Resolved";
+}
+
+/** Refresh the first page without dropping rows already loaded from later pages. */
+export function mergeFirstPage<T extends { id: string }>(current: T[], firstPage: T[]) {
+  if (current.length <= firstPage.length) return firstPage;
+  const firstIds = new Set(firstPage.map((item) => item.id));
+  return [...firstPage, ...current.filter((item) => !firstIds.has(item.id))];
 }

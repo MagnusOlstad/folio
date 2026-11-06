@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EntityMention } from "../../src/domain/entities.ts";
 import { EntitiesPanel } from "../../src/features/workspace/components/EntitiesPanel.tsx";
 
@@ -12,6 +12,7 @@ const mention: EntityMention = {
 };
 
 describe("EntitiesPanel", () => {
+  afterEach(() => vi.unstubAllGlobals());
   it("shows current-note evidence and sends a revision-checked related dismissal", async () => {
     const onOpenNote = vi.fn();
     const toggleEntity = vi.fn();
@@ -41,5 +42,79 @@ describe("EntitiesPanel", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/entities/corrections", expect.objectContaining({ method: "POST" })));
     const request = fetchMock.mock.calls.find(([url]) => String(url) === "/api/entities/corrections");
     expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ expectedRevision: 4, command: { type: "dismiss-related", noteId: "note-a", relatedNoteId: "note-b" } });
+  });
+
+  it("restores dismissed mentions from the refreshed dismissed group", async () => {
+    let dismissed = false;
+    let revision = 4;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      let body: unknown = {};
+      if (url.includes("/settings")) body = { enabled: true, modelId: "gliner25multi" };
+      else if (url.includes("/corrections/latest")) body = { revision, undoToken: null };
+      else if (url.includes("/jobs")) body = { items: [], nextCursor: null, mode: "running" };
+      else if (url.includes("/related")) body = { items: [], nextCursor: null };
+      else if (url.includes("/mentions?")) body = { items: [{ ...mention, status: dismissed ? "dismissed" : "active" }], staleCount: 0, freshness: "current", coverage: null };
+      else if (url.includes("/api/entities?") || url.endsWith("/api/entities")) body = { items: [], nextCursor: null, coverage: { eligible: 1, processed: 1, pending: 0, stale: 0, failed: 0 } };
+      else if (url.includes("/corrections")) {
+        const payload = JSON.parse(String(init?.body));
+        dismissed = payload.command.type === "dismiss";
+        revision += 1;
+        body = { revision, indexRevision: revision };
+      }
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<EntitiesPanel bundleId="bundle-a" note={{ id: "note-a", title: "Acme launch", content: "Acme" }} draft={undefined} onReveal={vi.fn()} onOpenNote={vi.fn()} onCreateNote={vi.fn(async () => null)} onOpenSettings={vi.fn()} scope={{ bundleId: "bundle-a", entityIds: [], entities: [], toggleEntity: vi.fn(), clear: vi.fn() }} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+    const dismissedGroup = await screen.findByRole("region", { name: "Dismissed mentions" });
+    expect(within(dismissedGroup).getByText("Acme")).toBeVisible();
+    fireEvent.click(within(dismissedGroup).getByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Dismissed mentions" })).toBeNull());
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeVisible();
+  });
+
+  it("refreshes entity detail after corrections and resets edit state when identity changes", async () => {
+    const records = [
+      { id: "entity-a", label: "Acme", type: "organization" as const, aliases: [] as string[], mentionCount: 1, noteCount: 1, createdAt: "", updatedAt: "1" },
+      { id: "entity-b", label: "Atlas", type: "project" as const, aliases: [] as string[], mentionCount: 1, noteCount: 1, createdAt: "", updatedAt: "1" },
+    ];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      let body: unknown = {};
+      if (url.includes("/settings")) body = { enabled: true, modelId: "gliner25multi" };
+      else if (url.includes("/corrections/latest")) body = { revision: 1, undoToken: null };
+      else if (url.includes("/jobs")) body = { items: [], nextCursor: null, mode: "running" };
+      else if (url.includes("/related")) body = { items: [], nextCursor: null };
+      else if (url.includes("/mentions?")) body = { items: [], staleCount: 0, freshness: "current", coverage: null };
+      else if (url.includes("/corrections")) {
+        const { command } = JSON.parse(String(init?.body));
+        const record = records.find((item) => item.id === command.entityId);
+        if (record && command.type === "add-alias") record.aliases.push(command.alias);
+        if (record && command.type === "rename") { record.label = command.label; record.updatedAt = String(Date.now()); }
+        body = { revision: 2, indexRevision: 2 };
+      } else if (url.includes("/api/entities?") || url.endsWith("/api/entities")) body = { items: records, nextCursor: null, coverage: { eligible: 1, processed: 1, pending: 0, stale: 0, failed: 0 } };
+      else if (url.includes("/api/entities/")) {
+        const record = records.find((item) => url.endsWith(item.id));
+        body = { ...record, bundleId: "bundle-a", revision: 1, noteIds: ["note-a"] };
+      }
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<EntitiesPanel bundleId="bundle-a" note={null} draft={undefined} onReveal={vi.fn()} onOpenNote={vi.fn()} onCreateNote={vi.fn(async () => null)} onOpenSettings={vi.fn()} scope={{ bundleId: "bundle-a", entityIds: [], entities: [], toggleEntity: vi.fn(), clear: vi.fn() }} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Acme" }));
+    const detail = await screen.findByRole("generic", { name: "Acme details" });
+    fireEvent.change(within(detail).getByLabelText("Add alias"), { target: { value: "Acme Corp" } });
+    fireEvent.click(within(detail).getByRole("button", { name: "Add alias" }));
+    await waitFor(() => expect(within(screen.getByRole("generic", { name: "Acme details" })).getByText("Acme Corp")).toBeVisible());
+    fireEvent.change(within(screen.getByRole("generic", { name: "Acme details" })).getByLabelText("Rename"), { target: { value: "Acme Incorporated" } });
+    fireEvent.click(within(screen.getByRole("generic", { name: "Acme details" })).getByRole("button", { name: "Save name" }));
+    await waitFor(() => expect(screen.getByRole("generic", { name: "Acme Incorporated details" })).toBeVisible());
+    fireEvent.click(within(screen.getByRole("generic", { name: "Acme Incorporated details" })).getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Atlas" }));
+    const atlasDetail = await screen.findByRole("generic", { name: "Atlas details" });
+    expect(within(atlasDetail).getByLabelText("Rename")).toHaveValue("Atlas");
   });
 });
