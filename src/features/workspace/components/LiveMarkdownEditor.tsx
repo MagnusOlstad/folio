@@ -192,19 +192,6 @@ export function LiveMarkdownEditor({
   }, [revealSelection]);
 
   useLayoutEffect(() => {
-    const view = viewRef.current;
-    const reveal = revealSelectionRef.current;
-    if (!view || !reveal) return;
-    const currentContent = view.state.doc.toString();
-    if (currentContent !== reveal.sourceContent || reveal.from < 0 || reveal.to <= reveal.from
-      || reveal.to > currentContent.length || currentContent.slice(reveal.from, reveal.to) !== reveal.expectedText) return;
-    view.dispatch({
-      selection: EditorSelection.range(reveal.from, reveal.to),
-      scrollIntoView: true,
-    });
-  }, [revealSelection?.requestId]);
-
-  useLayoutEffect(() => {
     controlledValueRef.current = value;
     readOnlyRef.current = readOnly;
     placeholderRef.current = placeholder;
@@ -623,6 +610,20 @@ export function LiveMarkdownEditor({
   useLayoutEffect(() => {
     reconcileControlledValue();
   }, [value]);
+
+  useLayoutEffect(() => {
+    const view = viewRef.current;
+    const reveal = revealSelectionRef.current;
+    if (!view || !reveal) return;
+    const currentContent = view.state.doc.toString();
+    if (currentContent !== reveal.sourceContent || reveal.from < 0 || reveal.to <= reveal.from
+      || reveal.to > currentContent.length || currentContent.slice(reveal.from, reveal.to) !== reveal.expectedText) return;
+    view.dispatch({
+      selection: EditorSelection.range(reveal.from, reveal.to),
+      scrollIntoView: true,
+    });
+    view.focus();
+  }, [revealSelection?.requestId, value]);
 
   return (
     <div

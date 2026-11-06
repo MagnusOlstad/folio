@@ -76,8 +76,9 @@ describe("EntitiesPanel", () => {
   });
 
   it("refreshes entity detail after corrections and resets edit state when identity changes", async () => {
+    let firstDetail = true;
     const records = [
-      { id: "entity-a", label: "Acme", type: "organization" as const, aliases: [] as string[], mentionCount: 1, noteCount: 1, createdAt: "", updatedAt: "1" },
+      { id: "entity-a", label: "Acme stale catalog value", type: "organization" as const, aliases: [] as string[], mentionCount: 1, noteCount: 1, createdAt: "", updatedAt: "1" },
       { id: "entity-b", label: "Atlas", type: "project" as const, aliases: [] as string[], mentionCount: 1, noteCount: 1, createdAt: "", updatedAt: "1" },
     ];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -97,6 +98,7 @@ describe("EntitiesPanel", () => {
       } else if (url.includes("/api/entities?") || url.endsWith("/api/entities")) body = { items: records, nextCursor: null, coverage: { eligible: 1, processed: 1, pending: 0, stale: 0, failed: 0 } };
       else if (url.includes("/api/entities/")) {
         const record = records.find((item) => url.endsWith(item.id));
+        if (record && firstDetail) { record.label = "Acme canonical detail"; firstDetail = false; }
         body = { ...record, bundleId: "bundle-a", revision: 1, noteIds: ["note-a"] };
       }
       return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
@@ -104,13 +106,13 @@ describe("EntitiesPanel", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<EntitiesPanel bundleId="bundle-a" note={null} draft={undefined} onReveal={vi.fn()} onOpenNote={vi.fn()} onCreateNote={vi.fn(async () => null)} onOpenSettings={vi.fn()} scope={{ bundleId: "bundle-a", entityIds: [], entities: [], toggleEntity: vi.fn(), clear: vi.fn() }} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Acme" }));
-    const detail = await screen.findByRole("generic", { name: "Acme details" });
+    fireEvent.click(await screen.findByRole("button", { name: "Acme stale catalog value" }));
+    const detail = await screen.findByRole("generic", { name: "Acme canonical detail details" });
     fireEvent.change(within(detail).getByLabelText("Add alias"), { target: { value: "Acme Corp" } });
     fireEvent.click(within(detail).getByRole("button", { name: "Add alias" }));
-    await waitFor(() => expect(within(screen.getByRole("generic", { name: "Acme details" })).getByText("Acme Corp")).toBeVisible());
-    fireEvent.change(within(screen.getByRole("generic", { name: "Acme details" })).getByLabelText("Rename"), { target: { value: "Acme Incorporated" } });
-    fireEvent.click(within(screen.getByRole("generic", { name: "Acme details" })).getByRole("button", { name: "Save name" }));
+    await waitFor(() => expect(within(screen.getByRole("generic", { name: "Acme canonical detail details" })).getByText("Acme Corp")).toBeVisible());
+    fireEvent.change(within(screen.getByRole("generic", { name: "Acme canonical detail details" })).getByLabelText("Rename"), { target: { value: "Acme Incorporated" } });
+    fireEvent.click(within(screen.getByRole("generic", { name: "Acme canonical detail details" })).getByRole("button", { name: "Save name" }));
     await waitFor(() => expect(screen.getByRole("generic", { name: "Acme Incorporated details" })).toBeVisible());
     fireEvent.click(within(screen.getByRole("generic", { name: "Acme Incorporated details" })).getByRole("button", { name: "Close" }));
     fireEvent.click(screen.getByRole("button", { name: "Atlas" }));

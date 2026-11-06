@@ -117,6 +117,16 @@ describe("live editor document lifecycle", () => {
     expect(view.state.selection.main.head).toBe(4);
   });
 
+  it("applies an exact source reveal after the editor mounts and focuses it", () => {
+    const sourceContent = "Acme met Atlas";
+    render(<LiveMarkdownEditor value={sourceContent} onChange={vi.fn()} ariaLabel="Revealed note" revealSelection={{
+      requestId: 7, from: 0, to: 4, expectedText: "Acme", sourceContent,
+    }} />);
+    const view = EditorView.findFromDOM(screen.getByLabelText("Revealed note"));
+    expect(view.state.selection.main).toMatchObject({ from: 0, to: 4 });
+    expect(view.hasFocus).toBe(true);
+  });
+
   it("updates marker click offsets after earlier document lines move", () => {
     render(<LiveMarkdownEditor value={"Text\n- item"} onChange={vi.fn()} ariaLabel="Moving marker note" />);
     const view = EditorView.findFromDOM(screen.getByLabelText("Moving marker note"));

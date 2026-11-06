@@ -33,6 +33,9 @@ export function EntitiesPanel({ bundleId, note, draft, onReveal, onOpenNote, onC
   const [detail, setDetail] = useState<Entity | null>(null);
   const [detailRevision, setDetailRevision] = useState(0);
   const detailRequest = useRef(0);
+  const activeDetailId = useRef<string | null>(null);
+  const entityPagesLoaded = useRef(0);
+  const jobPagesLoaded = useRef(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -43,16 +46,18 @@ export function EntitiesPanel({ bundleId, note, draft, onReveal, onOpenNote, onC
   const [jobMode, setJobMode] = useState<EntityJobMode | null>(null);
 
   function openEntityDetail(entity: Entity) {
-    setDetail(entity);
+    activeDetailId.current = entity.id;
+    setDetail(null);
     const requestId = ++detailRequest.current;
     if (!api) return;
     void api.detail(entity.id).then((fresh) => {
-      if (requestId === detailRequest.current) setDetail(fresh);
+      if (requestId === detailRequest.current) { setDetail(fresh); setDetailRevision((value) => value + 1); }
     }).catch((caught) => { if (requestId === detailRequest.current) setError(errorText(caught)); });
   }
 
   function closeEntityDetail() {
     detailRequest.current += 1;
+    activeDetailId.current = null;
     setDetail(null);
   }
 
@@ -60,9 +65,9 @@ export function EntitiesPanel({ bundleId, note, draft, onReveal, onOpenNote, onC
     if (!api) return;
     const controller = new AbortController();
     void api.settings({ signal: controller.signal }).then(setSettings).catch((caught) => { if (!controller.signal.aborted) setError(errorText(caught)); });
-    void api.list({ limit: 30, signal: controller.signal }).then((page) => { setEntities(page.items); setNextEntityCursor(page.nextCursor); setCoverage(page.coverage); }).catch((caught) => { if (!controller.signal.aborted) setError(errorText(caught)); });
+    void api.list({ limit: 30, signal: controller.signal }).then((page) => { entityPagesLoaded.current = 0; setEntities(page.items); setNextEntityCursor(page.nextCursor); setCoverage(page.coverage); }).catch((caught) => { if (!controller.signal.aborted) setError(errorText(caught)); });
     void api.latestUndo({ signal: controller.signal }).then((undo) => { setRevision(undo.revision); setUndoToken(undo.undoToken); }).catch((caught) => { if (!controller.signal.aborted) setError(errorText(caught)); });
-    void api.jobs(undefined, 8, { signal: controller.signal }).then((page) => { setJobs(page.items); setNextJobCursor(page.nextCursor); setJobMode(page.mode); }).catch((caught) => { if (!controller.signal.aborted) setError(errorText(caught)); });
+    void api.jobs(undefined, 8, { signal: controller.signal }).then((page) => { jobPagesLoaded.current = 0; setJobs(page.items); setNextJobCursor(page.nextCursor); setJobMode(page.mode); }).catch((caught) => { if (!controller.signal.aborted) setError(errorText(caught)); });
     if (noteId) {
       void api.noteMentions(noteId, { signal: controller.signal, includeDismissed: true }).then((result) => { setNoteCoverage(result); setMentions(result.items); }).catch((caught) => { if (!controller.signal.aborted) setError(errorText(caught)); });
       void api.related(noteId, undefined, 8, { signal: controller.signal }).then((page) => setRelated(page.items)).catch((caught) => { if (!controller.signal.aborted) setError(errorText(caught)); });
@@ -103,7 +108,9 @@ export function EntitiesPanel({ bundleId, note, draft, onReveal, onOpenNote, onC
         }
         const jobPage = jobResult.value;
         const nextSignature = JSON.stringify([jobPage.mode, jobPage.items.map((job) => [job.id, job.state, job.completed, job.total, job.updatedAt])]);
-        setJobs((current) => mergeFirstPage(current, jobPage.items)); setNextJobCursor(jobPage.nextCursor); setJobMode(jobPage.mode);
+        setJobs((current) => mergeFirstPage(current, jobPage.items));
+        if (jobPagesLoaded.current === 0) setNextJobCursor(jobPage.nextCursor);
+        setJobMode(jobPage.mode);
         if (signature && signature !== nextSignature) {
           const [listResult, noteResult, relatedResult] = await Promise.allSettled([
             api.list({ q: query, type: typeFilter || undefined, activity: activityFilter, limit: 30, signal: controller.signal }),
@@ -111,7 +118,11 @@ export function EntitiesPanel({ bundleId, note, draft, onReveal, onOpenNote, onC
             noteId ? api.related(noteId, undefined, 8, { signal: controller.signal }) : Promise.resolve(null),
           ]);
           if (stopped) return;
-          if (listResult.status === "fulfilled") { setEntities((current) => mergeFirstPage(current, listResult.value.items)); setNextEntityCursor(listResult.value.nextCursor); setCoverage(listResult.value.coverage); }
+          if (listResult.status === "fulfilled") {
+            setEntities((current) => mergeFirstPage(current, listResult.value.items));
+            if (entityPagesLoaded.current === 0) setNextEntityCursor(listResult.value.nextCursor);
+            setCoverage(listResult.value.coverage);
+          }
           else if (!controller.signal.aborted) setError(errorText(listResult.reason));
           if (noteResult.status === "fulfilled" && noteResult.value) { setMentions(noteResult.value.items); setNoteCoverage(noteResult.value); }
           else if (noteResult.status === "rejected" && !controller.signal.aborted) setError(errorText(noteResult.reason));
@@ -131,17 +142,27 @@ export function EntitiesPanel({ bundleId, note, draft, onReveal, onOpenNote, onC
 
   async function refresh() {
     if (!api) return;
+    const capturedDetailRequest = detailRequest.current;
+    const capturedDetailId = detail?.id && activeDetailId.current === detail.id ? detail.id : null;
     const [entityResult, undoResult, mentionResult, relatedResult, detailResult] = await Promise.allSettled([
       api.list({ q: query, type: typeFilter || undefined, activity: activityFilter, limit: 30 }), api.latestUndo(),
       note ? api.noteMentions(note.id, { includeDismissed: true }) : Promise.resolve(null),
       note ? api.related(note.id, undefined, 8) : Promise.resolve(null),
       detail ? api.detail(detail.id) : Promise.resolve(null),
     ]);
-    if (entityResult.status === "fulfilled") { setEntities((current) => mergeFirstPage(current, entityResult.value.items)); setNextEntityCursor(entityResult.value.nextCursor); setCoverage(entityResult.value.coverage); }
+    if (entityResult.status === "fulfilled") {
+      setEntities((current) => mergeFirstPage(current, entityResult.value.items));
+      if (entityPagesLoaded.current === 0) setNextEntityCursor(entityResult.value.nextCursor);
+      setCoverage(entityResult.value.coverage);
+    }
     if (undoResult.status === "fulfilled") { setRevision(undoResult.value.revision); setUndoToken(undoResult.value.undoToken); }
     if (mentionResult.status === "fulfilled") { setMentions(mentionResult.value?.items ?? []); setNoteCoverage(mentionResult.value); }
     if (relatedResult.status === "fulfilled") setRelated(relatedResult.value?.items ?? []);
-    if (detailResult.status === "fulfilled" && detailResult.value) { setDetail(detailResult.value); setDetailRevision((value) => value + 1); }
+    if (detailResult.status === "fulfilled" && detailResult.value && capturedDetailId
+      && capturedDetailRequest === detailRequest.current && activeDetailId.current === capturedDetailId
+      && detailResult.value.id === capturedDetailId) {
+      setDetail(detailResult.value); setDetailRevision((value) => value + 1);
+    }
     const failure = [entityResult, undoResult, mentionResult, relatedResult, detailResult].find((result) => result.status === "rejected");
     if (failure?.status === "rejected") setError(errorText(failure.reason));
   }
@@ -155,7 +176,7 @@ export function EntitiesPanel({ bundleId, note, draft, onReveal, onOpenNote, onC
   async function runJob(input: { noteIds?: string[]; force?: boolean; reason?: "manual" | "rebuild" }) {
     if (!api) return;
     setBusy(true); setError("");
-    try { await api.requestJob(input); const page = await api.jobs(undefined, 8); setJobs((current) => mergeFirstPage(current, page.items)); setNextJobCursor(page.nextCursor); }
+    try { await api.requestJob(input); const page = await api.jobs(undefined, 8); setJobs((current) => mergeFirstPage(current, page.items)); if (jobPagesLoaded.current === 0) setNextJobCursor(page.nextCursor); }
     catch (caught) { setError(errorText(caught)); }
     finally { setBusy(false); }
   }
@@ -168,17 +189,17 @@ export function EntitiesPanel({ bundleId, note, draft, onReveal, onOpenNote, onC
   }
   async function actOnJob(jobId: string, action: "pause" | "resume" | "cancel") {
     if (!api) return;
-    try { await api.jobAction(jobId, action); const page = await api.jobs(undefined, 8); setJobs((current) => mergeFirstPage(current, page.items)); setNextJobCursor(page.nextCursor); setJobMode(page.mode); }
+    try { await api.jobAction(jobId, action); const page = await api.jobs(undefined, 8); setJobs((current) => mergeFirstPage(current, page.items)); if (jobPagesLoaded.current === 0) setNextJobCursor(page.nextCursor); setJobMode(page.mode); }
     catch (caught) { setError(errorText(caught)); }
   }
   async function loadMoreJobs() {
     if (!api || !nextJobCursor) return;
-    try { const page = await api.jobs(nextJobCursor, 8); setJobs((current) => [...current, ...page.items]); setNextJobCursor(page.nextCursor); setJobMode(page.mode); }
+    try { const page = await api.jobs(nextJobCursor, 8); setJobs((current) => appendUnique(current, page.items)); jobPagesLoaded.current += 1; setNextJobCursor(page.nextCursor); setJobMode(page.mode); }
     catch (caught) { setError(errorText(caught)); }
   }
   async function loadMoreEntities() {
     if (!api || !nextEntityCursor) return;
-    try { const page = await api.list({ q: query, type: typeFilter || undefined, activity: activityFilter, limit: 30, cursor: nextEntityCursor }); setEntities((current) => [...current, ...page.items]); setNextEntityCursor(page.nextCursor); }
+    try { const page = await api.list({ q: query, type: typeFilter || undefined, activity: activityFilter, limit: 30, cursor: nextEntityCursor }); setEntities((current) => appendUnique(current, page.items)); entityPagesLoaded.current += 1; setNextEntityCursor(page.nextCursor); }
     catch (caught) { setError(errorText(caught)); }
   }
   async function undoLatest() {
@@ -239,6 +260,10 @@ function EntityDetail({ bundleId, entity, api, onClose, onCommand, busy, current
 }
 function sourceEvidence(items: EntityMention[]) {
   return items.slice(0, 3).map((item) => `${item.noteTitle ?? item.noteId}: “${item.text}”`).join("; ") || "no current mention evidence";
+}
+function appendUnique<T extends { id: string }>(current: T[], page: T[]) {
+  const seen = new Set(current.map((item) => item.id));
+  return [...current, ...page.filter((item) => !seen.has(item.id))];
 }
 function errorText(error: unknown) {
   if (error instanceof Error && "status" in error && error.status === 409) return "This entity changed elsewhere. The latest data is refreshed; review it and retry your correction.";
