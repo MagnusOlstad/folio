@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import { buildClassificationMessages, ClassificationOutputError, parseClassificationOutput } from '../server/knowledge/classification-output.js'
 import { createRuntime } from '../server/app.js'
+import { detectLanguageHeuristic } from '../server/core/language.js'
 
 const validOutput = {
   concept: {
@@ -64,8 +65,8 @@ test('Llama filing prompt asks for populated metadata rather than a JSON Schema'
 
   assert.match(messages[0].content, /not an answer template/)
   assert.match(messages[0].content, /never return field definitions/i)
-  assert.match(messages[0].content, /exactly these keys: kind, path, title, type, description, and tags/)
-  assert.match(messages[0].content, /only keys must be kind, path, title, type, description, and tags; do not add date/)
+  assert.match(messages[0].content, /exactly these keys: kind, path, title, type, description, tags, and language/)
+  assert.match(messages[0].content, /only keys must be kind, path, title, type, description, tags, and language/)
   assert.match(messages[0].content, /Example shape only; replace every value/)
   assert.match(messages[0].content, /"concept":\{"kind":"note"/)
 })
@@ -102,7 +103,7 @@ test('classification retries invalid metadata once using the native two-message 
       now: new Date('2026-10-01T12:00:00Z'),
       timeZone: 'Europe/Oslo',
     })
-    assert.deepEqual(result, validOutput)
+    assert.deepEqual(result, { concept: { ...validOutput.concept, language: 'en' } }) // heuristic fallback
     assert.equal(generated.length, 2)
     for (const messages of generated) {
       assert.equal(messages.length, 2)
@@ -159,6 +160,39 @@ test('matching slash-path steering survives the ranked filing guide limit', asyn
     await runtime.classify('Orion launch budget review.', records, { steering: 'projects/orion - continue Orion work' })
     assert.match(prompt, /path: \["projects","orion"\].*selected by matching user filing steering/)
     assert.match(prompt, /Orion Launch Budget/)
+  } finally {
+    await runtime.mlxService.close()
+  }
+})
+
+test('classification output validates the optional language field strictly', () => {
+  for (const language of ['no', 'en', 'other']) {
+    assert.equal(parseClassificationOutput(JSON.stringify({ concept: { ...validOutput.concept, language } })).concept.language, language)
+  }
+  for (const language of ['Norwegian', 'nb', 7, null]) {
+    const parsed = parseClassificationOutput(JSON.stringify({ concept: { ...validOutput.concept, language } }))
+    assert.equal('language' in parsed.concept, false)
+  }
+  assert.throws(() => parseClassificationOutput(JSON.stringify({ concept: { ...validOutput.concept, extra: 1 } })), ClassificationOutputError)
+})
+
+test('language heuristic separates Norwegian, English and unknown text', () => {
+  assert.equal(detectLanguageHeuristic('Jeg har ikke tid til møtet på fredag, og det er synd.'), 'no')
+  assert.equal(detectLanguageHeuristic('We will meet on Friday and the plan is not final.'), 'en')
+  assert.equal(detectLanguageHeuristic('`const x = 1` https://example.com'), 'other')
+})
+
+test('classification keeps a model language and falls back to the heuristic when it is garbled', async () => {
+  const runtime = createRuntime({ FOLIO_DATA_ROOT: '/tmp/folio-classification-language-test' })
+  const responses = []
+  runtime.mlxService.generate = async () => ({ text: JSON.stringify(responses.shift()) })
+  try {
+    responses.push({ concept: { ...validOutput.concept, language: 'no' } })
+    assert.equal((await runtime.classify('The plan is not final and we will meet.', [])).concept.language, 'no')
+    responses.push({ concept: { ...validOutput.concept, language: 'klingon' } })
+    assert.equal((await runtime.classify('Jeg har ikke tid, og det er synd.', [])).concept.language, 'no')
+    responses.push({ concept: validOutput.concept })
+    assert.equal((await runtime.classify('The plan is not final and we will meet.', [])).concept.language, 'en')
   } finally {
     await runtime.mlxService.close()
   }

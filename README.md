@@ -10,7 +10,7 @@ FolioNotes is a local-first personal notetaker with one Markdown capture field. 
 - Open-ended hierarchical filing based on the whole note, with opening labels and headings treated as strong routing guidance.
 - Special aggregate concepts: explicit todos append to `/todo-list.md`, while explicit daily notes append to `/daily/YYYY-MM-DD.md` in the browser's local timezone.
 - Lightweight vocabulary reuse: the classifier receives capped guides of existing paths and types plus tags retrieved from lexically and semantically similar notes, favoring established terminology without closing the taxonomy.
-- OKF v0.2 Markdown with provenance, generation metadata, lifecycle state, indexes, and logs.
+- OKF v0.2 Markdown with provenance, generation metadata, lifecycle state, an optional `language: no|en` detected when a note is filed, indexes, and logs.
 - Automatic link and backlink indexing from Markdown links and `sources[].resource` provenance, with generated title-mention links recalculated after edits and reindexing.
 - Semantic relationship suggestions that become Markdown links only after confirmation.
 - Hybrid retrieval through OKF metadata, lifecycle, relationships, keywords, and persisted EmbeddingGemma chunk embeddings generated through Swift MLX.

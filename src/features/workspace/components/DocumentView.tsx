@@ -1,6 +1,7 @@
-import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import type { NoteTranslationTarget, ViewerDocument } from "../../../domain/types.ts";
 import { getActiveBundleId } from "../../../lib/api.ts";
+import { useNoteLanguage } from "../hooks/useNoteLanguage.ts";
 import { useNoteTranslation } from "../hooks/useNoteTranslation.ts";
 import { useTranslationSettings } from "../hooks/useTranslationSettings.ts";
 import {
@@ -119,18 +120,39 @@ export function DocumentView(props: DocumentViewProps) {
     () => readNoteTranslationChoices(bundleId),
   );
   const toggleVisible = translatable && translationSettings !== null;
-  const translationTarget = toggleVisible && translationSettings.enabled ? (choices[document.id] ?? null) : null;
+  const translationOn = toggleVisible && translationSettings.enabled;
+  const language = useNoteLanguage(document.id, translationOn, document.content, translationOn);
+  const storedChoice = translationOn ? (choices[document.id] ?? null) : null;
+  // A stored choice equal to the note's own language means "Original".
+  const translationTarget = language.settled && storedChoice && storedChoice !== language.noteLanguage ? storedChoice : null;
   const translation = useNoteTranslation(document.id, translationTarget, document.content);
+  const knownLanguage = translation.translation?.noteLanguage !== undefined
+    ? translation.translation.noteLanguage
+    : language.noteLanguage;
+  const knownSource = translation.translation?.noteLanguageSource !== undefined
+    ? translation.translation.noteLanguageSource
+    : language.noteLanguageSource;
+  const storedIsOriginal = storedChoice !== null && storedChoice === language.noteLanguage;
+  useEffect(() => {
+    if (storedIsOriginal) setNoteTranslationChoice(bundleId, document.id, null);
+  }, [storedIsOriginal, bundleId, document.id]);
   const languageToggle = toggleVisible
     ? {
         enabled: translationSettings.enabled,
         saving: translationState.saving,
         error: translationState.error,
         onEnabledChange: (enabled: boolean) => void translationState.setEnabled(enabled),
-        value: translationState.settings?.enabled ? (choices[document.id] ?? null) : null,
+        value: translationOn ? (translationTarget ?? knownLanguage) : null,
+        originalLanguage: translationOn ? knownLanguage : null,
+        originalSource: knownSource,
         available: translationSettings.available,
-        onChange: (target: NoteTranslationTarget | null) =>
-          setNoteTranslationChoice(bundleId, document.id, target),
+        // The original's own button (or the shown translation's button) returns to Original.
+        onChange: (target: NoteTranslationTarget) =>
+          setNoteTranslationChoice(
+            bundleId,
+            document.id,
+            target === knownLanguage || target === translationTarget ? null : target,
+          ),
       }
     : undefined;
   const translated = translation.translation;

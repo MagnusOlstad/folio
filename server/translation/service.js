@@ -92,6 +92,8 @@ export function createTranslationService(runtime, options = {}) {
     return {
       title: parsed.title,
       description: parsed.description,
+      frontmatterLanguage: ['no', 'en'].includes(parsed.frontmatter?.language) ? parsed.frontmatter.language : null,
+      bodyBlocks: translatableBlocks(items),
       titleBlock: createTextBlock(parsed.title),
       descriptionBlock: createTextBlock(parsed.description),
       items,
@@ -261,6 +263,24 @@ export function createTranslationService(runtime, options = {}) {
     backfillTimer.unref?.()
   }
 
+  // Frontmatter wins; otherwise the length-weighted majority of cached main-entry sources.
+  function languageOf(note) {
+    if (note.frontmatterLanguage) return { noteLanguage: note.frontmatterLanguage, noteLanguageSource: 'frontmatter' }
+    const weights = { no: 0, en: 0 }
+    for (const block of note.bodyBlocks) {
+      const entry = cache.get(block.hash)
+      if (entry && !entry.failed && weights[entry.source] !== undefined) weights[entry.source] += block.text.length
+    }
+    if (weights.no === weights.en) return { noteLanguage: null, noteLanguageSource: null }
+    return { noteLanguage: weights.no > weights.en ? 'no' : 'en', noteLanguageSource: 'detected' }
+  }
+
+  async function language(id) {
+    const note = await readNote(id)
+    await cache.load()
+    return { id, ...languageOf(note) }
+  }
+
   async function view(id, target) {
     if (!TARGETS.includes(target)) throw httpError(400, 'Target must be en or no.')
     const note = await readNote(id)
@@ -281,6 +301,7 @@ export function createTranslationService(runtime, options = {}) {
       status: !enabled ? 'disabled' : ready ? 'ready' : available ? 'pending' : 'unavailable',
       translatedBlocks,
       totalBlocks,
+      ...languageOf(note),
       title: (note.titleBlock && lookup(note.titleBlock)) || note.title,
       description: (note.descriptionBlock && lookup(note.descriptionBlock)) || note.description,
       content: renderItems(note.items, lookup),
@@ -304,6 +325,6 @@ export function createTranslationService(runtime, options = {}) {
     await cache.flush()
   }
 
-  return { enqueue, prioritize, startBackfill, view, getSettings, setEnabled, idle, close, validId,
+  return { enqueue, prioritize, startBackfill, view, getSettings, setEnabled, idle, close, validId, language,
     startExport: exports.start, getExport: exports.get, cancelExport: exports.cancel }
 }

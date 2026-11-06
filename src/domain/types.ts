@@ -222,7 +222,15 @@ export type MarkdownNode = {
 };
 export type NoteTranslationTarget = "en" | "no";
 export type NoteTranslationStatus = "ready" | "pending" | "disabled" | "unavailable";
+export type NoteLanguageSource = "frontmatter" | "detected";
+export type NoteLanguageInfo = {
+  id: string;
+  noteLanguage: NoteTranslationTarget | null;
+  noteLanguageSource: NoteLanguageSource | null;
+};
 export type NoteTranslation = {
+  noteLanguage?: NoteTranslationTarget | null;
+  noteLanguageSource?: NoteLanguageSource | null;
   id: string;
   target: NoteTranslationTarget;
   status: NoteTranslationStatus;

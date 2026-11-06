@@ -1,4 +1,5 @@
 import type {
+  NoteLanguageInfo,
   NoteTranslation,
   NoteTranslationTarget,
   TranslatedExportJob,
@@ -142,4 +143,8 @@ export function cancelTranslatedExport(jobId: string): Promise<{ jobId: string; 
   return api<{ jobId: string; status: "cancelled" }>(`/api/note/translation/export/${encodeURIComponent(jobId)}`, {
     method: "DELETE",
   });
+}
+
+export function fetchNoteLanguage(id: string, signal?: AbortSignal): Promise<NoteLanguageInfo> {
+  return api<NoteLanguageInfo>(`/api/note/language?id=${encodeURIComponent(id)}`, { signal });
 }

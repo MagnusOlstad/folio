@@ -202,7 +202,7 @@ test('routes validate input and return the translation contract', async (context
   assert.equal((await send('/api/note/translation/prioritize', 'POST', { id: '/missing.md' })).status, 404)
 
   const first = await (await get('id=/a.md&target=en')).json()
-  assert.deepEqual(Object.keys(first).sort(), ['content', 'description', 'id', 'status', 'target', 'title', 'totalBlocks', 'translatedBlocks'])
+  assert.deepEqual(Object.keys(first).sort(), ['content', 'description', 'id', 'noteLanguage', 'noteLanguageSource', 'status', 'target', 'title', 'totalBlocks', 'translatedBlocks'])
   assert.equal(first.status, 'pending')
   await runtime.translation.idle()
   assert.equal((await (await get('id=/a.md&target=en')).json()).status, 'ready')
@@ -379,4 +379,23 @@ test('deleting a finished job keeps its status and failedBlocks counts fallbacks
   assert.equal(done.failedBlocks, 1)
   assert.deepEqual(runtime.translation.cancelExport(job.jobId), { jobId: job.jobId, status: 'done' })
   assert.equal(runtime.translation.getExport(job.jobId).status, 'done')
+})
+
+test('note language comes from frontmatter, else length-weighted cached sources, else null', async (context) => {
+  const { runtime } = await setup(context, { notes: {
+    '/fm.md': '---\nlanguage: en\n---\nJeg er her og det er bra.\n',
+    '/det.md': 'Jeg er her og det er bra.\n\nOk and yes.\n',
+    '/tie.md': 'Jeg er her.\n\nThe cat is here.\n',
+  } })
+  assert.deepEqual(await runtime.translation.language('/det.md'), { id: '/det.md', noteLanguage: null, noteLanguageSource: null })
+  assert.deepEqual(await runtime.translation.language('/fm.md'), { id: '/fm.md', noteLanguage: 'en', noteLanguageSource: 'frontmatter' })
+  runtime.translation.enqueue('/det.md')
+  runtime.translation.enqueue('/tie.md')
+  await runtime.translation.idle()
+  const detected = await runtime.translation.language('/det.md')
+  assert.equal(detected.noteLanguage, 'no')
+  assert.equal(detected.noteLanguageSource, 'detected')
+  assert.equal((await runtime.translation.view('/det.md', 'en')).noteLanguage, 'no')
+  const tie = await runtime.translation.language('/tie.md')
+  assert.equal(tie.noteLanguage === null, tie.noteLanguageSource === null)
 })

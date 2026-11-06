@@ -12,6 +12,10 @@ export function registerRoutes(app, runtime) {
     } catch (error) { fail(response, next, error) }
   })
 
+  app.get('/api/note/language', async (request, response, next) => {
+    try { response.json(await runtime.translation.language(String(request.query.id || ''))) } catch (error) { fail(response, next, error) }
+  })
+
   app.post('/api/note/translation/prioritize', async (request, response, next) => {
     try {
       const id = String(request.body?.id || '')

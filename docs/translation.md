@@ -10,6 +10,10 @@ Filed bundle notes are translated between Norwegian and English in the backgroun
 - The selected generation model returns one JSON object `{"source":"no"|"en"|"other","translation":"..."|null}` per block. Norwegian becomes English, English becomes Norwegian Bokmål, anything else is `other` and shown unchanged. Malformed output is retried once; after a second failure the block falls back to the original text (retried later only with a different model).
 - For target `en` the view shows English blocks unchanged and the translation of Norwegian blocks; target `no` is the reverse.
 
+## Note language
+
+`GET /api/note/translation` additionally returns `noteLanguage: 'no' | 'en' | null` and `noteLanguageSource: 'frontmatter' | 'detected' | null`. A `language:` frontmatter key (written when the note is filed) wins. Otherwise the language is 'detected' from the cached main-entry `source` values of the body blocks, weighted by text length (ignoring `other` and failed entries; a tie gives `null`). `null` means nothing is cached yet. `GET /api/note/language?id=` returns `{ id, noteLanguage, noteLanguageSource }` with the same rules (400/404 like the other routes) and never triggers model work.
+
 ## Scheduling
 
 A single serial queue per bundle processes one block per `generate` call and waits between blocks while any other model work (Ask, filing, transcription, embeddings) is active. Saves, moves and refiles enqueue the note (2 s debounce); opening a note via the API prioritizes it. After bundle initialization or reindex an idle backfill translates all notes (raw captures are skipped) and prunes cache entries no note references. Nothing runs if translation is disabled or no generation model is installed; models are never downloaded or force-loaded for this.

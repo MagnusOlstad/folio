@@ -1,4 +1,5 @@
-import type { NoteTranslationTarget } from "../../../domain/types.ts";
+import { useId } from "react";
+import type { NoteLanguageSource, NoteTranslationTarget } from "../../../domain/types.ts";
 import { NOTE_TRANSLATION_LANGUAGES } from "../model/note-translation.ts";
 
 type Props = {
@@ -7,12 +8,16 @@ type Props = {
   error: string;
   value: NoteTranslationTarget | null;
   available: boolean;
-  onChange: (target: NoteTranslationTarget | null) => void;
+  /** The note's own language when known; its button doubles as "Original". */
+  originalLanguage: NoteTranslationTarget | null;
+  originalSource: NoteLanguageSource | null;
+  onChange: (target: NoteTranslationTarget) => void;
   onEnabledChange: (enabled: boolean) => void;
 };
 
 /** Leading switch segment plus the language segments; rendered inside the header toolbar. */
-export function DocumentTranslationToggle({ enabled, saving, error, value, available, onChange, onEnabledChange }: Props) {
+export function DocumentTranslationToggle({ enabled, saving, error, value, available, originalLanguage, originalSource, onChange, onEnabledChange }: Props) {
+  const markerId = useId();
   return (
     <div className="document-translation-group" data-error={error ? "true" : undefined}>
       <button
@@ -35,17 +40,26 @@ export function DocumentTranslationToggle({ enabled, saving, error, value, avail
         >
           {NOTE_TRANSLATION_LANGUAGES.map(({ target, label, code, name }) => {
             const pressed = value === target;
+            const isOriginal = originalLanguage === target;
+            const marker = `Original language (${name}) — ${originalSource === "frontmatter" ? "set in the note" : "detected from the text"}`;
             return (
               <button
                 key={target}
                 type="button"
                 aria-pressed={pressed}
                 aria-label={label}
-                disabled={!available}
-                title={available ? `Show in ${name} — click again for original` : "Install a generation model in Settings to translate notes."}
-                onClick={() => onChange(pressed ? null : target)}
+                aria-describedby={isOriginal ? `${markerId}-${target}` : undefined}
+                data-original={isOriginal ? "true" : undefined}
+                disabled={!available && !isOriginal}
+                title={
+                  isOriginal ? marker
+                    : available ? `Show in ${name}${pressed ? " — click again for original" : ""}`
+                      : "Install a generation model in Settings to translate notes."
+                }
+                onClick={() => onChange(target)}
               >
                 {code}
+                {isOriginal ? <span id={`${markerId}-${target}`} className="translation-controls-error">{marker}</span> : null}
               </button>
             );
           })}

@@ -109,6 +109,7 @@ function normalizeClassification(result, content, records, allowReconciliation =
     type: continuation?.type || type,
     description,
     tags: Array.from(new Set(reconciledTags)).slice(0, 6),
+    language: ['no', 'en'].includes(candidate.language) ? candidate.language : null,
     kind: openingSpecialKind(steering) || openingSpecialKind(content) || proposedKind,
     path: continuation
       ? path.posix.dirname(continuation.id).replace(/^\/+/, '').split('/').filter(Boolean)
@@ -265,6 +266,7 @@ function conceptDocument(classification, rawId, createdAt, relatedConcepts, cont
     type: classification.type,
     title: classification.title,
     description: classification.description,
+    ...(classification.language ? { language: classification.language } : {}),
     tags: classification.tags,
     status: 'draft',
     generated: { by: filingActor(classifiedByModel, classification.generationModel), at: createdAt },

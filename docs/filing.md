@@ -1,6 +1,6 @@
 # Filing pipeline and model evaluation
 
-FolioNotes treats filing as a metadata decision. The capture route separates any filing steering from the note body, then calls `runtime.classify(body, records, { steering, now, timeZone })`. Classification combines EmbeddingGemma retrieval with the current bundle’s filing and tag vocabulary, asks Gemma 4 for one validated metadata object, and retries once if that JSON is malformed. It returns kind, path, title, type, description, and tags; it does not generate a replacement note body.
+FolioNotes treats filing as a metadata decision. The capture route separates any filing steering from the note body, then calls `runtime.classify(body, records, { steering, now, timeZone })`. Classification combines EmbeddingGemma retrieval with the current bundle’s filing and tag vocabulary, asks Gemma 4 for one validated metadata object, and retries once if that JSON is malformed. It returns kind, path, title, type, description, tags, and a `language` (`no`, `en`, or `other`); it does not generate a replacement note body.
 
 After classification, application code validates the proposed destination, decides whether the result can append to an exact existing concept, and writes the note body. Source receipts retain the exact submitted body. Visible Markdown keeps FolioNotes’s legacy `<br>` to hard-break normalization; todo and daily captures use their aggregate entry format. Mention and related links are selected and rendered by deterministic filing code.
 
@@ -40,3 +40,7 @@ For prompt changes, adjust the instructions and metadata schema in `server/knowl
 - [Gemma 4 prompt formatting](https://ai.google.dev/gemma/docs/core/prompt-formatting-gemma4) documents system and user turns and the explicit thinking control. FolioNotes’s classifier uses a system instruction and the MLX helper disables thinking for this metadata-only call.
 - [EmbeddingGemma model card](https://ai.google.dev/gemma/docs/embeddinggemma/model_card) documents the retrieval query prefix `task: search result | query:` and titled document prefix `title: {title} | text:` used by FolioNotes.
 - [EmbeddingGemma inference guide](https://ai.google.dev/gemma/docs/embeddinggemma/inference-embeddinggemma-with-sentence-transformers) explains task prompts at inference and query/document prompts for retrieval. The evaluator embeds fixture documents through `runtime.embedDocument`, so the application’s document prefix stays in force.
+
+## Note language
+
+The classifier also reports the note's predominant language. A new note created by filing or capture stores `language: no` or `language: en` in its YAML frontmatter (an optional OKF field); `other` is omitted. If the model omits or garbles only `language`, a deterministic heuristic over the note body (æøå plus common Norwegian and English function words, `server/core/language.js`) is used instead of failing filing. Appending to an existing note (daily or todo captures, continuations) never changes that note's `language`, and existing notes never get one automatically. Edits, moves, refiles and history restores keep the key because unknown frontmatter is preserved.

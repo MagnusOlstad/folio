@@ -88,6 +88,7 @@ describe("note translation model", () => {
 describe("DocumentView translation", () => {
   const fetchMock = vi.fn();
   let translation: NoteTranslation;
+  let languageInfo: { noteLanguage: "no" | "en" | null; noteLanguageSource: "frontmatter" | "detected" | null };
 
   beforeEach(() => {
     window.localStorage.clear();
@@ -96,9 +97,11 @@ describe("DocumentView translation", () => {
       id: noteDocument.id, target: "en", status: "pending", translatedBlocks: 3, totalBlocks: 12,
       title: "Hello", description: "A test", content: "# Hello\n\nThis is a test.",
     };
+    languageInfo = { noteLanguage: null, noteLanguageSource: null };
     fetchMock.mockReset();
     fetchMock.mockImplementation(async (url: string) => {
       const body = url.includes("/api/translation/settings") ? { enabled: true, available: true }
+        : url.includes("/api/note/language") ? { id: noteDocument.id, ...languageInfo }
         : url.includes("/prioritize") ? { queued: true } : translation;
       return new Response(JSON.stringify(body), { status: 200 });
     });
@@ -149,6 +152,61 @@ describe("DocumentView translation", () => {
     await waitFor(() => expect(document.querySelector("[data-live-markdown-editor]")).not.toBeNull());
     expect(screen.queryByText("Translating 3 of 12 paragraphs…")).toBeNull();
     expect(window.localStorage.getItem(noteTranslationStorageKey(null))).toBe("{}");
+  });
+
+  describe("known note language", () => {
+    beforeEach(() => {
+      languageInfo = { noteLanguage: "no", noteLanguageSource: "detected" };
+    });
+    const pressed = (name: string) => screen.getByRole("button", { name }).getAttribute("aria-pressed");
+
+    it("highlights the original language and marks it as the source", async () => {
+      render(<DocumentView {...props(noteDocument)} />);
+      await waitFor(() => expect(pressed("Norsk")).toBe("true"));
+      expect(pressed("English")).toBe("false");
+      const norsk = screen.getByRole("button", { name: "Norsk" });
+      expect(norsk).toHaveAccessibleDescription("Original language (Norwegian) — detected from the text");
+      expect(screen.getByRole("button", { name: "English" })).not.toHaveAttribute("aria-describedby");
+      expect(translationCalls()).toHaveLength(0);
+    });
+
+    it("switches to the other language and back, and clicking the original never fetches a translation", async () => {
+      render(<DocumentView {...props(noteDocument)} />);
+      await waitFor(() => expect(pressed("Norsk")).toBe("true"));
+      fireEvent.click(screen.getByRole("button", { name: "Norsk" }));
+      expect(translationCalls()).toHaveLength(0);
+      expect(document.querySelector("[data-live-markdown-editor]")).not.toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "English" }));
+      expect(await screen.findByText("This is a test.")).toBeInTheDocument();
+      expect(pressed("English")).toBe("true");
+      expect(pressed("Norsk")).toBe("false");
+      expect(translationCalls().every(([url]) => String(url).includes("target=en"))).toBe(true);
+      expect(document.querySelector("[data-live-markdown-editor]")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Norsk" }));
+      await waitFor(() => expect(document.querySelector("[data-live-markdown-editor]")).not.toBeNull());
+      expect(pressed("Norsk")).toBe("true");
+      expect(window.localStorage.getItem(noteTranslationStorageKey(null))).toBe("{}");
+    });
+
+    it("treats a stored choice equal to the note's language as Original and cleans it up", async () => {
+      setNoteTranslationChoice(null, noteDocument.id, "no");
+      render(<DocumentView {...props(noteDocument)} />);
+      await waitFor(() => expect(window.localStorage.getItem(noteTranslationStorageKey(null))).toBe("{}"));
+      expect(pressed("Norsk")).toBe("true");
+      expect(document.querySelector("[data-live-markdown-editor]")).not.toBeNull();
+      expect(translationCalls().every(([url]) => !String(url).includes("target=no"))).toBe(true);
+    });
+  });
+
+  it("keeps the neutral behaviour when the language is unknown", async () => {
+    render(<DocumentView {...props(noteDocument)} />);
+    await screen.findByRole("group", { name: "Note language" });
+    expect(screen.getByRole("button", { name: "Norsk" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "English" })).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: "English" }));
+    expect(await screen.findByText("This is a test.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "English" }));
+    await waitFor(() => expect(document.querySelector("[data-live-markdown-editor]")).not.toBeNull());
   });
 
   it("restores the remembered choice and shows an error with the toggle still available", async () => {

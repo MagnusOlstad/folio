@@ -1,6 +1,11 @@
 import { expect, test, type Page } from '@playwright/test'
 
-async function mockTranslation(page: Page, id: () => string, initiallyEnabled = true) {
+async function mockTranslation(
+  page: Page,
+  id: () => string,
+  initiallyEnabled = true,
+  noteLanguage: 'no' | 'en' | null = null,
+) {
   const requests: string[] = []
   let enabled = initiallyEnabled
   let polls = 0
@@ -8,6 +13,9 @@ async function mockTranslation(page: Page, id: () => string, initiallyEnabled = 
     if (route.request().method() === 'PUT') enabled = (route.request().postDataJSON() as { enabled: boolean }).enabled
     return route.fulfill({ json: { enabled, available: true } })
   })
+  await page.route('**/api/note/language?**', (route) => route.fulfill({
+    json: { id: id(), noteLanguage, noteLanguageSource: noteLanguage ? 'detected' : null },
+  }))
   await page.route('**/api/note/translation/prioritize', (route) => route.fulfill({ status: 202, json: { queued: true } }))
   await page.route('**/api/note/translation?**', (route) => {
     const url = new URL(route.request().url())
@@ -81,6 +89,34 @@ test('switch off leaves only the switch, and turning it on restores the stored l
     await expect(toggle).toHaveAttribute('aria-checked', 'true')
     await expect(page.getByRole('button', { name: 'Norsk' })).toHaveAttribute('aria-pressed', 'true')
     await expect(page.getByText('Translated paragraph one.')).toBeVisible()
+  } finally {
+    await request.delete(`/api/note?id=${encodeURIComponent(id)}`)
+  }
+})
+
+test('a detected language highlights its button; the other button translates and the original returns', async ({ page, request }) => {
+  const title = `Translation language E2E ${Date.now().toString(36)}`
+  const created = await request.post('/api/file/create', { data: { directory: '/', name: title } })
+  expect(created.status()).toBe(201)
+  const id = (await created.json()).id as string
+  try {
+    const requests = await mockTranslation(page, () => id, true, 'no')
+    await page.addInitScript(() => localStorage.setItem('folio:model-setup-prompt-seen', '1'))
+    await page.goto('/')
+    await page.locator('.workbench-sidebar').getByRole('button', { name: title, exact: true }).click()
+    const norsk = page.getByRole('button', { name: 'Norsk' })
+    const english = page.getByRole('button', { name: 'English' })
+    await expect(norsk).toHaveAttribute('aria-pressed', 'true')
+    await expect(english).toHaveAttribute('aria-pressed', 'false')
+    expect(requests).toEqual([])
+    await english.click()
+    await expect(english).toHaveAttribute('aria-pressed', 'true')
+    await expect(norsk).toHaveAttribute('aria-pressed', 'false')
+    await expect(page.getByText('Translated paragraph two.')).toBeVisible({ timeout: 15_000 })
+    expect(requests.every((entry) => entry === `${id}|en`)).toBe(true)
+    await norsk.click()
+    await expect(page.locator('.document-view [data-live-markdown-editor]')).toHaveCount(1)
+    await expect(norsk).toHaveAttribute('aria-pressed', 'true')
   } finally {
     await request.delete(`/api/note?id=${encodeURIComponent(id)}`)
   }

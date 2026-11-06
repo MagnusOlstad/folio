@@ -1,4 +1,4 @@
-import type { NoteTranslationTarget, ViewerDocument } from "../../../domain/types.ts";
+import type { NoteLanguageSource, NoteTranslationTarget, ViewerDocument } from "../../../domain/types.ts";
 import type { MetadataField } from "../types.ts";
 import { DocumentTranslationToggle } from "./DocumentTranslationToggle.tsx";
 
@@ -27,7 +27,9 @@ type DocumentHeaderProps = {
     onEnabledChange: (enabled: boolean) => void;
     value: NoteTranslationTarget | null;
     available: boolean;
-    onChange: (target: NoteTranslationTarget | null) => void;
+    originalLanguage: NoteTranslationTarget | null;
+    originalSource: NoteLanguageSource | null;
+    onChange: (target: NoteTranslationTarget) => void;
   };
 };
 
