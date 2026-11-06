@@ -99,6 +99,18 @@ function parseMentionText(text, source, types) {
     return item;
   });
 }
+function parseGemmaMentionText(text, source, types) {
+  let output;
+  try { output = JSON.parse(text); } catch { throw new Error('response.text is not strict JSON'); }
+  if (!output || typeof output !== 'object' || Array.isArray(output) || Object.keys(output).length !== 1 || !Array.isArray(output.mentions)) throw new Error('JSON must contain only a mentions array');
+  const mentions = [];
+  const invalid = [];
+  for (const [index, item] of output.mentions.entries()) {
+    try { mentions.push(...parseMentionText(JSON.stringify({ mentions: [item] }), source, types)); }
+    catch (error) { invalid.push({ index, message: error instanceof Error ? error.message : String(error) }); }
+  }
+  return { mentions, spanValidation: { reported: output.mentions.length, valid: mentions.length, invalid: invalid.length, examples: invalid.slice(0, 5) } };
+}
 function validateChunkPlan(plan, text, budget) {
   if (!plan || !Array.isArray(plan.chunks) || plan.coverage?.complete !== true
     || plan.coverage.startUtf16 !== 0 || plan.coverage.endUtf16 !== text.length) throw new Error('planner returned incomplete full-note coverage');
@@ -340,8 +352,15 @@ try {
         progress('case-start', { id: entry.id, repeat: repeat + 1, repeatCount, completedMeasuredRuns: partialCapture.progress.completedMeasuredRuns });
         const measured = mode === 'helper-entities' ? await runEntityCapture(entry) : await request(entry.request);
         if (mode === 'gemma-entity-baseline') {
-          try { measured.response.mentions = parseMentionText(measured.response.text ?? '', entry.text, corpus.schema.types); }
-          catch (error) { measured.response.mentions = []; measured.response.mentionValidationError = error instanceof Error ? error.message : String(error); }
+          try {
+            const parsed = parseGemmaMentionText(measured.response.text ?? '', entry.text, corpus.schema.types);
+            measured.response.mentions = parsed.mentions;
+            measured.response.spanValidation = parsed.spanValidation;
+          } catch (error) {
+            measured.response.mentions = [];
+            measured.response.spanValidation = { reported: 0, valid: 0, invalid: null, examples: [] };
+            measured.response.mentionValidationError = error instanceof Error ? error.message : String(error);
+          }
         }
         measuredRuns.push(measured);
         partialCapture.progress.completedMeasuredRuns += 1;
@@ -480,9 +499,22 @@ try {
       resolverState.entities = resolved.entities;
       return { id: item.id, text: item.text, mentions: resolved.mentions };
     });
-    report.predictions = { corpusVersion: corpus.version, metadata: { modelRevision: revision, runtimeRevision, schemaVersion: corpus.reference.schemaVersion, thresholds, inferenceScoreFloor: scoreFloor, entityConfigurationHash, device: `${host.cpu} (${host.architecture})`, osVersion: `${host.macOSVersion} (${host.macOSBuild})`, precision: helperReportedPrecision, precisionVerified, chunkBudget, warmupCount, repeatCount, identityResolver: 'server/entities/resolution.js:resolveMentions' }, cases };
+    report.predictions = { corpusVersion: corpus.version, metadata: { modelRevision: revision, runtimeRevision, runtimeProvenanceVerified, helperSha256, schemaVersion: corpus.reference.schemaVersion, thresholds, inferenceScoreFloor: scoreFloor, entityConfigurationHash, device: `${host.cpu} (${host.architecture})`, osVersion: `${host.macOSVersion} (${host.macOSBuild})`, precision: helperReportedPrecision, precisionVerified, chunkBudget, warmupCount, repeatCount, identityResolver: 'server/entities/resolution.js:resolveMentions' }, cases: cases.map((item) => ({ ...item, language: corpus.cases.find((source) => source.id === item.id).language })) };
   }
-  if (report.predictions) report.semanticQuality = { source: 'manual corpus semantic annotations', exactMentions: mentionMetrics(corpus.cases.map((item) => ({ gold: item.semantic.mentions.map((mention) => ({ ...mention, caseId: item.id })), predicted: report.predictions.cases.find((prediction) => prediction.id === item.id).mentions.map((mention) => ({ ...mention, caseId: item.id })) })), corpus), identity: 'computed from production resolveMentions output; user corrections are measured separately by server lifecycle tests' };
+  if (report.predictions) {
+    const rows = corpus.cases.map((item) => ({ id: item.id, language: item.language,
+      gold: item.semantic.mentions.map((mention) => ({ ...mention, caseId: item.id })),
+      predicted: report.predictions.cases.find((prediction) => prediction.id === item.id).mentions.map((mention) => ({ ...mention, caseId: item.id })) }));
+    report.semanticQuality = { source: 'manual corpus semantic annotations', exactMentions: mentionMetrics(rows, corpus), identity: 'computed from production resolveMentions output; user corrections are measured separately by server lifecycle tests' };
+  }
+  if (mode === 'gemma-entity-baseline') {
+    const validations = runs.map(({ response }) => response.spanValidation).filter(Boolean);
+    report.sourceSpanValidation = { reported: validations.reduce((sum, item) => sum + item.reported, 0),
+      valid: validations.reduce((sum, item) => sum + item.valid, 0),
+      invalid: validations.reduce((sum, item) => sum + (item.invalid ?? 0), 0),
+      completeJsonCases: measurements.results.filter((item) => !item.runs.at(-1)?.response?.mentionValidationError).length,
+      totalCases: measurements.results.length };
+  }
   await writeJsonAtomically(outputPath, report);
   await rm(partialPath, { force: true });
   progress('complete', { outputPath, completedCases: measurements.results.length, helperRequestCount });

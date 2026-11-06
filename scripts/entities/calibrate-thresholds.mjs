@@ -70,7 +70,7 @@ try {
   const goldByCase = new Map(corpus.cases.map((item) => [item.id, item.semantic.mentions]));
   for (const type of corpus.schema.types) {
     const goldCases = new Map([...goldByCase].map(([id, mentions]) => [id, mentions.filter((mention) => mention.type === type)]));
-    const candidates = [...new Set([floor, ...[...rawByCase.values()].flat().filter((item) => item.type === type).map((item) => item.score)])].filter((value) => value >= floor).sort((a, b) => a - b);
+    const candidates = [...new Set([floor, 1, ...[...rawByCase.values()].flat().filter((item) => item.type === type).map((item) => item.score)])].filter((value) => value >= floor).sort((a, b) => a - b);
     let best = null;
     for (const threshold of candidates) {
       const predictedCases = new Map(corpus.cases.map((item) => [item.id, rawByCase.get(item.id).filter((mention) => mention.type === type && mention.score >= threshold)]));
@@ -82,7 +82,9 @@ try {
   }
   const output = { corpusVersion: corpus.version, sourceCapture: path.resolve(input), sourceModelRevision: capture.metadata.modelRevision,
     entityConfigurationHash: capture.metadata.entityConfigurationHash, inferenceScoreFloor: floor,
-    selection: 'maximum per-type exact-mention F1 at or above inference floor; ties select the higher threshold', thresholds, metrics };
+    selection: 'in-sample maximum per-type exact-mention F1 at or above inference floor, including the abstain-all threshold 1; ties select the higher threshold',
+    limitation: 'Thresholds are selected and scored on the same fictional corpus; these metrics are optimistic and do not establish held-out quality or generalization.',
+    thresholds, metrics };
   const destination = process.argv[3] ? path.resolve(process.argv[3]) : null;
   if (destination) await writeFile(destination, `${JSON.stringify(output, null, 2)}\n`);
   console.log(JSON.stringify(output, null, 2));

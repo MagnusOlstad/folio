@@ -148,7 +148,7 @@ test('production entity capture plans chunks, extracts serially, and deduplicate
   assert.equal(await import('node:fs/promises').then(({ access }) => access(`${output}.partial.json`).then(() => true, () => false)), false);
 })
 
-test('Gemma prompted entity baseline strictly parses and scores JSON mention output', { skip: process.platform !== 'darwin' }, async (t) => {
+test('Gemma prompted entity baseline preserves valid spans and reports invalid source offsets', { skip: process.platform !== 'darwin' }, async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'folio-entities-gemma-mentions-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const modelDirectory = path.join(directory, 'model');
@@ -156,7 +156,10 @@ test('Gemma prompted entity baseline strictly parses and scores JSON mention out
   const { mkdir } = await import('node:fs/promises');
   await Promise.all([mkdir(modelDirectory), mkdir(cacheRoot)]);
   const control = path.join(directory, 'helper-control.json');
-  await writeFile(control, JSON.stringify({ entityResponseText: '{"mentions":[]}' }));
+  await writeFile(control, JSON.stringify({ entityResponseText: JSON.stringify({ mentions: [
+    { text: 'Priya Sharma', type: 'person', startUtf16: 0, endUtf16: 12 },
+    { text: 'Acme', type: 'organization', startUtf16: 0, endUtf16: 4 },
+  ] }) }));
   const output = path.join(directory, 'gemma-entities.json');
   const result = spawnSync(process.execPath, [capture,
     '--mode', 'gemma-entity-baseline', '--helper', helper,
@@ -170,7 +173,14 @@ test('Gemma prompted entity baseline strictly parses and scores JSON mention out
   assert.equal(report.metadata.runtimeProvenanceVerified, false);
   assert.ok(report.metadata.helperSha256.match(/^[a-f0-9]{64}$/));
   assert.equal(report.predictions.cases.length, corpus.cases.length);
-  assert.ok(report.predictions.cases.every((item) => item.mentions.length === 0));
-  assert.equal(report.semanticQuality.exactMentions.overall.recall, 0);
+  assert.equal(report.predictions.cases[0].mentions.length, 1);
+  assert.equal(report.results[0].runs[0].response.spanValidation.reported, 2);
+  assert.equal(report.results[0].runs[0].response.spanValidation.valid, 1);
+  assert.equal(report.results[0].runs[0].response.spanValidation.invalid, 1);
+  assert.ok(Object.hasOwn(report.semanticQuality.exactMentions.byLanguage, 'en'));
+  assert.ok(report.semanticQuality.exactMentions.overall.recall > 0);
+  assert.equal(report.sourceSpanValidation.reported, 2 * corpus.cases.length);
+  assert.ok(report.sourceSpanValidation.valid > 0);
+  assert.ok(report.sourceSpanValidation.invalid > 0);
   assert.equal(report.completeness.complete, false);
 });

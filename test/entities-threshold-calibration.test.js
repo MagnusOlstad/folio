@@ -47,3 +47,22 @@ test('threshold calibration cannot select below the helper inference floor', asy
   const output = JSON.parse(result.stdout);
   assert.ok(Object.values(output.thresholds).every((threshold) => threshold >= 0.7));
 });
+
+test('threshold calibration can abstain on a type with only false positives', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'folio-entities-threshold-abstain-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const input = path.join(directory, 'capture.json');
+  const noEntities = corpus.cases.find((item) => item.id === 'no-entities');
+  const startUtf16 = noEntities.text.indexOf('room');
+  const capture = { metadata: { mode: 'helper-entities', corpusVersion: corpus.version, modelRevision: 'checkpoint', inferenceScoreFloor: 0 },
+    results: corpus.cases.map((item) => ({ id: item.id, runs: [{ response: { chunks: [{ response: { mentions: item.id === 'no-entities'
+      ? [{ text: 'room', type: 'location', startUtf16, endUtf16: startUtf16 + 4, score: 0.8 }]
+      : [] } }] } }] })) };
+  await writeFile(input, JSON.stringify(capture));
+  const result = spawnSync(process.execPath, [calibrator, input], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.thresholds.location, 1, 'the abstain-all option wins an F1 tie rather than retaining the false positive');
+  assert.equal(output.metrics.location.fp, 0);
+  assert.match(output.limitation, /same fictional corpus/);
+});

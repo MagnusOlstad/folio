@@ -26,6 +26,7 @@ const noteFixtures = [
   { id: '/notes/priya-sharma.md', title: 'Priya Sharma decision', tags: ['people'], createdAt: '2026-11-01T09:00:00Z', content: 'Priya Sharma approved the hiring plan.', entities: ['person-priya-sharma'], relevant: ['priya-sharma'] },
   { id: '/notes/priya-shah.md', title: 'Priya Shah decision', tags: ['people'], createdAt: '2026-11-01T09:00:00Z', content: 'Priya Shah postponed the launch.', entities: ['person-priya-shah'], relevant: ['priya-shah'] },
   { id: '/notes/stale-atlas.md', title: 'Old Atlas decision', tags: ['launch'], createdAt: '2026-10-30T09:00:00Z', content: 'Acme recorded Project Atlas approval.', currentContent: 'Acme recorded a different decision.', entities: ['org-acme', 'project-atlas'], relevant: [] },
+  { id: '/notes/no-nordlys-august.md', title: 'Nordlys August approval', tags: ['planlegging'], createdAt: '2026-08-04T11:00:00Z', content: '4. august 2026 godkjente Fjord Labs prosjekt Nordlys for utrulling.', entities: ['org-fjord', 'project-nordlys'], relevant: ['nordlys-august'] },
 ]
 
 function expectedMentions(fixture, text, recordId) {
@@ -71,6 +72,7 @@ test('fixed English/Norwegian retrieval set compares unscoped rank, entity inter
     entityService: { async getRetrievalSnapshot() { return snapshot } },
   }
   const search = createSearchService(runtime)
+  Object.assign(runtime, search)
   const cases = [
     { id: 'en-atlas-launch', query: 'Project Atlas launch approval', entityIds: ['org-acme', 'project-atlas'], relevant: ['atlas-launch', 'atlas-negation'] },
     { id: 'no-nordlys-launch', query: 'Fjord Labs lanseringen Nordlys', entityIds: ['org-fjord', 'project-nordlys'], relevant: ['nordlys-yesterday'] },
@@ -111,6 +113,29 @@ test('fixed English/Norwegian retrieval set compares unscoped rank, entity inter
   const temporalReport = { id: 'no-nordlys-yesterday', baseline: score(baselineAsk.matches, temporalExpected),
     entityAware: score(ask.matches, temporalExpected) }
   assert.equal(temporalReport.entityAware.recall, 1)
+
+  for (let index = 0; index < 84; index += 1) {
+    const id = `/notes/no-nordlys-status-${index + 1}.md`
+    const date = new Date(Date.UTC(2026, 9, 31 - index)).toISOString().slice(0, 10)
+    const text = 'Fjord Labs og Nordlys ble nevnt i en vanlig statusoppdatering.'
+    const filePath = path.join(root, id.slice(1))
+    await fs.mkdir(path.dirname(filePath), { recursive: true })
+    await fs.writeFile(filePath, text)
+    fileById.set(id, filePath)
+    records.push({ id, title: `Nordlys status ${index + 1}`, description: '', type: 'Note', tags: ['planlegging'],
+      createdAt: `${date}T09:00:00Z`, content: text, imageText: '', relatedIds: [] })
+    mentions.push(...expectedMentions({ entities: ['org-fjord', 'project-nordlys'] }, text, id))
+  }
+
+  const augustQuery = 'What did Fjord Labs approve in early August 2026?'
+  const augustScope = await prepareEntityScope(runtime, records, ['org-fjord', 'project-nordlys'], {
+    query: augustQuery, source: 'body', mode: 'ask', now: new Date('2026-11-06T12:00:00Z'), timeZone: 'UTC',
+  })
+  const augustAsk = await search.retrieveKnowledge(augustQuery, augustScope.records,
+    new Date('2026-11-06T12:00:00Z'), 'UTC', { queryEmbedding: augustScope.queryEmbedding })
+  assert.ok(records.length > 80)
+  assert.equal(augustAsk.matches[0].id, '/notes/no-nordlys-august.md', 'production temporal retrieval must rank an older relevant note beyond the 80-note candidate ceiling')
+  assert.equal(score(augustAsk.matches, ['nordlys-august']).recall, 1)
 
   const negated = await prepareEntityScope(runtime, records, ['org-acme', 'project-atlas'], { query: 'Did Acme approve Project Atlas?' })
   assert.ok(negated.records.find(({ id }) => id === '/notes/en-atlas-rejected.md').entityPassages.some(({ excerpt }) => excerpt.includes('did not approve')))
