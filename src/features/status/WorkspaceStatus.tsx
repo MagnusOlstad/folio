@@ -67,7 +67,7 @@ export function DesktopUpdateControls({ versionInfo, updateState }: { versionInf
   const startDesktopUpdate = updateState ? window.folio?.startUpdate : undefined;
   const updateVersion = updateState?.version ?? (versionInfo?.updateAvailable ? versionInfo.latest : null);
   const nativeUpdateAvailable = Boolean(
-    updateState && updateVersion && updateState.status !== "idle",
+    updateState && updateVersion && (updateState.status !== "idle" || versionInfo?.updateAvailable),
   );
   const busy = updateState?.status === "checking" || updateState?.status === "downloading" || updateState?.status === "downloaded" || updateState?.status === "staging" || updateState?.status === "installing";
   const updateLabel = updateState?.status === "error"
