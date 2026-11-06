@@ -1,8 +1,8 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
 import { createMlxWorker, terminateMlxWorker } from './worker.js'
 import { createMlxModelCatalog, createEntityModelAvailabilityEvents } from './model-catalog.js'
+import { createGenerationSelection } from './generation-selection.js'
 import { findModelSnapshot } from './snapshots.js'
 import { helperPath, nativeMlxAvailable } from './helper-path.js'
 import { OCR_MODEL_ID, OCR_TIMEOUT_MS, cancellationError } from './ocr-models.js'
@@ -21,13 +21,15 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   const startingWorkers = new Map()
   const [installing, removing, unloading, stopping] = [new Set(), new Set(), new Set(), new Set()]
   const stoppingJobs = new Map()
-  const generationSelectionPath = path.join(modelRoot, 'generation-model.json')
   const idleTimers = new Map()
   const activeRequests = new Map()
   const requestWaiters = new Map()
   const modelActivities = new Map()
   const modelCatalog = createMlxModelCatalog()
   const MODEL_DEFINITIONS = modelCatalog.definitions
+  const generationSelection = createGenerationSelection({ modelRoot, modelDefinitions: MODEL_DEFINITIONS,
+    modelDefinition: modelCatalog.modelDefinition, withModelActivity, stopModel, status })
+  const { selectGenerationModel, selectedGenerationModel } = generationSelection
   const entityModelAvailability = createEntityModelAvailabilityEvents()
   let transcriptionSelectionTail = Promise.resolve()
   let heavyQueue = Promise.resolve()
@@ -65,28 +67,6 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     const activity = heavyQueue.then(run, run)
     heavyQueue = activity.catch(() => {})
     return activity
-  }
-
-  async function selectedGenerationModel() {
-    try {
-      const saved = JSON.parse(await fs.readFile(generationSelectionPath, 'utf8'))
-      if (typeof saved.id === 'string' && MODEL_DEFINITIONS[saved.id]?.purpose === 'generation') return saved.id
-    } catch { /* use the migrated default */ }
-    return 'gemma4'
-  }
-
-  async function selectGenerationModel(id) {
-    const definition = modelDefinition(id)
-    if (definition.purpose !== 'generation') throw Object.assign(new Error('Choose a generation model.'), { statusCode: 400 })
-    return withModelActivity(id, async () => {
-      const previous = await selectedGenerationModel()
-      if (previous !== id) await stopModel(previous)
-      await fs.mkdir(modelRoot, { recursive: true })
-      const temporaryPath = `${generationSelectionPath}.${randomUUID()}.tmp`
-      await fs.writeFile(temporaryPath, JSON.stringify({ id }), 'utf8')
-      await fs.rename(temporaryPath, generationSelectionPath)
-      return status()
-    }, { activate: false })
   }
 
   async function selectedTranscriptionModel() {
