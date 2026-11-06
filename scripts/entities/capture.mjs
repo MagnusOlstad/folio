@@ -9,6 +9,7 @@ import { readFile, access, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildClassificationMessages, classificationSchema } from '../../server/knowledge/classification-output.js';
+import { resolveMentions } from '../../server/entities/resolution.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const corpusPath = path.join(root, 'test/fixtures/entities/corpus.json');
@@ -419,9 +420,16 @@ try {
     limitations: [...(rssSamples.length ? [] : ['OS-level sampled RSS was unavailable; helper getrusage peakResidentBytes remains the process peak measurement.']), mode === 'gemma-baseline' ? 'Gemma filing baseline uses Folio’s existing classification prompt builder with an empty fictional filing/tag guide; it is separate from entity span quality.' : mode === 'gemma-entity-baseline' ? 'Gemma entity-span output comes from an explicit development prompt, not an existing Folio extraction feature; treat it as a prompted baseline.' : 'Raw helper responses are retained; use exact mention responses with scripts/entities/evaluate.mjs for semantic scoring.', 'This capture does not measure Electron total process footprint, responsiveness under concurrent transcription/generation, repeated model contention, real server backfill scheduling, or release budgets.'],
   };
   if (['helper-jsonl', 'helper-entities', 'gemma-entity-baseline'].includes(mode) && measurements.results.every((item) => item.runs.at(-1)?.response?.mentions && Array.isArray(item.runs.at(-1).response.mentions))) {
-    report.predictions = { corpusVersion: corpus.version, metadata: { modelRevision: revision, runtimeRevision, schemaVersion: corpus.reference.schemaVersion, thresholds, entityConfigurationHash, device: `${host.cpu} (${host.architecture})`, osVersion: `${host.macOSVersion} (${host.macOSBuild})`, precision: helperReportedPrecision, precisionVerified, chunkBudget, warmupCount, repeatCount }, cases: measurements.results.map((item) => ({ id: item.id, text: item.text, mentions: item.runs.at(-1).response.mentions })) };
+    const resolverState = { entities: [], mentionDecisions: [] };
+    const cases = measurements.results.map((item) => {
+      const mentions = item.runs.at(-1).response.mentions.map((mention, index) => ({ ...mention, id: `${item.id}:${index}` }));
+      const resolved = resolveMentions(mentions, resolverState);
+      resolverState.entities = resolved.entities;
+      return { id: item.id, text: item.text, mentions: resolved.mentions };
+    });
+    report.predictions = { corpusVersion: corpus.version, metadata: { modelRevision: revision, runtimeRevision, schemaVersion: corpus.reference.schemaVersion, thresholds, entityConfigurationHash, device: `${host.cpu} (${host.architecture})`, osVersion: `${host.macOSVersion} (${host.macOSBuild})`, precision: helperReportedPrecision, precisionVerified, chunkBudget, warmupCount, repeatCount, identityResolver: 'server/entities/resolution.js:resolveMentions' }, cases };
   }
-  if (report.predictions) report.semanticQuality = { source: 'manual corpus semantic annotations', exactMentions: mentionMetrics(corpus.cases.map((item) => ({ gold: item.semantic.mentions, predicted: report.predictions.cases.find((prediction) => prediction.id === item.id).mentions })), corpus), identityMetrics: 'not evaluated by this model prompt' };
+  if (report.predictions) report.semanticQuality = { source: 'manual corpus semantic annotations', exactMentions: mentionMetrics(corpus.cases.map((item) => ({ gold: item.semantic.mentions, predicted: report.predictions.cases.find((prediction) => prediction.id === item.id).mentions })), corpus), identity: 'computed from production resolveMentions output; user corrections are measured separately by server lifecycle tests' };
   await (await import('node:fs/promises')).mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`);
   console.log(JSON.stringify({ output: outputPath, predictionsIncluded: Boolean(report.predictions), completeness: report.completeness, measurements: report.measurements }, null, 2));

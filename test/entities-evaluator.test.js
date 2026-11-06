@@ -14,7 +14,7 @@ test('entity evaluator scores perfect fixture output and rejects incomplete meas
   const directory = await mkdtemp(path.join(os.tmpdir(), 'folio-entities-eval-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const input = path.join(directory, 'predictions.json');
-  const complete = { corpusVersion: corpus.version, metadata, cases: corpus.cases.map((item) => ({ id: item.id, text: item.text, mentions: item.semantic.mentions })) };
+  const complete = { corpusVersion: corpus.version, metadata, cases: corpus.cases.map((item) => ({ id: item.id, text: item.text, mentions: item.semantic.mentions.map((mention) => ({ ...mention, entityId: mention.identityId ?? null })) })) };
   await writeFile(input, JSON.stringify(complete));
   const good = spawnSync(process.execPath, [evaluator, input], { encoding: 'utf8' });
   assert.equal(good.status, 0, good.stderr);

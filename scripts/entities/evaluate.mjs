@@ -116,11 +116,11 @@ try {
   const exactTp = rows.reduce((sum, row) => sum + matchedCount(row.actual, row.gold), 0);
   const spanTp = rows.reduce((sum, row) => sum + matchedCount(row.actual, row.gold, (item) => key(item, false)), 0);
   const identityPairs = [];
-  const identityAbstentions = rows.reduce((sum, row) => sum + row.gold.filter((g) => g.identityId && !row.actual.some((p) => key(p) === key(g) && p.identityId)).length, 0);
+  const identityAbstentions = rows.reduce((sum, row) => sum + row.gold.filter((g) => g.identityId && !row.actual.some((p) => key(p) === key(g) && p.entityId)).length, 0);
   for (const row of rows) for (const gold of row.gold) {
     if (!gold.identityId) continue;
     const predicted = row.actual.find((item) => key(item) === key(gold));
-    if (predicted?.identityId) identityPairs.push({ gold: gold.identityId, predicted: predicted.identityId });
+    if (predicted?.entityId) identityPairs.push({ gold: gold.identityId, predicted: predicted.entityId });
   }
   const goldByPredicted = groupBy(identityPairs, (pair) => pair.predicted);
   const predictedByGold = groupBy(identityPairs, (pair) => pair.gold);
