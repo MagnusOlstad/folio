@@ -50,7 +50,11 @@ function resolveBundleResource(currentId, target) {
 function markdownRelationships(currentId, parsed) {
   const relationships = []
   let section = 'Link'
+  let generatedRelated = false
   for (const line of parsed.content.split('\n')) {
+    if (line.includes('<!-- folio:generated-related:start -->')) { generatedRelated = true; continue }
+    if (line.includes('<!-- folio:generated-related:end -->')) { generatedRelated = false; continue }
+    if (generatedRelated) continue
     const heading = line.match(/^#{1,6}\s+(.+)$/)?.[1]?.trim()
     if (heading) section = heading
     const linkPattern = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^)]*)?\)/g

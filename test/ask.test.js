@@ -78,6 +78,56 @@ test('Ask uses the generation worker and maps empty MLX responses', async (conte
   assert.equal((await empty.json()).error, 'The generation model returned an empty answer.')
 })
 
+test('Ask entity scope is an intersection and returns only cited source records', async (context) => {
+  const fixture = await configureFakeMlx(context)
+  const mlxService = createMlxService({ modelRoot: fixture.modelRoot, mlxHelperPath: fixture.helperPath })
+  await mlxService.install('gemma4')
+  context.after(() => mlxService.close())
+  fixture.restorePlatform()
+  const records = [
+    { id: '/notes/acme-atlas.md', title: 'Decision', type: 'Meeting', description: '', tags: [], createdAt: '2026-10-01', excerpts: ['Acme and Project Atlas approved the launch plan.'] },
+    { id: '/notes/acme-only.md', title: 'Budget', type: 'Meeting', description: '', tags: [], createdAt: '2026-09-30', excerpts: ['Acme reviewed the budget.'] },
+  ]
+  const app = express()
+  app.use(express.json())
+  registerRoutes(app, {
+    ...createTextHelpers(),
+    askContextLength: 4096,
+    distRoot: '/tmp/folio-test-dist',
+    validTimeZone: (timeZone) => timeZone,
+    readRecords: async () => records,
+    prepareEntityScope: async (available, entityIds) => {
+      assert.deepEqual(entityIds, ['ent-acme', 'ent-atlas'])
+      const eligible = available.filter((record) => record.id === '/notes/acme-atlas.md')
+      return { records: eligible, scope: {
+        entityIds, entities: [{ id: 'ent-acme', label: 'Acme', type: 'organization' }, { id: 'ent-atlas', label: 'Project Atlas', type: 'project' }],
+        coverage: { eligible: 2, processed: 2, stale: 0, failed: 0, pending: 0 }, incomplete: false,
+        matchedNoteCount: 1, revision: 3, indexRevision: 5,
+      } }
+    },
+    retrieveKnowledge: async (_question, eligible) => ({ matches: eligible, usedEmbeddings: false, temporal: null }),
+    buildKnowledgeContext: (matches) => JSON.stringify(matches.map(({ id, excerpts }) => ({ id, excerpts }))),
+    mlxService,
+    warmKeepAliveMs: mlxService.keepAliveMs,
+    answerModel: mlxService.modelDefinitions.gemma4.repository,
+    answerModels: [mlxService.modelDefinitions.gemma4.repository],
+    classifierModel: mlxService.modelDefinitions.gemma4.repository,
+    ensureAnswerCitations: (answer) => answer,
+  })
+  const server = await listen(http.createServer(app))
+  context.after(() => close(server))
+  const baseUrl = `http://127.0.0.1:${server.address().port}`
+  const response = await fetch(`${baseUrl}/api/ask`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ question: 'What did Acme decide with Project Atlas?', entityIds: ['ent-acme', 'ent-atlas'] }),
+  })
+  assert.equal(response.status, 200)
+  const result = await response.json()
+  assert.deepEqual(result.sources.map(({ id }) => id), ['/notes/acme-atlas.md'])
+  assert.equal(result.scope.matchedNoteCount, 1)
+  assert.deepEqual(result.scope.entityIds, ['ent-acme', 'ent-atlas'])
+})
+
 test('Ask context builder includes note titles without throwing', () => {
   const search = createSearchService({
     ...createTextHelpers(),

@@ -3,10 +3,10 @@ import path from 'node:path'
 import { aggregateEntryContent } from './aggregate-formatting.js'
 
 export function createFilingService(runtime) {
-  const { bundleRoot, generatedRelatedStart, generatedRelatedEnd, normalizeInlineText, normalizeTag,
+  const { bundleRoot, normalizeInlineText, normalizeTag,
     slugify, parseMarkdownFile, markdownDocument, markdownLinkTarget, markdownText,
     captureMarker, captureContribution,
-    captureMetadata, updatedGenerated, filingActor, stripGeneratedRelatedSection, indexedConceptContent,
+    captureMetadata, updatedGenerated, filingActor, stripGeneratedRelatedSection,
     searchTerms, reuseExistingClassificationPath,
     isMovableConceptId, bundleFileId, dateKeyInTimeZone, cosineSimilarity, lexicalScore } = runtime
 function openingSpecialKind(content) {
@@ -182,76 +182,11 @@ function creationRelationships(content, records, noteEmbedding = null) {
   }))
 }
 
-function generatedRelatedSection(relationships, recordsById) {
-  if (!relationships.length) return ''
-  const lines = [generatedRelatedStart, '# Related', '']
-  for (const relationship of relationships) {
-    const related = recordsById.get(relationship.id)
-    if (!related) continue
-    lines.push(`- [${markdownText(related.title)}](${markdownLinkTarget(relationship.id)}) - ${markdownText(relationship.relation)}`)
-  }
-  lines.push(generatedRelatedEnd)
-  return lines.length > 4 ? lines.join('\n') : ''
-}
+function generatedRelatedSection() { return '' }
 
-function generatedRelatedIds(content) {
-  const section = String(content).match(
-    /<!-- folio:generated-related:start -->[\s\S]*?<!-- folio:generated-related:end -->/i,
-  )?.[0]
-  if (!section) return []
-  return section.split('\n').flatMap((line) => {
-    if (!/ - Related\s*$/.test(line)) return []
-    const id = line.match(/\]\((\/[^)]+)\)\s+- Related\s*$/)?.[1]
-    if (!id) return []
-    try {
-      return [decodeURI(id)]
-    } catch {
-      return [id]
-    }
-  })
-}
-
-async function recalculateGeneratedRelationships(records, documents) {
-  const recordsById = new Map(records.map((record) => [record.id, record]))
-  for (const document of documents) {
-    let markdown
-    let parsed
-    try {
-      markdown = await fs.readFile(document.filePath, 'utf8')
-      parsed = parseMarkdownFile(markdown, document.filePath)
-    } catch (error) {
-      if (error.code === 'ENOENT') continue
-      throw error
-    }
-    const hadGeneratedSection = parsed.content.includes(generatedRelatedStart)
-    const generatedDocument = /^# (?:Captured note|Summary)\s*\n/i.test(parsed.content)
-      || hadGeneratedSection
-    if (!generatedDocument || parsed.type === 'Raw Capture') continue
-
-    const content = stripGeneratedRelatedSection(parsed.content).trim()
-    const indexedContent = indexedConceptContent(content)
-    const confirmedIds = Array.isArray(parsed.frontmatter.folio_related)
-      ? parsed.frontmatter.folio_related.map(String)
-      : []
-    const validConfirmedIds = confirmedIds.filter((id) => id !== document.id && recordsById.has(id))
-    const frontmatterChanged = validConfirmedIds.length !== confirmedIds.length
-    if (validConfirmedIds.length) parsed.frontmatter.folio_related = validConfirmedIds
-    else delete parsed.frontmatter.folio_related
-    const relationships = new Map()
-    for (const id of validConfirmedIds) relationships.set(id, { id, relation: 'Confirmed related' })
-    for (const id of generatedRelatedIds(parsed.content)) {
-      if (id !== document.id && recordsById.has(id) && !relationships.has(id)) relationships.set(id, { id, relation: 'Related' })
-    }
-    for (const id of mentionedRecordIds(indexedContent, records.filter((record) => record.id !== document.id))) {
-      if (!relationships.has(id)) relationships.set(id, { id, relation: 'Mentions' })
-    }
-
-    const generated = generatedRelatedSection(Array.from(relationships.values()), recordsById)
-    if (!hadGeneratedSection && !generated && !frontmatterChanged) continue
-    const nextContent = generated ? `${content}\n\n${generated}` : content
-    const nextMarkdown = markdownDocument(parsed.frontmatter, nextContent)
-    if (nextMarkdown !== markdown) await fs.writeFile(document.filePath, nextMarkdown)
-  }
+async function recalculateGeneratedRelationships() {
+  // Keep explicit links and historical generated Markdown intact. Entity UI
+  // suggestions now own discovery; indexing no longer rewrites note bodies.
 }
 
 function conceptDocument(classification, rawId, createdAt, relatedConcepts, content, classifiedByModel, captureId, sourceContent = content) {

@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { matchingEntityQuery, prepareEntityScope } from '../entities/retrieval.js'
 
 export function createSearchService(runtime) {
   const { normalizeTag, markdownText, recordIsStale, lifecycleFactor, embedQuery, embeddingDimension, cosineSimilarity,
@@ -84,18 +85,7 @@ function publicSearchRecord({
 }
 
 function updateSemanticSuggestions(records) {
-  for (const record of records) {
-    const linked = new Set(record.relatedIds || [])
-    record.suggestedRelatedIds = record.embedding
-      ? records
-        .filter((candidate) => candidate.id !== record.id && candidate.embedding && !linked.has(candidate.id))
-        .map((candidate) => ({ id: candidate.id, score: cosineSimilarity(record.embedding, candidate.embedding) }))
-        .filter((candidate) => candidate.score >= 0.75)
-        .sort((left, right) => right.score - left.score)
-        .slice(0, 3)
-        .map((candidate) => candidate.id)
-      : []
-  }
+  for (const record of records) record.suggestedRelatedIds = []
 }
 
 async function rankedRecords(query, records, limit = 8, tag = '') {
@@ -358,22 +348,6 @@ async function retrieveKnowledge(question, records, now, timeZone) {
     .sort((left, right) => right.candidateScore - left.candidateScore)
 
   const candidates = rankedConcepts.slice(0, 24)
-  const candidateIds = new Set(candidates.map((record) => record.id))
-  for (const candidate of [...candidates]) {
-    const linkedIds = new Set([
-      ...(candidate.relatedIds || []),
-      ...records.filter((record) => record.relatedIds?.includes(candidate.id)).map((record) => record.id),
-    ])
-    for (const id of linkedIds) {
-      if (candidates.length >= 24) break
-      if (candidateIds.has(id)) continue
-      const linked = rankedConcepts.find((record) => record.id === id)
-      if (linked) {
-        candidates.push({ ...linked, linked: true })
-        candidateIds.add(id)
-      }
-    }
-  }
 
   const reranked = candidates
     .map((record) => {
@@ -385,8 +359,7 @@ async function retrieveKnowledge(question, records, now, timeZone) {
           + record.semantic * 0.25
           + record.lexicalContent * 0.15
           + record.lexicalMetadata * 0.1
-          + record.time * 0.05
-          + (record.linked ? 0.03 : 0)) * lifecycleFactor(record, now),
+          + record.time * 0.05) * lifecycleFactor(record, now),
         excerpts: excerpts.slice(0, 2).map((excerpt) => excerpt.content),
       }
     })
@@ -442,7 +415,8 @@ function buildKnowledgeContext(matches, maxLength) {
 }
 
 
-  return { searchTerms, textMatchScore, lexicalScores, lexicalScore, searchResultSnippet, publicSearchRecord,
+  return { prepareEntityScope: (records, ids, options) => prepareEntityScope(runtime, records, ids, options), matchingEntityQuery,
+    searchTerms, textMatchScore, lexicalScores, lexicalScore, searchResultSnippet, publicSearchRecord,
     updateSemanticSuggestions, rankedRecords, dateKeyInTimeZone, addDateKeyDays, startOfWeekDateKey,
     monthStartDateKey, temporalQueryContext, temporalScore, splitByUtf8Bytes, noteChunks, retrieveKnowledge,
     validTimeZone, buildKnowledgeContext }

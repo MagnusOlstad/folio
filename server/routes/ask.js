@@ -4,7 +4,7 @@ import express from 'express'
 
 export function registerRoutes(app, runtime) {
   const { answerModel, answerModels, askContextLength, distRoot, readRecords, retrieveKnowledge,
-    validTimeZone, buildKnowledgeContext, mlxService, ensureAnswerCitations } = runtime
+    validTimeZone, buildKnowledgeContext, prepareEntityScope, mlxService, ensureAnswerCitations } = runtime
 app.post('/api/ask', async (request, response, next) => {
   try {
     const question = String(request.body?.question || '').trim()
@@ -21,8 +21,12 @@ app.post('/api/ask', async (request, response, next) => {
       return response.status(400).json({ error: 'The selected Ask model is not configured.' })
     }
 
-    const retrieval = await retrieveKnowledge(question, await readRecords(), now, timeZone)
+    const records = await readRecords()
+    const hasEntityScope = Object.hasOwn(request.body || {}, 'entityIds')
+    const prepared = hasEntityScope ? await prepareEntityScope(records, request.body.entityIds, { query: question }) : null
+    const retrieval = await retrieveKnowledge(question, prepared ? prepared.records : records, now, timeZone)
     const matches = retrieval.matches
+    const scope = prepared ? { ...prepared.scope, matchedNoteCount: matches.length } : undefined
     const retrievalLabel = retrieval.usedEmbeddings ? 'OKF + embeddings' : 'OKF metadata + keywords'
     if (!matches.length) {
       return response.json({
@@ -30,6 +34,7 @@ app.post('/api/ask', async (request, response, next) => {
         sources: [],
         model: mlxService.modelDefinitions[selectedAnswerModel].repository,
         retrieval: retrievalLabel,
+        ...(scope ? { scope } : {}),
       })
     }
 
@@ -59,6 +64,8 @@ app.post('/api/ask', async (request, response, next) => {
             'Interpret relative dates inside a source relative to that source capturedAt value, not relative to the current time.',
             'The supplied resolved question time range is authoritative. Never call a resolved future date today or a resolved past date current.',
             'Make cautious inferences only when multiple source details support them, and label them clearly as inference.',
+            'Entity scope only selects source notes. Co-mention does not establish that one entity works for, owns, attended, or is related to another; state such relations only when the source passages say so.',
+            'Preserve explicit negation, uncertainty, and ambiguity in the source passages.',
             'If the sources do not support an answer, say what is missing instead of guessing.',
             'Answer in the language used by the question.',
             'Cite every substantive paragraph or bullet with the exact citation string supplied by its source. Never invent or alter a citation path.',
@@ -114,6 +121,7 @@ app.post('/api/ask', async (request, response, next) => {
       }) => record),
       model: mlxService.modelDefinitions[selectedAnswerModel].repository,
       retrieval: retrievalLabel,
+      ...(scope ? { scope } : {}),
     })
   } catch (error) {
     if (error.answerResponse) {
@@ -121,6 +129,7 @@ app.post('/api/ask', async (request, response, next) => {
       const needsSetup = /not installed|choose install|helper|Apple Silicon|macOS 14|timed out/i.test(detail)
       return response.status(needsSetup ? 503 : 502).json({ error: detail })
     }
+    if (error.status) return response.status(error.status).json({ code: error.code, error: error.message })
     next(error)
   }
 })

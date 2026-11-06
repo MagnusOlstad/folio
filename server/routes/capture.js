@@ -6,11 +6,11 @@ import { scheduleEntityExtraction } from '../entities/triggers.js'
 export function registerRoutes(app, runtime) {
   const { embedModel, getRawRoot, getBundleRoot, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, normalizeDraftId, archiveDraft,
     readDraft, resolveBundleMarkdownPath, readBundleDocuments, bundleFileId, parseMarkdownFile, queueMarkdownMutation, reindexBundle,
-    normalizeInlineText, markdownDocument, embeddingInputHash, persistEmbeddingUpdates, refreshRecordEmbeddings, embedDocument, boundedEmbeddingText,
+    normalizeInlineText, markdownDocument, embeddingInputHash, persistEmbeddingUpdates, refreshRecordEmbeddings,
     embeddingSchemaVersion, classify, openingSpecialKind, rawDocument, normalizeBundlePath, resolveBundlePath, assertNoBundleSymlinks,
     slugify, confirmationIdFor, destinationFor, availableConceptFilename, findExactConceptFile, appendConceptDocument, appendAggregateDocument, filingActor,
-    conceptDocument, validTimeZone, dateKeyInTimeZone, normalizeClassification, embeddingDimension,
-    normalizeMarkdownBreaks, creationRelationships } = runtime
+    conceptDocument, validTimeZone, dateKeyInTimeZone, normalizeClassification,
+    normalizeMarkdownBreaks } = runtime
   const rawRootForRequest = typeof getRawRoot === 'function' ? getRawRoot : () => runtime.rawRoot
   const bundleRootForRequest = typeof getBundleRoot === 'function' ? getBundleRoot : () => runtime.bundleRoot
 app.post('/api/notes', async (request, response, next) => {
@@ -126,19 +126,6 @@ app.post('/api/notes', async (request, response, next) => {
       classification.path = guidedPath === '/' ? [] : guidedPath.slice(1).split('/')
     }
     const captureActor = filingActor(classifiedByModel, result.model)
-    let noteEmbedding = null
-    if (classification.kind === 'note') {
-      try {
-        noteEmbedding = await embedDocument(
-          classification.title,
-          boundedEmbeddingText(`${classification.description}\n${conceptContent}`),
-          embeddingDimension(records),
-        )
-      } catch {
-      warning ||= 'The note was classified, but semantic indexing is unavailable until EmbeddingGemma is installed.'
-      }
-    }
-
     let appended = false
     if (classification.kind === 'todo' || classification.kind === 'daily') {
       const dateKey = dateKeyInTimeZone(new Date(createdAt), timeZone)
@@ -159,8 +146,8 @@ app.post('/api/notes', async (request, response, next) => {
       appended = aggregate.appended
     } else {
       const folder = classification.path.join('/')
-      classification.relationships = creationRelationships(conceptContent, records, noteEmbedding)
-      classification.relatedIds = classification.relationships.map((relationship) => relationship.id)
+      classification.relationships = []
+      classification.relatedIds = []
 
       const relatedConcepts = new Map(records.map((record) => [record.id, record]))
       const targetFolder = path.join(bundleRootForRequest(), folder)
@@ -198,12 +185,6 @@ app.post('/api/notes', async (request, response, next) => {
     if (!createdRecord) throw new Error('The filed note could not be indexed.')
     let currentRecords = reindexed.records
     if (classification.kind === 'note') {
-      if (noteEmbedding && !appended) {
-        createdRecord.embedding = noteEmbedding
-        createdRecord.embeddingModel = embedModel
-        createdRecord.embeddingSchemaVersion = embeddingSchemaVersion
-        createdRecord.embeddingInputHash = embeddingInputHash(createdRecord)
-      }
       try {
         const embeddingErrors = await refreshRecordEmbeddings([createdRecord])
         if (embeddingErrors.length) throw new Error(embeddingErrors[0].error)

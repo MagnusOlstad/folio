@@ -7,7 +7,7 @@ import { scheduleEntityExtraction, scheduleEntityMove } from '../entities/trigge
 export function registerRoutes(app, runtime) {
   const { assertNoBundleSymlinks, embedModel, embeddingSchemaVersion, refreshMissingEmbeddingsInBackground, readRecords, publicRecord, resolveBundleMarkdownPath, listBundleMarkdownFiles, bundleFileId, parseMarkdownFile,
     isMovableConceptId, queueMarkdownMutation, moveConceptMarkdown, migrateIndexedRecordsAfterMove, reindexBundle, writeRecords, publicSearchRecord,
-    rankedRecords, normalizeInlineText, normalizeTag, normalizeMoveDirectory, normalizeMarkdownBreaks, markdownDocument, updatedGenerated,
+    rankedRecords, prepareEntityScope, normalizeInlineText, normalizeTag, normalizeMoveDirectory, normalizeMarkdownBreaks, markdownDocument, updatedGenerated,
     replaceIndexedConceptContent, indexedConceptContent, embeddingInputHash, refreshRecordEmbeddings, queueIndexOperation,
     performReindexBundle, persistEmbeddingUpdatesNow, relationshipIndex, recordIsStale,
     semanticSuggestionSummaries, classify } = runtime
@@ -15,10 +15,17 @@ app.get('/api/search', async (request, response, next) => {
   try {
     const query = String(request.query.q || '').trim()
     const tag = String(request.query.tag || '').trim()
-    if (!query && !tag) return response.json([])
-    const matches = await rankedRecords(query, await readRecords(), 8, tag)
-    response.json(matches.map(publicSearchRecord))
+    const records = await readRecords()
+    const hasEntityScope = Object.hasOwn(request.query, 'entityIds')
+    const prepared = hasEntityScope ? await prepareEntityScope(records, request.query.entityIds, { query, tag }) : null
+    if (!query && !tag && !prepared) return response.json([])
+    const candidates = prepared ? prepared.records : records
+    const matches = await rankedRecords(query, candidates, 8, tag)
+    const items = matches.map(publicSearchRecord)
+    if (prepared && request.query.includeScope === 'true') return response.json({ items, scope: { ...prepared.scope, matchedNoteCount: items.length } })
+    response.json(items)
   } catch (error) {
+    if (error.status) return response.status(error.status).json({ code: error.code, error: error.message })
     next(error)
   }
 })

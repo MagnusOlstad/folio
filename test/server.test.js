@@ -406,9 +406,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.ok(auroraRawCaptures.some((rawCapture) => /second steering line/.test(rawCapture)))
   const planningFilePath = path.join(dataRoot, 'bundle', planning.note.id.slice(1))
   const planningFile = await fs.readFile(planningFilePath, 'utf8')
-  assert.match(planningFile, /\[Morning launch meeting\]\([^)]*morning-launch-meeting[^)]*\) - Related/)
-  assert.match(planningFile, /<!-- folio:generated-related:start -->/)
-  assert.match(planningFile, new RegExp(`\\[Project Aurora\\]\\(${auroraId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\) - Mentions`))
+  assert.doesNotMatch(planningFile, /<!-- folio:generated-related:start -->/)
 
   const authoredRelated = `${planningFile.replace(/\n?<!-- folio:generated-related:start -->[\s\S]*?<!-- folio:generated-related:end -->\n?/g, '\n').trim()}\n\n# Related\n\nManual context that must remain searchable.[^manual]\n\n[^manual]: Authored footnote that must survive metadata edits.\n`
   await fs.writeFile(planningFilePath, authoredRelated)
@@ -417,7 +415,7 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   const preservedPlanning = await fs.readFile(planningFilePath, 'utf8')
   assert.match(preservedPlanning, /# Related\n\nManual context that must remain searchable\./)
   assert.match(preservedPlanning, /\[\^manual\]: Authored footnote that must survive metadata edits\./)
-  assert.match(preservedPlanning, /<!-- folio:generated-related:start -->/)
+  assert.doesNotMatch(preservedPlanning, /<!-- folio:generated-related:start -->/)
   const planningTagResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(planning.note.id)}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
@@ -433,10 +431,9 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   })
   const semanticDetailResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(semantic.note.id)}`)
   const semanticDetail = await semanticDetailResponse.json()
-  const suggestion = semanticDetail.suggestions.find((item) => item.id === meetingResult.note.id)
-  const autoRelated = semanticDetail.links.find((item) => item.id === meetingResult.note.id && item.relation === 'Related')
-  assert.ok(suggestion || autoRelated)
-  const relatedId = suggestion?.id || autoRelated.id
+  assert.deepEqual(semanticDetail.suggestions, [])
+  assert.equal(semanticDetail.links.some((item) => item.id === meetingResult.note.id && item.relation === 'Related'), false)
+  const relatedId = meetingResult.note.id
   const confirmResponse = await fetch(`${baseUrl}/api/note?id=${encodeURIComponent(semantic.note.id)}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
@@ -532,7 +529,8 @@ test('files whole notes hierarchically and appends todo and daily captures', asy
   assert.equal(spacedConfirmResponse.status, 200, JSON.stringify(spacedConfirmed))
   assert.ok(spacedConfirmed.links.some((item) => item.id === spacedId))
   const semanticFile = await fs.readFile(path.join(dataRoot, 'bundle', semantic.note.id.slice(1)), 'utf8')
-  assert.match(semanticFile, /\/manual\/Odd%20%28File%29\.md/)
+  assert.doesNotMatch(semanticFile, /folio:generated-related:start/)
+  assert.match(semanticFile, /Escaped \[Odd File\]\(\/manual\/Odd%20\\\(File\\\)\.md\)/)
 
   const indexBeforeMove = JSON.parse(await fs.readFile(path.join(dataRoot, 'search-index.json'), 'utf8'))
   const embeddingBeforeMove = indexBeforeMove.find((record) => record.id === spacedId)

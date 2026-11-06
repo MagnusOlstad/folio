@@ -10,7 +10,6 @@ export function createKnowledgeIndex(runtime) {
     listBundleMarkdownFiles, bundleFileId, parseMarkdownFile, markdownRelationships, resolveMarkdownLink, filingPreviousPaths, writeRecords, readRecords,
     normalizeMarkdownBreaks } = runtime
   const embedMany = (...args) => runtime.embedMany(...args)
-  const recalculateGeneratedRelationships = (...args) => runtime.recalculateGeneratedRelationships(...args)
   const rebuildBundleFiles = (...args) => runtime.rebuildBundleFiles(...args)
   const noteChunks = (...args) => runtime.noteChunks(...args)
   const splitByUtf8Bytes = (...args) => runtime.splitByUtf8Bytes(...args)
@@ -283,7 +282,7 @@ async function readImageText(documents) {
   }
 }
 
-async function performReindexBundle({ refreshEmbeddings = false, markdownLocked = false } = {}) {
+async function performReindexBundle({ refreshEmbeddings = false } = {}) {
   const existing = new Map((await readRecords()).map((record) => [record.id, record]))
   let { documents, errors } = await readBundleDocuments()
   let records = indexedRecordsFromDocuments(documents, existing, await readImageText(documents))
@@ -294,15 +293,11 @@ async function performReindexBundle({ refreshEmbeddings = false, markdownLocked 
     await refreshRecordEmbeddings(records, errors)
   }
 
-  if (markdownLocked) await recalculateGeneratedRelationships(records, documents)
-  else await queueMarkdownMutation(() => recalculateGeneratedRelationships(records, documents))
   const refreshedBundle = await readBundleDocuments()
   documents = refreshedBundle.documents
   errors.push(...refreshedBundle.errors)
   records = indexedRecordsFromDocuments(documents, new Map(records.map((record) => [record.id, record])), await readImageText(documents))
   normalizeEmbeddingDimensions(records)
-  if (markdownLocked) await recalculateGeneratedRelationships(records, documents)
-  else await queueMarkdownMutation(() => recalculateGeneratedRelationships(records, documents))
   const finalBundle = await readBundleDocuments()
   documents = finalBundle.documents
   errors.push(...finalBundle.errors)
