@@ -2,44 +2,16 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createMlxWorker, terminateMlxWorker } from './worker.js'
+import { createMlxModelCatalog, createEntityModelAvailabilityEvents } from './model-catalog.js'
 import { findModelSnapshot } from './snapshots.js'
 import { helperPath, nativeMlxAvailable } from './helper-path.js'
-import { OCR_MODELS, OCR_MODEL_ID, OCR_TIMEOUT_MS, cancellationError } from './ocr-models.js'
+import { OCR_MODEL_ID, OCR_TIMEOUT_MS, cancellationError } from './ocr-models.js'
 import { installationProgress } from './progress.js'
-import { ENTITY_MODEL_BYTES, ENTITY_MODEL_ID, ENTITY_MODEL_REPOSITORY, ENTITY_MODEL_REVISION, findEntityModelSnapshot } from './entities-model.js'
-import { TRANSCRIPTION_MODELS,
+import { ENTITY_MODEL_ID, findEntityModelSnapshot } from './entities-model.js'
+import {
   readTranscriptionModelPreference, writeTranscriptionModelPreference } from '../transcription/models.js'
 
 const KEEP_ALIVE_MS = 60 * 60 * 1000
-const MODEL_DEFINITIONS = Object.freeze({
-  gemma4: {
-    id: 'gemma4', name: 'Gemma 4 E4B', purpose: 'generation',
-    repository: 'mlx-community/gemma-4-e4b-it-4bit', revision: '475b9088d29754a3379866cf5aeb6b41acd313c2',
-    task: 'generation', downloadSizeBytes: 5_180_000_000,
-  },
-  qwen35: {
-    id: 'qwen35', name: 'Qwen 3.5 4B (4-bit)', purpose: 'generation',
-    repository: 'mlx-community/Qwen3.5-4B-4bit', revision: '0e7ffd5c629ef7719d4cbc04069232580bfa9d9c',
-    task: 'generation', downloadSizeBytes: 3_060_000_000,
-  },
-  llama32: {
-    id: 'llama32', name: 'Llama 3.2 3B Instruct (4-bit)', purpose: 'generation',
-    repository: 'mlx-community/Llama-3.2-3B-Instruct-4bit', revision: '7f0dc925e0d0afb0322d96f9255cfddf2ba5636e',
-    task: 'generation', downloadSizeBytes: 1_810_000_000,
-  },
-  embeddinggemma: {
-    id: 'embeddinggemma', name: 'EmbeddingGemma', purpose: 'embeddings',
-    repository: 'mlx-community/embeddinggemma-300m-4bit', revision: '5d9ef074df3957afc5c77127f208fddbc3c54187',
-    task: 'embedding', downloadSizeBytes: 212_000_000,
-  },
-  ...OCR_MODELS,
-  ...TRANSCRIPTION_MODELS,
-  [ENTITY_MODEL_ID]: {
-    id: ENTITY_MODEL_ID, name: 'GLiNER 2.5 Multi', purpose: 'entities',
-    repository: ENTITY_MODEL_REPOSITORY, revision: ENTITY_MODEL_REVISION,
-    task: 'entities', downloadSizeBytes: ENTITY_MODEL_BYTES,
-  },
-})
 
 export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKeepAliveMs = KEEP_ALIVE_MS, entitySnapshotValidator = findEntityModelSnapshot }) {
   const cacheRoot = path.join(modelRoot, 'hf-cache')
@@ -54,9 +26,9 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   const activeRequests = new Map()
   const requestWaiters = new Map()
   const modelActivities = new Map()
-  const externalModels = new Map()
-  const externalModelAdapters = new Map()
-  const entityModelAvailabilityListeners = new Set()
+  const modelCatalog = createMlxModelCatalog()
+  const MODEL_DEFINITIONS = modelCatalog.definitions
+  const entityModelAvailability = createEntityModelAvailabilityEvents()
   let transcriptionSelectionTail = Promise.resolve()
   let heavyQueue = Promise.resolve()
   let activeHeavyModel = null
@@ -64,11 +36,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   let closed = false
   const isAvailable = nativeMlxAvailable()
 
-  function modelDefinition(id) {
-    const model = MODEL_DEFINITIONS[id]
-    if (!model) throw Object.assign(new Error('Unknown MLX model.'), { statusCode: 404 })
-    return model
-  }
+  const { modelDefinition } = modelCatalog
 
   function withModelActivity(id, operation, { activate = true, background = false } = {}) {
     // The current model queue is intentionally exclusive. Background is part
@@ -97,15 +65,6 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     const activity = heavyQueue.then(run, run)
     heavyQueue = activity.catch(() => {})
     return activity
-  }
-
-  function registerExternalModel(id, adapter) {
-    if (MODEL_DEFINITIONS[id]?.purpose !== 'transcription' || !adapter) throw new Error('Invalid external MLX model adapter.')
-    if (!externalModels.has(id)) externalModels.set(id, adapter)
-    const adapters = externalModelAdapters.get(id) || new Set()
-    adapters.add(adapter)
-    externalModelAdapters.set(id, adapters)
-    return () => { if (externalModels.get(id) === adapter) externalModels.delete(id) }
   }
 
   async function selectedGenerationModel() {
@@ -156,19 +115,6 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   async function isInstalled(definition) {
     if (definition.purpose === 'entities') return Boolean(await entitySnapshotValidator(cacheRoot, definition))
     return Boolean(await findModelSnapshot(cacheRoot, definition))
-  }
-
-  function emitEntityModelAvailability(installed) {
-    for (const listener of entityModelAvailabilityListeners) {
-      try { void Promise.resolve(listener({ installed })).catch((error) => console.error(`Entity model availability listener failed: ${error.message}`)) }
-      catch (error) { console.error(`Entity model availability listener failed: ${error.message}`) }
-    }
-  }
-
-  function onEntityModelAvailabilityChange(listener) {
-    if (typeof listener !== 'function') throw new TypeError('Entity model availability listener must be a function.')
-    entityModelAvailabilityListeners.add(listener)
-    return () => entityModelAvailabilityListeners.delete(listener)
   }
 
   async function waitForRequests(id) {
@@ -227,7 +173,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
       let abortTimer
       try {
         const snapshot = definition.purpose === 'transcription'
-          ? await externalModels.get(id)?.snapshot?.()
+          ? await modelCatalog.externalModel(id)?.snapshot?.()
           : definition.purpose === 'entities'
             ? await entitySnapshotValidator(cacheRoot, definition)
             : await findModelSnapshot(cacheRoot, definition)
@@ -358,7 +304,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   async function status() {
     const [selected, selectedTranscription] = await Promise.all([selectedGenerationModel(), selectedTranscriptionModel()])
     const models = await Promise.all(Object.values(MODEL_DEFINITIONS).map(async (definition) => {
-      const external = externalModels.get(definition.id)
+      const external = modelCatalog.externalModel(definition.id)
       const externalStatus = external?.status ? await external.status() : null
       const worker = workers.get(definition.id)
       return {
@@ -394,7 +340,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
       selectedTranscriptionModel: selectedTranscription,
       downloads: await Promise.all([...new Set([...installing, ...models.filter((model) => model.loading).map((model) => model.id)])]
         .map(async (id) => {
-          const external = externalModels.get(id)
+          const external = modelCatalog.externalModel(id)
           const externalStatus = external?.status ? await external.status() : null
           const progress = externalStatus?.progress || await installationProgress({
             cacheRoot,
@@ -417,7 +363,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
 
   async function install(id) {
     const definition = modelDefinition(id)
-    const external = externalModels.get(id)
+    const external = modelCatalog.externalModel(id)
     if (external) return withModelActivity(id, async () => {
       await stopModel(id)
       return external.install()
@@ -432,7 +378,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
           throw Object.assign(new Error('GLiNER install completed without a complete pinned weights, encoder, and tokenizer snapshot.'), { code: 'ENTITY_MODEL_INCOMPLETE', statusCode: 503 })
         }
         const currentStatus = await status()
-        if (definition.purpose === 'entities') emitEntityModelAvailability(true)
+        if (definition.purpose === 'entities') entityModelAvailability.emit(true)
         return currentStatus
       }
       finally { installing.delete(id); loadingModels.delete(id) }
@@ -442,7 +388,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
 
   async function load(id) {
     const definition = modelDefinition(id)
-    const external = externalModels.get(id)
+    const external = modelCatalog.externalModel(id)
     if (external?.load) return withModelActivity(id, async () => external.load())
     loadingModels.add(id)
     const operation = async () => {
@@ -454,7 +400,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
 
   async function unload(id) {
     const definition = modelDefinition(id)
-    const external = externalModels.get(id)
+    const external = modelCatalog.externalModel(id)
     if (external?.unload) return withModelActivity(id, async () => external.unload(), { activate: false })
     const operation = async () => {
       if (definition.purpose === 'embeddings') unloading.add(id)
@@ -466,7 +412,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
 
   async function remove(id) {
     const definition = modelDefinition(id)
-    const external = externalModels.get(id)
+    const external = modelCatalog.externalModel(id)
     if (external?.remove) return withModelActivity(id, async () => {
       await stopModel(id)
       return external.remove()
@@ -480,7 +426,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
         const repoRoot = path.join(cacheRoot, `models--${definition.repository.replaceAll('/', '--')}`)
         await fs.rm(repoRoot, { recursive: true, force: true })
         const currentStatus = await status()
-        if (definition.purpose === 'entities') emitEntityModelAvailability(false)
+        if (definition.purpose === 'entities') entityModelAvailability.emit(false)
         return currentStatus
       }
       return definition.purpose === 'embeddings' ? await operation() : await withModelActivity(id, operation, { activate: false })
@@ -537,7 +483,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     for (const id of idleTimers.keys()) stopIdleTimer(id)
     const activeWorkers = new Set([...workers.values(), ...startingWorkers.values()])
     const termination = Promise.all([...activeWorkers].map((worker) => terminateMlxWorker(worker)))
-    const adapterClosures = [...externalModelAdapters.values()].flatMap((adapters) => [...adapters])
+    const adapterClosures = modelCatalog.adapterClosures()
       .map((adapter) => adapter.close?.()).filter(Boolean)
     await Promise.allSettled([...starting.values(), termination, ...adapterClosures])
     await heavyQueue
@@ -547,8 +493,10 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
 
   return { status, install, load, unload, remove, selectGenerationModel, selectedGenerationModel,
     selectTranscriptionModel, selectedTranscriptionModel, generate, embed, transcribe, extractText,
-    planEntityChunks, extractEntities, getEntityModelStatus, onEntityModelAvailabilityChange,
+    planEntityChunks, extractEntities, getEntityModelStatus,
+    onEntityModelAvailabilityChange: entityModelAvailability.subscribe,
     close, isBusy: () => [...modelActivities.values()].some((count) => count > 0),
-    withModelActivity, registerExternalModel, keepAliveMs: warmKeepAliveMs,
+    withModelActivity, registerExternalModel: modelCatalog.registerExternalModel,
+    keepAliveMs: warmKeepAliveMs,
     modelDefinitions: MODEL_DEFINITIONS }
 }
