@@ -73,6 +73,7 @@ test('image text is indexed and searchable without changing note content or plai
   context.after(async () => {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
     await runtime.embeddingRefresh
+    await app.bundleManager.close()
     await fs.rm(dataRoot, { recursive: true, force: true })
   })
   const baseUrl = `http://127.0.0.1:${server.address().port}`
@@ -129,6 +130,7 @@ test('OCR cache misses refresh the index in the background and hits do not', asy
   context.after(async () => {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
     await runtime.embeddingRefresh
+    await app.bundleManager.close()
     await fs.rm(dataRoot, { recursive: true, force: true })
   })
   let reindexes = 0
