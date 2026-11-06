@@ -147,7 +147,8 @@ for await (const line of lines) {
         chunks: regions.map((region, index) => ({ index, ...region, tokenCount: 1, schemaTokenCount: 1 })), schemaTokenCount: 1, memory }
     }
     else if (request.operation === 'extract_entities') {
-      const region = request.region
+      const text = request.text || ''
+      const region = request.region || { startUtf16: 0, endUtf16: text.length }
       const labels = [
         ['person', /\b(?:Priya Sharma|Kari Nilsen|Jonas Berg|Erik Lund)\b/gu],
         ['organization', /\b(?:Acme|Nordlys Labs|Fjord Analytics|Tandem\s+Co\.?|EU|NATO)\b/gu],
@@ -156,7 +157,7 @@ for await (const line of lines) {
         ['location', /\b(?:Oslo|Bergen|Trondheim|Nordland)\b/gu],
       ]
       const mentions = []
-      for (const [type, pattern] of labels) for (const match of request.text.matchAll(pattern)) {
+      for (const [type, pattern] of labels) for (const match of text.matchAll(pattern)) {
         const startUtf16 = match.index
         const endUtf16 = startUtf16 + match[0].length
         if (startUtf16 >= region.startUtf16 && endUtf16 <= region.endUtf16) mentions.push({ text: match[0], type, startUtf16, endUtf16, score: 0.9 })

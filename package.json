@@ -18,6 +18,7 @@
     "test": "node --test test/*.test.js",
     "test:ui": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:entities": "playwright test --config=playwright.entities.config.ts",
     "test:e2e:local": "playwright test --config=playwright.local.config.ts",
     "benchmark:history": "node scripts/benchmark-history.js",
     "desktop": "npm run build:mlx && npm run build && electron .",
