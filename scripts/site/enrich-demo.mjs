@@ -38,5 +38,17 @@ try {
   await edit(ids.tokens, (c) => c + `\n## Related\n- ${link('type', 'Type scale for product UI')}\n- ${link('contrast', 'Accessibility contrast checklist')}\n`)
   fs.writeFileSync(path.join(workDir, 'ids.json'), JSON.stringify(ids, null, 2))
   await api(base, 'POST', '/api/reindex')
+  // Translation: switch auto-translate on for the Norwegian workshop note and wait until the English view is cached.
+  await api(base, 'PUT', '/api/note/translation/auto', { id: ids.workshop, enabled: true })
+  for (let i = 0; i < 120; i++) {
+    const t = await api(base, 'GET', `/api/note/translation?id=${encodeURIComponent(ids.workshop)}&target=en`)
+    if (t.status === 'ready') { console.log('translation ready'); break }
+    if (i % 6 === 0) console.log('translating', t.translatedBlocks, '/', t.totalBlocks)
+    await new Promise((r) => setTimeout(r, 5000))
+  }
+  // OCR: extract text from the recipe card image once so the result is cached for the screenshots.
+  const card = (await get(ids.card)).content.match(/\((\/assets\/[^)]+)\)/)?.[1]
+  const ocr = await api(base, 'POST', '/api/assets/ocr', { path: card })
+  console.log('ocr:', JSON.stringify(ocr.text))
   console.log('done')
 } finally { await app.close() }

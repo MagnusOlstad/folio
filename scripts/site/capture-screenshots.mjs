@@ -31,6 +31,16 @@ async function shot(name, target = page, opts = {}) {
   await setTheme_('original', 'dark')
   await sleep(400)
 }
+// Light-theme-only shot (v0.8 features): saves `<name>-light.png`, then restores the dark default.
+async function shotLightOnly(name, target = page, opts = {}) {
+  await setTheme_('light', 'light')
+  await sleep(600)
+  const n = `${name}-light.png`
+  const b = await target.screenshot({ path: path.join(out, n), animations: 'disabled', ...opts })
+  sizes[n] = `${b.readUInt32BE(16)}x${b.readUInt32BE(20)}`
+  await setTheme_('original', 'dark')
+  await sleep(400)
+}
 async function around(locator, margin = 24) {
   const b = await locator.boundingBox()
   return { clip: { x: Math.max(0, b.x - margin), y: Math.max(0, b.y - margin), width: b.width + margin * 2, height: b.height + margin * 2 } }
@@ -210,12 +220,58 @@ const steps = {
     await shot('transcription-crop.png', page, { clip: { x: 316, y: 0, width: 1124, height: 891 } })
     await page.getByRole('tab', { name: /history/i }).click()
   },
+  async ocr() {
+    await openNote(/Cardamom/i)
+    await scrollNote(0)
+    const img = page.locator('.cm-live-markdown-image-frame img').first()
+    await img.scrollIntoViewIfNeeded()
+    await img.hover()
+    await sleep(500)
+    await page.getByRole('toolbar', { name: 'Image actions' }).first().getByRole('button', { name: 'Extract text' }).click()
+    const panel = page.getByLabel('Extracted text')
+    await panel.waitFor({ timeout: 180000 })
+    await sleep(1500)
+    await img.evaluate((el) => { el.scrollIntoView({ block: 'start' }); for (let p = el.parentElement; p; p = p.parentElement) if (p.scrollHeight > p.clientHeight + 20 && /auto|scroll/.test(getComputedStyle(p).overflowY)) { p.scrollTop += 34; break } })
+    await sleep(400)
+    await img.hover()
+    await sleep(500)
+    await shotLightOnly('ocr')
+    const a = await img.boundingBox(), b = await panel.boundingBox()
+    const x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y), x1 = Math.max(a.x + a.width, b.x + b.width), y1 = Math.max(a.y + a.height, b.y + b.height)
+    const m = 28, top = Math.max(40, y0 - 14), bottom = y1 + 6
+    await shotLightOnly('ocr-crop', page, { clip: { x: Math.max(0, x0 - m), y: top, width: x1 - x0 + 2 * m, height: bottom - top } })
+  },
+  async translate() {
+    await openNote(/Lumen-workshop/i)
+    await scrollNote(0)
+    const sw = page.getByRole('switch', { name: 'Auto-translate this note' })
+    if ((await sw.getAttribute('aria-checked')) !== 'true') await sw.click()
+    const en = page.getByRole('group', { name: 'Note language' }).getByRole('button', { name: 'English' })
+    await en.waitFor()
+    if ((await en.getAttribute('aria-pressed')) !== 'true') await en.click()
+    await page.waitForFunction(() => !/Translating|pending/i.test(document.body.innerText), null, { timeout: 120000 }).catch(() => {})
+    await sleep(2500)
+    await settle()
+    await shotLightOnly('translate')
+    await shotLightOnly('translate-crop', page, { clip: { x: 316, y: 0, width: 800, height: 650 } })
+  },
+  async translatedExport() {
+    await openNote(/Lumen-workshop/i)
+    await page.getByRole('button', { name: 'More actions' }).click()
+    await page.getByRole('menuitem', { name: /Translate/ }).click()
+    const dlg = page.getByRole('dialog', { name: 'Translate and export' })
+    await dlg.waitFor()
+    await sleep(800)
+    await shotLightOnly('translated-export', page, await around(dlg, 40))
+    await page.keyboard.press('Escape')
+    await sleep(500)
+  },
   async okf() {
     const f = path.join(docs, 'Folio', 'bundle', ids.usability.slice(1))
     fs.copyFileSync(f, path.join(out, 'okf-note.md'))
   },
 }
-const order = ['hero', 'explorer', 'models', 'search', 'links', 'history', 'refile', 'export', 'filing', 'ask', 'transcription', 'okf']
+const order = ['hero', 'explorer', 'models', 'search', 'links', 'history', 'refile', 'export', 'filing', 'ask', 'transcription', 'ocr', 'translate', 'translatedExport', 'okf']
 export { steps }
 
 await prepare()

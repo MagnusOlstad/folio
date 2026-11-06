@@ -165,6 +165,35 @@ Base 16 px, ratio 1.2 (minor third).
 - Display 33 px
 
 Line height 1.5 for body, 1.2 for headings. Keep line length between 60 and 75 characters. Use two weights only: regular and semibold.` },
+  { key: 'workshop', path: '/projects/lumen', content: `Møtenotater: Lumen-workshop med Solvik-teamet i Bergen
+
+**Deltakere:** Ingrid og Håkon fra Solvik, Maya, Jonas og Priya fra Lumen
+
+## Bakgrunn
+Solvik bruker Lumen til å ta imot nye ansatte, men mange avslutter introduksjonen før de har invitert noen fra teamet sitt.
+
+## Hovedpunkter
+- Sjekklisten er lett å forstå, men «arbeidsområde» er et uklart ord på norsk
+- Nye brukere savner en kort veiledning som viser hva de skal gjøre først
+- Håkon vil ha varsler på e-post når en kollega fullfører et steg
+- Teamet ønsker at fremdriften vises i sidemenyen hele tiden
+
+## Beslutninger
+- Vi bytter ut «arbeidsområde» med «teamrom» i den norske oversettelsen
+- Invitasjonssteget flyttes øverst i sjekklisten
+- Neste testrunde gjennomføres i Bergen i slutten av måneden
+
+## Oppgaver
+- [ ] Maya: oppdatere prototypen med nytt navn og ny rekkefølge
+- [ ] Priya: undersøke hvordan e-postvarsler kan sendes per steg
+- [ ] Jonas: avtale testdato med Ingrid` },
+  { key: 'card', path: '/life/recipes', content: `Recipe card: Cardamom buns
+
+Scanned the printed recipe card from the kitchen drawer so I can find it anywhere.
+
+![Printed recipe card for cardamom buns](__CARD_ASSET__)
+
+Tip: open the image menu and use Extract text to copy the ingredients into my shopping list.` },
   { key: 'todo', content: `todo: Send Lumen test summary to Jonas and Priya\nBook the Lisbon flights before prices go up\nRename "workspace" to "team space" in the prototype` },
   { key: 'daily', content: `daily: Ran the second Lumen usability session this morning. The new invite step placement worked. Spent the afternoon refining checklist states and sketching the Lisbon itinerary.` },
 ]
