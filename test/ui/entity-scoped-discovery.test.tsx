@@ -54,4 +54,30 @@ describe("entity-scoped discovery consumers", () => {
     }));
     expect(result.current.discovery.answer?.scope).toEqual(scope);
   });
+
+  it("does not let a late scoped response repopulate results after scope is cleared", async () => {
+    let resolveSearch!: (value: unknown) => void;
+    request.mockImplementation((_bundle: string, path?: string) => path?.startsWith("/api/search?")
+      ? new Promise((resolve) => { resolveSearch = resolve; })
+      : Promise.resolve({}));
+    const { result } = renderHook(() => {
+      const entityScope = useEntityScope("bundle-a");
+      const discovery = useWorkspaceDiscovery({ setMessage: vi.fn(), setSidebarMode: vi.fn(), bundleId: "bundle-a", entityScope });
+      return { entityScope, discovery };
+    });
+    act(() => {
+      result.current.entityScope.toggleEntity({ id: "acme", label: "Acme", type: "organization" }, true);
+      result.current.discovery.setSearchQuery("launch");
+    });
+    let pending!: Promise<void>;
+    act(() => { pending = result.current.discovery.searchNotes(); });
+    act(() => result.current.entityScope.clear());
+    await act(async () => {
+      resolveSearch({ items: [{ id: "note-a", title: "Acme launch" }], scope });
+      await pending;
+    });
+    expect(request.mock.calls[0]?.[1]).toContain("entityIds=acme");
+    expect(result.current.discovery.searchResults).toEqual([]);
+    expect(result.current.discovery.searchScope).toBeNull();
+  });
 });

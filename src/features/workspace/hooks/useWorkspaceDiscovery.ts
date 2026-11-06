@@ -27,6 +27,8 @@ export function useWorkspaceDiscovery({
   const [selectedTag, setSelectedTag] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchScope, setSearchScope] = useState<EntityScopeMetadata | null>(null);
+  const [searchResultScopeKey, setSearchResultScopeKey] = useState("");
+  const [answerScopeKey, setAnswerScopeKey] = useState("");
   const [searching, setSearching] = useState(false);
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<AskResult | null>(null);
@@ -34,10 +36,14 @@ export function useWorkspaceDiscovery({
   const searchRequest = useRef(0);
   const askRequest = useRef(0);
   const currentBundleId = useRef(bundleId);
+  const currentScopeKey = JSON.stringify([bundleId, entityScope?.bundleId === bundleId ? entityScope.entityIds : []]);
   useLayoutEffect(() => { currentBundleId.current = bundleId; }, [bundleId]);
+  const currentScopeKeyRef = useRef(currentScopeKey);
+  useLayoutEffect(() => { currentScopeKeyRef.current = currentScopeKey; }, [currentScopeKey]);
 
   async function searchNotes(query = searchQuery, tag = selectedTag) {
     const ids = entityScope && entityScope.bundleId === bundleId ? entityScope.entityIds : [];
+    const requestScopeKey = JSON.stringify([bundleId, ids]);
     if (!query.trim() && !tag && ids.length === 0) return;
     const requestId = ++searchRequest.current;
     setSearching(true);
@@ -53,15 +59,17 @@ export function useWorkspaceDiscovery({
       const path = `/api/search?${parameters}`;
       if (ids.length) {
         const response = await apiForBundle<ScopedSearchResponse>(bundleId, path);
-        if (requestId === searchRequest.current && currentBundleId.current === bundleId) {
+        if (requestId === searchRequest.current && currentBundleId.current === bundleId && currentScopeKeyRef.current === requestScopeKey) {
           setSearchResults(response.items);
           setSearchScope(response.scope);
+          setSearchResultScopeKey(requestScopeKey);
         }
       } else {
         const results = await apiForBundle<SearchResult[]>(bundleId, path);
-        if (requestId === searchRequest.current && currentBundleId.current === bundleId) {
+        if (requestId === searchRequest.current && currentBundleId.current === bundleId && currentScopeKeyRef.current === requestScopeKey) {
           setSearchResults(results);
           setSearchScope(null);
+          setSearchResultScopeKey(requestScopeKey);
         }
       }
     } catch (error) {
@@ -98,7 +106,10 @@ export function useWorkspaceDiscovery({
           ...(ids.length ? { entityIds: ids } : {}),
         }),
       });
-      if (requestId === askRequest.current && currentBundleId.current === bundleId) setAnswer(result);
+      if (requestId === askRequest.current && currentBundleId.current === bundleId && currentScopeKeyRef.current === JSON.stringify([bundleId, ids])) {
+        setAnswer(result);
+        setAnswerScopeKey(JSON.stringify([bundleId, ids]));
+      }
     } catch (error) {
       if (requestId === askRequest.current && currentBundleId.current === bundleId) setMessage(
         error instanceof Error ? error.message : "Could not ask your notes",
@@ -119,7 +130,9 @@ export function useWorkspaceDiscovery({
     invalidateRequests();
     setSearchResults([]);
     setSearchScope(null);
+    setSearchResultScopeKey("");
     setAnswer(null);
+    setAnswerScopeKey("");
   }
 
   function removeDocument(id: string) {
@@ -163,13 +176,13 @@ export function useWorkspaceDiscovery({
     setSearchQuery,
     selectedTag,
     setSelectedTag,
-    searchResults,
+    searchResults: searchResultScopeKey === currentScopeKey ? searchResults : [],
     setSearchResults,
-    searchScope,
+    searchScope: searchResultScopeKey === currentScopeKey ? searchScope : null,
     searching,
     question,
     setQuestion,
-    answer,
+    answer: answerScopeKey === currentScopeKey ? answer : null,
     setAnswer,
     asking,
     searchNotes,
