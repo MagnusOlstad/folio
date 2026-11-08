@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import type { TranslatedExportJob, TranslatedExportPhase, ViewerDocument } from "../../../domain/types.ts";
+import { filedDraftContent, isUntitledId } from "../../../lib/workspace.ts";
 import { ApiError, cancelTranslatedExport, fetchTranslatedExport, startTranslatedExport } from "../../../lib/api.ts";
 import {
   TRANSLATED_EXPORT_DESTINATIONS,
@@ -134,7 +135,11 @@ export function TranslatedExportDialog({ document: note, onClose, onDeliver }: P
     setElapsed(0);
     setPhase({ kind: "running", jobId: null, translated: 0, total: 0 });
     try {
-      const job = await startTranslatedExport(note.id, target);
+      const job = await startTranslatedExport(
+        note.id,
+        target,
+        isUntitledId(note.id) ? filedDraftContent(note.content) : undefined,
+      );
       jobIdRef.current = job.jobId;
       setPhase({ kind: "running", jobId: job.jobId, translated: job.translatedBlocks, total: job.totalBlocks, phase: job.phase, last: job.lastTranslated });
     } catch (error) {

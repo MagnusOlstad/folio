@@ -12,7 +12,7 @@ function httpError(status, message) {
 }
 
 // On-demand translated export jobs. One job runs at a time; others wait FIFO.
-export function createExportManager({ runtime, cache, readNote, installedModel, waitForTurn, translateBlock, closedFlag, retentionMs }) {
+export function createExportManager({ runtime, cache, readNote, parseNote, installedModel, waitForTurn, translateBlock, closedFlag, retentionMs }) {
   const jobs = new Map()
   const waiting = []
   const timers = new Set()
@@ -67,7 +67,7 @@ export function createExportManager({ runtime, cache, readNote, installedModel, 
   async function runJob(job) {
     try {
       job.phase = 'waiting'
-      const note = await readNote(job.id)
+      const note = job.note || await readNote(job.id)
       await cache.load()
       const model = await installedModel({ fresh: true })
       if (!model) throw httpError(503, 'No generation model is installed.')
@@ -111,10 +111,12 @@ export function createExportManager({ runtime, cache, readNote, installedModel, 
       job.title = (note.titleBlock && lookup(note.titleBlock)) || note.title
       job.description = (note.descriptionBlock && lookup(note.descriptionBlock)) || note.description
       job.content = renderItems(note.items, lookup)
+      delete job.note
       finish(job, 'done')
     } catch (error) {
       if (job.status !== 'running') return
       console.error(`Translated export of ${job.id} failed. ${error.message}`)
+      delete job.note
       job.error = 'The note could not be translated. Check that the generation model is installed and try again.'
       finish(job, 'failed')
     } finally {
@@ -132,15 +134,19 @@ export function createExportManager({ runtime, cache, readNote, installedModel, 
     })().finally(() => { running = null })
   }
 
-  async function start(id, target) {
+  // `markdown` (a string) translates inline text such as a local draft; otherwise `id` must be a bundle note.
+  async function start(id, target, markdown) {
     if (!Object.hasOwn(EXPORT_LANGUAGES, target)) throw httpError(400, 'Choose a supported target language.')
-    if (!runtime.resolveBundleMarkdownPath(id)) throw httpError(400, 'Only bundle notes can be translated.')
-    const note = await readNote(id)
+    const inline = markdown !== undefined && markdown !== null
+    if (inline && typeof markdown !== 'string') throw httpError(400, 'markdown must be a string.')
+    if (!inline && !runtime.resolveBundleMarkdownPath(id)) throw httpError(400, 'Only bundle notes can be translated.')
+    const note = inline ? parseNote(markdown, 'Untitled.md') : await readNote(id)
     if (!(await installedModel({ fresh: true }))) throw httpError(503, 'Install a generation model to translate notes.')
     await cache.load()
-    const existing = [...jobs.values()].find((job) => job.id === id && job.target === target && job.status === 'running')
+    const existing = inline ? null : [...jobs.values()].find((job) => !job.inline && job.id === id && job.target === target && job.status === 'running')
     if (existing) return summary(existing)
-    const job = { jobId: randomUUID(), id, target, status: 'running', phase: 'queued', lastTranslated: null, translatedBlocks: 0, totalBlocks: note.blocks.length }
+    const job = { jobId: randomUUID(), id: id || null, target, status: 'running', phase: 'queued', lastTranslated: null, translatedBlocks: 0, totalBlocks: note.blocks.length, inline }
+    if (inline) job.note = note
     jobs.set(job.jobId, job)
     waiting.push(job)
     kick()

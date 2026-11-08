@@ -22,6 +22,11 @@ export function isTranslatableDocument(document: ViewerDocument, isDraftId: bool
   return !isDraftId && document.deletable && document.movable;
 }
 
+/** On-demand translated export works for local drafts as well as translatable notes. */
+export function canTranslateExport(document: ViewerDocument, isDraftId: boolean): boolean {
+  return isDraftId || isTranslatableDocument(document, isDraftId);
+}
+
 export function parseNoteTranslationChoices(raw: string | null): NoteTranslationChoices {
   if (!raw) return {};
   try {

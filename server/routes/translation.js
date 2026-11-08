@@ -32,7 +32,9 @@ export function registerRoutes(app, runtime) {
 
   app.post('/api/note/translation/export', async (request, response, next) => {
     try {
-      response.status(202).json(await runtime.translation.startExport(String(request.body?.id || ''), String(request.body?.target || '')))
+      const markdown = request.body?.markdown
+      if (markdown !== undefined && typeof markdown !== 'string') return response.status(400).json({ error: 'markdown must be a string.' })
+      response.status(202).json(await runtime.translation.startExport(String(request.body?.id || ''), String(request.body?.target || ''), markdown))
     } catch (error) { fail(response, next, error) }
   })
 

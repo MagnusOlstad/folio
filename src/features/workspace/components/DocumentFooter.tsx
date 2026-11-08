@@ -9,7 +9,7 @@ import {
 import { NoteDeleteConfirmation } from "./NoteDeleteConfirmation.tsx";
 import { NoteMoreMenu } from "./NoteMoreMenu.tsx";
 import type { NoteExportFormat } from "../model/note-export.ts";
-import { isTranslatableDocument } from "../model/note-translation.ts";
+import { canTranslateExport } from "../model/note-translation.ts";
 import { useTranslationSettings } from "../hooks/useTranslationSettings.ts";
 import type { TranslatedExportDeliver } from "../model/translated-export.ts";
 
@@ -223,8 +223,12 @@ export function DocumentFooter({
                 : undefined
             }
             translate={
-              onTranslatedExport && !readOnly && isTranslatableDocument(document, isUntitledId(document.id))
-                ? { document, available: translationSettings?.available !== false, onDeliver: onTranslatedExport }
+              onTranslatedExport && !readOnly && canTranslateExport(document, isUntitledId(document.id))
+                ? {
+                    document: isUntitledId(document.id) ? { ...document, content: draft ?? document.content } : document,
+                    available: translationSettings?.available !== false,
+                    onDeliver: onTranslatedExport,
+                  }
                 : undefined
             }
           />

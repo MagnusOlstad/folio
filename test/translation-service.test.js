@@ -355,6 +355,24 @@ test('cancelling stops further generate calls; unavailable model returns 503', a
   await assert.rejects(() => none.runtime.translation.startExport('untitled:1', 'de'), { status: 400 })
 })
 
+test('inline markdown exports translate drafts without reading a bundle note', async (context) => {
+  const { runtime, mlx } = await setup(context, { auto: false })
+  const markdown = '# Utkast\n\nJeg er her.\n'
+  const job = await runtime.translation.startExport('untitled:1', 'en', markdown)
+  assert.equal(job.id, 'untitled:1')
+  assert.equal(job.totalBlocks, 3)
+  const other = await runtime.translation.startExport('untitled:1', 'en', markdown)
+  assert.notEqual(other.jobId, job.jobId)
+  const done = await waitForJob(runtime.translation, job.jobId)
+  assert.equal(done.status, 'done')
+  assert.match(done.content, /EN: Jeg er her\./)
+  assert.ok(mlx.calls.length > 0)
+  await waitForJob(runtime.translation, other.jobId)
+  assert.equal((await runtime.translation.startExport('', 'en', markdown).then((started) => started.id)), null)
+  await assert.rejects(() => runtime.translation.startExport('untitled:1', 'en', 5), { status: 400 })
+  await assert.rejects(() => runtime.translation.startExport('untitled:1', 'xx', markdown), { status: 400 })
+})
+
 test('backfill pruning keeps language entries whose base hash is referenced; export routes follow the contract', async (context) => {
   const { runtime } = await setup(context, { notes: { '/a.md': EXPORT_NOTE } })
   const app = express()
@@ -367,6 +385,8 @@ test('backfill pruning keeps language entries whose base hash is referenced; exp
   const post = (body) => fetch(`${base}/api/note/translation/export`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
   assert.equal((await post({ id: '/a.md', target: 'xx' })).status, 400)
   assert.equal((await post({ id: '/missing.md', target: 'de' })).status, 404)
+  assert.equal((await post({ id: 'untitled:1', target: 'de', markdown: 42 })).status, 400)
+  assert.equal((await post({ id: 'untitled:1', target: 'de', markdown: '# Hei\n\nJeg er her.\n' })).status, 202)
   const response = await post({ id: '/a.md', target: 'sv' })
   assert.equal(response.status, 202)
   const job = await response.json()

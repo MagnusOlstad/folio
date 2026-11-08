@@ -131,10 +131,14 @@ export function setNoteAutoTranslate(
   });
 }
 
-export function startTranslatedExport(id: string, target: TranslatedExportTarget): Promise<TranslatedExportJob> {
+export function startTranslatedExport(
+  id: string,
+  target: TranslatedExportTarget,
+  markdown?: string,
+): Promise<TranslatedExportJob> {
   return api<TranslatedExportJob>("/api/note/translation/export", {
     method: "POST",
-    body: JSON.stringify({ id, target }),
+    body: JSON.stringify(markdown === undefined ? { id, target } : { id, target, markdown }),
   });
 }
 
