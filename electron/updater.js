@@ -10,6 +10,7 @@ function initialState() {
 /** Coordinate the packaged macOS updater without importing Electron. */
 export function createUpdaterCoordinator({
   updater,
+  prepareFeed = null,
   getWindow,
   nativeUpdater,
   isPackaged,
@@ -44,6 +45,7 @@ export function createUpdaterCoordinator({
     checkPromise = (async () => {
       publish({ status: 'checking', error: null })
       try {
+        if (prepareFeed) await prepareFeed()
         const result = await updater.checkForUpdates()
         const version = result?.updateInfo?.version ?? state.version
         if (state.status === 'checking') publish({ status: result?.isUpdateAvailable ? 'available' : 'idle', version: result?.isUpdateAvailable ? version : null })

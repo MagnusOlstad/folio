@@ -3,7 +3,9 @@ import fsSync from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, autoUpdater, BrowserWindow, Menu, dialog, ipcMain, screen, shell } from 'electron'
+import packageMetadata from '../package.json' with { type: 'json' }
 import { createUpdaterCoordinator } from './updater.js'
+import { configureStableGithubReleaseFeed } from './update-feed.js'
 
 const isMac = process.platform === 'darwin'
 const preloadPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'preload.cjs')
@@ -310,10 +312,15 @@ async function initializeUpdater() {
     // electron-updater is CommonJS, so use its default namespace when loading
     // it from this ESM entrypoint. Dynamic import keeps the development/test
     // path dependency-free.
-    const { default: electronUpdater } = await import('electron-updater')
+    const { default: electronUpdater, Provider } = await import('electron-updater')
     const { autoUpdater: electronAutoUpdater } = electronUpdater
     updaterCoordinator = createUpdaterCoordinator({
       updater: electronAutoUpdater,
+      prepareFeed: () => configureStableGithubReleaseFeed({
+        updater: electronAutoUpdater,
+        Provider,
+        repositoryUrl: packageMetadata.repository.url,
+      }),
       nativeUpdater: autoUpdater,
       getWindow: () => mainWindow,
       isPackaged: app.isPackaged,

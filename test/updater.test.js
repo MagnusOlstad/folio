@@ -130,6 +130,82 @@ test('updater errors are logged and surfaced for retry', async () => {
   assert.equal(coordinator.getState().status, 'error')
 })
 
+test('prepares a fresh release feed before every updater check', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  const operations = []
+  updater.checkForUpdates = async () => {
+    operations.push('check')
+    return { isUpdateAvailable: false, updateInfo: { version: '1.0.0' } }
+  }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    prepareFeed: async () => { operations.push('feed') },
+  }))
+
+  await coordinator.start()
+  await coordinator.checkForUpdates()
+  assert.deepEqual(operations, ['feed', 'check', 'feed', 'check'])
+})
+
+test('concurrent checks share one deferred feed preparation and updater check', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let preparations = 0
+  let checks = 0
+  let finishPreparation
+  updater.checkForUpdates = async () => {
+    checks += 1
+    return { isUpdateAvailable: false }
+  }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    prepareFeed: () => {
+      preparations += 1
+      if (preparations === 1) return Promise.resolve()
+      return new Promise((resolve) => { finishPreparation = resolve })
+    },
+  }))
+
+  await coordinator.start()
+  const first = coordinator.checkForUpdates()
+  const second = coordinator.checkForUpdates()
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(preparations, 2)
+  assert.equal(checks, 1)
+  finishPreparation()
+  const [firstState, secondState] = await Promise.all([first, second])
+  assert.deepEqual(firstState, secondState)
+  assert.equal(checks, 2)
+})
+
+test('retries release discovery before checking or downloading an update', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let checks = 0
+  let downloads = 0
+  let preparations = 0
+  updater.checkForUpdates = async () => { checks += 1; return { isUpdateAvailable: true, updateInfo: { version: '1.2.3' } } }
+  updater.downloadUpdate = async () => { downloads += 1; return [] }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    prepareFeed: async () => {
+      preparations += 1
+      if (preparations === 1) throw new Error('GitHub release discovery returned HTTP 504.')
+    },
+  }))
+
+  await coordinator.start()
+  assert.equal(coordinator.getState().status, 'error')
+  assert.equal(preparations, 1)
+  assert.equal(checks, 0)
+  await coordinator.startDownload()
+  assert.equal(preparations, 2)
+  assert.equal(checks, 1)
+  assert.equal(downloads, 1)
+  assert.equal(coordinator.getState().status, 'staging')
+})
+
 test('concurrent update clicks share the check, download, and native stage', async () => {
   const { updater, nativeUpdater } = createUpdater()
   let checks = 0
