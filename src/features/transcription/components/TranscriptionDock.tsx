@@ -5,7 +5,6 @@ import { playbackStore } from '../model/playback-store.ts'
 import type { TranscriptionSession } from '../model/types.ts'
 import { PlusIcon, RecordDotIcon } from './icons.tsx'
 import { ModelNotices } from './ModelNotices.tsx'
-import { PlayerPanel } from './PlayerPanel.tsx'
 import { RecorderPanel } from './RecorderPanel.tsx'
 import { RecordingSourceSelect } from './RecordingSourceSelect.tsx'
 import { RecordingRow, type RowConfirmation } from './RecordingRow.tsx'
@@ -18,7 +17,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
   const lastDeletingIdRef = useRef<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const [confirming, setConfirming] = useState<{ id: string; kind: RowConfirmation } | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [learnedCounts, setLearnedCounts] = useState<Record<string, number>>({})
   const playback = useSyncExternalStore(playbackStore.subscribe, playbackStore.getSnapshot)
   const recorder = model.recording
@@ -35,7 +34,6 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
   const speakerLabelsWanted = model.identifySpeakers || model.pending.some((session) => session.identifySpeakers === true
     && (session.state !== 'ready' || session.id === confirmingRetranscribeId))
   const speakerOffer = Boolean(speakers) && speakerLabelsWanted && !speakersReady
-  const selected = model.pending.find((session) => session.id === selectedId && session.state === 'ready') ?? null
 
   useEffect(() => {
     recordingPhaseRef.current = recorder.phase
@@ -73,7 +71,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
   }
 
   function togglePlay(session: TranscriptionSession) {
-    setSelectedId(session.id)
+    setExpandedId(session.id)
     load(session)
     playbackStore.toggle()
   }
@@ -148,26 +146,20 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
               canTranscribe={canTranscribe}
               controlsBusy={controlsBusy}
               busy={busy}
-              selected={selected?.id === session.id}
+              expanded={expandedId === session.id && session.state === 'ready'}
               playing={playback.sessionId === session.id && playback.playing}
               speakerCount={learnedCounts[session.id] ?? session.speakerCount ?? null}
               confirming={confirming?.id === session.id ? confirming.kind : null}
               onConfirm={(kind) => setConfirming(kind ? { id: session.id, kind } : null)}
-              onSelect={() => { setSelectedId(session.id); load(session) }}
+              onToggleExpand={() => {
+                if (expandedId !== session.id) load(session)
+                setExpandedId(expandedId === session.id ? null : session.id)
+              }}
+              onSpeakerCount={(count) => setLearnedCounts((current) => current[session.id] === count ? current : { ...current, [session.id]: count })}
               onTogglePlay={() => togglePlay(session)}
             />
           ))}
         </ul>
-      )}
-
-      {selected && (
-        <PlayerPanel
-          key={selected.id}
-          session={selected}
-          model={model}
-          actions={actions}
-          onSpeakerCount={(count) => setLearnedCounts((current) => current[selected.id] === count ? current : { ...current, [selected.id]: count })}
-        />
       )}
     </section>
   )

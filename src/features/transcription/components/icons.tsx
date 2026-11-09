@@ -16,3 +16,5 @@ export const PlusIcon = () => <Icon><path d="M7.25 3h1.5v4.25H13v1.5H8.75V13h-1.
 export const MoreIcon = () => <Icon><circle cx="3.5" cy="8" r="1.3" /><circle cx="8" cy="8" r="1.3" /><circle cx="12.5" cy="8" r="1.3" /></Icon>
 export const WaveIcon = () => <Icon><rect x="2" y="6" width="1.6" height="4" rx="0.8" /><rect x="5" y="3.5" width="1.6" height="9" rx="0.8" /><rect x="8" y="5" width="1.6" height="6" rx="0.8" /><rect x="11" y="2.5" width="1.6" height="11" rx="0.8" /></Icon>
 export const RecordDotIcon = () => <svg className="transcription-icon transcription-record-dot" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="4.5" fill="currentColor" /></svg>
+export const ChevronIcon = () => <Icon size={12}><path d="M3.6 5.6a.75.75 0 0 1 1.06 0L8 8.94l3.34-3.34a.75.75 0 1 1 1.06 1.06l-3.87 3.87a.75.75 0 0 1-1.06 0L3.6 6.66a.75.75 0 0 1 0-1.06Z" /></Icon>
+export const PencilIcon = () => <Icon size={11}><path d="M11.2 2.3a1.5 1.5 0 0 1 2.12 0l.38.38a1.5 1.5 0 0 1 0 2.12L5.9 12.6l-3.3.7.7-3.3 7.9-7.7Z" /></Icon>

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ReassignOutcome } from '../hooks/speakerReassign.ts'
 import { formatClock, reassignOptions, speakerColor, speakerDisplayName } from '../model/playback-turns.ts'
 import type { TranscriptionSegment } from '../model/types.ts'
+import { RowMenu, type RowMenuItem } from './RowMenu.tsx'
 
 // The rewrite warning is shown before the first reassignment per recording in this app run.
 const confirmedSessions = new Set<string>()
@@ -17,7 +18,7 @@ type NowSpeakingProps = {
   onApplied: (outcome: ReassignOutcome) => void
 }
 
-/** Previous (muted), current (large) and next (muted) segment with a "Who said this?" correction. */
+/** Previous (muted), current (large) and next (muted) segment with a "Wrong speaker?" correction. */
 export function NowSpeaking({ sessionId, segments, index, present, names, hasSpeakers, onReassign, onApplied }: NowSpeakingProps) {
   const [pendingSpeaker, setPendingSpeaker] = useState<number | null>(null)
   const [working, setWorking] = useState(false)
@@ -34,20 +35,25 @@ export function NowSpeaking({ sessionId, segments, index, present, names, hasSpe
     try {
       const outcome = await onReassign(index, target)
       confirmedSessions.add(sessionId)
-      setNote(outcome.draftUpdated ? 'Transcript section updated in the draft.' : 'Draft not open — transcript updated in the recording.')
+      setNote(`Moved to ${speakerDisplayName(target, names)}.${outcome.draftUpdated ? '' : " Draft not open, so only the recording's transcript changed."}`)
       onApplied(outcome)
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not change the speaker.')
     } finally { setWorking(false) }
   }
 
-  function choose(value: string) {
-    if (value === 'keep') return
-    const target = Number(value)
+  function choose(target: number) {
     setNote('')
     if (confirmedSessions.has(sessionId)) void reassign(target)
     else setPendingSpeaker(target)
   }
+
+  const moveItems: RowMenuItem[] = reassignOptions(present, speaker).map((option) => ({
+    key: String(option),
+    label: present.includes(option) ? speakerDisplayName(option, names) : 'New speaker',
+    leading: <i className="player-dot" style={{ background: speakerColor(option) }} aria-hidden="true" />,
+    onSelect: () => choose(option),
+  }))
 
   return (
     <div className="player-now" aria-label="Now speaking">
@@ -60,23 +66,21 @@ export function NowSpeaking({ sessionId, segments, index, present, names, hasSpe
       <p className="player-now-current">{current.text.trim()}</p>
       <p className="player-now-neighbour">{segments[index + 1]?.text.trim() || ' '}</p>
       {hasSpeakers && (
-        <label className="player-reassign">
-          <span>Who said this?</span>
-          <select aria-label="Who said this?" value="keep" disabled={working} onChange={(event) => choose(event.currentTarget.value)}>
-            <option value="keep">Right speaker</option>
-            {reassignOptions(present, speaker).map((option) => (
-              <option key={option} value={option}>
-                {present.includes(option) ? `Was ${speakerDisplayName(option, names)}` : `New speaker ${option}`}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="player-reassign">
+          <RowMenu
+            label="Move this sentence to"
+            triggerText="Wrong speaker?"
+            triggerClassName="player-reassign-trigger"
+            disabled={working}
+            items={moveItems}
+          />
+        </div>
       )}
       {pendingSpeaker !== null && (
         <div className="player-reassign-confirm" role="group" aria-label="Confirm speaker change">
-          <p>This rewrites the Transcript section of the draft; edits you made inside it will be replaced.</p>
+          <p>Moving a sentence rebuilds the Transcript section of the draft. Edits you made inside that section will be replaced.</p>
           <button type="button" onClick={() => setPendingSpeaker(null)}>Cancel</button>
-          <button type="button" className="transcription-retranscribe-confirm-button" onClick={() => void reassign(pendingSpeaker)}>Reassign</button>
+          <button type="button" className="transcription-retranscribe-confirm-button" onClick={() => void reassign(pendingSpeaker)}>Move sentence</button>
         </div>
       )}
       {note && <p className="player-note" role="status">{note}</p>}
