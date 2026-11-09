@@ -36,6 +36,7 @@ import {
   type LiveMarkdownCallbacks,
 } from "../model/live-markdown.ts";
 import { imageUploadExtension } from "../model/image-paste.ts";
+import { liveMarkdownTimestamps } from "../model/live-markdown-timestamps.ts";
 import { createNoteSearchPanel } from "../model/note-search-panel.ts";
 
 // Prop replacements are authoritative snapshots, not user edits.
@@ -66,6 +67,8 @@ export type LiveMarkdownEditorProps = {
   focusRequestId?: number;
   onFocusRequestConsumed?: () => void;
   placeholder?: string;
+  /** Enables clickable transcript timestamps that drive the recording player. */
+  documentId?: string;
   ariaLabel: string;
 };
 
@@ -143,6 +146,7 @@ export function LiveMarkdownEditor({
   focusRequestId,
   onFocusRequestConsumed,
   placeholder,
+  documentId,
   ariaLabel,
   initialSelection,
   onSelectionChange,
@@ -176,6 +180,7 @@ export function LiveMarkdownEditor({
   const historyCompartment = useRef(new Compartment());
   const focusRequestFrameRef = useRef<number | null>(null);
   const ariaLabelRef = useRef(ariaLabel);
+  const documentIdRef = useRef(documentId);
   const onFocusRequestConsumedRef = useRef(onFocusRequestConsumed);
   const ariaLabelCompartment = useRef(new Compartment());
   const callbacksRef = useRef<LiveMarkdownCallbacks>({
@@ -188,6 +193,7 @@ export function LiveMarkdownEditor({
     controlledValueRef.current = value;
     readOnlyRef.current = readOnly;
     placeholderRef.current = placeholder;
+    documentIdRef.current = documentId;
     onChangeRef.current = onChange;
     onBlurRef.current = onBlur;
     onFocusRef.current = onFocus;
@@ -215,6 +221,7 @@ export function LiveMarkdownEditor({
     onSelectionChange,
     readOnly,
     placeholder,
+    documentId,
     value,
   ]);
 
@@ -356,6 +363,7 @@ export function LiveMarkdownEditor({
           ),
           keymapCompartment.current.of(readOnlyRef.current ? [] : editingKeymapRef.current),
           liveMarkdownExtensions({ callbacks: callbacksRef }),
+          documentIdRef.current === undefined ? [] : liveMarkdownTimestamps({ getDocumentId: () => documentIdRef.current }),
           imageUploadExtension({ onError: () => onErrorRef.current }),
           EditorView.updateListener.of((update) => {
             if (update.selectionSet && !update.state.readOnly)

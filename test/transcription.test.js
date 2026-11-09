@@ -11,6 +11,7 @@ import { createMlxService } from '../server/mlx/service.js'
 import { DIARIZATION_MODELS, TRANSCRIPTION_MODELS } from '../server/transcription/models.js'
 import { safeAudioFilename, safeTranscriptionId, splitTranscript } from '../server/transcription/model.js'
 import { registerRoutes } from '../server/transcription/routes.js'
+import { buildTranscriptResult } from '../server/transcription/segments.js'
 import { runHelper } from '../server/transcription/helper.js'
 
 async function fixture(t) {
@@ -936,4 +937,71 @@ test('recovery restores an interrupted re-transcription to ready but fails a fir
   assert.equal(failed.state, 'failed')
   assert.match(failed.error, /interrupted/)
   await service.close()
+})
+
+async function startApp(t, runtime, service) {
+  const app = express()
+  app.use(express.json({ limit: '1mb' }))
+  registerRoutes(app, { transcriptionService: service, transcriptionStorage: runtime.transcriptionStorage })
+  const server = app.listen(0, '127.0.0.1')
+  await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject) })
+  t.after(() => new Promise((resolve) => server.close(resolve)))
+  return `http://127.0.0.1:${server.address().port}`
+}
+
+test('recording playback supports ranges and speaker reassignment persists', async (t) => {
+  const { runtime } = await fixture(t)
+  const service = createTranscriptionService(runtime)
+  t.after(() => service.close())
+  const storage = runtime.transcriptionStorage
+  const base = await startApp(t, runtime, service)
+  const session = await storage.createSession({ fileName: 'meeting.mp3', audioExtension: '.mp3' })
+  const audio = Buffer.from('0123456789abcdefghij')
+  await storage.writeAudio(session.id, '.mp3', Readable.from([audio]))
+  const ready = await storage.writeManifest({ ...session, state: 'ready' })
+
+  const full = await fetch(`${base}/api/transcriptions/${session.id}/audio`)
+  assert.equal(full.status, 200)
+  assert.equal(full.headers.get('content-type'), 'audio/mpeg')
+  assert.equal(full.headers.get('accept-ranges'), 'bytes')
+  assert.equal(full.headers.get('cache-control'), 'no-store')
+  assert.deepEqual(Buffer.from(await full.arrayBuffer()), audio)
+
+  const partial = await fetch(`${base}/api/transcriptions/${session.id}/audio`, { headers: { range: 'bytes=5-9' } })
+  assert.equal(partial.status, 206)
+  assert.equal(partial.headers.get('content-range'), 'bytes 5-9/20')
+  assert.equal(partial.headers.get('content-length'), '5')
+  assert.equal(await partial.text(), '56789')
+  assert.equal((await fetch(`${base}/api/transcriptions/${session.id}/audio`, { headers: { range: 'bytes=100-200' } })).status, 416)
+  assert.equal((await fetch(`${base}/api/transcriptions/not-an-id/audio`)).status, 400)
+  assert.equal((await fetch(`${base}/api/transcriptions/11111111-1111-4111-8111-111111111111/audio`)).status, 404)
+  const bare = await storage.createSession({ fileName: 'x.wav' })
+  assert.equal((await fetch(`${base}/api/transcriptions/${bare.id}/audio`)).status, 404)
+
+  const post = (id, body) => fetch(`${base}/api/transcriptions/${id}/segments/speaker`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  })
+  assert.equal((await post(bare.id, { index: 0, speaker: 1 })).status, 404)
+  assert.equal((await post(session.id, { index: 0, speaker: 1 })).status, 404)
+  const segments = [
+    { start: 0, end: 2, text: 'Hello.', speaker: 1 },
+    { start: 2, end: 4, text: 'Hi.', speaker: 2 },
+  ]
+  await storage.writeResult(session.id, { ...buildTranscriptResult('Hello. Hi.', segments, [{ start: 0, end: 2, speaker: 0 }, { start: 2, end: 4, speaker: 1 }]), summary: 'sum' })
+  const response = await post(session.id, { index: 1, speaker: 3 })
+  assert.equal(response.status, 200)
+  const { result } = await response.json()
+  assert.deepEqual(result.speakerNumbers, [1, 3])
+  assert.equal(result.summary, 'sum')
+  assert.match(result.transcript, /\{\{speaker3\}\}/)
+  assert.deepEqual((await storage.readResult(session.id)), result)
+  assert.deepEqual((await (await fetch(`${base}/api/transcriptions/${session.id}`)).json()).result, result)
+
+  assert.equal((await post(session.id, { index: 9, speaker: 1 })).status, 400)
+  assert.equal((await post(session.id, { index: 0, speaker: 5 })).status, 400)
+  assert.equal((await post(session.id, { index: 0, speaker: 0 })).status, 400)
+  assert.equal((await post(session.id, { index: '0', speaker: 1 })).status, 400)
+  assert.equal((await post('not-an-id', { index: 0, speaker: 1 })).status, 400)
+  await storage.writeManifest({ ...ready, state: 'transcribing' })
+  assert.equal((await post(session.id, { index: 0, speaker: 2 })).status, 409)
 })

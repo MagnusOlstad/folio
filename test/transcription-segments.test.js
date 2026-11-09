@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import test from 'node:test'
 import {
   assignSpeakers, buildTranscript, buildTranscriptResult, formatTimestamp, formatTranscript,
-  mergeSpeakerTurns, normalizeSegments, normalizeSpeakerSegments,
+  mergeSpeakerTurns, normalizeSegments, normalizeSpeakerSegments, reassignSegmentSpeaker,
 } from '../server/transcription/segments.js'
 import { stripTranscriptMarkup } from '../server/knowledge/transcript-markup.js'
 import { DIARIZATION_MODELS } from '../server/transcription/models.js'
@@ -168,4 +168,37 @@ test('the Sortformer revision is pinned to a real commit, in sync with the helpe
   const swift = await fs.readFile(new URL('../experiments/mlx-swift/Sources/folio-mlx/main.swift', import.meta.url), 'utf8')
   assert.ok(swift.includes(`modelID: "${model.repository}"`))
   assert.ok(swift.includes(`"${model.revision}"`))
+})
+
+test('reassigning a segment speaker rebuilds derived fields without renumbering', () => {
+  const segments = [
+    { start: 0, end: 2, text: 'One.', speaker: 1 },
+    { start: 2, end: 4, text: 'Two.', speaker: 1 },
+    { start: 4, end: 6, text: 'Three.', speaker: 2 },
+  ]
+  const result = { ...buildTranscriptResult('One. Two. Three.', segments), summary: 'kept', plainText: 'kept text' }
+  const updated = reassignSegmentSpeaker({ ...result, segments, transcript: 'x', speakerNumbers: [1, 2], speakerCount: 2 }, 1, 3)
+  assert.deepEqual(updated.segments.map((segment) => segment.speaker), [1, 3, 2])
+  assert.deepEqual(updated.segments[0], segments[0])
+  assert.deepEqual(updated.speakerNumbers, [1, 2, 3])
+  assert.equal(updated.speakerCount, 3)
+  assert.equal(updated.summary, 'kept')
+  assert.equal(updated.plainText, 'kept text')
+  assert.equal(updated.transcript, formatTranscript(updated.segments, { speakers: true }))
+  assert.equal(segments[1].speaker, 1)
+  // Moving the only segment of speaker 2 leaves speaker numbers 1 and 3 (no renumbering).
+  const gap = reassignSegmentSpeaker(updated, 2, 3)
+  assert.deepEqual(gap.speakerNumbers, [1, 3])
+  assert.equal(gap.transcript.match(/\*\*\{\{speaker3\}\}\*\*/g).length, 1)
+  assert.match(gap.transcript, /\{\{speaker3\}\}\*\* \[00:02\]\nTwo\. Three\./)
+})
+
+test('reassigning a segment speaker rejects bad input', () => {
+  const segments = [{ start: 0, end: 1, text: 'A', speaker: 1 }, { start: 1, end: 2, text: 'B', speaker: 2 }]
+  const result = { segments, transcript: '', speakers: true, speakerCount: 2, speakerNumbers: [1, 2] }
+  for (const [index, speaker] of [[-1, 1], [2, 1], [0.5, 1], ['0', 1], [0, 0], [0, 5], [0, 1.5], [0, '2']]) {
+    assert.throws(() => reassignSegmentSpeaker(result, index, speaker), { status: 400 })
+  }
+  assert.throws(() => reassignSegmentSpeaker({ segments: [{ start: 0, end: 1, text: 'A', speaker: null }] }, 0, 1), { status: 400 })
+  assert.throws(() => reassignSegmentSpeaker({ segments: [] }, 0, 1), { status: 400 })
 })

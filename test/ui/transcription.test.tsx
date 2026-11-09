@@ -24,6 +24,8 @@ function model(overrides: Partial<TranscriptionDockModel> = {}): TranscriptionDo
     identifySpeakers: false,
     deletingSessionId: null,
     recording: { phase: "idle", duration: "0:00", error: "", saving: false },
+    speakerNamesFor: () => null,
+    audioUrlFor: (item) => `/api/transcriptions/${item.id}/audio`,
     ...overrides,
   };
 }
@@ -45,7 +47,17 @@ function actions(): TranscriptionDockActions {
     openTranscript: vi.fn(),
     regenerateSummary: vi.fn(),
     deleteSession: vi.fn(async () => undefined),
+    loadResult: vi.fn(async () => null),
+    reassignSpeaker: vi.fn(),
   };
+}
+
+function openMenu(fileName = "meeting.wav") {
+  fireEvent.click(screen.getByRole("button", { name: `More actions for ${fileName}` }));
+}
+
+function menuItem(name: string | RegExp, role: "menuitem" | "menuitemcheckbox" = "menuitem") {
+  return screen.getByRole(role, { name });
 }
 
 const status = {
@@ -210,20 +222,18 @@ describe("transcription UI", () => {
 
   it("supports choosing and dropping local audio and explains missing model setup", () => {
     const dockActions = actions();
-    const { container } = render(<TranscriptionDock model={model({ status, pending: [session] })} actions={dockActions} />);
+    render(<TranscriptionDock model={model({ status, pending: [session] })} actions={dockActions} />);
     expect(screen.getByRole("button", { name: "Choose audio" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Start recording" })).toBeEnabled();
     expect(screen.getByText("Whisper Large v3 Turbo is not installed")).toBeInTheDocument();
     expect(screen.getByText(/mlx-community\/whisper-large-v3-turbo/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Download Whisper Large v3 Turbo" })).toBeEnabled();
     const file = new File(["local audio"], "meeting.wav", { type: "audio/wav" });
-    fireEvent.drop(container.querySelector(".transcription-input-card")!, { dataTransfer: { files: { length: 1, item: () => file } } });
+    fireEvent.drop(screen.getByRole("region", { name: "Local transcription" }), { dataTransfer: { files: { length: 1, item: () => file } } });
     expect(dockActions.importFile).toHaveBeenCalledWith(file);
     expect(screen.getByText("meeting.wav")).toBeInTheDocument();
-    expect(screen.getByText(/Duration unavailable|1:01/)).toBeInTheDocument();
-    expect(screen.getByText("Record, choose, or drop an audio file. Audio stays on this device.")).toBeInTheDocument();
-    expect(container.querySelectorAll(".transcription-input-card")).toHaveLength(1);
-    expect(container.querySelector(".transcription-recorder")).toBeNull();
+    expect(screen.getByText(/1:01/)).toBeInTheDocument();
+    expect(document.querySelector(".transcription-recorder")).toBeNull();
   });
 
   it("reports the selected full Whisper variant and download size", () => {
@@ -242,14 +252,16 @@ describe("transcription UI", () => {
   it("confirms deletion inline and keeps the opened Markdown note", async () => {
     const dockActions = actions();
     render(<TranscriptionDock model={model({ pending: [session] })} actions={dockActions} />);
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    openMenu();
+    fireEvent.click(menuItem("Delete…"));
     expect(screen.getByText(/Delete this local audio, transcript, and summary/)).toBeInTheDocument();
     expect(screen.getByText(/Any opened or saved Markdown note will be kept/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("group", { name: /Confirm deletion/ })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    openMenu();
+    fireEvent.click(menuItem("Delete…"));
     fireEvent.click(screen.getByRole("button", { name: "Delete recording" }));
     await waitFor(() => expect(dockActions.deleteSession).toHaveBeenCalledWith(session));
   });
@@ -260,7 +272,8 @@ describe("transcription UI", () => {
       pending: [{ ...session, state: "transcribing" }],
       recording: { phase: "recording", duration: "0:03", error: "", saving: false },
     })} actions={dockActions} />);
-    expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
+    openMenu();
+    expect(menuItem("Delete…")).toBeDisabled();
   });
 
   it("shows only the current transcription percentage on the session", () => {
@@ -269,7 +282,7 @@ describe("transcription UI", () => {
       activeSession: { ...session, state: "recorded" },
       pending: [{ ...session, state: "recorded", progressPercent: 47 }],
     })} actions={actions()} />);
-    expect(screen.getByText("47%")).toBeInTheDocument();
+    expect(screen.getByText("Transcribing… 47%")).toBeInTheDocument();
     expect(document.querySelector(".transcription-download-progress")).toBeNull();
   });
 
@@ -931,16 +944,15 @@ describe("transcription UI", () => {
     expect(screen.queryByRole("checkbox", { name: /identify speakers/i })).not.toBeInTheDocument();
   });
 
-  it("has no speaker toggle in the Add audio card, and offers the download only when an item or the default wants speakers", () => {
+  it("has no speaker toggle in the header, and offers the download only when an item or the default wants speakers", () => {
     const dockActions = actions();
     const pendingSession: TranscriptionSession = { ...session, state: "recorded", identifySpeakers: false };
     const status = { ...readyStatus, diarization: speakerStatus };
     const { rerender } = render(<TranscriptionDock model={model({ status, pending: [pendingSession] })} actions={dockActions} />);
-    const card = document.querySelector(".transcription-input-card") as HTMLElement;
-    expect(card.querySelector("input[type=checkbox]")).toBeNull();
-    const toggle = screen.getByRole("checkbox", { name: "Identify speakers in meeting.wav" });
-    expect(toggle).not.toBeChecked();
-    expect(screen.getByText("up to 4 · slower")).toBeInTheDocument();
+    expect(document.querySelector(".transcription-header input[type=checkbox]")).toBeNull();
+    openMenu();
+    const toggle = menuItem("Identify speakers in meeting.wav", "menuitemcheckbox");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
     expect(screen.queryByRole("button", { name: /Download Sortformer/ })).not.toBeInTheDocument();
     fireEvent.click(toggle);
     expect(dockActions.setSessionIdentifySpeakers).toHaveBeenCalledWith(pendingSession, true);
@@ -964,8 +976,9 @@ describe("transcription UI", () => {
     const dockActions = actions();
     const pendingSession: TranscriptionSession = { ...session, state: "failed", identifySpeakers: true, error: "Interrupted." };
     render(<TranscriptionDock model={model({ status: { ...readyStatus, diarization: speakerStatus }, pending: [pendingSession] })} actions={dockActions} />);
-    const itemToggle = screen.getByRole("checkbox", { name: "Identify speakers in meeting.wav" });
-    expect(itemToggle).toBeChecked();
+    openMenu();
+    const itemToggle = menuItem("Identify speakers in meeting.wav", "menuitemcheckbox");
+    expect(itemToggle).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
     expect(screen.getByText(/Speaker labels need the Sortformer Speaker Labels model/)).toBeInTheDocument();
     fireEvent.click(itemToggle);
@@ -1037,8 +1050,9 @@ describe("transcription UI", () => {
     const dockActions = actions();
     const ready: TranscriptionSession = { ...session, identifySpeakers: false };
     render(<TranscriptionDock model={model({ status: { ...readyStatus, diarization: { ...speakerStatus, modelState: "ready", canDiarize: true } }, pending: [ready] })} actions={dockActions} />);
-    expect(screen.queryByRole("checkbox", { name: "Identify speakers in meeting.wav" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Re-transcribe" }));
+    openMenu();
+    expect(screen.queryByRole("menuitemcheckbox", { name: /Identify speakers/ })).not.toBeInTheDocument();
+    fireEvent.click(menuItem("Re-transcribe…"));
     fireEvent.click(screen.getByRole("checkbox", { name: "Identify speakers in meeting.wav" }));
     expect(dockActions.setSessionIdentifySpeakers).toHaveBeenCalledWith(ready, true);
     expect(dockActions.retranscribe).not.toHaveBeenCalled();
@@ -1047,7 +1061,8 @@ describe("transcription UI", () => {
     expect(within(group).getByRole("checkbox", { name: "Identify speakers in meeting.wav" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("group", { name: /Confirm re-transcription/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Re-transcribe" }));
+    openMenu();
+    fireEvent.click(menuItem("Re-transcribe…"));
     fireEvent.click(within(screen.getByRole("group", { name: /Confirm re-transcription/ })).getByRole("button", { name: "Re-transcribe" }));
     expect(dockActions.retranscribe).toHaveBeenCalledWith(ready);
   });

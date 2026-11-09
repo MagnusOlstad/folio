@@ -3,10 +3,15 @@
   flex-direction: column;
   gap: 10px;
   width: 100%;
-  padding-top: 10px;
-  border-top: 1px solid rgba(var(--line-rgb), 0.75);
+  box-sizing: border-box;
+  padding: 8px 9px;
+  border: 1px solid rgba(var(--line-rgb), 0.75);
+  border-radius: 6px;
+  background: var(--paper);
   text-align: left;
 }
+
+.transcription-recorder.is-recording { border-color: rgba(var(--acid-rgb), 0.75); }
 
 .transcription-recorder-heading,
 .transcription-recorder-actions {

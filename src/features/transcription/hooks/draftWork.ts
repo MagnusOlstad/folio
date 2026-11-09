@@ -47,11 +47,12 @@ function transcriptSection(markdown: string) {
 }
 
 /** The still-open draft this session produced, with its current text, or null once it was filed or closed. */
-export function linkedDraft(ctx: DraftWorkContext, sessionId: string, bundle: string | null) {
+export function linkedDraft(ctx: DraftWorkContext, sessionId: string, bundle: string | null, prune = true) {
   let draft = ctx.sessionDrafts.current.get(sessionId)
   if (draft && (draft.bundleId !== bundle || !draft.draftId.startsWith('untitled:')
     || ctx.draftsRef.current.isDraftOpen?.(draft.draftId) === false)) {
-    ctx.sessionDrafts.current.delete(sessionId)
+    // Render-time callers must not prune: the adapter can lag a render behind a just-created draft.
+    if (prune) ctx.sessionDrafts.current.delete(sessionId)
     draft = undefined
   }
   if (!draft) return null

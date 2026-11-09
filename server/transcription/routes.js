@@ -3,6 +3,8 @@ import { safeAudioFilename, safeTranscriptionId } from './model.js'
 
 const AUDIO_TYPES = new Set(['audio/aac', 'audio/aiff', 'audio/flac', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/x-aiff', 'audio/x-flac', 'audio/x-m4a', 'audio/x-wav', 'application/octet-stream'])
 
+const PLAYBACK_TYPES = { '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.aiff': 'audio/aiff', '.flac': 'audio/flac' }
+
 function fail(response, error) {
   const status = Number.isInteger(error?.status) ? error.status : Number.isInteger(error?.statusCode) ? error.statusCode : 500
   response.status(status).json({ error: error instanceof Error ? error.message : 'Transcription request failed.' })
@@ -70,6 +72,27 @@ export function registerRoutes(app, runtime) {
         const updated = await storage.writeManifest({ ...session, state: 'recorded', error: null })
         response.status(201).json({ session: updated })
       } finally { service.endUpload(session.id) }
+    } catch (error) { fail(response, error) }
+  })
+  app.get('/api/transcriptions/:id/audio', async (request, response) => {
+    try {
+      if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
+      const session = await storage.readManifest(request.params.id)
+      if (!session || !(await storage.hasRecording(session))) return response.status(404).json({ error: 'Recording not found.' })
+      const recording = storage.recordingPath(session)
+      response.set('Content-Type', PLAYBACK_TYPES[path.extname(recording).toLowerCase()] || 'application/octet-stream')
+      response.set('Cache-Control', 'no-store')
+      response.sendFile(path.resolve(recording), { acceptRanges: true, cacheControl: false, lastModified: false, etag: false }, (error) => {
+        if (error && !response.headersSent) fail(response, error)
+      })
+    } catch (error) { fail(response, error) }
+  })
+  app.post('/api/transcriptions/:id/segments/speaker', async (request, response) => {
+    try {
+      if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
+      const { index, speaker } = request.body ?? {}
+      if (!Number.isInteger(index) || !Number.isInteger(speaker)) return response.status(400).json({ error: 'index and speaker must be integers.' })
+      response.json({ result: await service.reassignSpeaker(request.params.id, index, speaker) })
     } catch (error) { fail(response, error) }
   })
   app.get('/api/transcriptions/:id', async (request, response) => {

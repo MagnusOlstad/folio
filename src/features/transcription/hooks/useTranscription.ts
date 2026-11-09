@@ -4,11 +4,15 @@ import { useAudioRecorder, type RecordingPhase } from './useAudioRecorder.ts'
 import type { RecordingAssociation } from '../model/recording.ts'
 import { audioDuration } from '../model/audio-duration.ts'
 import { applyRetranscribedResult, regenerateSummary, type DraftWorkContext, type SessionDraft } from './draftWork.ts'
+import { linkedSpeakerNames, reassignSegmentSpeaker, type ReassignOutcome } from './speakerReassign.ts'
+import { transcriptionAudioUrl } from '../model/audio-url.ts'
+import { playbackStore } from '../model/playback-store.ts'
 import {
   mergeTranscriptionDraft,
   type TranscriptionDraftAdapter,
   type TranscriptionPhase,
   type TranscriptionProcessResponse,
+  type TranscriptionResult,
   type SpeakerModelStatus,
   type TranscriptionSession,
   type TranscriptionStatus,
@@ -25,6 +29,9 @@ export type TranscriptionDockModel = {
   identifySpeakers: boolean
   deletingSessionId: string | null
   recording: { phase: RecordingPhase; duration: string; error: string; saving: boolean }
+  /** Speaker names from the session's open draft (`speakerN::`), or null when no draft is open. */
+  speakerNamesFor: (session: TranscriptionSession) => ReadonlyMap<number, string> | null
+  audioUrlFor: (session: TranscriptionSession) => string
 }
 
 export type TranscriptionDockActions = {
@@ -44,6 +51,9 @@ export type TranscriptionDockActions = {
   openTranscript: (session: TranscriptionSession) => void
   regenerateSummary: (session: TranscriptionSession) => void
   deleteSession: (session: TranscriptionSession) => Promise<void>
+  /** Loads the stored result (segments included) of a ready session for the player. */
+  loadResult: (session: TranscriptionSession) => Promise<TranscriptionResult | null>
+  reassignSpeaker: (session: TranscriptionSession, index: number, speaker: number) => Promise<ReassignOutcome>
 }
 
 type Options = {
@@ -115,6 +125,21 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     }
   }, [sourceBundleId])
   useLayoutEffect(() => { draftsRef.current = drafts }, [drafts])
+  const pendingRef = useRef(pending)
+  useLayoutEffect(() => { pendingRef.current = pending }, [pending])
+  useEffect(() => {
+    playbackStore.configure({
+      sourceFor: (sessionId) => {
+        const session = pendingRef.current.find((item) => item.id === sessionId)
+        return session ? transcriptionAudioUrl(session) : null
+      },
+      sessionForDraft: (draftId) => {
+        for (const [sessionId, draft] of sessionDrafts.current) if (draft.draftId === draftId) return sessionId
+        return null
+      },
+    })
+    return () => playbackStore.configure({})
+  }, [])
 
   function draftFiled(oldId: string, _newId: string, bundleId: string) {
     for (const [sessionId, draft] of sessionDrafts.current) {
@@ -364,6 +389,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
       await apiForBundle<{ deleted: boolean }>(session.sourceBundleId ?? null,
         `/api/transcriptions/${encodeURIComponent(session.id)}`, { method: 'DELETE' })
       sessionDrafts.current.delete(session.id)
+      playbackStore.unload(session.id)
       deletedSessionIds.current.add(session.id)
       setPending((sessions) => sessions.filter((item) => item.id !== session.id))
       if (activeSession?.id === session.id) {
@@ -400,6 +426,8 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     identifySpeakers,
     deletingSessionId,
     recording: { phase: recorder.phase, duration: recorder.duration, error: recorder.error, saving: recorder.saving },
+    speakerNamesFor: (session) => linkedSpeakerNames(draftWork, session),
+    audioUrlFor: transcriptionAudioUrl,
   }
   const actions: TranscriptionDockActions = {
     importFile: (file, association) => importFile(file, association),
@@ -417,6 +445,11 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     openTranscript: (session) => void openTranscript(session),
     regenerateSummary: (session) => void regenerateSummary(draftWork, session),
     deleteSession,
+    loadResult: async (session) => {
+      const response = await apiForBundle<TranscriptionProcessResponse>(session.sourceBundleId ?? null, `/api/transcriptions/${encodeURIComponent(session.id)}`)
+      return response.result ?? null
+    },
+    reassignSpeaker: (session, index, speaker) => reassignSegmentSpeaker(draftWork, session, index, speaker),
   }
   return { model, actions, draftFiled }
 }

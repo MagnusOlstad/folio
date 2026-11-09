@@ -184,3 +184,26 @@ export function buildTranscriptResult(text, segments, speakerTurns = null) {
   const built = buildTranscript(segments, speakerTurns)
   return { transcript: built.transcript, plainText, segments: built.segments, speakers: built.speakerCount > 0, speakerCount: built.speakerCount, speakerNumbers: built.speakerNumbers }
 }
+
+/**
+ * Reassigns one segment to another speaker and rebuilds the derived fields (transcript, speakerNumbers,
+ * speakerCount, speakers). Speaker numbers are never renumbered because notes reference `speakerN::` names.
+ * Throws a 400-status error for bad input or a result without speaker labels.
+ */
+export function reassignSegmentSpeaker(result, index, speaker, { maxSpeakers = 4 } = {}) {
+  const bad = (message) => Object.assign(new Error(message), { status: 400 })
+  const segments = Array.isArray(result?.segments) ? result.segments : []
+  if (!segments.length || !segments.every((segment) => Number.isInteger(segment?.speaker))) throw bad('This transcript has no speaker labels.')
+  if (!Number.isInteger(index) || index < 0 || index >= segments.length) throw bad('Segment index is out of range.')
+  if (!Number.isInteger(speaker) || speaker < 1 || speaker > maxSpeakers) throw bad(`Speaker must be a whole number from 1 to ${maxSpeakers}.`)
+  const updated = segments.map((segment, position) => (position === index ? { ...segment, speaker } : segment))
+  const speakerNumbers = speakerNumbersOf(updated)
+  return {
+    ...result,
+    segments: updated,
+    transcript: formatTranscript(updated, { speakers: true }),
+    speakers: true,
+    speakerCount: speakerNumbers.length,
+    speakerNumbers,
+  }
+}

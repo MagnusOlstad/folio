@@ -53,6 +53,11 @@ A ready session keeps its audio, so it can be transcribed again (for example wit
 - The run uses the currently selected Whisper model and the session's `identifySpeakers`. `result.json` is replaced only on success; on failure or cancellation the previous result and the `ready` state are kept.
 - A successful run replaces only the `## Transcript` section of the linked open draft. In `## Speakers` every existing `speakerN::` line is kept (including names you edited), definitions for newly appearing speakers are appended, and the section is created before `## Transcript` if the draft had none. The title, summary, and other text are untouched. With no open linked draft, a new draft is created as "Open draft" does. The merge is `applyRetranscription` in `src/features/transcription/model/retranscribe.ts`.
 
+## Playback and speaker correction
+
+- `GET /api/transcriptions/:id/audio` streams the stored recording with HTTP Range support (`206`, `Accept-Ranges: bytes`, `416` when unsatisfiable) and an audio `Content-Type` from the file extension. It is `Cache-Control: no-store` because the audio can be replaced. The bundle can be passed as `?bundle=` so an `<audio src>` works. `400` for an invalid ID, `404` when the session or recording is missing.
+- `POST /api/transcriptions/:id/segments/speaker` with `{ "index": 3, "speaker": 2 }` reassigns one segment (0-based `index`) to speaker 1-4 and returns `{ "result" }`, the full updated `result.json`. `transcript`, `speakerNumbers`, `speakerCount` and `speakers` are rebuilt from the segments; `plainText`, `summary` and other fields are kept. Speakers are not renumbered, so `speakerN::` names in the note stay valid and a new number (for example 3) can appear. `400` for a bad body, an out-of-range index or speaker, or a result without speaker labels; `404` for a missing session or result; `409` while the session is transcribing.
+
 ## Native patches
 
 The pinned `mlx-audio-swift` revision `8d86630` is patched when the helper is built (`experiments/mlx-swift/Patches/`): `whisper-language-detection-pinned-8d86630.patch`, then `whisper-timestamps-pinned-8d86630.patch`, which adds opt-in `WhisperModel.timestampsEnabled` (OpenAI's timestamp rules and per-segment output). Upstream behaviour is unchanged unless it is switched on.

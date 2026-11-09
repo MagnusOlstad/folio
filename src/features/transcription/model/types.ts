@@ -19,6 +19,8 @@ export type TranscriptionSession = {
   sourceBundleId?: string | null
   /** Per-transcription choice, saved with the session so retries use it. */
   identifySpeakers?: boolean
+  /** Distinct speakers in the saved transcript, when the server reports it. */
+  speakerCount?: number
 }
 
 export type TranscriptionSegment = { start: number; end: number; text: string; speaker?: number | null }

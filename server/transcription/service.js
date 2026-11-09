@@ -5,9 +5,9 @@ import { randomUUID } from 'node:crypto'
 import { createSerialQueue } from '../core/queue.js'
 import { markdownFromResult, splitTranscript } from './model.js'
 import { createDiarizationSupport } from './diarization.js'
-import { buildTranscriptResult, normalizeSegments } from './segments.js'
+import { buildTranscriptResult, normalizeSegments, reassignSegmentSpeaker } from './segments.js'
 import { folderBytes, installedSnapshot } from './snapshots.js'
-import { DEFAULT_TRANSCRIPTION_MODEL_ID, TRANSCRIPTION_MODELS } from './models.js'
+import { DEFAULT_TRANSCRIPTION_MODEL_ID, DIARIZATION_MODELS, DIARIZATION_MODEL_ID, TRANSCRIPTION_MODELS } from './models.js'
 import { createSessionLocks } from './locks.js'
 import { runHelper } from './helper.js'
 import { recordDownloadProgress, summarizeDownloadProgress } from '../mlx/download-progress.js'
@@ -295,6 +295,25 @@ export function createTranscriptionService(runtime) {
     return runtime.transcriptionStorage.writeManifest({ ...session, identifySpeakers: identifySpeakers === true })
   }
 
+  const speakerEdits = new Map()
+  async function reassignSpeaker(id, index, speaker) {
+    const storage = runtime.transcriptionStorage
+    const run = async () => {
+      const session = await storage.readManifest(id)
+      if (!session) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
+      if (active.has(id) || locks.pendingTranscriptions.has(id) || session.state === 'transcribing') {
+        throw Object.assign(new Error('Speakers cannot be changed while a transcription is running.'), { status: 409 })
+      }
+      const result = await storage.readResult(id)
+      if (!result) throw Object.assign(new Error('Transcription result not found.'), { status: 404 })
+      const updated = reassignSegmentSpeaker(result, index, speaker, { maxSpeakers: DIARIZATION_MODELS[DIARIZATION_MODEL_ID].maxSpeakers })
+      return storage.writeResult(id, updated)
+    }
+    const next = (speakerEdits.get(id) ?? Promise.resolve()).catch(() => undefined).then(run)
+    speakerEdits.set(id, next)
+    try { return await next } finally { if (speakerEdits.get(id) === next) speakerEdits.delete(id) }
+  }
+
   async function updateDraftId(id, draftId) {
     const session = await runtime.transcriptionStorage.readManifest(id)
     if (!session) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
@@ -452,6 +471,7 @@ export function createTranscriptionService(runtime) {
     selectModel,
     installDiarization: diarization.install,
     updateOptions,
+    reassignSpeaker,
     transcribe,
     cancel,
     updateDraftId,
