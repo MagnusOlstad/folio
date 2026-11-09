@@ -78,10 +78,15 @@ The build fetches the pinned Swift sources and verified Cmlx framework into
 the ignored `.cache` directory, compiles the helper, then stages a relocatable
 app tree at `.cache/staged/Folio.app`. This builds the runtime only; it does
 not download either model. The build applies
-`Patches/whisper-language-detection-pinned-8d86630.patch` to the ignored audio
-package copy. It detects Whisper's language from the encoder output when no
-language is supplied, then includes the detected language token in the decoder
-prompt. `npm run desktop` and the macOS packaging scripts run this build before
+`Patches/whisper-language-detection-pinned-8d86630.patch` and then
+`Patches/whisper-timestamps-pinned-8d86630.patch` to the ignored audio
+package copy. The first detects Whisper's language from the encoder output when
+no language is supplied, then includes the detected language token in the
+decoder prompt. The second adds an opt-in `timestampsEnabled` switch that makes
+Whisper decode timestamp tokens and return one `{start, end, text}` segment per
+timestamped span; `folio-mlx` turns it on and offsets segments by their window.
+The `diarization` task loads Sortformer from `MLXAudioVAD` (optional, installed
+on request; its pinned revision is still a placeholder in this checkout). `npm run desktop` and the macOS packaging scripts run this build before
 launching or packaging Folio.
 The package declares Swift tools version 6.1; this build has been validated with
 Swift 6.4. The preflight verifies that the selected SwiftPM launches and leaves
