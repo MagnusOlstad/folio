@@ -31,6 +31,8 @@ describe("translated export model", () => {
   it("parses stored preferences defensively", () => {
     expect(parseTranslatedExportPreferences("junk")).toEqual({ target: "en", destination: "markdown" });
     expect(parseTranslatedExportPreferences(JSON.stringify({ target: "de", destination: "pdf" }))).toEqual({ target: "de", destination: "pdf" });
+    expect(parseTranslatedExportPreferences(JSON.stringify({ target: "it", destination: "pdf" }))).toEqual({ target: "it", destination: "pdf" });
+    expect(parseTranslatedExportPreferences(JSON.stringify({ target: "fi", destination: "pdf" }))).toEqual({ target: "en", destination: "pdf" });
     expect(parseTranslatedExportPreferences(JSON.stringify({ target: "xx", destination: 3 }))).toEqual({ target: "en", destination: "markdown" });
   });
 
@@ -162,12 +164,12 @@ describe("translated export dialog", () => {
   };
   const tick = (ms = 1600) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 
-  it("marks Finnish as experimental through the radio's description", () => {
+  it("offers Italian without an experimental hint", () => {
     renderMenu();
     openDialog();
-    const finnish = screen.getByRole("radio", { name: /Suomi/ });
-    expect(finnish).toHaveAccessibleDescription("Experimental — lower quality");
-    expect(screen.getByRole("radio", { name: "Deutsch" })).not.toHaveAccessibleDescription();
+    const italian = screen.getByRole("radio", { name: /Italiano/ });
+    expect(italian).not.toHaveAccessibleDescription();
+    expect(screen.queryByRole("radio", { name: /Suomi/ })).toBeNull();
   });
 
   it("offers Translate… only for translatable notes and disables it without a model", () => {
@@ -177,14 +179,17 @@ describe("translated export dialog", () => {
     expect(screen.getByRole("menuitem", { name: "Markdown" })).toBeInTheDocument();
   });
 
-  it("sends a draft's body (without the guidance line) as markdown", async () => {
+  it("offers Italian for drafts and sends its body without the guidance line as markdown", async () => {
     const draft: ViewerDocument = { ...note, id: "untitled:1", title: "Untitled", content: "guidance line\n# Utkast\n\nJeg er her." };
     render(<NoteMoreMenu title={draft.title} exporting={false} onExport={vi.fn()} translate={{ document: draft, available: true, onDeliver }} />);
     openDialog();
+    expect(screen.getByRole("radio", { name: /Italiano/ })).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /Suomi/ })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: /Italiano/ }));
     fireEvent.click(screen.getByRole("button", { name: "Translate" }));
     await tick(0);
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
-    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ id: "untitled:1", target: expect.any(String), markdown: "# Utkast\n\nJeg er her." });
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ id: "untitled:1", target: "it", markdown: "# Utkast\n\nJeg er her." });
   });
 
   it("disables the item with a hint when translation is unavailable", () => {
@@ -211,6 +216,17 @@ describe("translated export dialog", () => {
     expect(onDeliver).toHaveBeenCalledWith(note, expect.objectContaining({ content: result.content }), "de", "draft");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(JSON.parse(window.localStorage.getItem(TRANSLATED_EXPORT_STORAGE_KEY) ?? "{}")).toEqual({ target: "de", destination: "draft" });
+  });
+
+  it("submits and remembers Italian with the it target", async () => {
+    renderMenu();
+    openDialog();
+    fireEvent.click(screen.getByRole("radio", { name: /Italiano/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Translate" }));
+    await tick(0);
+    const request = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(String(request?.[1]?.body))).toEqual({ id: note.id, target: "it" });
+    expect(JSON.parse(window.localStorage.getItem(TRANSLATED_EXPORT_STORAGE_KEY) ?? "{}")).toEqual({ target: "it", destination: "markdown" });
   });
 
   it("shows a determinate bar, phase text, elapsed time and the latest translated paragraph", async () => {

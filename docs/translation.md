@@ -39,7 +39,7 @@ Writes are atomic (temp file + rename). Because entries are keyed by text hash, 
 
 ## Translated export
 
-An explicit, on-demand export translates one filed note into `en` (English), `no` (Norwegian Bokmål), `de` (German), `es` (Spanish), `fr` (French), `fi` (Finnish), `sv` (Swedish) or `da` (Danish). It works even when background translation is switched off, but still needs an installed, selected generation model and never downloads anything.
+An explicit, on-demand export translates one filed note into `en` (English), `no` (Norwegian Bokmål), `de` (German), `es` (Spanish), `fr` (French), `it` (Italian), `sv` (Swedish) or `da` (Danish). It works even when background translation is switched off, but still needs an installed, selected generation model and never downloads anything.
 
 - `POST /api/note/translation/export` with `{ id, target }` returns 202 `{ jobId, id, target, status: 'running', translatedBlocks, totalBlocks }`. An identical running job is returned instead of starting another. 400 for an invalid target or non-bundle id, 404 for a missing note, 503 when no generation model is installed.
 - `GET /api/note/translation/export/:jobId` returns the job with `status` `running|done|failed|cancelled` and additive `phase` (`queued` behind another export, `waiting` for user-facing model work or model load, `translating`, `finishing`, then the final status), `lastTranslated` (plain text of the most recent translated block, at most 160 characters, or `null`; also on the POST response) and `failedBlocks` (blocks that fell back to the original after retries); `title`, `description` and `content` (Markdown body) appear only when `done`, `error` only when `failed`. 404 for unknown or expired jobs (kept 10 minutes after finishing).

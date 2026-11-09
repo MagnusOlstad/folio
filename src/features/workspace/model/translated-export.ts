@@ -16,7 +16,7 @@ export const TRANSLATED_EXPORT_LANGUAGES: readonly { target: TranslatedExportTar
   { target: "de", native: "Deutsch", english: "German" },
   { target: "es", native: "Español", english: "Spanish" },
   { target: "fr", native: "Français", english: "French" },
-  { target: "fi", native: "Suomi", english: "Finnish", hint: "Experimental — lower quality" },
+  { target: "it", native: "Italiano", english: "Italian" },
   { target: "sv", native: "Svenska", english: "Swedish" },
   { target: "da", native: "Dansk", english: "Danish" },
 ];
