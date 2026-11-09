@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, apiForBundle } from '../../../lib/api.ts'
 import { useAudioRecorder, type RecordingPhase } from './useAudioRecorder.ts'
+import type { SourceLevels, SourceSilence } from '../model/level-monitor.ts'
 import type { RecordingAssociation } from '../model/recording.ts'
+import { systemAudioSupported, type RecordingSource } from '../model/recording-source.ts'
 import { audioDuration } from '../model/audio-duration.ts'
 import { applyRetranscribedResult, regenerateSummary, type DraftWorkContext, type SessionDraft } from './draftWork.ts'
 import { linkedSpeakerNames, reassignSegmentSpeaker, type ReassignOutcome } from './speakerReassign.ts'
@@ -18,6 +20,19 @@ import {
   type TranscriptionStatus,
 } from '../model/types.ts'
 
+export type RecordingModel = {
+  phase: RecordingPhase
+  duration: string
+  error: string
+  saving: boolean
+  source: RecordingSource
+  /** True when the desktop shell can capture system audio, so the source choice is offered. */
+  systemAudioSupported: boolean
+  systemAudioBlocked: boolean
+  levels: SourceLevels
+  silent: SourceSilence
+}
+
 export type TranscriptionDockModel = {
   phase: TranscriptionPhase
   activeSession: TranscriptionSession | null
@@ -28,7 +43,7 @@ export type TranscriptionDockModel = {
   /** Applies to the next import or recording; each session keeps its own saved copy. */
   identifySpeakers: boolean
   deletingSessionId: string | null
-  recording: { phase: RecordingPhase; duration: string; error: string; saving: boolean }
+  recording: RecordingModel
   /** Speaker names from the session's open draft (`speakerN::`), or null when no draft is open. */
   speakerNamesFor: (session: TranscriptionSession) => ReadonlyMap<number, string> | null
   audioUrlFor: (session: TranscriptionSession) => string
@@ -37,6 +52,7 @@ export type TranscriptionDockModel = {
 export type TranscriptionDockActions = {
   importFile: (file: File, association?: RecordingAssociation) => Promise<boolean>
   startRecording: () => Promise<void>
+  setRecordingSource: (source: RecordingSource) => void
   stopRecording: () => void
   discardRecording: () => void
   retryRecording: () => Promise<void>
@@ -425,13 +441,24 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     error,
     identifySpeakers,
     deletingSessionId,
-    recording: { phase: recorder.phase, duration: recorder.duration, error: recorder.error, saving: recorder.saving },
+    recording: {
+      phase: recorder.phase,
+      duration: recorder.duration,
+      error: recorder.error,
+      saving: recorder.saving,
+      source: recorder.source,
+      systemAudioSupported: systemAudioSupported(),
+      systemAudioBlocked: recorder.systemAudioBlocked,
+      levels: recorder.levels,
+      silent: recorder.silent,
+    },
     speakerNamesFor: (session) => linkedSpeakerNames(draftWork, session),
     audioUrlFor: transcriptionAudioUrl,
   }
   const actions: TranscriptionDockActions = {
     importFile: (file, association) => importFile(file, association),
     startRecording: recorder.start,
+    setRecordingSource: recorder.setSource,
     stopRecording: recorder.stop,
     discardRecording: recorder.discard,
     retryRecording: recorder.retry,

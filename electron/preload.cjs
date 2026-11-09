@@ -38,4 +38,7 @@ contextBridge.exposeInMainWorld('folio', {
   getObsidianImportJob: (jobId) => ipcRenderer.invoke('folio:get-obsidian-import-job', jobId),
   cancelObsidianImport: (jobId) => ipcRenderer.invoke('folio:cancel-obsidian-import', jobId),
   selectFolder: () => ipcRenderer.invoke('folio:select-folder'),
+  systemAudio: { supported: process.platform === 'darwin' || process.platform === 'win32' },
+  getScreenCaptureAccess: () => ipcRenderer.invoke('folio:get-screen-capture-access'),
+  openSystemAudioSettings: () => ipcRenderer.invoke('folio:open-system-audio-settings'),
 })

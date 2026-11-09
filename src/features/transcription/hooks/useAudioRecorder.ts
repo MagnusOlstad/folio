@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { openCapture, SystemAudioUnavailableError, type CaptureSession } from '../model/capture-streams.ts'
+import { IDLE_SNAPSHOT, startLevelMonitor, type LevelSnapshot } from '../model/level-monitor.ts'
 import { recordingBlobToWav, type RecordingAssociation } from '../model/recording.ts'
+import { loadRecordingSource, saveRecordingSource, systemAudioSupported, type RecordingSource } from '../model/recording-source.ts'
 
 export type RecordingPhase = 'idle' | 'requesting' | 'recording' | 'processing' | 'ready'
 
@@ -8,7 +11,7 @@ type Options = {
   onImport: (file: File, association: RecordingAssociation) => Promise<boolean>
 }
 
-const MAX_RECORDING_MS = 40 * 60 * 1000
+const MAX_RECORDING_MS = 4 * 60 * 60 * 1000
 type RetainedRecording = { blob: Blob; association: RecordingAssociation; durationMs: number; file?: File }
 
 function durationLabel(durationMs: number) {
@@ -21,8 +24,13 @@ export function useAudioRecorder({ association, onImport }: Options) {
   const [durationMs, setDurationMs] = useState(0)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [source, setSourceState] = useState<RecordingSource>(loadRecordingSource)
+  const [meters, setMeters] = useState<LevelSnapshot>(IDLE_SNAPSHOT)
+  const [systemAudioBlocked, setSystemAudioBlocked] = useState(false)
   const recorder = useRef<MediaRecorder | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
+  const captureRef = useRef<CaptureSession | null>(null)
+  const stopMonitor = useRef<(() => void) | null>(null)
+  const activeSource = useRef<RecordingSource>(source)
   const chunks = useRef<Blob[]>([])
   const startedAt = useRef(0)
   const interval = useRef<number | null>(null)
@@ -40,8 +48,17 @@ export function useAudioRecorder({ association, onImport }: Options) {
   const stopTracks = useCallback(() => {
     if (interval.current !== null) window.clearInterval(interval.current)
     interval.current = null
-    streamRef.current?.getTracks().forEach((track) => track.stop())
-    streamRef.current = null
+    stopMonitor.current?.()
+    stopMonitor.current = null
+    captureRef.current?.close()
+    captureRef.current = null
+    if (mounted.current) setMeters(IDLE_SNAPSHOT)
+  }, [])
+
+  const setSource = useCallback((next: RecordingSource) => {
+    if (!systemAudioSupported()) return
+    setSourceState(next)
+    saveRecordingSource(next)
   }, [])
 
   const saveRetained = useCallback(async () => {
@@ -70,6 +87,7 @@ export function useAudioRecorder({ association, onImport }: Options) {
     const allChunks = chunks.current
     const duration = Date.now() - startedAt.current
     const capturedAssociation = activeAssociation.current
+    const capturedSource = activeSource.current
     const mediaRecorder = recorder.current
     recorder.current = null
     stopTracks()
@@ -88,7 +106,13 @@ export function useAudioRecorder({ association, onImport }: Options) {
       return
     }
     try {
-      if (!allChunks.length) throw new Error('No audio was captured. Check your microphone and try again.')
+      if (!allChunks.length) {
+        throw new Error(capturedSource === 'microphone'
+          ? 'No audio was captured. Check your microphone and try again.'
+          : capturedSource === 'system'
+            ? 'No audio was captured. Check that the meeting is playing on this Mac and try again.'
+            : 'No audio was captured. Check your microphone and that the meeting is playing on this Mac, then try again.')
+      }
       const source = new Blob(allChunks, { type: mediaRecorder?.mimeType || allChunks[0]?.type || 'audio/webm' })
       const pending: RetainedRecording = { blob: source, association: capturedAssociation, durationMs: duration }
       retained.current = pending
@@ -119,23 +143,29 @@ export function useAudioRecorder({ association, onImport }: Options) {
     startPending.current = true
     cancelStart.current = false
     setError('')
+    setSystemAudioBlocked(false)
     setDurationMs(0)
     discardOnStop.current = false
     setPhase('requesting')
     activeAssociation.current = association
+    const requestedSource = systemAudioSupported() ? source : 'microphone'
+    activeSource.current = requestedSource
     try {
-      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-        throw new Error('Microphone recording is not supported in this browser.')
+      if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices
+        || (requestedSource !== 'system' && !navigator.mediaDevices.getUserMedia)) {
+        throw new Error(requestedSource === 'microphone'
+          ? 'Microphone recording is not supported in this browser.'
+          : 'Recording is not supported in this browser.')
       }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      streamRef.current = stream
+      const capture = await openCapture(requestedSource)
+      captureRef.current = capture
       startPending.current = false
       if (!mounted.current || cancelStart.current) {
-        stream.getTracks().forEach((track) => track.stop())
+        stopTracks()
         if (mounted.current) setPhase('idle')
         return
       }
-      const mediaRecorder = new MediaRecorder(stream)
+      const mediaRecorder = new MediaRecorder(capture.stream)
       recorder.current = mediaRecorder
       chunks.current = []
       startedAt.current = Date.now()
@@ -145,10 +175,20 @@ export function useAudioRecorder({ association, onImport }: Options) {
       })
       mediaRecorder.addEventListener('stop', () => { void finishRecording() }, { once: true })
       mediaRecorder.addEventListener('error', () => {
-        setError('The microphone recording stopped unexpectedly. Try again.')
+        setError(requestedSource === 'microphone'
+          ? 'The microphone recording stopped unexpectedly. Try again.'
+          : 'The recording stopped unexpectedly. Try again.')
         if (mediaRecorder.state !== 'inactive') mediaRecorder.stop()
       }, { once: true })
+      // Stopping the OS-level share ends the system track; keep what was captured.
+      capture.system?.getAudioTracks()[0]?.addEventListener('ended', () => {
+        if (recorder.current === mediaRecorder && mediaRecorder.state === 'recording') {
+          setPhase('processing')
+          mediaRecorder.stop()
+        }
+      }, { once: true })
       mediaRecorder.start(1_000)
+      stopMonitor.current = startLevelMonitor({ mic: capture.mic, system: capture.system }, setMeters, capture.context)
       setPhase('recording')
       interval.current = window.setInterval(() => {
         const elapsed = Date.now() - startedAt.current
@@ -158,6 +198,7 @@ export function useAudioRecorder({ association, onImport }: Options) {
     } catch (recordingError) {
       startPending.current = false
       stopTracks()
+      if (recordingError instanceof SystemAudioUnavailableError) setSystemAudioBlocked(true)
       setError(recordingError instanceof Error && recordingError.name === 'NotAllowedError'
         ? 'Microphone access was denied. Allow microphone access in system settings and try again.'
         : recordingError instanceof Error && recordingError.name === 'NotFoundError'
@@ -165,7 +206,7 @@ export function useAudioRecorder({ association, onImport }: Options) {
           : recordingError instanceof Error ? recordingError.message : 'Could not access the microphone.')
       setPhase('idle')
     }
-  }, [association, finishRecording, phase, stopTracks])
+  }, [association, finishRecording, phase, source, stopTracks])
 
   const stop = useCallback(() => {
     if (startPending.current) {
@@ -210,6 +251,11 @@ export function useAudioRecorder({ association, onImport }: Options) {
     durationMs,
     error,
     saving,
+    source,
+    setSource,
+    levels: meters.levels,
+    silent: meters.silent,
+    systemAudioBlocked,
     start,
     stop,
     discard,

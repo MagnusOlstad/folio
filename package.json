@@ -92,7 +92,8 @@
       "category": "public.app-category.productivity",
       "minimumSystemVersion": "14.0",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "FolioNotes uses your microphone to record audio for local transcription."
+        "NSMicrophoneUsageDescription": "FolioNotes uses your microphone to record audio for local transcription.",
+        "NSAudioCaptureUsageDescription": "FolioNotes records system audio, such as the other people in an online meeting, for local transcription."
       },
       "icon": "build/icon.icns",
       "hardenedRuntime": true,
