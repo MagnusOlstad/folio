@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TranslatedExportJob, ViewerDocument } from "../../src/domain/types.ts";
 import { NoteMoreMenu } from "../../src/features/workspace/components/NoteMoreMenu.tsx";
 import { draftFilingGuidance } from "../../src/lib/workspace.ts";
+import { canTranslateExport } from "../../src/features/workspace/model/note-translation.ts";
 import { translatedExportFilename } from "../../src/features/workspace/model/note-export.ts";
 import {
   TRANSLATED_EXPORT_STORAGE_KEY,
@@ -109,6 +110,15 @@ describe("translated export partial failures", () => {
   });
 });
 
+describe("canTranslateExport", () => {
+  it("allows drafts and translatable notes only", () => {
+    expect(canTranslateExport(note, true)).toBe(true);
+    expect(canTranslateExport(note, false)).toBe(true);
+    expect(canTranslateExport({ ...note, movable: false }, false)).toBe(false);
+    expect(canTranslateExport({ ...note, movable: false }, true)).toBe(true);
+  });
+});
+
 describe("translated export dialog", () => {
   const fetchMock = vi.fn();
   const onDeliver = vi.fn(async () => {});
@@ -165,6 +175,16 @@ describe("translated export dialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "More actions" }));
     expect(screen.queryByRole("menuitem", { name: "Translate…" })).toBeNull();
     expect(screen.getByRole("menuitem", { name: "Markdown" })).toBeInTheDocument();
+  });
+
+  it("sends a draft's body (without the guidance line) as markdown", async () => {
+    const draft: ViewerDocument = { ...note, id: "untitled:1", title: "Untitled", content: "guidance line\n# Utkast\n\nJeg er her." };
+    render(<NoteMoreMenu title={draft.title} exporting={false} onExport={vi.fn()} translate={{ document: draft, available: true, onDeliver }} />);
+    openDialog();
+    fireEvent.click(screen.getByRole("button", { name: "Translate" }));
+    await tick(0);
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ id: "untitled:1", target: expect.any(String), markdown: "# Utkast\n\nJeg er her." });
   });
 
   it("disables the item with a hint when translation is unavailable", () => {

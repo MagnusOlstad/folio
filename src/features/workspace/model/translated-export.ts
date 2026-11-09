@@ -1,5 +1,5 @@
 import type { TranslatedExportJob, TranslatedExportPhase, TranslatedExportTarget, ViewerDocument } from "../../../domain/types.ts";
-import { serializeDraft } from "../../../lib/workspace.ts";
+import { isUntitledId, serializeDraft } from "../../../lib/workspace.ts";
 import { readStorageItem, writeStorageItem } from "../../../lib/storage.ts";
 import {
   translatedExportFilename,
@@ -172,5 +172,5 @@ export async function deliverTranslatedExport(
     deps.setMessage(`Opened ${language} translation as a new draft${keptNotice}`);
     return;
   }
-  await deps.exportSnapshot(snapshot, destination, translatedExportFilename(document.title, destination, target), document.id, keptNotice);
+  await deps.exportSnapshot(snapshot, destination, translatedExportFilename(isUntitledId(document.id) ? snapshot.title : document.title, destination, target), document.id, keptNotice);
 }

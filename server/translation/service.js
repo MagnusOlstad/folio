@@ -78,6 +78,10 @@ export function createTranslationService(runtime, options = {}) {
       if (error.code === 'ENOENT') throw httpError(404, 'Note not found.')
       throw error
     }
+    return parseNote(markdown, filePath)
+  }
+
+  function parseNote(markdown, filePath) {
     const parsed = runtime.parseMarkdownFile(markdown, filePath)
     // Translate the same cleaned body the app shows and indexes (no capture markers or generated wrappers).
     const items = splitBody(runtime.indexedConceptContent(parsed.content))
@@ -94,7 +98,7 @@ export function createTranslationService(runtime, options = {}) {
   }
 
   const exports = createExportManager({
-    runtime, cache, readNote, installedModel, translateBlock: (block, modelId) => translateBlock(block, modelId),
+    runtime, cache, readNote, parseNote, installedModel, translateBlock: (block, modelId) => translateBlock(block, modelId),
     waitForTurn: (options) => waitForTurn(options), closedFlag: () => closed, retentionMs: settings.exportRetentionMs,
   })
 
