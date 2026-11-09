@@ -179,14 +179,17 @@ describe("translated export dialog", () => {
     expect(screen.getByRole("menuitem", { name: "Markdown" })).toBeInTheDocument();
   });
 
-  it("sends a draft's body (without the guidance line) as markdown", async () => {
+  it("offers Italian for drafts and sends its body without the guidance line as markdown", async () => {
     const draft: ViewerDocument = { ...note, id: "untitled:1", title: "Untitled", content: "guidance line\n# Utkast\n\nJeg er her." };
     render(<NoteMoreMenu title={draft.title} exporting={false} onExport={vi.fn()} translate={{ document: draft, available: true, onDeliver }} />);
     openDialog();
+    expect(screen.getByRole("radio", { name: /Italiano/ })).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /Suomi/ })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: /Italiano/ }));
     fireEvent.click(screen.getByRole("button", { name: "Translate" }));
     await tick(0);
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
-    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ id: "untitled:1", target: expect.any(String), markdown: "# Utkast\n\nJeg er her." });
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ id: "untitled:1", target: "it", markdown: "# Utkast\n\nJeg er her." });
   });
 
   it("disables the item with a hint when translation is unavailable", () => {
