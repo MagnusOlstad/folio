@@ -5,6 +5,7 @@ import type { RecordingAssociation } from '../model/recording.ts'
 import { audioDuration } from '../model/audio-duration.ts'
 import { applyRetranscribedResult, regenerateSummary, type DraftWorkContext, type SessionDraft } from './draftWork.ts'
 import { linkedSpeakerNames, reassignSegmentSpeaker, type ReassignOutcome } from './speakerReassign.ts'
+import { renameSpeakerInDraft } from './speakerRename.ts'
 import { transcriptionAudioUrl } from '../model/audio-url.ts'
 import { playbackStore } from '../model/playback-store.ts'
 import {
@@ -54,6 +55,8 @@ export type TranscriptionDockActions = {
   /** Loads the stored result (segments included) of a ready session for the player. */
   loadResult: (session: TranscriptionSession) => Promise<TranscriptionResult | null>
   reassignSpeaker: (session: TranscriptionSession, index: number, speaker: number) => Promise<ReassignOutcome>
+  /** Writes a speaker's name into the linked draft, opening the draft first when needed. */
+  renameSpeaker: (session: TranscriptionSession, speaker: number, name: string) => Promise<void>
 }
 
 type Options = {
@@ -275,13 +278,14 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     await refresh()
   }
 
-  function openTranscriptDraft(session: TranscriptionSession, result: TranscriptionProcessResponse['result']) {
+  function openTranscriptDraft(session: TranscriptionSession, result: TranscriptionProcessResponse['result'], transform?: (content: string) => string) {
     const bundleId = session.sourceBundleId ?? null
     if (activeBundle.current !== bundleId) {
       setMessage('Transcription finished. Switch back to the source workspace to open its Markdown note.')
       return null
     }
-    const draftId = draftsRef.current.createDraft(mergeTranscriptionDraft(session, result))
+    const content = mergeTranscriptionDraft(session, result)
+    const draftId = draftsRef.current.createDraft(transform ? transform(content) : content)
     sessionDrafts.current.set(session.id, { draftId, bundleId })
     setMessage(result.speakerWarning ? `Transcript opened in a new editable draft. ${result.speakerWarning}` : 'Transcript opened in a new editable draft.')
     return draftId
@@ -450,6 +454,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
       return response.result ?? null
     },
     reassignSpeaker: (session, index, speaker) => reassignSegmentSpeaker(draftWork, session, index, speaker),
+    renameSpeaker: (session, speaker, name) => renameSpeakerInDraft(draftWork, session, speaker, name, openTranscriptDraft),
   }
   return { model, actions, draftFiled }
 }

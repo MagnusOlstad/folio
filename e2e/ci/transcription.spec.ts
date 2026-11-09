@@ -214,9 +214,12 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   await expect(summaryDraft).not.toContainText('Edited only in the new draft.')
   expect(processBodies[0]).toEqual({})
 
-  // Selecting the ready row loads it into the player; the play button toggles real audio playback.
-  await filed.getByRole('button', { name: /^project-review\.wav, / }).click()
-  const player = page.getByRole('group', { name: 'Player for project-review.wav' })
+  // Expanding the ready card shows the player inside it; the play button toggles real audio playback.
+  const header = filed.getByRole('button', { name: /^project-review\.wav, / })
+  await expect(header).toHaveAttribute('aria-expanded', 'false')
+  await header.click()
+  await expect(header).toHaveAttribute('aria-expanded', 'true')
+  const player = filed.getByRole('group', { name: 'Player for project-review.wav' })
   await expect(player).toBeVisible()
   await expect(player.getByText('The project review moved to Thursday at noon.')).toBeVisible()
   await player.getByRole('button', { name: 'Play', exact: true }).click()

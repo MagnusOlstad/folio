@@ -5,6 +5,7 @@ import {
   reconcileSpeakersSection,
   resolveSpeakerNames,
   resultSpeakerNumbers,
+  setSpeakerName,
 } from "../../src/features/transcription/model/speakers.ts";
 import { mergeTranscriptionDraft, type TranscriptionResult, type TranscriptionSession } from "../../src/features/transcription/model/types.ts";
 
@@ -74,5 +75,42 @@ describe("applyRetranscription", () => {
     const next = applyRetranscription(original, result({ transcript: "[00:00] Plain." }));
     expect(next).toContain("speaker1:: Alex");
     expect(next).toContain("## Transcript\n\n[00:00] Plain.");
+  });
+});
+
+describe("setSpeakerName", () => {
+  const note = "# Meeting\n\n## Speakers\n\nspeaker1:: Speaker 1\nspeaker2:: Speaker 2\n\n## Transcript\n\n**{{speaker1}}** [00:00]\nHi.\n";
+
+  it("rewrites only the matching definition line", () => {
+    expect(setSpeakerName(note, 2, "Ola")).toBe(note.replace("speaker2:: Speaker 2", "speaker2:: Ola"));
+  });
+
+  it("appends a missing definition to the Speakers section", () => {
+    const text = "# Meeting\n\n## Speakers\n\nspeaker1:: Alex\n\n## Transcript\n\nbody\n";
+    expect(setSpeakerName(text, 3, "Kim")).toBe("# Meeting\n\n## Speakers\n\nspeaker1:: Alex\nspeaker3:: Kim\n\n## Transcript\n\nbody\n");
+    expect(setSpeakerName("## Speakers\n## Transcript\nx", 1, "A")).toBe("## Speakers\n\nspeaker1:: A\n\n## Transcript\nx");
+  });
+
+  it("creates the section before Transcript, or at the end", () => {
+    expect(setSpeakerName("# Meeting\n\n## Transcript\n\nbody\n", 2, "Ola")).toBe("# Meeting\n\n## Speakers\n\nspeaker2:: Ola\n\n## Transcript\n\nbody\n");
+    expect(setSpeakerName("# Meeting\n\ntext\n", 1, "Alex")).toBe("# Meeting\n\ntext\n\n## Speakers\n\nspeaker1:: Alex\n");
+  });
+
+  it("keeps CRLF line endings and leaves other lines alone", () => {
+    const crlf = note.replace(/\n/g, "\r\n");
+    const next = setSpeakerName(crlf, 1, "Alex");
+    expect(next).toBe(crlf.replace("speaker1:: Speaker 1", "speaker1:: Alex"));
+    expect(next).not.toMatch(/[^\r]\n/);
+  });
+
+  it("trims, collapses whitespace, caps at 64 characters and resets blanks", () => {
+    expect(setSpeakerName(note, 1, "  Alex \n Doe ")).toContain("speaker1:: Alex Doe\n");
+    expect(setSpeakerName(note, 1, "x".repeat(80))).toContain(`speaker1:: ${"x".repeat(64)}\n`);
+    expect(setSpeakerName(note, 2, "   ")).toBe(note);
+    expect(setSpeakerName(note.replace("Speaker 2", "Ola"), 2, "")).toBe(note);
+  });
+
+  it("round-trips through parseSpeakerNames", () => {
+    expect(parseSpeakerNames(setSpeakerName(note, 2, "Ola")).get(2)).toBe("Ola");
   });
 });

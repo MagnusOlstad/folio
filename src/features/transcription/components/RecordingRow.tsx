@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import type { TranscriptionDockActions, TranscriptionDockModel } from '../hooks/useTranscription.ts'
 import type { SpeakerModelStatus, TranscriptionSession } from '../model/types.ts'
 import { formatClock } from '../model/playback-turns.ts'
-import { PauseIcon, PlayIcon, WaveIcon } from './icons.tsx'
+import { ChevronIcon, PauseIcon, PlayIcon, WaveIcon } from './icons.tsx'
+import { PlayerPanel } from './PlayerPanel.tsx'
 import { RowMenu, type RowMenuItem } from './RowMenu.tsx'
 
 export type RowConfirmation = 'delete' | 'retranscribe'
@@ -17,12 +18,13 @@ type RecordingRowProps = {
   canTranscribe: boolean
   controlsBusy: boolean
   busy: boolean
-  selected: boolean
+  expanded: boolean
   playing: boolean
   speakerCount: number | null
   confirming: RowConfirmation | null
   onConfirm: (value: RowConfirmation | null) => void
-  onSelect: () => void
+  onToggleExpand: () => void
+  onSpeakerCount: (count: number) => void
   onTogglePlay: () => void
 }
 
@@ -31,7 +33,8 @@ function durationLabel(durationMs: number | null) {
 }
 
 export function RecordingRow(props: RecordingRowProps) {
-  const { session, model, actions, speakers, speakersReady, selectedModelName, canTranscribe, controlsBusy, busy, selected, playing, speakerCount, confirming, onConfirm } = props
+  const { session, model, actions, speakers, speakersReady, selectedModelName, canTranscribe, controlsBusy, busy, expanded, playing, speakerCount, confirming, onConfirm } = props
+  const panelId = useId()
   const name = session.fileName || 'audio recording'
   const cancelRef = useRef<HTMLButtonElement>(null)
   const wasDeletingRef = useRef(false)
@@ -100,13 +103,16 @@ export function RecordingRow(props: RecordingRowProps) {
     : <span className={`transcription-row-status${processing || summarizing ? ' is-busy' : ''}`} aria-hidden="true"><WaveIcon /></span>
 
   return (
-    <li className={`transcription-row${selected ? ' is-selected' : ''}`} aria-current={selected ? 'true' : undefined}>
+    <li className={`transcription-row${expanded ? ' is-expanded' : ''}`}>
       <div className="transcription-row-line">
         {lead}
         {ready ? (
-          <button type="button" className="transcription-row-main" onClick={props.onSelect} aria-label={`${name}, ${meta}`}>
-            <strong title={session.fileName || 'Audio recording'}>{session.fileName || 'Audio recording'}</strong>
-            <small>{meta}</small>
+          <button type="button" className="transcription-row-main" onClick={props.onToggleExpand} aria-expanded={expanded} aria-controls={panelId} aria-label={`${name}, ${meta}`}>
+            <span className="transcription-row-text">
+              <strong title={session.fileName || 'Audio recording'}>{session.fileName || 'Audio recording'}</strong>
+              <small>{meta}</small>
+            </span>
+            <span className="transcription-row-chevron" aria-hidden="true"><ChevronIcon /></span>
           </button>
         ) : (
           <div className="transcription-row-main">
@@ -127,6 +133,7 @@ export function RecordingRow(props: RecordingRowProps) {
         )}
         <RowMenu label={`More actions for ${name}`} items={items} />
       </div>
+      {ready && expanded && <PlayerPanel id={panelId} session={session} model={model} actions={actions} onSpeakerCount={props.onSpeakerCount} />}
       {speakersBlocked && <p className="transcription-item-error" role="status">Speaker labels need the {speakers?.modelName} model. Download it above, or turn speaker labels off for this audio.</p>}
       {ready && confirming === 'retranscribe' && (
         <div className="transcription-retranscribe-confirm" role="group" aria-label={`Confirm re-transcription of ${name}`}>

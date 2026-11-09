@@ -1,28 +1,34 @@
-import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { KeyboardEvent } from 'react'
 import type { TranscriptionDockActions, TranscriptionDockModel } from '../hooks/useTranscription.ts'
 import { usePlayerResult } from '../hooks/usePlayerResult.ts'
 import { playbackStore } from '../model/playback-store.ts'
 import {
-  buildTurns, findSegmentIndex, formatClock, segmentSpeakers, speakerColor, speakerDisplayName, totalDuration, turnCounts,
+  buildTurns, findSegmentIndex, formatClock, segmentSpeakers, totalDuration, turnCounts,
 } from '../model/playback-turns.ts'
 import type { TranscriptionSession } from '../model/types.ts'
 import { NextIcon, PauseIcon, PlayIcon, PrevIcon } from './icons.tsx'
 import { NowSpeaking } from './NowSpeaking.tsx'
+import { SpeakerChips } from './SpeakerChips.tsx'
 import { SpeakerLanes } from './SpeakerLanes.tsx'
+import { normalizeSpeakerName } from '../model/speakers.ts'
 
 type PlayerPanelProps = {
+  id: string
   session: TranscriptionSession
   model: TranscriptionDockModel
   actions: TranscriptionDockActions
   onSpeakerCount: (count: number) => void
 }
 
-export function PlayerPanel({ session, model, actions, onSpeakerCount }: PlayerPanelProps) {
+export function PlayerPanel({ id, session, model, actions, onSpeakerCount }: PlayerPanelProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const playback = useSyncExternalStore(playbackStore.subscribe, playbackStore.getSnapshot)
   const { result, error, setResult } = usePlayerResult(session, actions.loadResult)
-  const names = model.speakerNamesFor(session)
+  const draftNames = model.speakerNamesFor(session)
+  // Names just saved fill in until the draft adapter reports them (a draft created by the rename can lag a render).
+  const [renamed, setRenamed] = useState<ReadonlyMap<number, string>>(new Map())
+  const names = useMemo(() => renamed.size ? new Map([...renamed, ...(draftNames ?? [])]) : draftNames, [draftNames, renamed])
   const segments = useMemo(() => result?.segments ?? [], [result])
   const turns = useMemo(() => buildTurns(segments), [segments])
   const speakers = useMemo(() => segmentSpeakers(segments), [segments])
@@ -41,6 +47,11 @@ export function PlayerPanel({ session, model, actions, onSpeakerCount }: PlayerP
   useEffect(() => { playbackStore.setTurns(session.id, turns) }, [session.id, turns])
   useEffect(() => { if (speakers.length) onSpeakerCount(speakers.length) }, [speakers.length, onSpeakerCount])
 
+  async function renameSpeaker(speaker: number, name: string) {
+    await actions.renameSpeaker(session, speaker, name)
+    setRenamed((current) => new Map(current).set(speaker, normalizeSpeakerName(speaker, name)))
+  }
+
   function focusPanel() { rootRef.current?.focus() }
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -51,7 +62,7 @@ export function PlayerPanel({ session, model, actions, onSpeakerCount }: PlayerP
   }
 
   return (
-    <div className="player-panel" ref={rootRef} role="group" aria-label={`Player for ${session.fileName || 'audio recording'}`} tabIndex={0} onKeyDown={onKeyDown}>
+    <div className="player-panel" id={id} ref={rootRef} role="group" aria-label={`Player for ${session.fileName || 'audio recording'}`} tabIndex={0} onKeyDown={onKeyDown}>
       <div className="player-transport">
         <button type="button" className="transcription-icon-button" aria-label="Previous turn" title="Previous turn" onClick={() => playbackStore.skipTurn(-1)} disabled={!active || !turns.length}><PrevIcon /></button>
         <button type="button" className="transcription-icon-button player-play" aria-label={active && playback.playing ? 'Pause' : 'Play'} onClick={() => playbackStore.toggle()} disabled={!active}>
@@ -86,23 +97,7 @@ export function PlayerPanel({ session, model, actions, onSpeakerCount }: PlayerP
         />
       )}
 
-      {hasSpeakers && (
-        <div className="player-chips" role="group" aria-label="Play one speaker">
-          {speakers.map((speaker) => (
-            <button
-              key={speaker}
-              type="button"
-              className={`player-chip${solo === speaker ? ' is-solo' : ''}`}
-              aria-pressed={solo === speaker}
-              onClick={() => playbackStore.setSolo(solo === speaker ? null : speaker)}
-              disabled={!active}
-            >
-              <i className="player-dot" style={{ background: speakerColor(speaker) }} aria-hidden="true" />
-              {speakerDisplayName(speaker, names)} · {counts.get(speaker) ?? 0}
-            </button>
-          ))}
-        </div>
-      )}
+      {hasSpeakers && <SpeakerChips speakers={speakers} names={names} counts={counts} solo={solo} active={active} onRename={renameSpeaker} />}
 
       {error && <p className="transcription-item-error" role="status">{error}</p>}
       {result && segments.length > 0 && (

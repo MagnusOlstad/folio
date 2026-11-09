@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import type { KeyboardEvent } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
 import { MoreIcon } from './icons.tsx'
 
 export type RowMenuItem = {
@@ -12,12 +12,21 @@ export type RowMenuItem = {
   /** Renders a menuitemcheckbox. */
   checked?: boolean
   destructive?: boolean
+  /** Decorative content before the label, such as a colour dot. */
+  leading?: ReactNode
 }
 
-type RowMenuProps = { label: string; items: RowMenuItem[]; disabled?: boolean }
+type RowMenuProps = {
+  label: string
+  items: RowMenuItem[]
+  disabled?: boolean
+  /** Renders a text button instead of the "⋯" icon; the menu then shows `label` as its title. */
+  triggerText?: string
+  triggerClassName?: string
+}
 
-/** The "⋯" overflow menu of a recording row. */
-export function RowMenu({ label, items, disabled = false }: RowMenuProps) {
+/** The "⋯" overflow menu of a recording row, or a small text-triggered menu. */
+export function RowMenu({ label, items, disabled = false, triggerText, triggerClassName }: RowMenuProps) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -59,18 +68,19 @@ export function RowMenu({ label, items, disabled = false }: RowMenuProps) {
       <button
         ref={buttonRef}
         type="button"
-        className="transcription-icon-button"
-        aria-label={label}
-        title={label}
+        className={triggerText ? triggerClassName : 'transcription-icon-button'}
+        aria-label={triggerText ? undefined : label}
+        title={triggerText ? undefined : label}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         disabled={disabled}
         onClick={() => setOpen((value) => !value)}
         onKeyDown={(event) => { if (event.key === 'ArrowDown' && !open) { event.preventDefault(); setOpen(true) } }}
-      ><MoreIcon /></button>
+      >{triggerText ?? <MoreIcon />}</button>
       {open && (
-        <div className="transcription-menu-list" id={menuId} role="menu" aria-label={label} onKeyDown={onMenuKeyDown}>
+        <div className={`transcription-menu-list${triggerText ? ' is-start' : ''}`} id={menuId} role="menu" aria-label={label} onKeyDown={onMenuKeyDown}>
+          {triggerText && <span className="transcription-menu-heading" aria-hidden="true">{label}</span>}
           {items.map((item) => (
             <button
               key={item.key}
@@ -83,6 +93,7 @@ export function RowMenu({ label, items, disabled = false }: RowMenuProps) {
               onClick={() => { close(false); item.onSelect() }}
             >
               {item.checked !== undefined && <span className="transcription-menu-check" aria-hidden="true">{item.checked ? '✓' : ''}</span>}
+              {item.leading}
               {item.label}
             </button>
           ))}
