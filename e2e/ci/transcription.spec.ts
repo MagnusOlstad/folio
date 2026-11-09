@@ -113,8 +113,7 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   await page.getByRole('button', { name: 'Download Whisper Large v3 Turbo' }).click()
   await expect(page.getByText('Whisper Large v3 Turbo is ready', { exact: true })).toBeVisible()
 
-  const speakerToggle = page.getByRole('checkbox', { name: /^Identify speakers/ })
-  await expect(speakerToggle).not.toBeChecked()
+  await expect(page.getByRole('checkbox', { name: /^Identify speakers/ })).toHaveCount(0)
   await page.getByLabel('Choose local audio file').setInputFiles({
     name: 'project-review.wav',
     mimeType: 'audio/wav',
@@ -187,27 +186,29 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   // Re-transcribing replaces only the transcript section of the open draft; the summary stays.
   await page.getByRole('tab', { name: 'Transcription' }).click()
   await filed.getByRole('button', { name: 'Re-transcribe', exact: true }).click()
-  await expect(filed.getByText(/transcript in your open draft will be replaced/)).toBeVisible()
-  await filed.getByRole('button', { name: 'Re-transcribe audio' }).click()
+  await expect(filed.getByText(/Only the Transcript section of the open draft is replaced/)).toBeVisible()
+  await filed.getByRole('group', { name: /Confirm re-transcription/ }).getByRole('button', { name: 'Re-transcribe' }).click()
   await expect.poll(() => processBodies.at(-1)).toEqual({ retranscribe: true })
   await expect(summaryDraft).toContainText('[00:02] The project review moved to Thursday at noon.')
   await expect(summaryDraft).toContainText('The project review is Wednesday at noon.')
   await expect(summaryDraft).not.toContainText('Edited only in the new draft.')
   expect(processBodies[0]).toEqual({})
 
-  // Speaker labels are a per-transcription choice: choosing them offers the optional model download.
+  // Speaker labels are a per-audio choice made on the imported item; choosing them offers the optional model download.
   await page.getByRole('tab', { name: 'Transcription' }).click()
-  await speakerToggle.check()
-  await expect(page.getByText('Sortformer Speaker Labels is not installed')).toBeVisible()
-  await page.getByRole('button', { name: 'Download Sortformer Speaker Labels' }).click()
-  await expect(page.getByText('Sortformer Speaker Labels is not installed')).toHaveCount(0)
   await page.getByLabel('Choose local audio file').setInputFiles({
     name: 'interview.wav',
     mimeType: 'audio/wav',
     buffer: Buffer.from('RIFF-local-audio-fixture-two'),
   })
-  await expect(page.locator('.transcription-item').filter({ hasText: 'interview.wav' })).toBeVisible()
-  expect(importBodies.at(-1)).toMatchObject({ fileName: 'interview.wav', identifySpeakers: true })
+  const interview = page.locator('.transcription-item').filter({ hasText: 'interview.wav' })
+  await expect(interview).toBeVisible()
+  expect(importBodies.at(-1)).toMatchObject({ fileName: 'interview.wav', identifySpeakers: false })
+  await interview.getByRole('checkbox', { name: 'Identify speakers in interview.wav' }).click()
+  await expect(page.getByText('Sortformer Speaker Labels is not installed')).toBeVisible()
+  await page.getByRole('button', { name: 'Download Sortformer Speaker Labels' }).click()
+  await expect(page.getByText('Sortformer Speaker Labels is not installed')).toHaveCount(0)
+  await expect(interview.getByRole('checkbox', { name: 'Identify speakers in interview.wav' })).toBeChecked()
 
   await filed.getByRole('button', { name: 'Delete' }).click()
   await expect(filed.getByText(/Any opened or saved Markdown note will be kept/)).toBeVisible()

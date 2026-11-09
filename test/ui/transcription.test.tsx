@@ -1,4 +1,4 @@
-import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptionDock } from "../../src/features/transcription/components/TranscriptionDock.tsx";
 import { mergeTranscriptionDraft, type TranscriptionSession } from "../../src/features/transcription/model/types.ts";
@@ -931,16 +931,21 @@ describe("transcription UI", () => {
     expect(screen.queryByRole("checkbox", { name: /identify speakers/i })).not.toBeInTheDocument();
   });
 
-  it("offers Identify speakers off by default, and a download only after it is chosen", () => {
+  it("has no speaker toggle in the Add audio card, and offers the download only when an item or the default wants speakers", () => {
     const dockActions = actions();
-    const { rerender } = render(<TranscriptionDock model={model({ status: { ...readyStatus, diarization: speakerStatus } })} actions={dockActions} />);
-    const toggle = screen.getByRole("checkbox", { name: /Identify speakers/ });
+    const pendingSession: TranscriptionSession = { ...session, state: "recorded", identifySpeakers: false };
+    const status = { ...readyStatus, diarization: speakerStatus };
+    const { rerender } = render(<TranscriptionDock model={model({ status, pending: [pendingSession] })} actions={dockActions} />);
+    const card = document.querySelector(".transcription-input-card") as HTMLElement;
+    expect(card.querySelector("input[type=checkbox]")).toBeNull();
+    const toggle = screen.getByRole("checkbox", { name: "Identify speakers in meeting.wav" });
     expect(toggle).not.toBeChecked();
+    expect(screen.getByText("up to 4 · slower")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Download Sortformer/ })).not.toBeInTheDocument();
     fireEvent.click(toggle);
-    expect(dockActions.setIdentifySpeakers).toHaveBeenCalledWith(true);
+    expect(dockActions.setSessionIdentifySpeakers).toHaveBeenCalledWith(pendingSession, true);
 
-    rerender(<TranscriptionDock model={model({ status: { ...readyStatus, diarization: speakerStatus }, identifySpeakers: true })} actions={dockActions} />);
+    rerender(<TranscriptionDock model={model({ status, pending: [{ ...pendingSession, identifySpeakers: true }] })} actions={dockActions} />);
     expect(screen.getByText("Sortformer Speaker Labels is not installed")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Download Sortformer Speaker Labels" }));
     expect(dockActions.installSpeakerModel).toHaveBeenCalledOnce();
@@ -975,6 +980,7 @@ describe("transcription UI", () => {
     });
     apiForBundleMock.mockImplementation(async (_bundle: string | null, url: string) => {
       if (url === "/api/transcriptions") return { session: { ...session, state: "queued" } };
+      if (url.endsWith("/options")) return { session: { ...session, state: "recorded", identifySpeakers: true } };
       if (url.endsWith("/audio")) return { session: { ...session, state: "recorded" } };
       if (url.endsWith("/process")) {
         return {
@@ -1000,7 +1006,7 @@ describe("transcription UI", () => {
     const firstBody = JSON.parse(apiForBundleMock.mock.calls.find(([, url]) => url === "/api/transcriptions")?.[2].body as string);
     expect(firstBody).toMatchObject({ fileName: "first.wav", identifySpeakers: false });
 
-    act(() => { result.current.actions.setIdentifySpeakers(true); });
+    await act(async () => { await result.current.actions.setSessionIdentifySpeakers({ ...session, state: "recorded", sourceBundleId: "bundle-a" }, true); });
     expect(result.current.model.identifySpeakers).toBe(true);
     await act(async () => { await result.current.actions.importFile(new File(["b"], "second.wav", { type: "audio/wav" })); });
     const creations = apiForBundleMock.mock.calls.filter(([, url]) => url === "/api/transcriptions");
@@ -1037,11 +1043,12 @@ describe("transcription UI", () => {
     expect(dockActions.setSessionIdentifySpeakers).toHaveBeenCalledWith(ready, true);
     expect(dockActions.retranscribe).not.toHaveBeenCalled();
     const group = screen.getByRole("group", { name: "Confirm re-transcription of meeting.wav" });
-    expect(group).toHaveTextContent("transcript in your open draft will be replaced");
+    expect(group).toHaveTextContent("Only the Transcript section of the open draft is replaced");
+    expect(within(group).getByRole("checkbox", { name: "Identify speakers in meeting.wav" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("group", { name: /Confirm re-transcription/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Re-transcribe" }));
-    fireEvent.click(screen.getByRole("button", { name: "Re-transcribe audio" }));
+    fireEvent.click(within(screen.getByRole("group", { name: /Confirm re-transcription/ })).getByRole("button", { name: "Re-transcribe" }));
     expect(dockActions.retranscribe).toHaveBeenCalledWith(ready);
   });
 

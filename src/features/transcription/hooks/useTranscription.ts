@@ -238,6 +238,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
 
   async function setSessionIdentifySpeakers(session: TranscriptionSession, value: boolean) {
     if (busyRef.current || session.state === 'transcribing') return
+    setIdentifySpeakers(value)
     setError('')
     try {
       const response = await apiForBundle<SessionResponse>(session.sourceBundleId ?? null,

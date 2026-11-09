@@ -55,10 +55,7 @@ test('records microphone audio, converts it to WAV, and saves it through local i
   await page.goto(baseURL!)
   await page.getByRole('button', { name: 'Todo List', exact: true }).click()
   await page.getByRole('tab', { name: 'Transcription' }).click()
-  // Speaker labels are chosen per transcription and apply to the recording that is about to start.
-  const speakerToggle = page.getByRole('checkbox', { name: /^Identify speakers/ })
-  await expect(speakerToggle).not.toBeChecked()
-  await speakerToggle.check()
+  await expect(page.getByRole('checkbox', { name: /^Identify speakers/ })).toHaveCount(0)
   await page.getByRole('button', { name: 'Start recording' }).click()
   await expect(page.getByRole('button', { name: 'Stop recording' })).toBeVisible()
   await page.waitForTimeout(1_100)
@@ -71,5 +68,5 @@ test('records microphone audio, converts it to WAV, and saves it through local i
   expect(upload.bytes.subarray(8, 12).toString('ascii')).toBe('WAVE')
   expect(sessionState.value?.fileName).toMatch(/^Recording .*\.wav$/)
   expect(creationBody).not.toHaveProperty('sourceNoteId')
-  expect(creationBody).toMatchObject({ identifySpeakers: true })
+  expect(creationBody).toMatchObject({ identifySpeakers: false })
 })

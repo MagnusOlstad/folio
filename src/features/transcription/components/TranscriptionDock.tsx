@@ -83,6 +83,24 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
     if (file) actions.importFile(file)
   }
 
+  function speakerOption(session: TranscriptionSession) {
+    if (!speakers) return null
+    const processing = session.state === 'transcribing' || (busy && model.activeSession?.id === session.id && model.phase === 'transcribing')
+    return (
+      <label className="transcription-item-speakers">
+        <input
+          type="checkbox"
+          aria-label={`Identify speakers in ${session.fileName || 'audio recording'}`}
+          checked={session.identifySpeakers === true}
+          onChange={(event) => actions.setSessionIdentifySpeakers(session, event.currentTarget.checked)}
+          disabled={controlsBusy || processing}
+        />
+        <span>Identify speakers</span>
+        <small>{`up to ${speakers.maxSpeakers} · slower`}</small>
+      </label>
+    )
+  }
+
   return (
     <section className="transcription-dock" aria-label="Local transcription">
       <div
@@ -105,18 +123,6 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
             Choose audio
           </button>
         </div>
-        {speakers && <label className="transcription-speaker-toggle">
-          <input
-            type="checkbox"
-            checked={model.identifySpeakers}
-            onChange={(event) => actions.setIdentifySpeakers(event.currentTarget.checked)}
-            disabled={controlsBusy}
-          />
-          <span>
-            <strong>Identify speakers</strong>
-            <small>{`Labels who is speaking (up to ${speakers.maxSpeakers} speakers) with a separate local model. Adds processing time. Off by default.`}</small>
-          </span>
-        </label>}
         <input
           ref={inputRef}
           type="file"
@@ -220,18 +226,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
               </div>
               <small>{importedDate(session)}{session.durationMs === null ? '' : ` · ${durationLabel(session.durationMs)}`}</small>
               {session.error && <p className="transcription-item-error" role="status">{session.error}</p>}
-              {speakers && (session.state !== 'ready' || confirmingRetranscribeId === session.id) && (
-                <label className="transcription-item-speakers">
-                  <input
-                    type="checkbox"
-                    aria-label={`Identify speakers in ${session.fileName || 'audio recording'}`}
-                    checked={session.identifySpeakers === true}
-                    onChange={(event) => actions.setSessionIdentifySpeakers(session, event.currentTarget.checked)}
-                    disabled={controlsBusy || processing}
-                  />
-                  <span>Identify speakers</span>
-                </label>
-              )}
+              {speakers && session.state !== 'ready' && speakerOption(session)}
               {speakersBlocked && <p className="transcription-item-error" role="status">Speaker labels need the {speakers?.modelName} model. Download it above, or turn speaker labels off for this audio.</p>}
               <div className="transcription-item-actions">
                 {session.state === 'ready' ? (
@@ -248,15 +243,16 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
                   </button>
                 )}
                 {session.state === 'ready' && confirmingRetranscribeId === session.id && (
-                  <div className="transcription-delete-confirm" role="group" aria-label={`Confirm re-transcription of ${session.fileName || 'audio recording'}`}>
-                    <p>Transcribe this audio again with {selectedModelName}? The transcript in your open draft will be replaced; its summary and other text are kept, and speaker names you edited stay.</p>
+                  <div className="transcription-retranscribe-confirm" role="group" aria-label={`Confirm re-transcription of ${session.fileName || 'audio recording'}`}>
+                    <p>Transcribe again with {selectedModelName}? Only the Transcript section of the open draft is replaced; speaker names you set are kept.</p>
+                    {speakerOption(session)}
                     <button type="button" onClick={() => setConfirmingRetranscribeId(null)}>Cancel</button>
                     <button
                       type="button"
-                      className="transcription-delete-confirm-button"
+                      className="transcription-retranscribe-confirm-button"
                       onClick={() => { setConfirmingRetranscribeId(null); actions.retranscribe(session) }}
                       disabled={!canTranscribe || controlsBusy || speakersBlocked}
-                    >Re-transcribe audio</button>
+                    >Re-transcribe</button>
                   </div>
                 )}
                 {processing && <button type="button" onClick={() => actions.cancel(session)}>Cancel</button>}
