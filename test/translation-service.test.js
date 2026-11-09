@@ -374,7 +374,7 @@ test('inline markdown exports translate drafts without reading a bundle note', a
 })
 
 test('backfill pruning keeps language entries whose base hash is referenced; export routes follow the contract', async (context) => {
-  const { runtime } = await setup(context, { notes: { '/a.md': EXPORT_NOTE } })
+  const { runtime, mlx } = await setup(context, { notes: { '/a.md': EXPORT_NOTE } })
   const app = express()
   app.use(express.json())
   registerRoutes(app, runtime)
@@ -384,6 +384,7 @@ test('backfill pruning keeps language entries whose base hash is referenced; exp
   const base = `http://127.0.0.1:${server.address().port}`
   const post = (body) => fetch(`${base}/api/note/translation/export`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
   assert.equal((await post({ id: '/a.md', target: 'xx' })).status, 400)
+  assert.equal((await post({ id: '/a.md', target: 'fi' })).status, 400)
   assert.equal((await post({ id: '/missing.md', target: 'de' })).status, 404)
   assert.equal((await post({ id: 'untitled:1', target: 'de', markdown: 42 })).status, 400)
   assert.equal((await post({ id: 'untitled:1', target: 'de', markdown: '# Hei\n\nJeg er her.\n' })).status, 202)
@@ -394,6 +395,12 @@ test('backfill pruning keeps language entries whose base hash is referenced; exp
   const result = await (await fetch(`${base}/api/note/translation/export/${job.jobId}`)).json()
   assert.equal(result.status, 'done')
   assert.ok(result.content)
+  const italianResponse = await post({ id: '/a.md', target: 'it' })
+  assert.equal(italianResponse.status, 202)
+  const italianJob = await italianResponse.json()
+  const italianResult = await waitForJob(runtime.translation, italianJob.jobId)
+  assert.equal(italianResult.status, 'done')
+  assert.ok(mlx.behavior.prompts.some((prompt) => prompt.includes('Translate the following English text into Italian')))
   assert.equal((await fetch(`${base}/api/note/translation/export/unknown`)).status, 404)
   assert.equal((await fetch(`${base}/api/note/translation/export/${job.jobId}`, { method: 'DELETE' })).status, 200)
 

@@ -244,7 +244,7 @@ export type NoteTranslation = {
   content: string;
 };
 export type TranslationSettings = { available: boolean };
-export type TranslatedExportTarget = "en" | "no" | "de" | "es" | "fr" | "fi" | "sv" | "da";
+export type TranslatedExportTarget = "en" | "no" | "de" | "es" | "fr" | "it" | "sv" | "da";
 export type TranslatedExportPhase = "queued" | "waiting" | "translating" | "finishing" | "done" | "failed" | "cancelled";
 export type TranslatedExportJob = {
   phase?: TranslatedExportPhase;

@@ -110,7 +110,7 @@ export function parseDirectTranslation(text, tokens, original, protectedSource) 
 }
 
 export const EXPORT_LANGUAGES = Object.freeze({
-  en: 'English', no: 'Norwegian Bokmål', de: 'German', es: 'Spanish', fr: 'French', fi: 'Finnish', sv: 'Swedish', da: 'Danish',
+  en: 'English', no: 'Norwegian Bokmål', de: 'German', es: 'Spanish', fr: 'French', it: 'Italian', sv: 'Swedish', da: 'Danish',
 })
 
 export function buildLanguageMessages(language, protectedText, sourceLanguage = null) {
