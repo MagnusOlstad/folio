@@ -31,8 +31,8 @@ test('records microphone audio, converts it to WAV, and saves it through local i
     totalBytes: 1_610_000_000, downloadPercent: 100, canInstall: true, canTranscribe: true, installing: false,
     diarization: {
       modelId: 'sortformer', modelName: 'Sortformer Speaker Labels',
-      model: 'mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16', pinned: true, maxSpeakers: 4,
-      modelState: 'ready', downloadedBytes: 250_000_000, totalBytes: 250_000_000,
+      model: 'mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16', maxSpeakers: 4,
+      modelState: 'ready', downloadedBytes: 236_110_000, totalBytes: 236_110_000,
       downloadPercent: 100, canInstall: true, canDiarize: true, installing: false,
     },
   } }))
@@ -56,7 +56,7 @@ test('records microphone audio, converts it to WAV, and saves it through local i
   await page.getByRole('button', { name: 'Todo List', exact: true }).click()
   await page.getByRole('tab', { name: 'Transcription' }).click()
   // Speaker labels are chosen per transcription and apply to the recording that is about to start.
-  const speakerToggle = page.getByRole('checkbox', { name: 'Identify speakers', exact: true })
+  const speakerToggle = page.getByRole('checkbox', { name: /^Identify speakers/ })
   await expect(speakerToggle).not.toBeChecked()
   await speakerToggle.check()
   await page.getByRole('button', { name: 'Start recording' }).click()

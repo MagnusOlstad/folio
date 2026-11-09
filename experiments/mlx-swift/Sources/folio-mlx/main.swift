@@ -201,16 +201,10 @@ private struct SortformerVariant {
     let revision: String
     let modelFiles: [String]
 
-    /// Placeholder until the exact Hugging Face commit is resolved. It must stay in sync with
-    /// `DIARIZATION_MODELS.sortformer.revision` in server/transcription/models.js (a test checks this).
-    static let unresolvedRevision = "UNRESOLVED-SORTFORMER-REVISION"
-
     static let v21 = SortformerVariant(
         modelID: "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16",
-        revision: unresolvedRevision,
+        revision: "e23e6404bd9859e93edbf94a740eb1c7fc58f12e",
         modelFiles: ["config.json", "model.safetensors"])
-
-    var isPinned: Bool { revision != SortformerVariant.unresolvedRevision }
 
     static func resolve(modelID: String, revision: String) -> SortformerVariant? {
         v21.modelID == modelID && v21.revision == revision ? v21 : nil
@@ -307,10 +301,6 @@ private func validateSortformerSnapshot(_ directory: URL, variant: SortformerVar
 }
 
 private func installSortformerSnapshot(_ variant: SortformerVariant) async throws -> URL {
-    guard variant.isPinned else {
-        throw NSError(domain: "FolioMLX", code: 32,
-                      userInfo: [NSLocalizedDescriptionKey: "The Sortformer model revision has not been pinned yet, so it cannot be downloaded."])
-    }
     let cache = localHubCache()
     let client = HubClient(cache: cache)
     let repo = try modelRepository(variant.modelID)
@@ -424,10 +414,6 @@ private struct FolioMLX {
                               userInfo: [NSLocalizedDescriptionKey: "diarization requires --operation install or --operation diarize"])
             }
             if operation == "diarize" {
-                guard variant.isPinned else {
-                    throw NSError(domain: "FolioMLX", code: 32,
-                                  userInfo: [NSLocalizedDescriptionKey: "The Sortformer model revision has not been pinned yet."])
-                }
                 guard let modelDirectory else {
                     throw NSError(domain: "FolioMLX", code: 8,
                                   userInfo: [NSLocalizedDescriptionKey: "diarization requires a fully installed local --model-directory"])

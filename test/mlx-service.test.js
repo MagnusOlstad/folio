@@ -95,7 +95,7 @@ test('models install explicitly into their pinned snapshots and use the JSONL wo
     { id: 'lightonocr', purpose: 'ocr', downloadSizeBytes: 2_020_000_000, selected: false },
     { id: 'whisper', purpose: 'transcription', downloadSizeBytes: 1_610_000_000, selected: true },
     { id: 'whisperlarge', purpose: 'transcription', downloadSizeBytes: 3_090_000_000, selected: false },
-    { id: 'sortformer', purpose: 'diarization', downloadSizeBytes: 250_000_000, selected: false },
+    { id: 'sortformer', purpose: 'diarization', downloadSizeBytes: 236_110_000, selected: false },
   ])
 
   await assert.rejects(service.load('gemma4'), /not installed/)

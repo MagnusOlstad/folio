@@ -27,17 +27,7 @@ export const TRANSCRIPTION_MODELS = Object.freeze({
   }),
 })
 
-/**
- * Sortformer speaker diarization is a separate, optional download (never a Whisper choice).
- *
- * The Hugging Face commit hash for this repository could not be resolved when the feature was
- * written (no access to huggingface.co). `UNRESOLVED_DIARIZATION_REVISION` is a marker, not a
- * commit: install and diarization stay disabled until it is replaced by the real 40-character
- * hash. Keep it in sync with `SortformerVariant.unresolvedRevision` in
- * experiments/mlx-swift/Sources/folio-mlx/main.swift. `requiredFiles` and the size are likewise
- * unverified estimates for the fp16 checkpoint.
- */
-export const UNRESOLVED_DIARIZATION_REVISION = 'UNRESOLVED-SORTFORMER-REVISION'
+/** Sortformer speaker diarization is a separate, optional download (never a Whisper choice). */
 export const DIARIZATION_MODEL_ID = 'sortformer'
 export const DIARIZATION_MODELS = Object.freeze({
   [DIARIZATION_MODEL_ID]: Object.freeze({
@@ -45,17 +35,13 @@ export const DIARIZATION_MODELS = Object.freeze({
     name: 'Sortformer Speaker Labels',
     purpose: 'diarization',
     repository: 'mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16',
-    revision: UNRESOLVED_DIARIZATION_REVISION,
+    revision: 'e23e6404bd9859e93edbf94a740eb1c7fc58f12e',
     task: 'diarization',
-    downloadSizeBytes: 250_000_000,
+    downloadSizeBytes: 236_110_000,
     maxSpeakers: 4,
     requiredFiles: Object.freeze(['config.json', 'model.safetensors']),
   }),
 })
-
-export function isDiarizationRevisionPinned(model = DIARIZATION_MODELS[DIARIZATION_MODEL_ID]) {
-  return /^[0-9a-f]{40}$/.test(model.revision)
-}
 
 export function isTranscriptionModelId(id) {
   return typeof id === 'string' && Object.hasOwn(TRANSCRIPTION_MODELS, id)

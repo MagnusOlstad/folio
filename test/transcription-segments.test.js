@@ -6,7 +6,7 @@ import {
   mergeSpeakerTurns, normalizeSegments, normalizeSpeakerSegments,
 } from '../server/transcription/segments.js'
 import { stripTranscriptMarkup } from '../server/knowledge/transcript-markup.js'
-import { DIARIZATION_MODELS, isDiarizationRevisionPinned } from '../server/transcription/models.js'
+import { DIARIZATION_MODELS } from '../server/transcription/models.js'
 
 test('timestamps use mm:ss and switch to h:mm:ss after an hour', () => {
   assert.equal(formatTimestamp(0), '00:00')
@@ -152,13 +152,17 @@ test('semantic indexing sees spoken text without timestamps or speaker headers',
   assert.equal(stripTranscriptMarkup(plain), 'Only a timestamp.')
 })
 
-test('the Sortformer revision stays an explicit placeholder until a real commit is pinned, in sync with the helper', async () => {
+test('semantic indexing also strips markup from CRLF notes', () => {
+  assert.equal(stripTranscriptMarkup('**Speaker 1** [1:02:03]\r\nHello there.\r\n\r\n[00:09] Bye.'), 'Hello there.\r\n\r\nBye.')
+})
+
+test('the Sortformer revision is pinned to a real commit, in sync with the helper', async () => {
   const model = DIARIZATION_MODELS.sortformer
   assert.equal(model.purpose, 'diarization')
   assert.equal(model.repository, 'mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16')
-  assert.equal(isDiarizationRevisionPinned(model), /^[0-9a-f]{40}$/.test(model.revision))
+  assert.match(model.revision, /^[0-9a-f]{40}$/)
+  assert.deepEqual(model.requiredFiles, ['config.json', 'model.safetensors'])
   const swift = await fs.readFile(new URL('../experiments/mlx-swift/Sources/folio-mlx/main.swift', import.meta.url), 'utf8')
   assert.ok(swift.includes(`modelID: "${model.repository}"`))
-  if (isDiarizationRevisionPinned(model)) assert.ok(swift.includes(`"${model.revision}"`))
-  else assert.ok(swift.includes(`static let unresolvedRevision = "${model.revision}"`))
+  assert.ok(swift.includes(`"${model.revision}"`))
 })

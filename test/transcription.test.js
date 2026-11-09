@@ -641,7 +641,7 @@ test('unsupported platforms expose setup guidance without attempting MLX install
   await service.close()
 })
 
-const PINNED_SORTFORMER = Object.freeze({ ...DIARIZATION_MODELS.sortformer, revision: 'b'.repeat(40) })
+const PINNED_SORTFORMER = DIARIZATION_MODELS.sortformer
 
 async function installSortformer(runtime, model = PINNED_SORTFORMER) {
   const directory = path.join(runtime.modelRoot, 'hf-cache', `models--${model.repository.replaceAll('/', '--')}`, 'snapshots', model.revision)
@@ -703,26 +703,6 @@ test('a helper without segments keeps the plain transcript and skips speaker lab
   assert.equal(labelled.result.transcript, 'Only text.')
   assert.match(labelled.result.speakerWarning, /did not return segment timestamps/)
   assert.deepEqual(operations, ['transcribe', 'transcribe'], 'no diarization pass without segments to label')
-  await service.close()
-})
-
-test('speaker labels need the pinned Sortformer model, and the unresolved revision never downloads', async (t) => {
-  const { runtime } = await fixture(t)
-  await installSnapshot(runtime)
-  runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
-  let ran = false
-  runtime.transcriptionRunner = async ({ request }) => { ran = true; return { id: request.id, text: 'x', segments: MEETING_SEGMENTS } }
-  runtime.transcriptionInstaller = async () => { throw new Error('must not download an unpinned revision') }
-  const service = createTranscriptionService(runtime)
-  const status = (await service.status()).diarization
-  assert.equal(status.pinned, false)
-  assert.equal(status.canInstall, false)
-  assert.equal(status.modelState, 'missing')
-  await assert.rejects(service.installDiarization(), /revision has not been pinned/)
-  const session = await recordedSession(runtime, service, { identifySpeakers: true })
-  await assert.rejects(service.transcribe(session.id), /not available in this build yet/)
-  assert.equal(ran, false)
-  assert.equal((await runtime.transcriptionStorage.readManifest(session.id)).state, 'recorded')
   await service.close()
 })
 

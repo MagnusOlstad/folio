@@ -108,13 +108,11 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
             type="checkbox"
             checked={model.identifySpeakers}
             onChange={(event) => actions.setIdentifySpeakers(event.currentTarget.checked)}
-            disabled={controlsBusy || !speakers.pinned}
+            disabled={controlsBusy}
           />
           <span>
             <strong>Identify speakers</strong>
-            <small>{speakers.pinned
-              ? `Labels who is speaking (up to ${speakers.maxSpeakers} speakers) with a separate local model. Adds processing time. Off by default.`
-              : 'Not available in this build yet.'}</small>
+            <small>{`Labels who is speaking (up to ${speakers.maxSpeakers} speakers) with a separate local model. Adds processing time. Off by default.`}</small>
           </span>
         </label>}
         <input
@@ -185,8 +183,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
           <span className="transcription-status-dot" aria-hidden="true" />
           <strong>{speakers.modelState === 'downloading' ? `Downloading ${speakers.modelName}` : `${speakers.modelName} is not installed`}</strong>
         </div>
-        {!speakers.pinned && <p>Speaker labels are not available in this build yet. Turn “Identify speakers” off to transcribe without them.</p>}
-        {speakers.pinned && speakers.modelState === 'missing' && <>
+        {speakers.modelState === 'missing' && <>
           <p>Speaker labels need {speakers.model} (about {Math.round(speakers.totalBytes / 1_000_000)} MB). It runs locally and is only downloaded when you ask.</p>
           <button type="button" className="transcription-secondary" onClick={actions.installSpeakerModel} disabled={controlsBusy || !speakers.canInstall}>Download {speakers.modelName}</button>
         </>}
@@ -228,7 +225,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
                     aria-label={`Identify speakers in ${session.fileName || 'audio recording'}`}
                     checked={session.identifySpeakers === true}
                     onChange={(event) => actions.setSessionIdentifySpeakers(session, event.currentTarget.checked)}
-                    disabled={controlsBusy || processing || !speakers.pinned}
+                    disabled={controlsBusy || processing}
                   />
                   <span>Identify speakers</span>
                 </label>

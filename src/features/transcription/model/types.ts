@@ -43,8 +43,6 @@ export type SpeakerModelStatus = {
   modelId: 'sortformer'
   modelName: string
   model: string
-  /** False while the Sortformer revision is an unresolved placeholder (no download possible). */
-  pinned: boolean
   maxSpeakers: number
   modelState: 'ready' | 'missing' | 'downloading'
   downloadedBytes: number

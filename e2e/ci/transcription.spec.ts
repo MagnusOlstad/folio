@@ -32,9 +32,9 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
     downloadPercent: installed ? 100 : 0, canInstall: true, canTranscribe: installed, installing: false,
     diarization: {
       modelId: 'sortformer', modelName: 'Sortformer Speaker Labels',
-      model: 'mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16', pinned: true, maxSpeakers: 4,
+      model: 'mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16', maxSpeakers: 4,
       modelState: speakerModelInstalled ? 'ready' : 'missing',
-      downloadedBytes: speakerModelInstalled ? 250_000_000 : 0, totalBytes: 250_000_000,
+      downloadedBytes: speakerModelInstalled ? 236_110_000 : 0, totalBytes: 236_110_000,
       downloadPercent: speakerModelInstalled ? 100 : 0, canInstall: true, canDiarize: speakerModelInstalled, installing: false,
     },
   } }))
@@ -99,7 +99,7 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   await page.getByRole('button', { name: 'Download Whisper Large v3 Turbo' }).click()
   await expect(page.getByText('Whisper Large v3 Turbo is ready', { exact: true })).toBeVisible()
 
-  const speakerToggle = page.getByRole('checkbox', { name: 'Identify speakers', exact: true })
+  const speakerToggle = page.getByRole('checkbox', { name: /^Identify speakers/ })
   await expect(speakerToggle).not.toBeChecked()
   await page.getByLabel('Choose local audio file').setInputFiles({
     name: 'project-review.wav',

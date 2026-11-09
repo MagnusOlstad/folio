@@ -67,7 +67,6 @@ const speakerStatus = {
   modelId: "sortformer" as const,
   modelName: "Sortformer Speaker Labels",
   model: "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16",
-  pinned: true,
   maxSpeakers: 4,
   modelState: "missing" as const,
   downloadedBytes: 0,
@@ -548,7 +547,7 @@ describe("transcription UI", () => {
     await act(async () => { await result.current.actions.importFile(file); });
     const createCall = apiForBundleMock.mock.calls[0];
     expect(createCall?.[0]).toBe("bundle-a");
-    expect(JSON.parse(createCall?.[2]?.body as string)).toEqual({ fileName: "meeting.wav", durationMs: null, sourceBundleId: "bundle-a" });
+    expect(JSON.parse(createCall?.[2]?.body as string)).toEqual({ fileName: "meeting.wav", durationMs: null, sourceBundleId: "bundle-a", identifySpeakers: false });
     expect(JSON.parse(createCall?.[2]?.body as string)).not.toHaveProperty("sourceNoteId");
   });
 
@@ -955,16 +954,6 @@ describe("transcription UI", () => {
     expect(screen.queryByRole("button", { name: /Download Sortformer/ })).not.toBeInTheDocument();
   });
 
-  it("explains that speaker labels are unavailable while the model revision is unpinned", () => {
-    render(<TranscriptionDock model={model({
-      status: { ...readyStatus, diarization: { ...speakerStatus, pinned: false, canInstall: false } },
-      identifySpeakers: true,
-    })} actions={actions()} />);
-    expect(screen.getByRole("checkbox", { name: /Identify speakers/ })).toBeDisabled();
-    expect(screen.getAllByText(/not available in this build yet/i).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: /Download Sortformer/ })).not.toBeInTheDocument();
-  });
-
   it("lets a pending item change its saved speaker setting and blocks Transcribe until the model is installed", () => {
     const dockActions = actions();
     const pendingSession: TranscriptionSession = { ...session, state: "failed", identifySpeakers: true, error: "Interrupted." };
@@ -994,7 +983,8 @@ describe("transcription UI", () => {
       }
       throw new Error(`Unexpected bundle API request: ${url}`);
     });
-    // jsdom has no URL.createObjectURL, so audioDuration resolves to null without waiting for metadata.
+    // audioDuration waits for media metadata that jsdom never delivers; without Audio it resolves to null at once.
+    vi.stubGlobal("Audio", undefined);
     const setMessage = vi.fn();
     const drafts = {
       createDraft: vi.fn(() => "untitled:new"),
@@ -1018,6 +1008,7 @@ describe("transcription UI", () => {
     await act(async () => { result.current.actions.transcribe({ ...session, state: "recorded", draftId: null, sourceBundleId: "bundle-a" }); });
     await waitFor(() => expect(setMessage).toHaveBeenCalledWith(expect.stringContaining("Speaker labels could not be added: out of memory")));
     expect(drafts.createDraft).toHaveBeenCalledWith(expect.stringContaining("[00:01] Hi."));
+    vi.unstubAllGlobals();
   });
 
   it("saves a per-item speaker change through the options endpoint", async () => {

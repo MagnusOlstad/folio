@@ -1,13 +1,11 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { DIARIZATION_MODEL_ID, DIARIZATION_MODELS, isDiarizationRevisionPinned } from './models.js'
+import { DIARIZATION_MODEL_ID, DIARIZATION_MODELS } from './models.js'
 import { runHelper } from './helper.js'
 import { folderBytes, installedSnapshot, repositoryRoot } from './snapshots.js'
 import { normalizeSpeakerSegments } from './segments.js'
 import { recordDownloadProgress, summarizeDownloadProgress } from '../mlx/download-progress.js'
-
-const UNPINNED_MESSAGE = 'Speaker labels are not available in this build yet: the Sortformer model revision has not been pinned.'
 
 function failure(message, status) { return Object.assign(new Error(message), { status }) }
 
@@ -25,10 +23,9 @@ export function createDiarizationSupport({ runtime, cacheRoot, executable, avail
     if (modelDirectory) args.push('--model-directory', modelDirectory)
     return args
   }
-  const snapshot = () => (isDiarizationRevisionPinned(model) ? installedSnapshot(cacheRoot, model) : Promise.resolve(null))
+  const snapshot = () => installedSnapshot(cacheRoot, model)
 
   async function localStatus() {
-    const pinned = isDiarizationRevisionPinned(model)
     let helperAvailable = false
     try { await fs.access(executable); helperAvailable = available } catch { /* native build has not run */ }
     const ready = Boolean(await snapshot())
@@ -42,7 +39,6 @@ export function createDiarizationSupport({ runtime, cacheRoot, executable, avail
       modelName: model.name,
       model: model.repository,
       revision: model.revision,
-      pinned,
       maxSpeakers: model.maxSpeakers,
       available,
       helperAvailable,
@@ -50,7 +46,7 @@ export function createDiarizationSupport({ runtime, cacheRoot, executable, avail
       downloadedBytes,
       totalBytes: model.downloadSizeBytes,
       downloadPercent: ready ? 100 : installing ? Math.min(99, Math.floor(downloadedBytes / model.downloadSizeBytes * 100)) : 0,
-      canInstall: available && helperAvailable && pinned,
+      canInstall: available && helperAvailable,
       canDiarize: available && helperAvailable && ready,
       installing: Boolean(installing),
     }
@@ -70,14 +66,13 @@ export function createDiarizationSupport({ runtime, cacheRoot, executable, avail
       downloadedBytes: progress?.downloadedBytes ?? local.downloadedBytes,
       totalBytes: progress?.totalBytes ?? local.totalBytes,
       downloadPercent: progress?.percent ?? local.downloadPercent,
-      canInstall: local.available && shared.helperAvailable && local.pinned,
+      canInstall: local.available && shared.helperAvailable,
       canDiarize: local.available && shared.helperAvailable && installed,
       installing: Boolean(progress),
     }
   }
 
   async function installRaw() {
-    if (!isDiarizationRevisionPinned(model)) throw failure(UNPINNED_MESSAGE, 503)
     if (!available) throw failure('Speaker labels require FolioNotes on an Apple Silicon Mac running macOS 14 or later.', 503)
     if (installing) return installing
     installProgress.clear()
@@ -99,14 +94,12 @@ export function createDiarizationSupport({ runtime, cacheRoot, executable, avail
 
   async function install() {
     if (!runtime.mlxService?.install) return installRaw()
-    if (!isDiarizationRevisionPinned(model)) throw failure(UNPINNED_MESSAGE, 503)
     await runtime.mlxService.install(model.id)
     return status()
   }
 
   /** Throws a user-facing 409 unless speaker labels can run now. Called before Whisper starts. */
   async function requireReady() {
-    if (!isDiarizationRevisionPinned(model)) throw failure(UNPINNED_MESSAGE, 409)
     if (!(await snapshot())) {
       throw failure(`Download ${model.name} in the Transcription tab before identifying speakers, or turn speaker labels off.`, 409)
     }
