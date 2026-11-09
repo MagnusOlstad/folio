@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test'
 
 test('imports audio, downloads local Whisper, files an editable note, and summarizes its edits', async ({ page, request }) => {
   let installed = false
+  let speakerModelInstalled = false
+  const importBodies: Record<string, unknown>[] = []
   let summarizedTranscript = ''
   let filedNoteId = ''
   let sourceBundleId = ''
@@ -14,6 +16,7 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   page.on('request', (request) => {
     if (new URL(request.url()).pathname === '/api/transcriptions' && request.method() === 'POST') {
       importBody = request.postDataJSON() as Record<string, unknown>
+      importBodies.push(importBody)
     }
   })
   page.on('response', async (response) => {
@@ -27,7 +30,18 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
     available: true, helperAvailable: true, modelState: installed ? 'ready' : 'missing',
     downloadedBytes: installed ? 1_610_000_000 : 0, totalBytes: 1_610_000_000,
     downloadPercent: installed ? 100 : 0, canInstall: true, canTranscribe: installed, installing: false,
+    diarization: {
+      modelId: 'sortformer', modelName: 'Sortformer Speaker Labels',
+      model: 'mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16', pinned: true, maxSpeakers: 4,
+      modelState: speakerModelInstalled ? 'ready' : 'missing',
+      downloadedBytes: speakerModelInstalled ? 250_000_000 : 0, totalBytes: 250_000_000,
+      downloadPercent: speakerModelInstalled ? 100 : 0, canInstall: true, canDiarize: speakerModelInstalled, installing: false,
+    },
   } }))
+  await page.route('**/api/transcriptions/speakers/install', async (route) => {
+    speakerModelInstalled = true
+    await route.fulfill({ json: { modelState: 'ready', canDiarize: true } })
+  })
   await page.route('**/api/transcriptions/model/install', async (route) => {
     installed = true
     await route.fulfill({ json: { modelState: 'ready', canTranscribe: true } })
@@ -46,7 +60,11 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
       const fallback = setTimeout(resolve, 10_000)
       releaseTranscription = () => { clearTimeout(fallback); resolve() }
     })
-    const result = { summary: '', transcript: 'The project review is next Tuesday at noon.' }
+    const result = {
+      summary: '', transcript: '[00:01] The project review is next Tuesday at noon.',
+      plainText: 'The project review is next Tuesday at noon.', speakers: false,
+      segments: [{ start: 1.2, end: 4.8, text: 'The project review is next Tuesday at noon.' }],
+    }
     if (id) { activeSessionIds.delete(id); processedSessionIds.add(id); rawResults.set(id, result) }
     const sessionResponse = await request.get(`/api/transcriptions/${id}`)
     const { session } = await sessionResponse.json()
@@ -81,6 +99,8 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   await page.getByRole('button', { name: 'Download Whisper Large v3 Turbo' }).click()
   await expect(page.getByText('Whisper Large v3 Turbo is ready', { exact: true })).toBeVisible()
 
+  const speakerToggle = page.getByRole('checkbox', { name: 'Identify speakers', exact: true })
+  await expect(speakerToggle).not.toBeChecked()
   await page.getByLabel('Choose local audio file').setInputFiles({
     name: 'project-review.wav',
     mimeType: 'audio/wav',
@@ -90,6 +110,7 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   await expect(imported).toBeVisible()
   await expect.poll(() => importBody).not.toBeNull()
   expect(importBody).not.toHaveProperty('sourceNoteId')
+  expect(importBody).toMatchObject({ fileName: 'project-review.wav', identifySpeakers: false })
   const tabsBeforeTranscribe = await page.locator('.editor-tab').count()
   await imported.getByRole('button', { name: 'Transcribe' }).first().click()
   await expect(imported.getByText('37%', { exact: true })).toBeVisible()
@@ -98,6 +119,7 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   const draftEditor = page.getByLabel('Write a new note')
   await expect(draftEditor).toBeVisible()
   await expect(draftEditor).toContainText('Source audio: project-review.wav')
+  await expect(draftEditor).toContainText('[00:01] The project review is next Tuesday at noon.')
   await expect(page.locator('.editor-tab')).toHaveCount(tabsBeforeTranscribe + 1)
   const countLocalDraftsContaining = (text: string) => page.evaluate(({ bundleId, needle }) => {
     const stored = localStorage.getItem(`folio:drafts:v2:${bundleId}`)
@@ -146,7 +168,21 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
     const response = await fetch(`/api/transcriptions/${id}`)
     return await response.json() as { result: { transcript: string } }
   }, rawSessionId)
-  expect(rawSession.result.transcript).toBe('The project review is next Tuesday at noon.')
+  expect(rawSession.result.transcript).toBe('[00:01] The project review is next Tuesday at noon.')
+
+  // Speaker labels are a per-transcription choice: choosing them offers the optional model download.
+  await page.getByRole('tab', { name: 'Transcription' }).click()
+  await speakerToggle.check()
+  await expect(page.getByText('Sortformer Speaker Labels is not installed')).toBeVisible()
+  await page.getByRole('button', { name: 'Download Sortformer Speaker Labels' }).click()
+  await expect(page.getByText('Sortformer Speaker Labels is not installed')).toHaveCount(0)
+  await page.getByLabel('Choose local audio file').setInputFiles({
+    name: 'interview.wav',
+    mimeType: 'audio/wav',
+    buffer: Buffer.from('RIFF-local-audio-fixture-two'),
+  })
+  await expect(page.locator('.transcription-item').filter({ hasText: 'interview.wav' })).toBeVisible()
+  expect(importBodies.at(-1)).toMatchObject({ fileName: 'interview.wav', identifySpeakers: true })
 
   await filed.getByRole('button', { name: 'Delete' }).click()
   await expect(filed.getByText(/Any opened or saved Markdown note will be kept/)).toBeVisible()

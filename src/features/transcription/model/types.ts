@@ -16,17 +16,44 @@ export type TranscriptionSession = {
   source?: 'file'
   sourceNoteId?: string | null
   sourceBundleId?: string | null
+  /** Per-transcription choice, saved with the session so retries use it. */
+  identifySpeakers?: boolean
 }
+
+export type TranscriptionSegment = { start: number; end: number; text: string; speaker?: number | null }
 
 export type TranscriptionResult = {
   markdown?: string
   summary: string
+  /** Markdown transcript: `[mm:ss]` paragraphs, or `**Speaker N** [mm:ss]` turns. */
   transcript: string
+  plainText?: string
+  segments?: TranscriptionSegment[]
+  speakers?: boolean
+  speakerCount?: number
+  /** Set when speaker labels were requested but could not be added. */
+  speakerWarning?: string
   generatedAt?: string
   summaryGeneratedAt?: string
 }
 
 export type TranscriptionProcessResponse = { session: TranscriptionSession; result: TranscriptionResult }
+
+export type SpeakerModelStatus = {
+  modelId: 'sortformer'
+  modelName: string
+  model: string
+  /** False while the Sortformer revision is an unresolved placeholder (no download possible). */
+  pinned: boolean
+  maxSpeakers: number
+  modelState: 'ready' | 'missing' | 'downloading'
+  downloadedBytes: number
+  totalBytes: number
+  downloadPercent: number
+  canInstall: boolean
+  canDiarize: boolean
+  installing: boolean
+}
 
 export type TranscriptionStatus = {
   model: string
@@ -42,6 +69,7 @@ export type TranscriptionStatus = {
   canInstall: boolean
   canTranscribe: boolean
   installing: boolean
+  diarization?: SpeakerModelStatus
 }
 
 export type TranscriptionDraftAdapter = {

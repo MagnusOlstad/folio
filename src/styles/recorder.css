@@ -152,3 +152,40 @@
   .is-recording .transcription-recorder-mark,
   .transcription-recording-activity i { animation: none; }
 }
+
+.transcription-speaker-toggle,
+.transcription-item-speakers {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.transcription-speaker-toggle > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.transcription-speaker-toggle small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.transcription-speaker-toggle input,
+.transcription-item-speakers input {
+  flex: none;
+  margin: 2px 0 0;
+  accent-color: var(--acid);
+}
+
+.transcription-item-speakers {
+  align-items: center;
+  color: var(--muted);
+}
+
+.transcription-item-speakers input {
+  margin: 0;
+}

@@ -21,6 +21,7 @@ function model(overrides: Partial<TranscriptionDockModel> = {}): TranscriptionDo
     status: null,
     progress: "",
     error: "",
+    identifySpeakers: false,
     deletingSessionId: null,
     recording: { phase: "idle", duration: "0:00", error: "", saving: false },
     ...overrides,
@@ -35,6 +36,9 @@ function actions(): TranscriptionDockActions {
     discardRecording: vi.fn(),
     retryRecording: vi.fn(),
     installModel: vi.fn(),
+    installSpeakerModel: vi.fn(),
+    setIdentifySpeakers: vi.fn(),
+    setSessionIdentifySpeakers: vi.fn(),
     transcribe: vi.fn(),
     cancel: vi.fn(),
     openTranscript: vi.fn(),
@@ -58,6 +62,22 @@ const status = {
   canTranscribe: false,
   installing: false,
 };
+
+const speakerStatus = {
+  modelId: "sortformer" as const,
+  modelName: "Sortformer Speaker Labels",
+  model: "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16",
+  pinned: true,
+  maxSpeakers: 4,
+  modelState: "missing" as const,
+  downloadedBytes: 0,
+  totalBytes: 250_000_000,
+  downloadPercent: 0,
+  canInstall: true,
+  canDiarize: false,
+  installing: false,
+};
+const readyStatus = { ...status, modelState: "ready" as const, canTranscribe: true, downloadPercent: 100, downloadedBytes: status.totalBytes };
 
 const session: TranscriptionSession = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -904,5 +924,114 @@ describe("transcription UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel summary" }));
     expect(dockActions.cancel).toHaveBeenCalledWith(session);
     expect(screen.getByText(/your draft and original transcript stay unchanged/i)).toBeInTheDocument();
+  });
+
+  it("hides the speaker option until the server reports speaker support", () => {
+    render(<TranscriptionDock model={model({ status: readyStatus })} actions={actions()} />);
+    expect(screen.queryByRole("checkbox", { name: /identify speakers/i })).not.toBeInTheDocument();
+  });
+
+  it("offers Identify speakers off by default, and a download only after it is chosen", () => {
+    const dockActions = actions();
+    const { rerender } = render(<TranscriptionDock model={model({ status: { ...readyStatus, diarization: speakerStatus } })} actions={dockActions} />);
+    const toggle = screen.getByRole("checkbox", { name: /Identify speakers/ });
+    expect(toggle).not.toBeChecked();
+    expect(screen.queryByRole("button", { name: /Download Sortformer/ })).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(dockActions.setIdentifySpeakers).toHaveBeenCalledWith(true);
+
+    rerender(<TranscriptionDock model={model({ status: { ...readyStatus, diarization: speakerStatus }, identifySpeakers: true })} actions={dockActions} />);
+    expect(screen.getByText("Sortformer Speaker Labels is not installed")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Download Sortformer Speaker Labels" }));
+    expect(dockActions.installSpeakerModel).toHaveBeenCalledOnce();
+
+    rerender(<TranscriptionDock model={model({
+      status: { ...readyStatus, diarization: { ...speakerStatus, modelState: "downloading", downloadPercent: 40, downloadedBytes: 100_000_000, installing: true } },
+      identifySpeakers: true,
+    })} actions={dockActions} />);
+    expect(screen.getByLabelText("Sortformer Speaker Labels download 40%")).toBeInTheDocument();
+
+    rerender(<TranscriptionDock model={model({ status: { ...readyStatus, diarization: { ...speakerStatus, modelState: "ready", canDiarize: true } }, identifySpeakers: true })} actions={dockActions} />);
+    expect(screen.queryByRole("button", { name: /Download Sortformer/ })).not.toBeInTheDocument();
+  });
+
+  it("explains that speaker labels are unavailable while the model revision is unpinned", () => {
+    render(<TranscriptionDock model={model({
+      status: { ...readyStatus, diarization: { ...speakerStatus, pinned: false, canInstall: false } },
+      identifySpeakers: true,
+    })} actions={actions()} />);
+    expect(screen.getByRole("checkbox", { name: /Identify speakers/ })).toBeDisabled();
+    expect(screen.getAllByText(/not available in this build yet/i).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /Download Sortformer/ })).not.toBeInTheDocument();
+  });
+
+  it("lets a pending item change its saved speaker setting and blocks Transcribe until the model is installed", () => {
+    const dockActions = actions();
+    const pendingSession: TranscriptionSession = { ...session, state: "failed", identifySpeakers: true, error: "Interrupted." };
+    render(<TranscriptionDock model={model({ status: { ...readyStatus, diarization: speakerStatus }, pending: [pendingSession] })} actions={dockActions} />);
+    const itemToggle = screen.getByRole("checkbox", { name: "Identify speakers in meeting.wav" });
+    expect(itemToggle).toBeChecked();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
+    expect(screen.getByText(/Speaker labels need the Sortformer Speaker Labels model/)).toBeInTheDocument();
+    fireEvent.click(itemToggle);
+    expect(dockActions.setSessionIdentifySpeakers).toHaveBeenCalledWith(pendingSession, false);
+  });
+
+  it("sends the chosen speaker setting with each import and shows a speaker warning when the draft opens", async () => {
+    apiMock.mockImplementation((url: string) => {
+      if (url === "/api/transcriptions/status") return { ...readyStatus, diarization: { ...speakerStatus, modelState: "ready", canDiarize: true } };
+      if (url === "/api/transcriptions?pending=1") return [];
+      throw new Error(`Unexpected API request: ${url}`);
+    });
+    apiForBundleMock.mockImplementation(async (_bundle: string | null, url: string) => {
+      if (url === "/api/transcriptions") return { session: { ...session, state: "queued" } };
+      if (url.endsWith("/audio")) return { session: { ...session, state: "recorded" } };
+      if (url.endsWith("/process")) {
+        return {
+          session: { ...session, state: "ready", identifySpeakers: true },
+          result: { summary: "", transcript: "[00:01] Hi.", speakerWarning: "Speaker labels could not be added: out of memory" },
+        };
+      }
+      throw new Error(`Unexpected bundle API request: ${url}`);
+    });
+    // jsdom has no URL.createObjectURL, so audioDuration resolves to null without waiting for metadata.
+    const setMessage = vi.fn();
+    const drafts = {
+      createDraft: vi.fn(() => "untitled:new"),
+      getDraftContent: vi.fn(() => undefined),
+      getDraftDocument: vi.fn(() => undefined),
+      updateDraftContent: vi.fn(),
+      openDraft: vi.fn(),
+    };
+    const { result } = renderHook(() => useTranscription({ drafts, setMessage, sourceBundleId: "bundle-a" }));
+    expect(result.current.model.identifySpeakers).toBe(false);
+    await act(async () => { await result.current.actions.importFile(new File(["a"], "first.wav", { type: "audio/wav" })); });
+    const firstBody = JSON.parse(apiForBundleMock.mock.calls.find(([, url]) => url === "/api/transcriptions")?.[2].body as string);
+    expect(firstBody).toMatchObject({ fileName: "first.wav", identifySpeakers: false });
+
+    act(() => { result.current.actions.setIdentifySpeakers(true); });
+    expect(result.current.model.identifySpeakers).toBe(true);
+    await act(async () => { await result.current.actions.importFile(new File(["b"], "second.wav", { type: "audio/wav" })); });
+    const creations = apiForBundleMock.mock.calls.filter(([, url]) => url === "/api/transcriptions");
+    expect(JSON.parse(creations[1]?.[2].body as string)).toMatchObject({ fileName: "second.wav", identifySpeakers: true });
+
+    await act(async () => { result.current.actions.transcribe({ ...session, state: "recorded", draftId: null, sourceBundleId: "bundle-a" }); });
+    await waitFor(() => expect(setMessage).toHaveBeenCalledWith(expect.stringContaining("Speaker labels could not be added: out of memory")));
+    expect(drafts.createDraft).toHaveBeenCalledWith(expect.stringContaining("[00:01] Hi."));
+  });
+
+  it("saves a per-item speaker change through the options endpoint", async () => {
+    const pendingSession: TranscriptionSession = { ...session, state: "recorded", draftId: null, identifySpeakers: false };
+    apiMock.mockImplementation((url: string) => {
+      if (url === "/api/transcriptions/status") return readyStatus;
+      if (url === "/api/transcriptions?pending=1") return [pendingSession];
+      throw new Error(`Unexpected API request: ${url}`);
+    });
+    apiForBundleMock.mockResolvedValue({ session: { ...pendingSession, identifySpeakers: true } });
+    const drafts = { createDraft: vi.fn(() => "untitled:new"), getDraftContent: vi.fn(), getDraftDocument: vi.fn(), updateDraftContent: vi.fn(), openDraft: vi.fn() };
+    const { result } = renderHook(() => useTranscription({ drafts, setMessage: vi.fn(), sourceBundleId: "bundle-a" }));
+    await waitFor(() => expect(result.current.model.pending).toHaveLength(1));
+    await act(async () => { result.current.actions.setSessionIdentifySpeakers(pendingSession, true); });
+    expect(apiForBundleMock).toHaveBeenCalledWith("bundle-a", `/api/transcriptions/${pendingSession.id}/options`, { method: "POST", body: JSON.stringify({ identifySpeakers: true }) });
   });
 });

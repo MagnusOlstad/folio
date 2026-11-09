@@ -29,6 +29,12 @@ test('records microphone audio, converts it to WAV, and saves it through local i
     model: 'mlx-community/whisper-large-v3-turbo', revision: 'test-revision',
     available: true, helperAvailable: true, modelState: 'ready', downloadedBytes: 1_610_000_000,
     totalBytes: 1_610_000_000, downloadPercent: 100, canInstall: true, canTranscribe: true, installing: false,
+    diarization: {
+      modelId: 'sortformer', modelName: 'Sortformer Speaker Labels',
+      model: 'mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16', pinned: true, maxSpeakers: 4,
+      modelState: 'ready', downloadedBytes: 250_000_000, totalBytes: 250_000_000,
+      downloadPercent: 100, canInstall: true, canDiarize: true, installing: false,
+    },
   } }))
   await page.route('**/api/transcriptions?pending=1', (route) => route.fulfill({ json: sessionState.value ? [sessionState.value] : [] }))
   await page.route('**/api/transcriptions', async (route) => {
@@ -49,6 +55,10 @@ test('records microphone audio, converts it to WAV, and saves it through local i
   await page.goto(baseURL!)
   await page.getByRole('button', { name: 'Todo List', exact: true }).click()
   await page.getByRole('tab', { name: 'Transcription' }).click()
+  // Speaker labels are chosen per transcription and apply to the recording that is about to start.
+  const speakerToggle = page.getByRole('checkbox', { name: 'Identify speakers', exact: true })
+  await expect(speakerToggle).not.toBeChecked()
+  await speakerToggle.check()
   await page.getByRole('button', { name: 'Start recording' }).click()
   await expect(page.getByRole('button', { name: 'Stop recording' })).toBeVisible()
   await page.waitForTimeout(1_100)
@@ -61,4 +71,5 @@ test('records microphone audio, converts it to WAV, and saves it through local i
   expect(upload.bytes.subarray(8, 12).toString('ascii')).toBe('WAVE')
   expect(sessionState.value?.fileName).toMatch(/^Recording .*\.wav$/)
   expect(creationBody).not.toHaveProperty('sourceNoteId')
+  expect(creationBody).toMatchObject({ identifySpeakers: true })
 })

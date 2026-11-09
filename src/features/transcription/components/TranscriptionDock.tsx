@@ -39,6 +39,10 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
   const status = model.status
   const selectedModelName = status?.modelName ?? (status?.modelId === 'whisperlarge' ? 'Whisper Large v3' : 'Whisper Large v3 Turbo')
   const canTranscribe = status?.canTranscribe === true
+  const speakers = status?.diarization
+  const speakersReady = speakers?.canDiarize === true
+  const speakerLabelsWanted = model.identifySpeakers || model.pending.some((session) => session.identifySpeakers === true && session.state !== 'ready')
+  const speakerOffer = Boolean(speakers) && speakerLabelsWanted && !speakersReady
 
   useEffect(() => {
     recordingPhaseRef.current = recorder.phase
@@ -99,6 +103,20 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
             Choose audio
           </button>
         </div>
+        {speakers && <label className="transcription-speaker-toggle">
+          <input
+            type="checkbox"
+            checked={model.identifySpeakers}
+            onChange={(event) => actions.setIdentifySpeakers(event.currentTarget.checked)}
+            disabled={controlsBusy || !speakers.pinned}
+          />
+          <span>
+            <strong>Identify speakers</strong>
+            <small>{speakers.pinned
+              ? `Labels who is speaking (up to ${speakers.maxSpeakers} speakers) with a separate local model. Adds processing time. Off by default.`
+              : 'Not available in this build yet.'}</small>
+          </span>
+        </label>}
         <input
           ref={inputRef}
           type="file"
@@ -162,6 +180,24 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
         )}
       </div>
 
+      {speakers && speakerOffer && <div className="transcription-model-status transcription-speaker-model" role="status" aria-live="polite">
+        <div className="transcription-model-state">
+          <span className="transcription-status-dot" aria-hidden="true" />
+          <strong>{speakers.modelState === 'downloading' ? `Downloading ${speakers.modelName}` : `${speakers.modelName} is not installed`}</strong>
+        </div>
+        {!speakers.pinned && <p>Speaker labels are not available in this build yet. Turn “Identify speakers” off to transcribe without them.</p>}
+        {speakers.pinned && speakers.modelState === 'missing' && <>
+          <p>Speaker labels need {speakers.model} (about {Math.round(speakers.totalBytes / 1_000_000)} MB). It runs locally and is only downloaded when you ask.</p>
+          <button type="button" className="transcription-secondary" onClick={actions.installSpeakerModel} disabled={controlsBusy || !speakers.canInstall}>Download {speakers.modelName}</button>
+        </>}
+        {speakers.modelState === 'downloading' && (
+          <div className="transcription-download-progress" aria-label={`${speakers.modelName} download ${speakers.downloadPercent}%`}>
+            <div><span style={{ width: `${speakers.downloadPercent}%` }} /></div>
+            <small>{speakers.downloadPercent}% · {speakers.downloadedBytes.toLocaleString()} of about {speakers.totalBytes.toLocaleString()} bytes</small>
+          </div>
+        )}
+      </div>}
+
       {model.progress && model.phase !== 'transcribing' && <p className="transcription-progress" role="status">{model.progress}</p>}
       {(model.phase === 'summarizing' || model.phase === 'cancelling-summary') && <p className="transcription-empty">Cancel waits for the current local model request; your draft and original transcript stay unchanged.</p>}
       {model.error && <p className="transcription-error" role="alert">{model.error}</p>}
@@ -175,6 +211,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
           const summarizing = busy && model.activeSession?.id === session.id
             && (model.phase === 'summarizing' || model.phase === 'cancelling-summary')
           const deleting = model.deletingSessionId === session.id
+          const speakersBlocked = session.identifySpeakers === true && Boolean(speakers) && !speakersReady
           const deleteDisabled = controlsBusy || recorder.phase !== 'idle' || processing || summarizing || Boolean(model.deletingSessionId)
           return (
             <article className="transcription-item" key={session.id}>
@@ -184,6 +221,19 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
               </div>
               <small>{importedDate(session)}{session.durationMs === null ? '' : ` · ${durationLabel(session.durationMs)}`}</small>
               {session.error && <p className="transcription-item-error" role="status">{session.error}</p>}
+              {speakers && session.state !== 'ready' && (
+                <label className="transcription-item-speakers">
+                  <input
+                    type="checkbox"
+                    aria-label={`Identify speakers in ${session.fileName || 'audio recording'}`}
+                    checked={session.identifySpeakers === true}
+                    onChange={(event) => actions.setSessionIdentifySpeakers(session, event.currentTarget.checked)}
+                    disabled={controlsBusy || processing || !speakers.pinned}
+                  />
+                  <span>Identify speakers</span>
+                </label>
+              )}
+              {speakersBlocked && <p className="transcription-item-error" role="status">Speaker labels need the {speakers?.modelName} model. Download it above, or turn speaker labels off for this audio.</p>}
               <div className="transcription-item-actions">
                 {session.state === 'ready' ? (
                   <>
@@ -191,7 +241,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
                     <button type="button" onClick={() => actions.regenerateSummary(session)} disabled={controlsBusy}>Summarize draft</button>
                   </>
                 ) : (
-                  <button type="button" onClick={() => actions.transcribe(session)} disabled={!canTranscribe || controlsBusy || processing}>
+                  <button type="button" onClick={() => actions.transcribe(session)} disabled={!canTranscribe || controlsBusy || processing || speakersBlocked}>
                     {session.state === 'failed' ? 'Retry' : 'Transcribe'}
                   </button>
                 )}

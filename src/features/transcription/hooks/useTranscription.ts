@@ -9,6 +9,7 @@ import {
   type TranscriptionDraftAdapter,
   type TranscriptionPhase,
   type TranscriptionProcessResponse,
+  type SpeakerModelStatus,
   type TranscriptionSession,
   type TranscriptionStatus,
 } from '../model/types.ts'
@@ -20,6 +21,8 @@ export type TranscriptionDockModel = {
   status: TranscriptionStatus | null
   progress: string
   error: string
+  /** Applies to the next import or recording; each session keeps its own saved copy. */
+  identifySpeakers: boolean
   deletingSessionId: string | null
   recording: { phase: RecordingPhase; duration: string; error: string; saving: boolean }
 }
@@ -31,6 +34,9 @@ export type TranscriptionDockActions = {
   discardRecording: () => void
   retryRecording: () => Promise<void>
   installModel: () => void
+  installSpeakerModel: () => void
+  setIdentifySpeakers: (value: boolean) => void
+  setSessionIdentifySpeakers: (session: TranscriptionSession, value: boolean) => void
   transcribe: (session: TranscriptionSession) => void
   cancel: (session: TranscriptionSession) => void
   openTranscript: (session: TranscriptionSession) => void
@@ -85,6 +91,8 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
   const [progress, setProgress] = useState('')
   const [error, setError] = useState('')
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
+  const [identifySpeakers, setIdentifySpeakersState] = useState(false)
+  const identifySpeakersRef = useRef(false)
   const activeBundle = useRef(sourceBundleId)
   const activeTranscriptionId = useRef<string | null>(null)
   const bundleGeneration = useRef(0)
@@ -169,7 +177,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
       const durationMs = await audioDuration(file)
       const created = await apiForBundle<SessionResponse>(importBundle, '/api/transcriptions', {
         method: 'POST',
-        body: JSON.stringify({ fileName: file.name, durationMs, sourceBundleId: importBundle }),
+        body: JSON.stringify({ fileName: file.name, durationMs, sourceBundleId: importBundle, identifySpeakers: identifySpeakersRef.current }),
       })
       await apiForBundle(importBundle, `/api/transcriptions/${encodeURIComponent(created.session.id)}/audio`, {
         method: 'PUT',
@@ -212,6 +220,44 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     } finally { busyRef.current = false }
   }
 
+  async function installSpeakerModel() {
+    if (busyRef.current) return
+    busyRef.current = true
+    setError('')
+    setPhase('downloading')
+    setProgress('Downloading the Sortformer speaker model…')
+    try {
+      await api<SpeakerModelStatus>('/api/transcriptions/speakers/install', { method: 'POST' })
+      setMessage('Speaker labels are ready for local transcription.')
+      await refresh()
+      setPhase('idle')
+      setProgress('')
+    } catch (downloadError) {
+      setError(errorMessage(downloadError, 'Could not download the Sortformer speaker model.'))
+      setPhase('error')
+      setProgress('')
+      await refresh()
+    } finally { busyRef.current = false }
+  }
+
+  function setIdentifySpeakers(value: boolean) {
+    identifySpeakersRef.current = value
+    setIdentifySpeakersState(value)
+  }
+
+  async function setSessionIdentifySpeakers(session: TranscriptionSession, value: boolean) {
+    if (busyRef.current || session.state === 'transcribing' || session.state === 'ready') return
+    setError('')
+    try {
+      const response = await apiForBundle<SessionResponse>(session.sourceBundleId ?? null,
+        `/api/transcriptions/${encodeURIComponent(session.id)}/options`, { method: 'POST', body: JSON.stringify({ identifySpeakers: value }) })
+      setPending((sessions) => sessions.map((item) => item.id === session.id ? { ...item, identifySpeakers: response.session.identifySpeakers === true } : item))
+    } catch (optionError) {
+      setError(errorMessage(optionError, 'Could not change the speaker label setting.'))
+    }
+    await refresh()
+  }
+
   function openTranscriptDraft(session: TranscriptionSession, result: TranscriptionProcessResponse['result']) {
     const bundleId = session.sourceBundleId ?? null
     if (activeBundle.current !== bundleId) {
@@ -220,7 +266,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     }
     const draftId = draftsRef.current.createDraft(mergeTranscriptionDraft(session, result))
     sessionDrafts.current.set(session.id, { draftId, bundleId })
-    setMessage('Transcript opened in a new editable draft.')
+    setMessage(result.speakerWarning ? `Transcript opened in a new editable draft. ${result.speakerWarning}` : 'Transcript opened in a new editable draft.')
     return draftId
   }
 
@@ -417,6 +463,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
       ? `${pending.find((session) => session.id === activeSession?.id)?.progressPercent ?? 0}%`
       : progress,
     error,
+    identifySpeakers,
     deletingSessionId,
     recording: { phase: recorder.phase, duration: recorder.duration, error: recorder.error, saving: recorder.saving },
   }
@@ -427,6 +474,9 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     discardRecording: recorder.discard,
     retryRecording: recorder.retry,
     installModel: () => void installModel(),
+    installSpeakerModel: () => void installSpeakerModel(),
+    setIdentifySpeakers,
+    setSessionIdentifySpeakers: (session, value) => void setSessionIdentifySpeakers(session, value),
     transcribe: (session) => void transcribe(session),
     cancel: (session) => void cancel(session),
     openTranscript: (session) => void openTranscript(session),
