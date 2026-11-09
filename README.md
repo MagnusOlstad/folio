@@ -28,6 +28,24 @@ FolioNotes is a local-first personal notetaker with one Markdown capture field. 
 - Local filesystem storage. No cloud service or account is required.
 - Import AAC, AIFF, FLAC, M4A, MP3, and WAV files from the Transcription tab in the right pane. FolioNotes downloads pinned `mlx-community/whisper-large-v3-turbo` weights on request, transcribes locally on Apple Silicon, and opens an editable Markdown note with the source filename, import time, duration, and source-note link. Transcript paragraphs start with a `[mm:ss]` timestamp from Whisper's segment times. Tick "Identify speakers" for an import or recording to also run the optional Sortformer model (a separate on-device download, off by default, up to 4 speakers); turns then read `**Speaker 1** [mm:ss]` followed by the text. Regenerate its concise summary with the selected local text model; it sees the speaker-labelled transcript. Timestamps and speaker headers are left out of the semantic index. See [docs/transcription.md](docs/transcription.md).
 
+## Note variables
+
+A note can define short variables and reuse them, for example to name the speakers of a transcript once:
+
+```markdown
+speaker1:: Kari Nordmann
+speaker2:: Ola
+
+**{{speaker1}}** [00:04]
+Welcome, {{speaker2}}.
+```
+
+- A definition is a whole line `key:: value` (Dataview inline-field style). Keys start with a letter, may contain letters, digits, `_` and `-`, and are case-insensitive. The first definition of a key wins.
+- `{{key}}` (optional inner spaces) is replaced by the value in the live editor, the rendered preview, search, Ask, and exports (Markdown, PDF, clipboard). Undefined references are left as written; in the editor they get a warning underline.
+- Variables are scoped to the note they appear in. YAML frontmatter, fenced code, and inline code are ignored, and values are plain text (no nested references).
+- The stored Markdown is never rewritten. In the editor the raw `{{key}}` shows while the cursor is inside it. In preview and exports, definition lines read `key: value`.
+- Translation leaves `{{key}}` references and `key:: value` lines untouched.
+
 ## Keyboard shortcuts
 
 The macOS desktop app installs a native application menu, so standard editing

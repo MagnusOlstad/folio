@@ -1,5 +1,10 @@
 import path from 'node:path'
 
+import { resolveNoteVariablesForIndex } from '../core/note-variables.js'
+
+// Note variables are resolved for matching and excerpts; stored `record.content` stays raw.
+const noteText = (record) => resolveNoteVariablesForIndex(record.content)
+
 export function createSearchService(runtime) {
   const { normalizeTag, markdownText, recordIsStale, lifecycleFactor, embedQuery, embeddingDimension, cosineSimilarity,
     bestSemanticChunk } = runtime
@@ -34,7 +39,7 @@ function lexicalScores(record, query) {
   const pathMetadata = path.posix.dirname(record.id).replaceAll('/', ' ')
   return {
     metadata: textMatchScore(metadata, terms) * 0.85 + textMatchScore(pathMetadata, terms) * 0.15,
-    content: textMatchScore(record.imageText ? `${record.content}\n${record.imageText}` : record.content, terms),
+    content: textMatchScore(record.imageText ? `${noteText(record)}\n${record.imageText}` : noteText(record), terms),
   }
 }
 
@@ -58,9 +63,9 @@ function searchResultSnippet(content, query, maxLength = 320) {
 function snippetSource(record, bestChunk, query) {
   if (record.imageText && query) {
     const terms = searchTerms(query)
-    if (textMatchScore(record.imageText, terms) > textMatchScore(record.content, terms)) return record.imageText
+    if (textMatchScore(record.imageText, terms) > textMatchScore(noteText(record), terms)) return record.imageText
   }
-  return bestChunk?.content || record.content
+  return bestChunk?.content || noteText(record)
 }
 
 function publicSearchRecord({
@@ -79,7 +84,7 @@ function publicSearchRecord({
   return {
     ...record,
     stale: recordIsStale(record),
-    snippet: snippet || searchResultSnippet(bestChunk?.content || content, ''),
+    snippet: snippet || searchResultSnippet(bestChunk?.content || resolveNoteVariablesForIndex(content), ''),
   }
 }
 
@@ -105,7 +110,7 @@ async function rankedRecords(query, records, limit = 8, tag = '') {
     : records
   if (!query) {
     return candidates
-      .map((record) => ({ ...record, score: lifecycleFactor(record), bestChunk: null, snippet: searchResultSnippet(record.content, '') }))
+      .map((record) => ({ ...record, score: lifecycleFactor(record), bestChunk: null, snippet: searchResultSnippet(noteText(record), '') }))
       .sort((left, right) => right.score - left.score || right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id))
       .slice(0, limit)
   }
@@ -239,7 +244,7 @@ function temporalScore(record, temporal) {
   const createdAt = new Date(record.createdAt)
   const createdDate = dateKeyInTimeZone(createdAt, temporal.timeZone)
   let score = temporal.creationRelevant && createdDate >= temporal.startDate && createdDate < temporal.endDate ? 0.85 : 0
-  const content = record.content.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+  const content = noteText(record).toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
 
   for (let dateKey = temporal.startDate, count = 0; dateKey < temporal.endDate && count < 32; dateKey = addDateKeyDays(dateKey, 1), count += 1) {
     const [year, month, day] = dateKey.split('-')
@@ -326,7 +331,7 @@ async function retrieveKnowledge(question, records, now, timeZone) {
 
   const chunksById = new Map()
   for (const record of records) {
-    const chunks = (record.chunks?.length ? record.chunks : noteChunks(record.content)).map((chunk) => {
+    const chunks = (record.chunks?.length ? record.chunks : noteChunks(noteText(record))).map((chunk) => {
       const content = typeof chunk === 'string' ? chunk : chunk.content
       const embedding = typeof chunk === 'string' ? null : chunk.embedding
       return {
