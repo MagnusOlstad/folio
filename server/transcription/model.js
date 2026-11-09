@@ -40,6 +40,7 @@ export function validateManifest(manifest) {
     audioExtension: typeof manifest.audioExtension === 'string' && SUPPORTED_AUDIO_EXTENSIONS.has(manifest.audioExtension) ? manifest.audioExtension : '.wav',
     sourceNoteId: typeof manifest.sourceNoteId === 'string' ? manifest.sourceNoteId.slice(0, 500) : null,
     sourceBundleId: typeof manifest.sourceBundleId === 'string' ? manifest.sourceBundleId.slice(0, 200) : null,
+    identifySpeakers: manifest.identifySpeakers === true,
     source: 'file',
   }
 }

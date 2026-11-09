@@ -8,7 +8,7 @@ import express from 'express'
 import { createTranscriptionStorage } from '../server/transcription/storage.js'
 import { createTranscriptionService, TRANSCRIPTION_MODEL } from '../server/transcription/service.js'
 import { createMlxService } from '../server/mlx/service.js'
-import { TRANSCRIPTION_MODELS } from '../server/transcription/models.js'
+import { DIARIZATION_MODELS, TRANSCRIPTION_MODELS } from '../server/transcription/models.js'
 import { safeAudioFilename, safeTranscriptionId, splitTranscript } from '../server/transcription/model.js'
 import { registerRoutes } from '../server/transcription/routes.js'
 import { runHelper } from '../server/transcription/helper.js'
@@ -638,5 +638,210 @@ test('unsupported platforms expose setup guidance without attempting MLX install
   assert.equal(unavailable.available, false)
   assert.equal(unavailable.canInstall, false)
   await assert.rejects(service.install(), /Apple Silicon Mac running macOS 14 or later/)
+  await service.close()
+})
+
+const PINNED_SORTFORMER = Object.freeze({ ...DIARIZATION_MODELS.sortformer, revision: 'b'.repeat(40) })
+
+async function installSortformer(runtime, model = PINNED_SORTFORMER) {
+  const directory = path.join(runtime.modelRoot, 'hf-cache', `models--${model.repository.replaceAll('/', '--')}`, 'snapshots', model.revision)
+  await fs.mkdir(directory, { recursive: true })
+  await fs.writeFile(path.join(directory, 'config.json'), JSON.stringify({ model_type: 'sortformer' }))
+  await fs.writeFile(path.join(directory, 'model.safetensors'), 'weights')
+  return directory
+}
+
+async function recordedSession(runtime, service, options = {}) {
+  const session = await service.createFileSession({ fileName: 'meeting.wav', ...options })
+  await runtime.transcriptionStorage.writeAudio(session.id, '.wav', Readable.from([Buffer.from('audio')]))
+  return runtime.transcriptionStorage.writeManifest({ ...(await runtime.transcriptionStorage.readManifest(session.id)), state: 'recorded' })
+}
+
+const MEETING_SEGMENTS = [
+  { start: 0.5, end: 4, text: 'Welcome to the review.' },
+  { start: 4, end: 8, text: 'Thanks for having me.' },
+  { start: 8, end: 12, text: 'Let us begin.' },
+]
+const MEETING_TURNS = [{ start: 0, end: 4, speaker: 0 }, { start: 4, end: 8, speaker: 1 }, { start: 8, end: 12, speaker: 0 }]
+
+test('speaker recognition defaults off and the transcript gets timestamps from Whisper segments', async (t) => {
+  const { runtime } = await fixture(t)
+  await installSnapshot(runtime)
+  runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
+  const calls = []
+  runtime.transcriptionRunner = async ({ args, request }) => {
+    calls.push({ args, operation: request.operation })
+    return { id: request.id, text: 'Welcome to the review. Thanks for having me. Let us begin.', segments: MEETING_SEGMENTS }
+  }
+  const service = createTranscriptionService(runtime)
+  const created = await service.createFileSession({ fileName: 'meeting.wav' })
+  assert.equal(created.identifySpeakers, false)
+  const session = await recordedSession(runtime, service)
+  const completed = await service.transcribe(session.id)
+  assert.deepEqual(calls.map((call) => call.operation), ['transcribe'])
+  assert.equal(completed.result.transcript, '[00:00] Welcome to the review. Thanks for having me. Let us begin.')
+  assert.equal(completed.result.speakers, false)
+  assert.equal(completed.result.plainText, 'Welcome to the review. Thanks for having me. Let us begin.')
+  assert.equal(completed.result.segments.length, 3)
+  assert.match(completed.result.markdown, /# Transcript\n\n\[00:00\] Welcome/)
+  await service.close()
+})
+
+test('a helper without segments keeps the plain transcript and skips speaker labels with a warning', async (t) => {
+  const { runtime } = await fixture(t)
+  await installSnapshot(runtime)
+  runtime.diarizationModel = PINNED_SORTFORMER
+  await installSortformer(runtime)
+  runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
+  const operations = []
+  runtime.transcriptionRunner = async ({ request }) => { operations.push(request.operation); return { id: request.id, text: 'Only text.' } }
+  const service = createTranscriptionService(runtime)
+  const plain = await service.transcribe((await recordedSession(runtime, service)).id)
+  assert.equal(plain.result.transcript, 'Only text.')
+  assert.deepEqual(plain.result.segments, [])
+  const labelled = await service.transcribe((await recordedSession(runtime, service, { identifySpeakers: true })).id)
+  assert.equal(labelled.result.transcript, 'Only text.')
+  assert.match(labelled.result.speakerWarning, /did not return segment timestamps/)
+  assert.deepEqual(operations, ['transcribe', 'transcribe'], 'no diarization pass without segments to label')
+  await service.close()
+})
+
+test('speaker labels need the pinned Sortformer model, and the unresolved revision never downloads', async (t) => {
+  const { runtime } = await fixture(t)
+  await installSnapshot(runtime)
+  runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
+  let ran = false
+  runtime.transcriptionRunner = async ({ request }) => { ran = true; return { id: request.id, text: 'x', segments: MEETING_SEGMENTS } }
+  runtime.transcriptionInstaller = async () => { throw new Error('must not download an unpinned revision') }
+  const service = createTranscriptionService(runtime)
+  const status = (await service.status()).diarization
+  assert.equal(status.pinned, false)
+  assert.equal(status.canInstall, false)
+  assert.equal(status.modelState, 'missing')
+  await assert.rejects(service.installDiarization(), /revision has not been pinned/)
+  const session = await recordedSession(runtime, service, { identifySpeakers: true })
+  await assert.rejects(service.transcribe(session.id), /not available in this build yet/)
+  assert.equal(ran, false)
+  assert.equal((await runtime.transcriptionStorage.readManifest(session.id)).state, 'recorded')
+  await service.close()
+})
+
+test('Sortformer downloads on request with its pinned revision, then labels speakers after Whisper finishes', async (t) => {
+  const { runtime } = await fixture(t)
+  await installSnapshot(runtime)
+  runtime.diarizationModel = PINNED_SORTFORMER
+  runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
+  const service = createTranscriptionService(runtime)
+  const session = await recordedSession(runtime, service, { identifySpeakers: true })
+  await assert.rejects(service.transcribe(session.id), /Download Sortformer Speaker Labels/)
+  assert.equal((await runtime.transcriptionStorage.readManifest(session.id)).state, 'recorded')
+
+  let installArgs
+  runtime.transcriptionInstaller = async ({ args }) => { installArgs = args; await installSortformer(runtime); return { event: 'ready' } }
+  const before = (await service.status()).diarization
+  assert.equal(before.canInstall, true)
+  assert.equal(before.canDiarize, false)
+  const installed = await service.installDiarization()
+  assert.equal(installed.modelState, 'ready')
+  assert.deepEqual(installArgs.slice(0, 8), ['--task', 'diarization', '--model', PINNED_SORTFORMER.repository, '--revision', PINNED_SORTFORMER.revision, '--operation', 'install'])
+
+  const order = []
+  const progress = []
+  runtime.transcriptionRunner = async ({ args, request, onEvent }) => {
+    order.push(request.operation)
+    assert.equal(args[args.indexOf('--task') + 1], request.operation === 'diarize' ? 'diarization' : 'transcription')
+    if (request.operation === 'transcribe') {
+      onEvent({ event: 'transcription-progress', id: request.id, percent: 99 })
+      progress.push(service.active.get(session.id).progressPercent)
+      return { id: request.id, text: 'Welcome to the review. Thanks for having me. Let us begin.', segments: MEETING_SEGMENTS }
+    }
+    assert.equal(service.active.get(session.id).progress, 'Identifying speakers locally…')
+    assert.match(request.audioPath, /recording\.wav$/)
+    onEvent({ event: 'transcription-progress', id: request.id, percent: 50 })
+    progress.push(service.active.get(session.id).progressPercent)
+    return { id: request.id, speakerSegments: MEETING_TURNS }
+  }
+  const completed = await service.transcribe(session.id)
+  assert.deepEqual(order, ['transcribe', 'diarize'])
+  assert.ok(progress[0] <= 85 && progress[1] > 85 && progress[1] <= 99)
+  assert.equal(completed.result.transcript, [
+    '**Speaker 1** [00:00]\nWelcome to the review.',
+    '**Speaker 2** [00:04]\nThanks for having me.',
+    '**Speaker 1** [00:08]\nLet us begin.',
+  ].join('\n\n'))
+  assert.equal(completed.result.speakers, true)
+  assert.equal(completed.result.speakerCount, 2)
+  assert.equal(completed.result.speakerWarning, undefined)
+  assert.equal(completed.session.progressPercent, 100)
+  assert.equal(completed.session.identifySpeakers, true)
+  await service.close()
+})
+
+test('a failed speaker pass keeps the timestamped transcript and explains why; cancelling still cancels', async (t) => {
+  const { runtime } = await fixture(t)
+  await installSnapshot(runtime)
+  runtime.diarizationModel = PINNED_SORTFORMER
+  await installSortformer(runtime)
+  runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
+  let mode = 'fail'
+  runtime.transcriptionRunner = async ({ request, signal }) => {
+    if (request.operation === 'transcribe') return { id: request.id, text: 'Hello there.', segments: [{ start: 1, end: 2, text: 'Hello there.' }] }
+    if (mode === 'fail') throw new Error('Sortformer ran out of memory.')
+    if (mode === 'cancel') throw Object.assign(new Error('Transcription was cancelled.'), { code: 'TRANSCRIPTION_CANCELLED' })
+    return { id: request.id, speakerSegments: [], signal }
+  }
+  const service = createTranscriptionService(runtime)
+  const first = await recordedSession(runtime, service, { identifySpeakers: true })
+  const completed = await service.transcribe(first.id)
+  assert.equal(completed.session.state, 'ready')
+  assert.equal(completed.result.transcript, '[00:01] Hello there.')
+  assert.equal(completed.result.speakers, false)
+  assert.match(completed.result.speakerWarning, /Speaker labels could not be added: Sortformer ran out of memory/)
+
+  mode = 'empty'
+  const empty = await recordedSession(runtime, service, { identifySpeakers: true })
+  assert.match((await service.transcribe(empty.id)).result.speakerWarning, /No speaker turns/)
+
+  mode = 'cancel'
+  const cancelled = await recordedSession(runtime, service, { identifySpeakers: true })
+  await assert.rejects(service.transcribe(cancelled.id), /cancelled/)
+  const stored = await runtime.transcriptionStorage.readManifest(cancelled.id)
+  assert.equal(stored.state, 'failed')
+  assert.equal(stored.identifySpeakers, true, 'a retry reuses the saved choice')
+  await service.close()
+})
+
+test('the speaker choice can change until transcription starts and is rejected afterwards', async (t) => {
+  const { runtime } = await fixture(t)
+  await installSnapshot(runtime)
+  runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
+  runtime.transcriptionRunner = async ({ request }) => ({ id: request.id, text: 'Hi.', segments: [{ start: 0, end: 1, text: 'Hi.' }] })
+  const service = createTranscriptionService(runtime)
+  const session = await recordedSession(runtime, service)
+  assert.equal((await service.updateOptions(session.id, { identifySpeakers: true })).identifySpeakers, true)
+  assert.equal((await service.updateOptions(session.id, { identifySpeakers: false })).identifySpeakers, false)
+  await service.transcribe(session.id)
+  await assert.rejects(service.updateOptions(session.id, { identifySpeakers: true }), /before a transcription starts/)
+  await assert.rejects(service.updateOptions('11111111-1111-4111-8111-111111111111', { identifySpeakers: true }), /not found/)
+  await service.close()
+})
+
+test('Sortformer runs in its own model slot after Whisper has finished with its own', async (t) => {
+  const { runtime } = await fixture(t)
+  await installSnapshot(runtime)
+  runtime.diarizationModel = PINNED_SORTFORMER
+  await installSortformer(runtime)
+  const activations = []
+  runtime.mlxService = {
+    selectedTranscriptionModel: async () => 'whisper',
+    withModelActivity: async (id, operation) => { activations.push(id); return operation() },
+  }
+  runtime.transcriptionRunner = async ({ request }) => request.operation === 'transcribe'
+    ? { id: request.id, text: 'Hi.', segments: [{ start: 0, end: 1, text: 'Hi.' }] }
+    : { id: request.id, speakerSegments: [{ start: 0, end: 1, speaker: 0 }] }
+  const service = createTranscriptionService(runtime)
+  const completed = await service.transcribe((await recordedSession(runtime, service, { identifySpeakers: true })).id)
+  assert.deepEqual(activations, ['whisper', 'sortformer'], 'Whisper finishes its slot before Sortformer starts')
+  assert.equal(completed.result.transcript, '**Speaker 1** [00:00]\nHi.')
   await service.close()
 })

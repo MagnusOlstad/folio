@@ -95,6 +95,7 @@ test('models install explicitly into their pinned snapshots and use the JSONL wo
     { id: 'lightonocr', purpose: 'ocr', downloadSizeBytes: 2_020_000_000, selected: false },
     { id: 'whisper', purpose: 'transcription', downloadSizeBytes: 1_610_000_000, selected: true },
     { id: 'whisperlarge', purpose: 'transcription', downloadSizeBytes: 3_090_000_000, selected: false },
+    { id: 'sortformer', purpose: 'diarization', downloadSizeBytes: 250_000_000, selected: false },
   ])
 
   await assert.rejects(service.load('gemma4'), /not installed/)
@@ -295,6 +296,20 @@ test('transcription progress is request scoped and never resolves the request, t
   const largeResult = await service.transcribe('/tmp/recording.wav', { onProgress: (percent) => progress.push(percent) })
   assert.equal(largeResult.text, 'Fixture transcription.')
   assert.equal((await service.status()).models.find((model) => model.id === 'whisperlarge').loaded, false)
+})
+
+test('Sortformer diarization uses its own worker with the diarize operation and unloads after each run', async (t) => {
+  const { root, logPath, service } = await fixture(t)
+  await setControl(root, { transcriptionProgress: [40, 99] })
+  await service.install('sortformer')
+  assert.equal((await service.status()).models.find((model) => model.id === 'sortformer').purpose, 'diarization')
+  const progress = []
+  const result = await service.diarize('/tmp/recording.wav', { onProgress: (percent) => progress.push(percent) })
+  assert.deepEqual(result.speakerSegments, [{ start: 0, end: 1.5, speaker: 0 }])
+  assert.deepEqual(progress, [40, 99])
+  assert.equal((await service.status()).models.find((model) => model.id === 'sortformer').loaded, false)
+  assert.ok((await readLog(logPath)).some((entry) => entry.event === 'response' && entry.operation === 'diarize' && !entry.error))
+  await assert.rejects(service.selectTranscriptionModel('sortformer'), /Choose a transcription model/)
 })
 
 test('transcription worker also unloads when inference fails and queued generation can proceed', async (t) => {

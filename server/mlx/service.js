@@ -4,36 +4,12 @@ import { randomUUID } from 'node:crypto'
 import { createMlxWorker, terminateMlxWorker } from './worker.js'
 import { findModelSnapshot } from './snapshots.js'
 import { helperPath, nativeMlxAvailable } from './helper-path.js'
-import { OCR_MODELS, OCR_MODEL_ID, OCR_TIMEOUT_MS, cancellationError } from './ocr-models.js'
+import { OCR_MODEL_ID, OCR_TIMEOUT_MS, cancellationError } from './ocr-models.js'
+import { MODEL_DEFINITIONS } from './model-definitions.js'
 import { installationProgress } from './progress.js'
-import { TRANSCRIPTION_MODELS,
-  readTranscriptionModelPreference, writeTranscriptionModelPreference } from '../transcription/models.js'
+import { DIARIZATION_MODEL_ID, readTranscriptionModelPreference, writeTranscriptionModelPreference } from '../transcription/models.js'
 
 const KEEP_ALIVE_MS = 60 * 60 * 1000
-const MODEL_DEFINITIONS = Object.freeze({
-  gemma4: {
-    id: 'gemma4', name: 'Gemma 4 E4B', purpose: 'generation',
-    repository: 'mlx-community/gemma-4-e4b-it-4bit', revision: '475b9088d29754a3379866cf5aeb6b41acd313c2',
-    task: 'generation', downloadSizeBytes: 5_180_000_000,
-  },
-  qwen35: {
-    id: 'qwen35', name: 'Qwen 3.5 4B (4-bit)', purpose: 'generation',
-    repository: 'mlx-community/Qwen3.5-4B-4bit', revision: '0e7ffd5c629ef7719d4cbc04069232580bfa9d9c',
-    task: 'generation', downloadSizeBytes: 3_060_000_000,
-  },
-  llama32: {
-    id: 'llama32', name: 'Llama 3.2 3B Instruct (4-bit)', purpose: 'generation',
-    repository: 'mlx-community/Llama-3.2-3B-Instruct-4bit', revision: '7f0dc925e0d0afb0322d96f9255cfddf2ba5636e',
-    task: 'generation', downloadSizeBytes: 1_810_000_000,
-  },
-  embeddinggemma: {
-    id: 'embeddinggemma', name: 'EmbeddingGemma', purpose: 'embeddings',
-    repository: 'mlx-community/embeddinggemma-300m-4bit', revision: '5d9ef074df3957afc5c77127f208fddbc3c54187',
-    task: 'embedding', downloadSizeBytes: 212_000_000,
-  },
-  ...OCR_MODELS,
-  ...TRANSCRIPTION_MODELS,
-})
 
 export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKeepAliveMs = KEEP_ALIVE_MS }) {
   const cacheRoot = path.join(modelRoot, 'hf-cache')
@@ -90,7 +66,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   }
 
   function registerExternalModel(id, adapter) {
-    if (MODEL_DEFINITIONS[id]?.purpose !== 'transcription' || !adapter) throw new Error('Invalid external MLX model adapter.')
+    if (!['transcription', 'diarization'].includes(MODEL_DEFINITIONS[id]?.purpose) || !adapter) throw new Error('Invalid external MLX model adapter.')
     if (!externalModels.has(id)) externalModels.set(id, adapter)
     const adapters = externalModelAdapters.get(id) || new Set()
     adapters.add(adapter)
@@ -202,7 +178,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
       let abortStartup
       let abortTimer
       try {
-        const snapshot = definition.purpose === 'transcription'
+        const snapshot = ['transcription', 'diarization'].includes(definition.purpose)
           ? await externalModels.get(id)?.snapshot?.()
           : await findModelSnapshot(cacheRoot, definition)
         if (closed) throw new Error('The MLX service is shutting down.')
@@ -470,6 +446,18 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     })
   }
 
+  async function diarize(audioPath, { signal, onProgress = null } = {}) {
+    let lastPercent = -1
+    return run(DIARIZATION_MODEL_ID, 'diarize', { audioPath }, 6 * 60 * 60_000, signal, {
+      unloadAfter: true,
+      onEvent: (event) => {
+        if (event.percent <= lastPercent) return
+        lastPercent = event.percent
+        onProgress?.(event.percent)
+      },
+    })
+  }
+
   async function extractText(imagePath, { signal } = {}) {
     const definition = modelDefinition(OCR_MODEL_ID)
     if (!await isInstalled(definition)) throw Object.assign(new Error('Install LightOnOCR in Settings → Models to extract text.'), { statusCode: 409 })
@@ -491,6 +479,6 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   }
 
   return { status, install, load, unload, remove, selectGenerationModel, selectedGenerationModel,
-    selectTranscriptionModel, selectedTranscriptionModel, generate, embed, transcribe, extractText, close, isBusy: () => [...modelActivities.values()].some((count) => count > 0), withModelActivity, registerExternalModel, keepAliveMs: warmKeepAliveMs,
+    selectTranscriptionModel, selectedTranscriptionModel, generate, embed, transcribe, diarize, extractText, close, isBusy: () => [...modelActivities.values()].some((count) => count > 0), withModelActivity, registerExternalModel, keepAliveMs: warmKeepAliveMs,
     modelDefinitions: MODEL_DEFINITIONS }
 }

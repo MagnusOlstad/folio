@@ -17,6 +17,9 @@ export function registerRoutes(app, runtime) {
   app.post('/api/transcriptions/model/install', async (_request, response) => {
     try { response.json(await service.install()) } catch (error) { fail(response, error) }
   })
+  app.post('/api/transcriptions/speakers/install', async (_request, response) => {
+    try { response.json(await service.installDiarization()) } catch (error) { fail(response, error) }
+  })
   app.post('/api/transcriptions/draft-remap', async (request, response) => {
     try {
       response.json({ updated: await service.remapDraft(request.body?.oldId, request.body?.newId, request.body?.bundleId) })
@@ -39,6 +42,7 @@ export function registerRoutes(app, runtime) {
         durationMs,
         sourceNoteId: typeof request.body?.sourceNoteId === 'string' ? request.body.sourceNoteId : null,
         sourceBundleId: typeof request.body?.sourceBundleId === 'string' ? request.body.sourceBundleId : null,
+        identifySpeakers: request.body?.identifySpeakers === true,
       })
       response.status(201).json({ session })
     } catch (error) { fail(response, error) }
@@ -88,6 +92,13 @@ export function registerRoutes(app, runtime) {
     try {
       if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
       response.json(await service.transcribe(request.params.id))
+    } catch (error) { fail(response, error) }
+  })
+  app.post('/api/transcriptions/:id/options', async (request, response) => {
+    try {
+      if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
+      if (typeof request.body?.identifySpeakers !== 'boolean') return response.status(400).json({ error: 'identifySpeakers must be true or false.' })
+      response.json({ session: await service.updateOptions(request.params.id, { identifySpeakers: request.body.identifySpeakers }) })
     } catch (error) { fail(response, error) }
   })
   app.post('/api/transcriptions/:id/cancel', async (request, response) => {
