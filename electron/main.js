@@ -316,7 +316,8 @@ async function initializeUpdater() {
     const { autoUpdater: electronAutoUpdater } = electronUpdater
     updaterCoordinator = createUpdaterCoordinator({
       updater: electronAutoUpdater,
-      prepareFeed: () => configureStableGithubReleaseFeed({
+      resetPrimaryFeed: () => electronAutoUpdater.setFeedURL({ ...packageMetadata.build.publish }),
+      prepareFallbackFeed: () => configureStableGithubReleaseFeed({
         updater: electronAutoUpdater,
         Provider,
         repositoryUrl: packageMetadata.repository.url,
