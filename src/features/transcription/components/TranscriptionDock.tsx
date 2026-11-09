@@ -31,6 +31,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
   const lastDeletingIdRef = useRef<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
+  const [confirmingRetranscribeId, setConfirmingRetranscribeId] = useState<string | null>(null)
   const recorder = model.recording
   const recordingPhaseRef = useRef(recorder.phase)
   const stopRecordingRef = useRef(actions.stopRecording)
@@ -41,7 +42,8 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
   const canTranscribe = status?.canTranscribe === true
   const speakers = status?.diarization
   const speakersReady = speakers?.canDiarize === true
-  const speakerLabelsWanted = model.identifySpeakers || model.pending.some((session) => session.identifySpeakers === true && session.state !== 'ready')
+  const speakerLabelsWanted = model.identifySpeakers || model.pending.some((session) => session.identifySpeakers === true
+    && (session.state !== 'ready' || session.id === confirmingRetranscribeId))
   const speakerOffer = Boolean(speakers) && speakerLabelsWanted && !speakersReady
 
   useEffect(() => {
@@ -218,7 +220,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
               </div>
               <small>{importedDate(session)}{session.durationMs === null ? '' : ` · ${durationLabel(session.durationMs)}`}</small>
               {session.error && <p className="transcription-item-error" role="status">{session.error}</p>}
-              {speakers && session.state !== 'ready' && (
+              {speakers && (session.state !== 'ready' || confirmingRetranscribeId === session.id) && (
                 <label className="transcription-item-speakers">
                   <input
                     type="checkbox"
@@ -236,11 +238,26 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
                   <>
                     <button type="button" onClick={() => actions.openTranscript(session)} disabled={controlsBusy}>Open draft</button>
                     <button type="button" onClick={() => actions.regenerateSummary(session)} disabled={controlsBusy}>Summarize draft</button>
+                    {confirmingRetranscribeId !== session.id && (
+                      <button type="button" onClick={() => setConfirmingRetranscribeId(session.id)} disabled={controlsBusy || !canTranscribe}>Re-transcribe</button>
+                    )}
                   </>
                 ) : (
                   <button type="button" onClick={() => actions.transcribe(session)} disabled={!canTranscribe || controlsBusy || processing || speakersBlocked}>
                     {session.state === 'failed' ? 'Retry' : 'Transcribe'}
                   </button>
+                )}
+                {session.state === 'ready' && confirmingRetranscribeId === session.id && (
+                  <div className="transcription-delete-confirm" role="group" aria-label={`Confirm re-transcription of ${session.fileName || 'audio recording'}`}>
+                    <p>Transcribe this audio again with {selectedModelName}? The transcript in your open draft will be replaced; its summary and other text are kept, and speaker names you edited stay.</p>
+                    <button type="button" onClick={() => setConfirmingRetranscribeId(null)}>Cancel</button>
+                    <button
+                      type="button"
+                      className="transcription-delete-confirm-button"
+                      onClick={() => { setConfirmingRetranscribeId(null); actions.retranscribe(session) }}
+                      disabled={!canTranscribe || controlsBusy || speakersBlocked}
+                    >Re-transcribe audio</button>
+                  </div>
                 )}
                 {processing && <button type="button" onClick={() => actions.cancel(session)}>Cancel</button>}
                 {summarizing && <button type="button" onClick={() => actions.cancel(session)} disabled={model.phase === 'cancelling-summary'}>{model.phase === 'cancelling-summary' ? 'Cancelling…' : 'Cancel summary'}</button>}

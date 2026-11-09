@@ -138,7 +138,7 @@ function paragraphsOf(segments) {
 /**
  * Renders the transcript Markdown.
  * Without speakers: `[01:23] text` paragraphs.
- * With speakers: `**Speaker 1** [01:23]` followed by the turn's text; a long turn continues in
+ * With speakers: `**{{speaker1}}** [01:23]` (a note variable the draft defines as `speaker1:: Speaker 1`) followed by the turn's text; a long turn continues in
  * `[01:50] text` paragraphs so no single block grows unbounded.
  */
 export function formatTranscript(segments, { speakers = false } = {}) {
@@ -148,9 +148,14 @@ export function formatTranscript(segments, { speakers = false } = {}) {
   }
   return mergeSpeakerTurns(segments).map((turn) => {
     const [first, ...rest] = paragraphsOf(turn.parts)
-    const opening = `**Speaker ${turn.speaker}** [${formatTimestamp(turn.start)}]\n${first.text}`
+    const opening = `**{{speaker${turn.speaker}}}** [${formatTimestamp(turn.start)}]\n${first.text}`
     return [opening, ...rest.map((paragraph) => `[${formatTimestamp(paragraph.start)}] ${paragraph.text}`)].join('\n\n')
   }).join('\n\n')
+}
+
+/** Speaker numbers in order of first appearance, which is also ascending (1, 2, 3…). */
+function speakerNumbersOf(segments) {
+  return [...new Set(segments.map((segment) => segment.speaker))].filter(Number.isInteger).sort((left, right) => left - right)
 }
 
 /**
@@ -165,6 +170,7 @@ export function buildTranscript(segments, speakerSegments = null) {
     segments: assigned,
     transcript: formatTranscript(assigned, { speakers }),
     speakerCount: speakers ? new Set(assigned.map((segment) => segment.speaker)).size : 0,
+    speakerNumbers: speakers ? speakerNumbersOf(assigned) : [],
   }
 }
 
@@ -174,7 +180,7 @@ export function buildTranscript(segments, speakerSegments = null) {
  */
 export function buildTranscriptResult(text, segments, speakerTurns = null) {
   const plainText = String(text).trim()
-  if (!segments.length) return { transcript: plainText, segments: [], speakers: false, speakerCount: 0 }
+  if (!segments.length) return { transcript: plainText, segments: [], speakers: false, speakerCount: 0, speakerNumbers: [] }
   const built = buildTranscript(segments, speakerTurns)
-  return { transcript: built.transcript, plainText, segments: built.segments, speakers: built.speakerCount > 0, speakerCount: built.speakerCount }
+  return { transcript: built.transcript, plainText, segments: built.segments, speakers: built.speakerCount > 0, speakerCount: built.speakerCount, speakerNumbers: built.speakerNumbers }
 }

@@ -123,21 +123,22 @@ test('transcripts with speakers show a bold label and timestamp before each turn
   ])
   assert.equal(built.speakerCount, 2)
   assert.equal(built.transcript, [
-    '**Speaker 1** [00:00]\nHello everyone. Welcome to the review.',
-    '**Speaker 2** [00:09]\nThanks.',
+    '**{{speaker1}}** [00:00]\nHello everyone. Welcome to the review.',
+    '**{{speaker2}}** [00:09]\nThanks.',
   ].join('\n\n'))
 })
 
 test('a transcript result keeps plain text when no segments exist and carries segments otherwise', () => {
-  assert.deepEqual(buildTranscriptResult(' Plain text. ', []), { transcript: 'Plain text.', segments: [], speakers: false, speakerCount: 0 })
+  assert.deepEqual(buildTranscriptResult(' Plain text. ', []), { transcript: 'Plain text.', segments: [], speakers: false, speakerCount: 0, speakerNumbers: [] })
   const segments = [{ start: 1, end: 2, text: 'Hi.' }]
   const timed = buildTranscriptResult('Hi.', segments)
   assert.equal(timed.transcript, '[00:01] Hi.')
   assert.equal(timed.plainText, 'Hi.')
   assert.equal(timed.speakers, false)
   const spoken = buildTranscriptResult('Hi.', segments, [{ start: 0, end: 3, speaker: 0 }])
-  assert.equal(spoken.transcript, '**Speaker 1** [00:01]\nHi.')
+  assert.equal(spoken.transcript, '**{{speaker1}}** [00:01]\nHi.')
   assert.equal(spoken.speakers, true)
+  assert.deepEqual(spoken.speakerNumbers, [1])
   assert.equal(spoken.segments[0].speaker, 1)
   // Speaker turns that never overlap anything leave a timestamp-only transcript.
   assert.equal(buildTranscriptResult('Hi.', segments, []).speakers, false)
@@ -146,6 +147,7 @@ test('a transcript result keeps plain text when no segments exist and carries se
 test('semantic indexing sees spoken text without timestamps or speaker headers', () => {
   const transcript = '**Speaker 1** [00:00]\nHello everyone.\n\n[00:20] More from the same turn.\n\n**Speaker 2** [1:02:03]\nThanks.'
   assert.equal(stripTranscriptMarkup(transcript), 'Hello everyone.\n\nMore from the same turn.\n\nThanks.')
+  assert.equal(stripTranscriptMarkup('**Kari** [00:04]\nHei.\n\n**Speaker 2** [00:09]\nHi.\n\n**{{speaker3}}** [00:12]\nYo.\n\n**Kari** [00:20]\n\n**Ola** [00:30]'), 'Kari: Hei.\n\nHi.\n\nYo.\n\n\n')
   assert.equal(stripTranscriptMarkup('Meet at [12:30] sharp.\n[draft] keep this'), 'Meet at [12:30] sharp.\n[draft] keep this')
   assert.equal(stripTranscriptMarkup('No markup here.'), 'No markup here.')
   const plain = '[00:05] Only a timestamp.'
@@ -154,6 +156,7 @@ test('semantic indexing sees spoken text without timestamps or speaker headers',
 
 test('semantic indexing also strips markup from CRLF notes', () => {
   assert.equal(stripTranscriptMarkup('**Speaker 1** [1:02:03]\r\nHello there.\r\n\r\n[00:09] Bye.'), 'Hello there.\r\n\r\nBye.')
+  assert.equal(stripTranscriptMarkup('**Kari** [1:02:03]\r\nHei.\r\n\r\n[00:09] Bye.'), 'Kari: Hei.\r\n\r\nBye.')
 })
 
 test('the Sortformer revision is pinned to a real commit, in sync with the helper', async () => {

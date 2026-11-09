@@ -16,23 +16,42 @@ Past one hour the prefix is `[h:mm:ss]`. If a helper build returns no segments, 
 
 ## Speaker labels (optional)
 
-"Identify speakers" is a per-transcription choice in the Transcription tab, shown for both imports and recordings and off by default. The choice is saved on the session (`identifySpeakers` in `session.json`), so a retry uses the same setting; it can be changed per item until transcription starts.
+"Identify speakers" is a per-transcription choice in the Transcription tab, shown for both imports and recordings and off by default. The choice is saved on the session (`identifySpeakers` in `session.json`), so a retry uses the same setting; it can be changed per item whenever the session is not transcribing, including before a re-transcription (below).
 
 - Speaker recognition uses NVIDIA's Sortformer through `MLXAudioVAD` (`mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16`), a separate download that happens only on request. It is pinned to Hugging Face commit `e23e6404bd9859e93edbf94a740eb1c7fc58f12e` (`config.json` and `model.safetensors`, about 236 MB) and supports up to 4 speakers.
 - It runs after Whisper has finished, in its own MLX model slot, so Whisper is unloaded first and both models are not resident together.
 - Each Whisper segment goes to the speaker with the greatest time overlap (a nearby turn, then the neighbouring segment, when nothing overlaps). Speakers are numbered by first appearance, and consecutive segments from one speaker merge into a turn:
 
 ```markdown
-**Speaker 1** [01:23]
+**{{speaker1}}** [01:23]
 Welcome to the review.
 
-**Speaker 2** [01:31]
+**{{speaker2}}** [01:31]
 Thanks for having me.
 ```
 
+- Speaker names are note variables. The stored transcript references `{{speakerN}}`, and the draft gets a `## Speakers` section (between `## Summary` and `## Transcript`) with one definition line per speaker. Rename a speaker by editing its line; every reference in the note follows:
+
+```markdown
+## Speakers
+
+speaker1:: Alex
+speaker2:: Speaker 2
+```
+
+- `result.json` lists the speakers that appear in `speakerNumbers` (for example `[1, 2]`); `speakers` stays a boolean. Timestamp-only transcripts have no Speakers section.
+
 - If the speaker pass fails or finds no turns, the timestamped transcript is kept and `result.speakerWarning` explains why. Cancelling still cancels the whole job.
-- Summaries are generated from the `## Transcript` section of the draft, so they see the labels.
+- Summaries are generated from the `## Transcript` section of the draft. The client resolves `{{speakerN}}` through the draft's `## Speakers` lines before sending it, so the summary uses the real names (`Speaker N` for a speaker without a usable line).
 - The semantic index drops timestamps and speaker headers (`server/knowledge/transcript-markup.js`) so they do not affect embeddings.
+
+## Re-transcribe
+
+A ready session keeps its audio, so it can be transcribed again (for example with a different Whisper model selected, or with speaker labels switched on). The Transcription tab offers **Re-transcribe** on ready items; it asks for inline confirmation and shows the per-session "Identify speakers" toggle first.
+
+- API: `POST /api/transcriptions/:id/process` with `{ "retranscribe": true }`. Without the flag a ready session still returns its stored result unchanged. `POST /api/transcriptions/:id/options` now also accepts a ready session (it is rejected only while the session is transcribing).
+- The run uses the currently selected Whisper model and the session's `identifySpeakers`. `result.json` is replaced only on success; on failure or cancellation the previous result and the `ready` state are kept.
+- A successful run replaces only the `## Transcript` section of the linked open draft. In `## Speakers` every existing `speakerN::` line is kept (including names you edited), definitions for newly appearing speakers are appended, and the section is created before `## Transcript` if the draft had none. The title, summary, and other text are untouched. With no open linked draft, a new draft is created as "Open draft" does. The merge is `applyRetranscription` in `src/features/transcription/model/retranscribe.ts`.
 
 ## Native patches
 

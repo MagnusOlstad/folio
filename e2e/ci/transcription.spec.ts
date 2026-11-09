@@ -11,6 +11,7 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   const processedSessionIds = new Set<string>()
   const activeSessionIds = new Set<string>()
   const rawResults = new Map<string, { summary: string; transcript: string }>()
+  const processBodies: Record<string, unknown>[] = []
   let releaseTranscription = () => {}
   await page.addInitScript(() => localStorage.setItem('folio:model-setup-prompt-seen', '1'))
   page.on('request', (request) => {
@@ -55,6 +56,19 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   })
   await page.route('**/api/transcriptions/*/process', async (route) => {
     const id = new URL(route.request().url()).pathname.split('/').at(-2)
+    const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>
+    processBodies.push(body)
+    if (body.retranscribe === true && id) {
+      const redone = {
+        summary: '', transcript: '[00:02] The project review moved to Thursday at noon.',
+        plainText: 'The project review moved to Thursday at noon.', speakers: false,
+        segments: [{ start: 2.1, end: 5, text: 'The project review moved to Thursday at noon.' }],
+      }
+      rawResults.set(id, redone)
+      const { session } = await (await request.get(`/api/transcriptions/${id}`)).json()
+      await route.fulfill({ json: { session: { ...session, state: 'ready' }, result: redone } })
+      return
+    }
     if (id) activeSessionIds.add(id)
     await new Promise<void>((resolve) => {
       const fallback = setTimeout(resolve, 10_000)
@@ -169,6 +183,17 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
     return await response.json() as { result: { transcript: string } }
   }, rawSessionId)
   expect(rawSession.result.transcript).toBe('[00:01] The project review is next Tuesday at noon.')
+
+  // Re-transcribing replaces only the transcript section of the open draft; the summary stays.
+  await page.getByRole('tab', { name: 'Transcription' }).click()
+  await filed.getByRole('button', { name: 'Re-transcribe', exact: true }).click()
+  await expect(filed.getByText(/transcript in your open draft will be replaced/)).toBeVisible()
+  await filed.getByRole('button', { name: 'Re-transcribe audio' }).click()
+  await expect.poll(() => processBodies.at(-1)).toEqual({ retranscribe: true })
+  await expect(summaryDraft).toContainText('[00:02] The project review moved to Thursday at noon.')
+  await expect(summaryDraft).toContainText('The project review is Wednesday at noon.')
+  await expect(summaryDraft).not.toContainText('Edited only in the new draft.')
+  expect(processBodies[0]).toEqual({})
 
   // Speaker labels are a per-transcription choice: choosing them offers the optional model download.
   await page.getByRole('tab', { name: 'Transcription' }).click()

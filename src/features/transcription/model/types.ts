@@ -1,4 +1,5 @@
 import type { ViewerDocument } from '../../../domain/types.ts'
+import { resultSpeakerNumbers, speakerDefinitionLine } from './speakers.ts'
 
 export type TranscriptionPhase = 'idle' | 'importing' | 'downloading' | 'transcribing' | 'summarizing' | 'cancelling-summary' | 'error'
 export type TranscriptionSessionState = 'recorded' | 'queued' | 'transcribing' | 'ready' | 'failed'
@@ -25,11 +26,13 @@ export type TranscriptionSegment = { start: number; end: number; text: string; s
 export type TranscriptionResult = {
   markdown?: string
   summary: string
-  /** Markdown transcript: `[mm:ss]` paragraphs, or `**Speaker N** [mm:ss]` turns. */
+  /** Markdown transcript: `[mm:ss]` paragraphs, or `**{{speakerN}}** [mm:ss]` turns (note variables defined under `## Speakers`). */
   transcript: string
   plainText?: string
   segments?: TranscriptionSegment[]
   speakers?: boolean
+  /** Speaker numbers that appear in the transcript, in ascending order. */
+  speakerNumbers?: number[]
   speakerCount?: number
   /** Set when speaker labels were requested but could not be added. */
   speakerWarning?: string
@@ -84,6 +87,7 @@ export function mergeTranscriptionDraft(session: TranscriptionSession, result: T
   const name = String(session.fileName || 'Audio recording').replace(/[\r\n]/g, ' ')
   const totalSeconds = Math.floor((session.durationMs ?? 0) / 1000)
   const duration = `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')}`
+  const speakerNumbers = resultSpeakerNumbers(result)
   const sections = [
     `# ${name} transcript`,
     '',
@@ -95,6 +99,7 @@ export function mergeTranscriptionDraft(session: TranscriptionSession, result: T
     '',
     result.summary.trim() || 'Generate a summary from this transcript.',
     '',
+    ...(speakerNumbers.length ? ['## Speakers', '', ...speakerNumbers.map(speakerDefinitionLine), ''] : []),
     '## Transcript',
     '',
     result.transcript.trim() || '(No speech was recognized.)',

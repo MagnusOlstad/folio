@@ -86,7 +86,9 @@ export function createTranscriptionStorage(runtime) {
     const sessions = await listSessions()
     const updated = []
     for (const session of sessions) {
-      const next = nextRetryableState(session)
+      // An interrupted re-run leaves the previous result.json intact, so the session goes back to ready.
+      const kept = session.state === 'transcribing' && await readResult(session.id)
+      const next = kept ? { ...session, state: 'ready', error: null } : nextRetryableState(session)
       if (next.state !== session.state) await writeManifest(next)
       updated.push(next)
     }

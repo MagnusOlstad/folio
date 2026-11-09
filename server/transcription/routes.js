@@ -91,7 +91,7 @@ export function registerRoutes(app, runtime) {
   app.post('/api/transcriptions/:id/process', async (request, response) => {
     try {
       if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
-      response.json(await service.transcribe(request.params.id))
+      response.json(await service.transcribe(request.params.id, { retranscribe: request.body?.retranscribe === true }))
     } catch (error) { fail(response, error) }
   })
   app.post('/api/transcriptions/:id/options', async (request, response) => {

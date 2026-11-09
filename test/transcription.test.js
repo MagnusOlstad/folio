@@ -745,12 +745,14 @@ test('Sortformer downloads on request with its pinned revision, then labels spea
   assert.deepEqual(order, ['transcribe', 'diarize'])
   assert.ok(progress[0] <= 85 && progress[1] > 85 && progress[1] <= 99)
   assert.equal(completed.result.transcript, [
-    '**Speaker 1** [00:00]\nWelcome to the review.',
-    '**Speaker 2** [00:04]\nThanks for having me.',
-    '**Speaker 1** [00:08]\nLet us begin.',
+    '**{{speaker1}}** [00:00]\nWelcome to the review.',
+    '**{{speaker2}}** [00:04]\nThanks for having me.',
+    '**{{speaker1}}** [00:08]\nLet us begin.',
   ].join('\n\n'))
   assert.equal(completed.result.speakers, true)
   assert.equal(completed.result.speakerCount, 2)
+  assert.deepEqual(completed.result.speakerNumbers, [1, 2])
+  assert.deepEqual((await runtime.transcriptionStorage.readResult(session.id)).speakerNumbers, [1, 2])
   assert.equal(completed.result.speakerWarning, undefined)
   assert.equal(completed.session.progressPercent, 100)
   assert.equal(completed.session.identifySpeakers, true)
@@ -791,7 +793,7 @@ test('a failed speaker pass keeps the timestamped transcript and explains why; c
   await service.close()
 })
 
-test('the speaker choice can change until transcription starts and is rejected afterwards', async (t) => {
+test('the speaker choice can change on idle and ready sessions but not while transcribing', async (t) => {
   const { runtime } = await fixture(t)
   await installSnapshot(runtime)
   runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
@@ -801,7 +803,7 @@ test('the speaker choice can change until transcription starts and is rejected a
   assert.equal((await service.updateOptions(session.id, { identifySpeakers: true })).identifySpeakers, true)
   assert.equal((await service.updateOptions(session.id, { identifySpeakers: false })).identifySpeakers, false)
   await service.transcribe(session.id)
-  await assert.rejects(service.updateOptions(session.id, { identifySpeakers: true }), /before a transcription starts/)
+  assert.equal((await service.updateOptions(session.id, { identifySpeakers: true })).identifySpeakers, true, 'a ready session may change the choice before a re-run')
   await assert.rejects(service.updateOptions('11111111-1111-4111-8111-111111111111', { identifySpeakers: true }), /not found/)
   await service.close()
 })
@@ -822,6 +824,116 @@ test('Sortformer runs in its own model slot after Whisper has finished with its 
   const service = createTranscriptionService(runtime)
   const completed = await service.transcribe((await recordedSession(runtime, service, { identifySpeakers: true })).id)
   assert.deepEqual(activations, ['whisper', 'sortformer'], 'Whisper finishes its slot before Sortformer starts')
-  assert.equal(completed.result.transcript, '**Speaker 1** [00:00]\nHi.')
+  assert.equal(completed.result.transcript, '**{{speaker1}}** [00:00]\nHi.')
+  await service.close()
+})
+
+test('re-transcribing a ready session replaces its result, and a plain process call still returns the existing one', async (t) => {
+  const { runtime } = await fixture(t)
+  await installSnapshot(runtime)
+  runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
+  let text = 'First pass.'
+  let runs = 0
+  runtime.transcriptionRunner = async ({ request }) => { runs += 1; return { id: request.id, text, segments: [{ start: 0, end: 1, text }] } }
+  const service = createTranscriptionService(runtime)
+  const session = await recordedSession(runtime, service)
+  assert.equal((await service.transcribe(session.id)).result.transcript, '[00:00] First pass.')
+  text = 'Second pass.'
+  const unchanged = await service.transcribe(session.id)
+  assert.equal(unchanged.result.transcript, '[00:00] First pass.')
+  assert.equal(runs, 1)
+  const redone = await service.transcribe(session.id, { retranscribe: true })
+  assert.equal(runs, 2)
+  assert.equal(redone.session.state, 'ready')
+  assert.equal(redone.result.transcript, '[00:00] Second pass.')
+  assert.equal((await runtime.transcriptionStorage.readResult(session.id)).transcript, '[00:00] Second pass.')
+  await service.close()
+})
+
+test('a failed or cancelled re-transcription keeps the previous result and the ready state', async (t) => {
+  const { runtime } = await fixture(t)
+  await installSnapshot(runtime)
+  runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
+  let mode = 'ok'
+  runtime.transcriptionRunner = async ({ request, signal }) => {
+    if (mode === 'fail') throw new Error('Whisper crashed.')
+    if (mode === 'cancel') {
+      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
+      throw Object.assign(new Error('Transcription was cancelled.'), { code: 'TRANSCRIPTION_CANCELLED' })
+    }
+    return { id: request.id, text: 'Original.', segments: [{ start: 0, end: 1, text: 'Original.' }] }
+  }
+  const service = createTranscriptionService(runtime)
+  const session = await recordedSession(runtime, service)
+  await service.transcribe(session.id)
+  mode = 'fail'
+  await assert.rejects(service.transcribe(session.id, { retranscribe: true }), /Whisper crashed/)
+  let manifest = await runtime.transcriptionStorage.readManifest(session.id)
+  assert.equal(manifest.state, 'ready')
+  assert.equal(manifest.error, null)
+  assert.equal((await runtime.transcriptionStorage.readResult(session.id)).transcript, '[00:00] Original.')
+
+  mode = 'cancel'
+  const running = service.transcribe(session.id, { retranscribe: true })
+  const rejection = assert.rejects(running, /cancelled/)
+  while (!service.active.has(session.id)) await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.equal((await runtime.transcriptionStorage.readManifest(session.id)).state, 'transcribing')
+  await service.cancel(session.id)
+  await rejection
+  manifest = await runtime.transcriptionStorage.readManifest(session.id)
+  assert.equal(manifest.state, 'ready')
+  assert.equal((await runtime.transcriptionStorage.readResult(session.id)).transcript, '[00:00] Original.')
+  await service.close()
+})
+
+test('re-transcription uses the session\'s updated speaker choice and rejects option changes while active', async (t) => {
+  const { runtime } = await fixture(t)
+  await installSnapshot(runtime)
+  runtime.diarizationModel = PINNED_SORTFORMER
+  await installSortformer(runtime)
+  runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  let hold = false
+  const operations = []
+  runtime.transcriptionRunner = async ({ request }) => {
+    operations.push(request.operation)
+    if (request.operation === 'diarize') return { id: request.id, speakerSegments: MEETING_TURNS }
+    if (hold) await gate
+    return { id: request.id, text: 'Welcome to the review. Thanks for having me. Let us begin.', segments: MEETING_SEGMENTS }
+  }
+  const service = createTranscriptionService(runtime)
+  const session = await recordedSession(runtime, service)
+  assert.equal((await service.transcribe(session.id)).result.speakers, false)
+  await service.updateOptions(session.id, { identifySpeakers: true })
+  hold = true
+  const running = service.transcribe(session.id, { retranscribe: true })
+  while (!service.active.has(session.id)) await new Promise((resolve) => setTimeout(resolve, 5))
+  await assert.rejects(service.updateOptions(session.id, { identifySpeakers: false }), /while a transcription is running/)
+  release()
+  const redone = await running
+  assert.deepEqual(operations, ['transcribe', 'transcribe', 'diarize'])
+  assert.deepEqual(redone.result.speakerNumbers, [1, 2])
+  assert.match(redone.result.transcript, /^\*\*\{\{speaker1\}\}\*\* \[00:00\]/)
+  await service.close()
+})
+
+test('recovery restores an interrupted re-transcription to ready but fails a first-time one', async (t) => {
+  const { runtime } = await fixture(t)
+  runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
+  const service = createTranscriptionService(runtime)
+  const rerun = await recordedSession(runtime, service)
+  await runtime.transcriptionStorage.writeResult(rerun.id, { transcript: '[00:00] Kept.', summary: '' })
+  await runtime.transcriptionStorage.writeManifest({ ...rerun, state: 'transcribing' })
+  const first = await recordedSession(runtime, service)
+  await runtime.transcriptionStorage.writeManifest({ ...first, state: 'transcribing' })
+  await service.recoverInterrupted()
+  const restored = await runtime.transcriptionStorage.readManifest(rerun.id)
+  assert.equal(restored.state, 'ready')
+  assert.equal(restored.error, null)
+  assert.equal((await runtime.transcriptionStorage.readResult(rerun.id)).transcript, '[00:00] Kept.')
+  const failed = await runtime.transcriptionStorage.readManifest(first.id)
+  assert.equal(failed.state, 'failed')
+  assert.match(failed.error, /interrupted/)
   await service.close()
 })

@@ -167,7 +167,7 @@ export function createTranscriptionService(runtime) {
     return serial(() => runtime.mlxService.selectTranscriptionModel(id))
   }
 
-  async function transcribe(id) {
+  async function transcribe(id, { retranscribe = false } = {}) {
     if (active.has(id)) throw Object.assign(new Error('This recording is already being transcribed.'), { status: 409 })
     locks.beginTranscription(id)
     const selectedModelId = runtime.mlxService?.selectedTranscriptionModel
@@ -179,7 +179,8 @@ export function createTranscriptionService(runtime) {
       const session = await runtime.transcriptionStorage.readManifest(id)
       if (locks.deleting.has(id)) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
       if (!session) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
-      if (session.state === 'ready') return { session: withProgress(session), result: await runtime.transcriptionStorage.readResult(id) }
+      const rerun = retranscribe === true && session.state === 'ready'
+      if (session.state === 'ready' && !rerun) return { session: withProgress(session), result: await runtime.transcriptionStorage.readResult(id) }
       if (active.has(id)) throw Object.assign(new Error('This recording is already being transcribed.'), { status: 409 })
       const selectedModel = TRANSCRIPTION_MODELS[selectedModelId]
       const snapshot = await installedSnapshot(cacheRoot, selectedModel)
@@ -269,7 +270,8 @@ export function createTranscriptionService(runtime) {
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Transcription failed.'
         const latest = await runtime.transcriptionStorage.readManifest(id)
-        if (latest) await runtime.transcriptionStorage.writeManifest({ ...latest, state: 'failed', error: message })
+        // A re-run never loses the transcript it was replacing: result.json is untouched, so the session stays ready.
+        if (latest) await runtime.transcriptionStorage.writeManifest(rerun ? { ...latest, state: 'ready', error: null } : { ...latest, state: 'failed', error: message })
         throw error
       } finally { active.get(id)?.finish(); active.delete(id) }
       } finally { locks.pendingTranscriptions.delete(id) }
@@ -287,8 +289,8 @@ export function createTranscriptionService(runtime) {
   async function updateOptions(id, { identifySpeakers }) {
     const session = await runtime.transcriptionStorage.readManifest(id)
     if (!session) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
-    if (active.has(id) || locks.pendingTranscriptions.has(id) || session.state === 'transcribing' || session.state === 'ready') {
-      throw Object.assign(new Error('Speaker labels can only be changed before a transcription starts.'), { status: 409 })
+    if (active.has(id) || locks.pendingTranscriptions.has(id) || session.state === 'transcribing') {
+      throw Object.assign(new Error('Speaker labels cannot be changed while a transcription is running.'), { status: 409 })
     }
     return runtime.transcriptionStorage.writeManifest({ ...session, identifySpeakers: identifySpeakers === true })
   }
@@ -332,7 +334,7 @@ export function createTranscriptionService(runtime) {
       const summaries = []
       for (const piece of pieces) {
         const generated = await runtime.mlxService.generate([
-          { role: 'system', content: 'Write a concise factual summary of the supplied transcript in Markdown bullets. Keep names, numbers, dates, decisions, and uncertainty accurate. Do not infer facts that are not stated. The transcript may contain [mm:ss] timestamps and **Speaker N** labels; use the labels to attribute statements and decisions, but do not copy timestamps into the summary.' },
+          { role: 'system', content: 'Write a concise factual summary of the supplied transcript in Markdown bullets. Keep names, numbers, dates, decisions, and uncertainty accurate. Do not infer facts that are not stated. The transcript may contain [mm:ss] timestamps and bold speaker names at the start of each turn (for example **Speaker 1** or **Alex**); use the names to attribute statements and decisions exactly as written, but do not copy timestamps into the summary.' },
           { role: 'user', content: `<transcript>\n${piece}\n</transcript>` },
         ], { maxTokens: 384, temperature: 0 })
         if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. Your draft and original transcript were kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })

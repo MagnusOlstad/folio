@@ -40,6 +40,7 @@ function actions(): TranscriptionDockActions {
     setIdentifySpeakers: vi.fn(),
     setSessionIdentifySpeakers: vi.fn(),
     transcribe: vi.fn(),
+    retranscribe: vi.fn(),
     cancel: vi.fn(),
     openTranscript: vi.fn(),
     regenerateSummary: vi.fn(),
@@ -1024,5 +1025,101 @@ describe("transcription UI", () => {
     await waitFor(() => expect(result.current.model.pending).toHaveLength(1));
     await act(async () => { result.current.actions.setSessionIdentifySpeakers(pendingSession, true); });
     expect(apiForBundleMock).toHaveBeenCalledWith("bundle-a", `/api/transcriptions/${pendingSession.id}/options`, { method: "POST", body: JSON.stringify({ identifySpeakers: true }) });
+  });
+
+  it("confirms re-transcription inline with a per-session speaker toggle", () => {
+    const dockActions = actions();
+    const ready: TranscriptionSession = { ...session, identifySpeakers: false };
+    render(<TranscriptionDock model={model({ status: { ...readyStatus, diarization: { ...speakerStatus, modelState: "ready", canDiarize: true } }, pending: [ready] })} actions={dockActions} />);
+    expect(screen.queryByRole("checkbox", { name: "Identify speakers in meeting.wav" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Re-transcribe" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Identify speakers in meeting.wav" }));
+    expect(dockActions.setSessionIdentifySpeakers).toHaveBeenCalledWith(ready, true);
+    expect(dockActions.retranscribe).not.toHaveBeenCalled();
+    const group = screen.getByRole("group", { name: "Confirm re-transcription of meeting.wav" });
+    expect(group).toHaveTextContent("transcript in your open draft will be replaced");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("group", { name: /Confirm re-transcription/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Re-transcribe" }));
+    fireEvent.click(screen.getByRole("button", { name: "Re-transcribe audio" }));
+    expect(dockActions.retranscribe).toHaveBeenCalledWith(ready);
+  });
+
+  it("re-transcribes into the open linked draft, keeping edited speaker names and the summary", async () => {
+    const draftsById = new Map<string, string>();
+    apiForBundleMock.mockImplementation(async (_bundle: string | null, url: string, options?: { body?: string }) => {
+      if (url.endsWith("/process")) {
+        expect(JSON.parse(options?.body ?? "{}")).toEqual({ retranscribe: true });
+        return {
+          session,
+          result: { summary: "", transcript: "**{{speaker1}}** [00:00]\nNew.\n\n**{{speaker2}}** [00:05]\nMore.", speakers: true, speakerNumbers: [1, 2] },
+        };
+      }
+      if (/\/api\/transcriptions\/[^/]+$/.test(url)) return { session, result: { summary: "", transcript: "old text" } };
+      throw new Error("Unexpected API request: " + url);
+    });
+    const drafts = {
+      createDraft: vi.fn((content = "") => { draftsById.set("untitled:one", content); return "untitled:one"; }),
+      getDraftContent: vi.fn((id: string) => draftsById.get(id)),
+      getDraftDocument: vi.fn(() => undefined),
+      isDraftOpen: vi.fn(() => true),
+      updateDraftContent: vi.fn((id: string, content: string) => { draftsById.set(id, content); }),
+      openDraft: vi.fn(),
+    };
+    const setMessage = vi.fn();
+    const { result } = renderHook(() => useTranscription({ drafts, setMessage, sourceBundleId: "bundle-a" }));
+    await act(async () => { await result.current.actions.openTranscript(session); });
+    expect(drafts.createDraft).toHaveBeenCalledTimes(1);
+    draftsById.set("untitled:one", "# Meeting\n\n## Summary\n\n- Mine\n\n## Speakers\n\nspeaker1:: Alex\n\n## Transcript\n\nold text\n");
+    apiForBundleMock.mockClear();
+    await act(async () => { result.current.actions.retranscribe(session); });
+    await waitFor(() => expect(drafts.updateDraftContent).toHaveBeenCalled());
+    expect(draftsById.get("untitled:one")).toBe("# Meeting\n\n## Summary\n\n- Mine\n\n## Speakers\n\nspeaker1:: Alex\nspeaker2:: Speaker 2\n\n## Transcript\n\n**{{speaker1}}** [00:00]\nNew.\n\n**{{speaker2}}** [00:05]\nMore.\n");
+    expect(drafts.createDraft).toHaveBeenCalledTimes(1);
+    expect(setMessage).toHaveBeenCalledWith("Transcript replaced in your open draft.");
+  });
+
+  it("opens a new draft after re-transcribing when no linked draft is open", async () => {
+    apiForBundleMock.mockResolvedValue({ session, result: { summary: "", transcript: "[00:01] Hi." } });
+    const drafts = { createDraft: vi.fn(() => "untitled:new"), getDraftContent: vi.fn(), getDraftDocument: vi.fn(), updateDraftContent: vi.fn(), openDraft: vi.fn() };
+    const { result } = renderHook(() => useTranscription({ drafts, setMessage: vi.fn(), sourceBundleId: "bundle-a" }));
+    await act(async () => { result.current.actions.retranscribe(session); });
+    await waitFor(() => expect(drafts.createDraft).toHaveBeenCalledWith(expect.stringContaining("[00:01] Hi.")));
+    expect(drafts.updateDraftContent).not.toHaveBeenCalled();
+  });
+
+  it("keeps the previous transcript and shows the failure when re-transcription fails", async () => {
+    apiForBundleMock.mockRejectedValue(new Error("Whisper crashed."));
+    apiMock.mockResolvedValue([]);
+    const drafts = { createDraft: vi.fn(), getDraftContent: vi.fn(), getDraftDocument: vi.fn(), updateDraftContent: vi.fn(), openDraft: vi.fn() };
+    const { result } = renderHook(() => useTranscription({ drafts, setMessage: vi.fn(), sourceBundleId: "bundle-a" }));
+    await act(async () => { result.current.actions.retranscribe(session); });
+    await waitFor(() => expect(result.current.model.error).toBe("Whisper crashed. Your previous transcript was kept."));
+    expect(drafts.updateDraftContent).not.toHaveBeenCalled();
+    expect(drafts.createDraft).not.toHaveBeenCalled();
+  });
+
+  it("resolves speaker names from the draft before sending the transcript to be summarized", async () => {
+    const draft = "# Meeting\n\n## Summary\n\nx\n\n## Speakers\n\nspeaker1:: Alex\nspeaker2:: Sam\n\n## Transcript\n\n**{{speaker1}}** [00:00]\nHi.\n\n**{{speaker2}}** [00:04]\nHey.\n";
+    let sent = "";
+    apiForBundleMock.mockImplementation(async (_bundle: string | null, url: string, options?: { body?: string }) => {
+      if (url.endsWith("/summarize")) { sent = JSON.parse(options?.body ?? "{}").transcript; return { result: { summary: "- Done", transcript: sent } }; }
+      return { session, result: { summary: "", transcript: "x" } };
+    });
+    const drafts = {
+      createDraft: vi.fn(() => "untitled:one"),
+      getDraftContent: vi.fn(() => draft),
+      getDraftDocument: vi.fn(() => undefined),
+      isDraftOpen: vi.fn(() => true),
+      updateDraftContent: vi.fn(),
+      openDraft: vi.fn(),
+    };
+    const { result } = renderHook(() => useTranscription({ drafts, setMessage: vi.fn(), sourceBundleId: "bundle-a" }));
+    await act(async () => { await result.current.actions.openTranscript(session); });
+    apiMock.mockResolvedValue([]);
+    await act(async () => { result.current.actions.regenerateSummary(session); });
+    await waitFor(() => expect(drafts.updateDraftContent).toHaveBeenCalled());
+    expect(sent).toBe("**Alex** [00:00]\nHi.\n\n**Sam** [00:04]\nHey.");
+    expect(sent).not.toContain("{{");
   });
 });
