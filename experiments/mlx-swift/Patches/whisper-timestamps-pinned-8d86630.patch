@@ -1,0 +1,276 @@
+diff --git a/Sources/MLXAudioSTT/Models/Whisper/WhisperModel.swift b/Sources/MLXAudioSTT/Models/Whisper/WhisperModel.swift
+--- a/Sources/MLXAudioSTT/Models/Whisper/WhisperModel.swift
++++ b/Sources/MLXAudioSTT/Models/Whisper/WhisperModel.swift
+@@ -12,6 +12,11 @@
+ 
+     private var tokenizer: WhisperTokenizer?
+ 
++    /// When true, the decoder emits Whisper timestamp tokens and `STTOutput.segments`
++    /// holds one entry per timestamped segment instead of one entry per 30 s chunk.
++    /// Defaults to false so existing callers keep the original behaviour.
++    public var timestampsEnabled = false
++
+     public init(config: WhisperConfig, generationConfig: WhisperGenerationConfig? = nil) {
+         self.config = config
+         self.generationConfig = generationConfig
+@@ -52,7 +57,7 @@
+                 let endSeconds = chunk.offsetSeconds + Float(chunk.audio.dim(0)) / Float(WhisperAudioConfig.sampleRate)
+                 print("[Whisper] chunk \(index + 1)/\(chunks.count) \(String(format: "%.1f", chunk.offsetSeconds))s..\(String(format: "%.1f", endSeconds))s")
+             }
+-            let (text, promptTokens, generationTokens, lang) = transcribeChunk(
++            let (text, promptTokens, generationTokens, lang, chunkSegments) = transcribeChunk(
+                 audio: chunk.audio,
+                 generationParameters: generationParameters
+             )
+@@ -64,11 +69,21 @@
+             if !trimmed.isEmpty {
+                 allText.append(trimmed)
+                 let endSeconds = Double(chunk.offsetSeconds) + Double(chunk.audio.dim(0)) / Double(WhisperAudioConfig.sampleRate)
+-                allSegments.append([
+-                    "text": trimmed,
+-                    "start": Double(chunk.offsetSeconds),
+-                    "end": endSeconds,
+-                ])
++                if timestampsEnabled, !chunkSegments.isEmpty {
++                    for segment in chunkSegments {
++                        allSegments.append([
++                            "text": segment.text,
++                            "start": Double(chunk.offsetSeconds) + segment.start,
++                            "end": Double(chunk.offsetSeconds) + segment.end,
++                        ])
++                    }
++                } else {
++                    allSegments.append([
++                        "text": trimmed,
++                        "start": Double(chunk.offsetSeconds),
++                        "end": endSeconds,
++                    ])
++                }
+             }
+         }
+ 
+@@ -110,7 +125,7 @@
+                     print("[Whisper] chunk \(index + 1)/\(chunks.count) \(String(format: "%.1f", chunk.offsetSeconds))s..\(String(format: "%.1f", endSeconds))s")
+                 }
+ 
+-                let (text, promptTokens, generationTokens, lang) = transcribeChunk(
++                let (text, promptTokens, generationTokens, lang, chunkSegments) = transcribeChunk(
+                     audio: chunk.audio,
+                     generationParameters: generationParameters,
+                     onTokenDelta: { delta in
+@@ -127,11 +142,21 @@
+                 if !trimmed.isEmpty {
+                     allText.append(trimmed)
+                     let endSeconds = Double(chunk.offsetSeconds) + Double(chunk.audio.dim(0)) / Double(WhisperAudioConfig.sampleRate)
+-                    allSegments.append([
+-                        "text": trimmed,
+-                        "start": Double(chunk.offsetSeconds),
+-                        "end": endSeconds,
+-                    ])
++                    if timestampsEnabled, !chunkSegments.isEmpty {
++                        for segment in chunkSegments {
++                            allSegments.append([
++                                "text": segment.text,
++                                "start": Double(chunk.offsetSeconds) + segment.start,
++                                "end": Double(chunk.offsetSeconds) + segment.end,
++                            ])
++                        }
++                    } else {
++                        allSegments.append([
++                            "text": trimmed,
++                            "start": Double(chunk.offsetSeconds),
++                            "end": endSeconds,
++                        ])
++                    }
+                 }
+             }
+ 
+@@ -187,7 +212,7 @@
+         audio: MLXArray,
+         generationParameters: STTGenerateParameters,
+         onTokenDelta: ((String) -> Void)? = nil
+-    ) -> (text: String, promptTokens: Int, generationTokens: Int, language: String?) {
++    ) -> (text: String, promptTokens: Int, generationTokens: Int, language: String?, segments: [TimedSegment]) {
+         guard let tokenizer else {
+             fatalError("WhisperTokenizer not loaded — call fromPretrained / fromDirectory before generate.")
+         }
+@@ -199,7 +224,8 @@
+         var caches = (0..<config.decoderLayers).map { _ in WhisperLayerCache() }
+         let promptIds = tokenizer.buildPromptTokens(
+             language: language,
+-            task: "transcribe"
++            task: "transcribe",
++            withTimestamps: timestampsEnabled
+         )
+ 
+         let promptArray = MLXArray(promptIds.map(Int32.init)).expandedDimensions(axis: 0)
+@@ -235,7 +261,19 @@
+             if !suppress.isEmpty {
+                 stepLogits = suppressLogits(stepLogits, ids: suppress)
+             }
+-            stepLogits = suppressFromIndex(stepLogits, fromIndex: tokenizer.timestampBeginId)
++            if timestampsEnabled {
++                var scores = stepLogits.asType(.float32).asArray(Float.self)
++                Self.applyTimestampRules(
++                    to: &scores,
++                    generated: generated,
++                    timestampBegin: tokenizer.timestampBeginId,
++                    endOfText: tokenizer.endOfTextId,
++                    noTimestamps: tokenizer.noTimestampsId
++                )
++                stepLogits = MLXArray(scores).asType(stepLogits.dtype)
++            } else {
++                stepLogits = suppressFromIndex(stepLogits, fromIndex: tokenizer.timestampBeginId)
++            }
+ 
+             let nextToken = sample(stepLogits, temperature: generationParameters.temperature)
+             if nextToken == tokenizer.endOfTextId { break }
+@@ -271,7 +309,122 @@
+         }
+ 
+         let text = tokenizer.decode(tokens: generated)
+-        return (text, promptIds.count, generated.count, language)
++        let chunkSeconds = Double(audio.dim(0)) / Double(WhisperAudioConfig.sampleRate)
++        let segments = timestampsEnabled
++            ? Self.timedSegments(
++                from: generated,
++                timestampBegin: tokenizer.timestampBeginId,
++                chunkSeconds: chunkSeconds,
++                decode: { tokenizer.decode(tokens: $0) }
++            )
++            : []
++        return (text, promptIds.count, generated.count, language, segments)
++    }
++
++    // MARK: - Timestamp decoding
++
++    struct TimedSegment: Sendable {
++        let start: Double
++        let end: Double
++        let text: String
++    }
++
++    /// Seconds represented by one Whisper timestamp token.
++    static let secondsPerTimestampToken = 0.02
++    /// Whisper limits the first timestamp to one second into the window.
++    static let maxInitialTimestampIndex = 50
++
++    /// Port of openai/whisper `ApplyTimestampRules`, applied to one step of CPU logits.
++    /// `generated` holds only the tokens sampled after the prompt.
++    static func applyTimestampRules(
++        to logits: inout [Float],
++        generated: [Int],
++        timestampBegin: Int,
++        endOfText: Int,
++        noTimestamps: Int
++    ) {
++        let count = logits.count
++        guard timestampBegin < count else { return }
++        let suppressed: Float = -1e9
++        if noTimestamps >= 0, noTimestamps < count { logits[noTimestamps] = suppressed }
++
++        let lastWasTimestamp = (generated.last ?? -1) >= timestampBegin
++        let penultimateWasTimestamp = generated.count < 2 || generated[generated.count - 2] >= timestampBegin
++        if lastWasTimestamp {
++            if penultimateWasTimestamp {
++                // A completed pair must be followed by text or end-of-text.
++                for index in timestampBegin..<count { logits[index] = suppressed }
++            } else {
++                // A single open timestamp must be followed by a timestamp or end-of-text.
++                for index in 0..<min(endOfText, count) { logits[index] = suppressed }
++            }
++        }
++
++        let timestamps = generated.filter { $0 >= timestampBegin }
++        if let lastTimestamp = timestamps.last {
++            let floorToken = lastWasTimestamp && !penultimateWasTimestamp ? lastTimestamp : lastTimestamp + 1
++            if floorToken > timestampBegin {
++                for index in timestampBegin..<min(floorToken, count) { logits[index] = suppressed }
++            }
++        }
++
++        if generated.isEmpty {
++            for index in 0..<timestampBegin { logits[index] = suppressed }
++            let lastAllowed = timestampBegin + maxInitialTimestampIndex
++            if lastAllowed + 1 < count {
++                for index in (lastAllowed + 1)..<count { logits[index] = suppressed }
++            }
++        }
++
++        // If timestamps are collectively more likely than any single text token, force one.
++        let maximum = logits.max() ?? 0
++        var total: Float = 0
++        for value in logits { total += expf(value - maximum) }
++        let logTotal = logf(total) + maximum
++        var timestampMass: Float = 0
++        for index in timestampBegin..<count { timestampMass += expf(logits[index] - logTotal) }
++        let timestampLogProb = logf(max(timestampMass, Float.leastNormalMagnitude))
++        let maxTextLogProb = (logits[0..<timestampBegin].max() ?? suppressed) - logTotal
++        if timestampLogProb > maxTextLogProb {
++            for index in 0..<timestampBegin { logits[index] = suppressed }
++        }
++    }
++
++    /// Splits sampled tokens into `<|start|> text <|end|>` segments. Times are seconds from the
++    /// start of the chunk and are clamped to the chunk length.
++    static func timedSegments(
++        from tokens: [Int],
++        timestampBegin: Int,
++        chunkSeconds: Double,
++        decode: ([Int]) -> String
++    ) -> [TimedSegment] {
++        var segments: [TimedSegment] = []
++        var textTokens: [Int] = []
++        var start: Double?
++        var previousEnd = 0.0
++
++        func flush(end: Double) {
++            let text = decode(textTokens).trimmingCharacters(in: .whitespacesAndNewlines)
++            textTokens.removeAll()
++            guard !text.isEmpty else { return }
++            let begin = min(start ?? previousEnd, chunkSeconds)
++            let finish = max(begin, min(end, chunkSeconds))
++            segments.append(TimedSegment(start: begin, end: finish, text: text))
++            previousEnd = finish
++            start = nil
++        }
++
++        for token in tokens {
++            if token >= timestampBegin {
++                let time = min(Double(token - timestampBegin) * secondsPerTimestampToken, chunkSeconds)
++                if textTokens.isEmpty { start = time } else { flush(end: time) }
++            } else {
++                textTokens.append(token)
++            }
++        }
++        // Decoding stopped without a closing timestamp: the segment runs to the end of the chunk.
++        if !textTokens.isEmpty { flush(end: chunkSeconds) }
++        return segments
+     }
+ 
+     private func detectLanguage(encoderHidden: MLXArray, tokenizer: WhisperTokenizer) -> String? {
+diff --git a/Sources/MLXAudioSTT/Models/Whisper/WhisperTokenizer.swift b/Sources/MLXAudioSTT/Models/Whisper/WhisperTokenizer.swift
+--- a/Sources/MLXAudioSTT/Models/Whisper/WhisperTokenizer.swift
++++ b/Sources/MLXAudioSTT/Models/Whisper/WhisperTokenizer.swift
+@@ -95,7 +95,11 @@
+     /// Build the decoder prefix for a transcription request. `language` may be
+     /// an ISO code ("en") or a full name ("English"); pass `nil` to let
+     /// multilingual variants auto-detect.
+-    public func buildPromptTokens(language: String?, task: String = "transcribe") -> [Int] {
++    public func buildPromptTokens(
++        language: String?,
++        task: String = "transcribe",
++        withTimestamps: Bool = false
++    ) -> [Int] {
+         var tokens: [Int] = [startOfTranscriptId]
+         if isMultilingual {
+             if let resolved = resolveLanguage(language) {
+@@ -108,7 +112,7 @@
+                 if let id = transcribeId { tokens.append(id) }
+             }
+         }
+-        tokens.append(noTimestampsId)
++        if !withTimestamps { tokens.append(noTimestampsId) }
+         return tokens
+     }
+ 
