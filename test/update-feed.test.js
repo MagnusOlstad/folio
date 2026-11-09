@@ -4,7 +4,6 @@ import { Provider } from 'electron-updater'
 import { configureStableGithubReleaseFeed } from '../electron/update-feed.js'
 
 const repositoryUrl = 'https://github.com/MagnusOlstad/folio.git'
-const metadataUrl = 'https://api.github.com/repos/MagnusOlstad/folio/releases/assets/726603503'
 const zipUrl = 'https://api.github.com/repos/MagnusOlstad/folio/releases/assets/726603504'
 const zipName = 'FolioNotes-0.9.0-arm64.zip'
 const sha512 = 'a'.repeat(88)
