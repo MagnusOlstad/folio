@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.0](https://github.com/MagnusOlstad/folio/compare/v0.8.0...v0.9.0) (2026-11-09)
+
+
+### Features
+
+* **translation:** export local drafts translated ([#151](https://github.com/MagnusOlstad/folio/issues/151)) ([8527685](https://github.com/MagnusOlstad/folio/commit/852768538511a4bac4fdb207c29e55e4ae455de1))
+
+
+### Bug Fixes
+
+* replace finnish export language with italian ([#152](https://github.com/MagnusOlstad/folio/issues/152)) ([32528c3](https://github.com/MagnusOlstad/folio/commit/32528c3c5506291f118321ad362a8d27bc4bb4da))
+
 ## [0.8.0](https://github.com/MagnusOlstad/folio/compare/v0.7.8...v0.8.0) (2026-11-06)
 
 
