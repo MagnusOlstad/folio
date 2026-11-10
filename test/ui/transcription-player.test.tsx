@@ -110,7 +110,7 @@ describe("player", () => {
     fireEvent.click(within(player).getByRole("button", { name: "Playback speed 1×" }));
     expect(FakeAudio.last?.playbackRate).toBe(1.5);
     expect(within(player).getByText("Hello there.")).toBeInTheDocument();
-    expect(within(player).getByRole("button", { name: "Wrong speaker?" })).toHaveAttribute("aria-haspopup", "menu");
+    expect(within(player).getByRole("button", { name: "Wrong speaker? Move this sentence to another speaker" })).toHaveAttribute("aria-haspopup", "menu");
     fireEvent.click(header);
     expect(header).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("group", { name: /Player for/ })).not.toBeInTheDocument();
@@ -208,7 +208,7 @@ describe("speaker reassignment", () => {
     drafts.set("untitled:one", "# Meeting\n\n## Speakers\n\nspeaker1:: Alex\n\n## Transcript\n\nstale\n");
 
     const player = await expandReadyRow();
-    const trigger = await within(player).findByRole("button", { name: "Wrong speaker?" });
+    const trigger = await within(player).findByRole("button", { name: "Wrong speaker? Move this sentence to another speaker" });
     expect(within(player).getByRole("button", { name: /Alex · 2/ })).toBeInTheDocument();
     fireEvent.click(trigger);
     const menu = screen.getByRole("menu", { name: "Move this sentence to" });
@@ -224,7 +224,7 @@ describe("speaker reassignment", () => {
     expect(await within(player).findByText("Moved to Speaker 2.")).toBeInTheDocument();
 
     // The confirmation is only shown the first time for a recording.
-    fireEvent.click(within(player).getByRole("button", { name: "Wrong speaker?" }));
+    fireEvent.click(within(player).getByRole("button", { name: "Wrong speaker? Move this sentence to another speaker" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "New speaker" }));
     expect(within(player).queryByText(/Editing speakers rebuilds/)).not.toBeInTheDocument();
     await waitFor(() => expect(bodies).toHaveLength(2));
@@ -236,7 +236,7 @@ describe("speaker reassignment", () => {
     const fresh: TranscriptionSession = { ...ready, id: "66666666-6666-4666-8666-666666666666" };
     render(<TranscriptionDock model={model({ pending: [fresh] })} actions={actions({ reassignSpeaker })} />);
     const player = await expandReadyRow();
-    const trigger = await within(player).findByRole("button", { name: "Wrong speaker?" });
+    const trigger = await within(player).findByRole("button", { name: "Wrong speaker? Move this sentence to another speaker" });
     fireEvent.click(trigger);
     fireEvent.keyDown(screen.getByRole("menuitem", { name: "Speaker 2" }), { key: "Escape" });
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
@@ -447,7 +447,7 @@ describe("long recordings and long text", () => {
     act(() => { playbackStore.seekCurrent(9000 + 1.5); });
     await waitFor(() => expect(player.querySelector(".player-now-current")?.textContent).toBe(longSentence));
     expect(player.querySelector(".player-now-head time")?.textContent).toBe("2:30:00");
-    fireEvent.click(within(player).getByRole("button", { name: "Split sentence" }));
+    fireEvent.click(within(player).getByRole("button", { name: "Split this sentence where another speaker starts" }));
     const words = player.querySelectorAll("button.player-split-word");
     expect(words).toHaveLength(519);
     expect(player.querySelector(".player-split-words")).not.toBeNull();

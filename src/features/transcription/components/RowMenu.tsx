@@ -20,13 +20,15 @@ type RowMenuProps = {
   label: string
   items: RowMenuItem[]
   disabled?: boolean
-  /** Renders a text button instead of the "⋯" icon; the menu then shows `label` as its title. */
-  triggerText?: string
+  /** Renders a labelled button instead of the "⋯" icon; the menu then shows `label` as its title. */
+  triggerText?: ReactNode
   triggerClassName?: string
+  /** Accessible name and tooltip for a `triggerText` button whose visible content is not a plain label. */
+  triggerLabel?: string
 }
 
 /** The "⋯" overflow menu of a recording row, or a small text-triggered menu. */
-export function RowMenu({ label, items, disabled = false, triggerText, triggerClassName }: RowMenuProps) {
+export function RowMenu({ label, items, disabled = false, triggerText, triggerClassName, triggerLabel }: RowMenuProps) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -69,8 +71,8 @@ export function RowMenu({ label, items, disabled = false, triggerText, triggerCl
         ref={buttonRef}
         type="button"
         className={triggerText ? triggerClassName : 'transcription-icon-button'}
-        aria-label={triggerText ? undefined : label}
-        title={triggerText ? undefined : label}
+        aria-label={triggerText ? triggerLabel : label}
+        title={triggerText ? triggerLabel : label}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}

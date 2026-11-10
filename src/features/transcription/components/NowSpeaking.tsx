@@ -3,6 +3,7 @@ import type { ReassignOutcome } from '../hooks/speakerReassign.ts'
 import { formatClock, reassignOptions, speakerColor, speakerDisplayName } from '../model/playback-turns.ts'
 import { nearestBoundary, sentenceWords } from '../model/split-sentence.ts'
 import type { TranscriptionSegment } from '../model/types.ts'
+import { ChevronIcon, MergeUpIcon, ScissorsIcon } from './icons.tsx'
 import { RowMenu, type RowMenuItem } from './RowMenu.tsx'
 import { SplitSentence } from './SplitSentence.tsx'
 
@@ -143,10 +144,14 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
       )}
       <p className="player-now-neighbour">{segments[index + 1]?.text.trim() || ' '}</p>
       {hasSpeakers && (
-        <div className="player-reassign">
+        <div className="player-reassign" role="group" aria-label="Fix this sentence">
           <RowMenu
             label="Move this sentence to"
-            triggerText="Wrong speaker?"
+            triggerLabel="Wrong speaker? Move this sentence to another speaker"
+            triggerText={<>
+              {speaker !== null && <i className="player-dot" style={{ background: speakerColor(speaker) }} aria-hidden="true" />}
+              Speaker<ChevronIcon />
+            </>}
             triggerClassName="player-reassign-trigger"
             disabled={working}
             items={moveItems}
@@ -154,11 +159,21 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
           <button
             type="button"
             className="player-reassign-trigger"
-            disabled={working || splitting !== null || sentenceWords(current.text).length < 2}
-            onClick={startSplit}
-          >Split sentence</button>
+            title="Split this sentence where another speaker starts"
+            aria-label="Split this sentence where another speaker starts"
+            aria-pressed={splitting !== null}
+            disabled={working || (splitting === null && sentenceWords(current.text).length < 2)}
+            onClick={() => (splitting !== null ? setSplitting(null) : startSplit())}
+          ><ScissorsIcon />Split</button>
           {index > 0 && (
-            <button type="button" className="player-reassign-trigger" disabled={working || splitting !== null} onClick={merge}>Merge with previous</button>
+            <button
+              type="button"
+              className="player-reassign-trigger"
+              title="Merge with the previous sentence"
+              aria-label="Merge with the previous sentence"
+              disabled={working || splitting !== null}
+              onClick={merge}
+            ><MergeUpIcon />Merge</button>
           )}
         </div>
       )}

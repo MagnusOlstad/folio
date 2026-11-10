@@ -45,8 +45,8 @@ describe("split sentence helpers", () => {
 describe("split and merge controls", () => {
   it("opens split mode, preselects from the playhead and sends the offset and speaker", async () => {
     const props = setup(1, 8);
-    expect(screen.getByRole("button", { name: "Split sentence" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "Split sentence" }));
+    expect(screen.getByRole("button", { name: "Split this sentence where another speaker starts" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Split this sentence where another speaker starts" }));
     expect(screen.getByText("Click the word where the other speaker starts.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: 'Split before "then"' })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("button", { name: 'Split before "Sure"' })).not.toBeInTheDocument();
@@ -62,7 +62,7 @@ describe("split and merge controls", () => {
 
   it("starts without a boundary when the playhead is outside the sentence and cancels with Escape", () => {
     setup(1, 20);
-    fireEvent.click(screen.getByRole("button", { name: "Split sentence" }));
+    fireEvent.click(screen.getByRole("button", { name: "Split this sentence where another speaker starts" }));
     expect(screen.getByRole("button", { name: "Split" })).toBeDisabled();
     fireEvent.keyDown(screen.getByRole("button", { name: 'Split before "thing"' }), { key: "Escape" });
     expect(screen.queryByText("Click the word where the other speaker starts.")).not.toBeInTheDocument();
@@ -70,18 +70,31 @@ describe("split and merge controls", () => {
 
   it("disables splitting a single word and hides merge at the first sentence", () => {
     setup(2);
-    expect(screen.getByRole("button", { name: "Split sentence" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Merge with previous" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Split this sentence where another speaker starts" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Merge with the previous sentence" })).toBeEnabled();
+  });
+
+  it("exposes the toolbar names and toggles split mode with aria-pressed", () => {
+    setup(1, 8);
+    expect(screen.getByRole("button", { name: "Wrong speaker? Move this sentence to another speaker" })).toHaveAttribute("aria-haspopup", "menu");
+    expect(screen.getByRole("button", { name: "Merge with the previous sentence" })).toBeEnabled();
+    const split = screen.getByRole("button", { name: "Split this sentence where another speaker starts" });
+    expect(split).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(split);
+    expect(split).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(split);
+    expect(split).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByText("Click the word where the other speaker starts.")).not.toBeInTheDocument();
   });
 
   it("hides merge at index 0", () => {
     setup(0);
-    expect(screen.queryByRole("button", { name: "Merge with previous" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Merge with the previous sentence" })).not.toBeInTheDocument();
   });
 
   it("merges after confirmation, reports it, and undoes with a split", async () => {
     const props = setup(1);
-    fireEvent.click(screen.getByRole("button", { name: "Merge with previous" }));
+    fireEvent.click(screen.getByRole("button", { name: "Merge with the previous sentence" }));
     expect(props.onMerge).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Merge sentences" }));
     expect(await screen.findByText(/Merged with the previous sentence\./)).toBeInTheDocument();
@@ -93,7 +106,7 @@ describe("split and merge controls", () => {
 
   it("undoes a split by merging the second half back", async () => {
     const props = setup(1, 8);
-    fireEvent.click(screen.getByRole("button", { name: "Split sentence" }));
+    fireEvent.click(screen.getByRole("button", { name: "Split this sentence where another speaker starts" }));
     fireEvent.click(screen.getByRole("button", { name: "Split" }));
     confirmSplit();
     expect(await screen.findByText(/Split\. The rest is now Speaker 1\./)).toBeInTheDocument();
@@ -103,7 +116,7 @@ describe("split and merge controls", () => {
 
   it("shows failures in the alert", async () => {
     setup(1, 8, { onSplit: vi.fn(async () => { throw new Error("nope"); }) });
-    fireEvent.click(screen.getByRole("button", { name: "Split sentence" }));
+    fireEvent.click(screen.getByRole("button", { name: "Split this sentence where another speaker starts" }));
     fireEvent.click(screen.getByRole("button", { name: "Split" }));
     confirmSplit();
     expect(await screen.findByRole("alert")).toHaveTextContent("nope");
