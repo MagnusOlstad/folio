@@ -81,7 +81,7 @@ export function PlayerPanel({ id, session, model, actions, onSpeakerCount }: Pla
           duration={duration}
           time={time}
           solo={solo}
-          onSeek={(seconds) => { playbackStore.seekCurrent(seconds); focusPanel() }}
+          onSeek={(seconds, source) => { playbackStore.seekCurrent(seconds); if (source === 'pointer') focusPanel() }}
         />
       ) : (
         <input

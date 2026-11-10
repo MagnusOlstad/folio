@@ -407,3 +407,51 @@ describe("editor timestamps", () => {
     expect(screen.getByLabelText("Plain note").querySelector(".cm-live-markdown-timestamp")).toBeNull();
   });
 });
+
+describe("long recordings and long text", () => {
+  const longName = "Dr. Alexandrina Montgomery-Featherstonehaugh of the Northern Regional Council";
+  const longFile = "quarterly-planning-meeting-with-the-entire-regional-leadership-team-final-v7.wav";
+  const longSentence = Array.from({ length: 520 }, (_, i) => `word${i}`).join(" ");
+  const longSession: TranscriptionSession = { ...ready, fileName: longFile, durationMs: 12_000_000 };
+  const longSegments = Array.from({ length: 4000 }, (_, i) => ({
+    start: i * 3, end: (i + 1) * 3, text: i === 3000 ? longSentence : `Sentence ${i}.`, speaker: (Math.floor(i / 2) % 2) + 1,
+  }));
+  const longResult: TranscriptionResult = { ...storedResult, segments: longSegments, transcript: "" };
+
+  it("shows h:mm:ss clocks, bounded lane bars, a keyboard slider and truncated names with titles", async () => {
+    const names = new Map([[1, longName], [2, "Sam"]]);
+    render(<TranscriptionDock model={model({ pending: [longSession], speakerNamesFor: () => names })} actions={actions({ loadResult: vi.fn(async () => longResult) })} />);
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${longFile.replace(/\./g, "\\.")}, `) }));
+    const player = await screen.findByRole("group", { name: `Player for ${longFile}` });
+    const lanes = await within(player).findByTestId("speaker-lanes");
+    expect(screen.getByText("3:20:00", { exact: false, selector: ".transcription-row-text small" })).toBeInTheDocument();
+    expect(player.querySelector(".player-time")?.textContent).toBe("0:00 / 3:20:00");
+    // 4,000 segments: with a 0.15% merge gap each lane is a handful of bars, not 1,000 elements.
+    expect(lanes.querySelectorAll(".player-lane-bar").length).toBeLessThanOrEqual(4);
+    expect(lanes.querySelector(`.player-lane-name[title="${longName}"]`)).not.toBeNull();
+    expect(within(player).getByText(longName, { selector: ".player-chip-name" })).toHaveAttribute("title", longName);
+
+    expect(lanes).toHaveAttribute("role", "slider");
+    expect(lanes).toHaveAttribute("aria-valuetext", "0:00");
+    fireEvent.keyDown(lanes, { key: "ArrowRight", shiftKey: true });
+    await waitFor(() => expect(lanes).toHaveAttribute("aria-valuetext", "0:30"));
+    fireEvent.keyDown(lanes, { key: "End" });
+    await waitFor(() => expect(lanes).toHaveAttribute("aria-valuetext", "3:20:00"));
+  });
+
+  it("renders a 500-word sentence inside the capped box with the split picker usable", async () => {
+    render(<TranscriptionDock model={model({ pending: [longSession] })} actions={actions({ loadResult: vi.fn(async () => longResult) })} />);
+    fireEvent.click(screen.getByRole("button", { name: /^quarterly-planning/ }));
+    const player = await screen.findByRole("group", { name: /Player for quarterly/ });
+    await within(player).findByTestId("speaker-lanes");
+    act(() => { playbackStore.seekCurrent(9000 + 1.5); });
+    await waitFor(() => expect(player.querySelector(".player-now-current")?.textContent).toBe(longSentence));
+    expect(player.querySelector(".player-now-head time")?.textContent).toBe("2:30:00");
+    fireEvent.click(within(player).getByRole("button", { name: "Split sentence" }));
+    const words = player.querySelectorAll("button.player-split-word");
+    expect(words).toHaveLength(519);
+    expect(player.querySelector(".player-split-words")).not.toBeNull();
+    fireEvent.click(words[300]);
+    expect(player.querySelector(".is-boundary")).toBe(words[300]);
+  });
+});

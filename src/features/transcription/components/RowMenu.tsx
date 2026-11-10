@@ -94,7 +94,7 @@ export function RowMenu({ label, items, disabled = false, triggerText, triggerCl
             >
               {item.checked !== undefined && <span className="transcription-menu-check" aria-hidden="true">{item.checked ? '✓' : ''}</span>}
               {item.leading}
-              {item.label}
+              <span className="transcription-menu-label" title={item.label}>{item.label}</span>
             </button>
           ))}
         </div>

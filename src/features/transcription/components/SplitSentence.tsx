@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { reassignOptions, speakerColor, speakerDisplayName } from '../model/playback-turns.ts'
 import { sentenceWords } from '../model/split-sentence.ts'
 
@@ -21,6 +21,15 @@ export function SplitSentence({ text, speaker, present, names, initialBoundary, 
   const [boundary, setBoundary] = useState<number | null>(initialBoundary)
   const [target, setTarget] = useState<number | undefined>(options[0])
   const rest = target ?? speaker
+  const wordsRef = useRef<HTMLParagraphElement>(null)
+
+  // A preselected boundary may sit far down a long sentence; bring it into view inside the scroll box.
+  useEffect(() => {
+    if (boundary === null) return
+    wordsRef.current?.querySelector<HTMLElement>('.is-boundary')?.scrollIntoView?.({ block: 'nearest' })
+  }, [boundary])
+
+  function optionLabel(option: number) { return present.includes(option) ? speakerDisplayName(option, names) : 'New speaker' }
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key !== 'Escape') return
@@ -31,7 +40,7 @@ export function SplitSentence({ text, speaker, present, names, initialBoundary, 
 
   return (
     <div className="player-split" onKeyDown={onKeyDown}>
-      <p className="player-now-current player-split-words">
+      <p className="player-now-current player-split-words" ref={wordsRef}>
         {words.map((word, index) => {
           const after = boundary !== null && index >= boundary
           const color = boundary === null ? undefined : after ? (rest === null ? undefined : speakerColor(rest)) : (speaker === null ? undefined : speakerColor(speaker))
@@ -67,7 +76,7 @@ export function SplitSentence({ text, speaker, present, names, initialBoundary, 
             onClick={() => setTarget(option)}
           >
             <i className="player-dot" style={{ background: speakerColor(option) }} aria-hidden="true" />
-            {present.includes(option) ? speakerDisplayName(option, names) : 'New speaker'}
+            <span className="player-ellipsis" title={optionLabel(option)}>{optionLabel(option)}</span>
           </button>
         ))}
       </div>

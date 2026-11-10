@@ -58,10 +58,29 @@ export function activeTimestampIndex(stamps: readonly TranscriptTimestamp[], sec
 
 /** Inclusive 0-based line range of the turn/paragraph that starts at `stamps[index]`. */
 export function timestampBlockLines(stamps: readonly TranscriptTimestamp[], index: number, lineCount: number, text: string) {
+  const lines = text.split('\n')
+  return timestampBlockRange(stamps, index, lineCount, (line) => lines[line] ?? '')
+}
+
+/** Same as `timestampBlockLines`, reading only the lines it needs through `lineText` (0-based). */
+export function timestampBlockRange(stamps: readonly TranscriptTimestamp[], index: number, lineCount: number, lineText: (line: number) => string) {
   const start = stamps[index].line
   const nextLine = index + 1 < stamps.length ? stamps[index + 1].line : lineCount
-  const lines = text.split('\n')
   let end = nextLine - 1
-  while (end > start && (lines[end] ?? '').trim() === '') end -= 1
+  while (end > start && lineText(end).trim() === '') end -= 1
   return { start, end }
+}
+
+/** Timestamps whose marks start inside [from, to), by binary search over the document-ordered list. */
+export function timestampsInRange(stamps: readonly TranscriptTimestamp[], from: number, to: number) {
+  let low = 0
+  let high = stamps.length
+  while (low < high) {
+    const mid = (low + high) >> 1
+    if (stamps[mid].from < from) low = mid + 1
+    else high = mid
+  }
+  const found: TranscriptTimestamp[] = []
+  for (let index = low; index < stamps.length && stamps[index].from < to; index += 1) found.push(stamps[index])
+  return found
 }

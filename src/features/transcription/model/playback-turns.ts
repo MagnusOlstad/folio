@@ -69,9 +69,10 @@ export function laneTimeAt(fraction: number, duration: number) {
   return Math.min(duration, Math.max(0, fraction * duration))
 }
 
-/** Where solo playback for `speaker` should be when the playhead is at `time`. */
+/** Where solo playback for `speaker` should be when the playhead is at `time`. O(log n) to find the neighbourhood. */
 export function soloStep(turns: readonly Turn[], speaker: number, time: number): SoloStep {
-  for (const turn of turns) {
+  for (let index = Math.max(0, findTurnIndex(turns, time + EPSILON)); index < turns.length; index += 1) {
+    const turn = turns[index]
     if (turn.speaker !== speaker) continue
     if (time < turn.start - EPSILON) return { kind: 'jump', to: turn.start }
     if (time < turn.end - EPSILON) return { kind: 'inside' }
@@ -81,11 +82,18 @@ export function soloStep(turns: readonly Turn[], speaker: number, time: number):
 
 /** Start of the next (direction 1) or previous (-1) turn, optionally limited to one speaker. */
 export function adjacentTurnStart(turns: readonly Turn[], time: number, direction: 1 | -1, speaker: number | null = null) {
-  const candidates = turns.filter((turn) => speaker === null || turn.speaker === speaker)
-  if (direction === 1) return candidates.find((turn) => turn.start > time + EPSILON)?.start ?? null
+  const matches = (turn: Turn) => speaker === null || turn.speaker === speaker
+  if (direction === 1) {
+    for (let index = findTurnIndex(turns, time + EPSILON) + 1; index < turns.length; index += 1) {
+      if (matches(turns[index])) return turns[index].start
+    }
+    return null
+  }
   // A few seconds into a turn, "previous" restarts that turn first, like a media player.
-  const earlier = candidates.filter((turn) => turn.start < time - 1)
-  return earlier.length ? earlier[earlier.length - 1].start : (candidates[0]?.start ?? null)
+  for (let index = findTurnIndex(turns, time - 1 - Number.EPSILON); index >= 0; index -= 1) {
+    if (matches(turns[index]) && turns[index].start < time - 1) return turns[index].start
+  }
+  return turns.find(matches)?.start ?? null
 }
 
 export function formatClock(seconds: number) {

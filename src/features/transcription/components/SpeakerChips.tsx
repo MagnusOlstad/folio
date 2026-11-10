@@ -86,7 +86,8 @@ export function SpeakerChips({ speakers, names, counts, solo, active, onRename }
                 disabled={!active}
               >
                 {dot}
-                {name} · {counts.get(speaker) ?? 0}
+                <span className="player-chip-name" title={name}>{name}</span>{' '}
+                <span className="player-chip-count">· {counts.get(speaker) ?? 0}</span>
               </button>
               <button type="button" className="player-chip-edit" aria-label={`Rename ${name}`} title={`Rename ${name}`} onClick={() => startEditing(speaker)} disabled={saving}>
                 <PencilIcon />
