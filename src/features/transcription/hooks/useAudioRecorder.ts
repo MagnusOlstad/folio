@@ -187,6 +187,14 @@ export function useAudioRecorder({ association, onImport }: Options) {
           mediaRecorder.stop()
         }
       }, { once: true })
+      // A lost microphone in mixed mode is not fatal: the meeting audio is still worth keeping.
+      if (capture.system) {
+        capture.mic?.getAudioTracks()[0]?.addEventListener('ended', () => {
+          if (recorder.current === mediaRecorder && mediaRecorder.state === 'recording' && mounted.current) {
+            setError('Microphone disconnected. Recording continues with meeting audio only.')
+          }
+        }, { once: true })
+      }
       mediaRecorder.start(1_000)
       stopMonitor.current = startLevelMonitor({ mic: capture.mic, system: capture.system }, setMeters, capture.context)
       setPhase('recording')

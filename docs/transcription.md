@@ -4,7 +4,7 @@ Audio is transcribed on-device with Whisper through the bundled MLX helper (`fol
 
 ## Recording sources
 
-The recorder in the Recordings dock captures the microphone by default. In the desktop app on macOS and Windows a **Record** menu next to it also offers **System audio** and **Microphone + system audio** (the default there), so a Zoom, Teams, or Meet call on headphones can be recorded with both sides in one file. The choice is remembered in `folio:recording-source`. The browser build only offers the microphone.
+The recorder in the Recordings dock captures the microphone by default. In the desktop app on macOS 14.2 or later and Windows a **Record** menu next to it also offers **System audio** and **Microphone + system audio** (the default there), so a Zoom, Teams, or Meet call on headphones can be recorded with both sides in one file. The choice is remembered in `folio:recording-source`. The browser build only offers the microphone.
 
 - System audio is captured with Chromium's loopback capture through `getDisplayMedia`. The Electron main process answers the request for the app's own window only, and the renderer discards the video track immediately; no screen content is recorded.
 - On macOS, allow FolioNotes under System Settings > Privacy & Security > Screen & System Audio Recording (the recorder offers an **Open System Settings** button when capture fails), then try again. macOS may ask you to restart the app after granting access.

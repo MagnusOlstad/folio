@@ -1,5 +1,18 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
+// macOS system audio uses the CoreAudio Tap API, which needs macOS 14.2 or later.
+function systemAudioSupported() {
+  if (process.platform === 'win32') return true
+  if (process.platform !== 'darwin') return false
+  try {
+    const [major, minor] = String(process.getSystemVersion()).split('.').map((part) => Number.parseInt(part, 10))
+    if (!Number.isFinite(major)) return false
+    return major > 14 || (major === 14 && (Number.isFinite(minor) ? minor : 0) >= 2)
+  } catch {
+    return false
+  }
+}
+
 contextBridge.exposeInMainWorld('folio', {
   getStorage: (key) => ipcRenderer.sendSync('folio:get-storage', key),
   setStorage: (key, value) => ipcRenderer.send('folio:set-storage', key, value),
@@ -38,7 +51,7 @@ contextBridge.exposeInMainWorld('folio', {
   getObsidianImportJob: (jobId) => ipcRenderer.invoke('folio:get-obsidian-import-job', jobId),
   cancelObsidianImport: (jobId) => ipcRenderer.invoke('folio:cancel-obsidian-import', jobId),
   selectFolder: () => ipcRenderer.invoke('folio:select-folder'),
-  systemAudio: { supported: process.platform === 'darwin' || process.platform === 'win32' },
+  systemAudio: { supported: systemAudioSupported() },
   getScreenCaptureAccess: () => ipcRenderer.invoke('folio:get-screen-capture-access'),
   openSystemAudioSettings: () => ipcRenderer.invoke('folio:open-system-audio-settings'),
 })

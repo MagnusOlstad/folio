@@ -11,10 +11,26 @@ import { loadRecordingSource, parseRecordingSource, RECORDING_SOURCE_KEY } from 
 
 vi.mock("../../src/lib/api.ts", () => ({ api: vi.fn(), apiForBundle: vi.fn() }));
 
-type FakeTrack = { kind: string; stop: ReturnType<typeof vi.fn>; addEventListener: ReturnType<typeof vi.fn> };
+type FakeTrack = {
+  kind: string;
+  readyState: string;
+  stop: ReturnType<typeof vi.fn>;
+  addEventListener: ReturnType<typeof vi.fn>;
+  end: () => void;
+};
 
-function fakeStream(kinds: string[]) {
-  let tracks: FakeTrack[] = kinds.map((kind) => ({ kind, stop: vi.fn(), addEventListener: vi.fn() }));
+function fakeStream(kinds: string[], readyState = "live") {
+  let tracks: FakeTrack[] = kinds.map((kind) => {
+    const listeners: Array<() => void> = [];
+    const track: FakeTrack = {
+      kind,
+      readyState,
+      stop: vi.fn(),
+      addEventListener: vi.fn((_type: string, listener: () => void) => { listeners.push(listener); }),
+      end: () => { track.readyState = "ended"; listeners.forEach((listener) => listener()); },
+    };
+    return track;
+  });
   const stream = {
     getTracks: () => [...tracks],
     getAudioTracks: () => tracks.filter((track) => track.kind === "audio"),
@@ -92,6 +108,16 @@ describe("capture streams", () => {
     expect(silent.all[0]?.stop).toHaveBeenCalled();
     getDisplayMedia.mockRejectedValueOnce(new DOMException("denied", "NotAllowedError"));
     await expect(openCapture("system")).rejects.toThrow(/Screen & System Audio Recording/);
+  });
+
+  it("treats a system capture whose audio tracks are all ended as unavailable", async () => {
+    const ended = fakeStream(["video", "audio"], "ended");
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getDisplayMedia: vi.fn(async () => ended.stream) },
+    });
+    await expect(openCapture("system")).rejects.toBeInstanceOf(SystemAudioUnavailableError);
+    expect(ended.all.every((track) => track.stop.mock.calls.length > 0)).toBe(true);
   });
 
   it("mixes microphone and system audio into one stream and cleans everything up", async () => {
@@ -234,5 +260,37 @@ describe("useAudioRecorder with system audio", () => {
     await waitFor(() => expect(result.current.error).toMatch(/Screen & System Audio Recording/));
     expect(result.current.systemAudioBlocked).toBe(true);
     expect(result.current.phase).toBe("idle");
+  });
+
+  it("keeps recording with a warning when the microphone drops in mixed mode", async () => {
+    setFolio(desktop);
+    const mic = fakeStream(["audio"]);
+    const system = fakeStream(["video", "audio"]);
+    const mixed = fakeStream(["audio"]);
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: vi.fn(async () => mic.stream), getDisplayMedia: vi.fn(async () => system.stream) },
+    });
+    vi.stubGlobal("AudioContext", class {
+      resume = vi.fn(async () => undefined);
+      close = vi.fn(async () => undefined);
+      createMediaStreamDestination = () => ({ stream: mixed.stream, channelCount: 2 });
+      createMediaStreamSource = () => ({ connect: vi.fn() });
+    });
+    const recorders: Array<{ state: string; stop: ReturnType<typeof vi.fn> }> = [];
+    vi.stubGlobal("MediaRecorder", class {
+      state = "inactive";
+      stop = vi.fn(() => { this.state = "inactive"; });
+      addEventListener = vi.fn();
+      start = vi.fn(() => { this.state = "recording"; });
+      constructor() { recorders.push(this); }
+    });
+    const { result } = renderHook(() => useAudioRecorder({ association: { sourceBundleId: null }, onImport: vi.fn() }));
+    await act(async () => { await result.current.start(); });
+    expect(result.current.phase).toBe("recording");
+    act(() => { mic.all[0]?.end(); });
+    expect(result.current.error).toBe("Microphone disconnected. Recording continues with meeting audio only.");
+    expect(result.current.phase).toBe("recording");
+    expect(recorders[0]?.stop).not.toHaveBeenCalled();
   });
 });

@@ -34,7 +34,9 @@ export async function openSystemAudioStream(): Promise<MediaStream> {
     track.stop()
     stream.removeTrack(track)
   }
-  if (!stream.getAudioTracks().length) {
+  // Without the OS permission Chromium still hands out an audio track, already ended and silent.
+  const audioTracks = stream.getAudioTracks()
+  if (!audioTracks.length || audioTracks.every((track) => track.readyState === 'ended')) {
     stream.getTracks().forEach((track) => track.stop())
     throw new SystemAudioUnavailableError()
   }
