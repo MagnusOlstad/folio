@@ -208,24 +208,38 @@ describe("LiveMarkdownEditor image toolbar", () => {
 
 describe("LiveMarkdownEditor image download", () => {
   const label = (root: HTMLElement, name: string) => root.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`);
+  let restoreUrl: (() => void) | null = null;
+  afterEach(() => {
+    restoreUrl?.();
+    restoreUrl = null;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
 
   it("downloads through a temporary link named after the asset and revokes the object URL", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(new Blob(["x"], { type: "image/png" }), { status: 200 })));
+    // A plain object keeps the test independent of Node's and jsdom's Blob internals.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, blob: async () => ({ type: "image/png" }) }));
     const create = vi.fn(() => "blob:test");
     const revoke = vi.fn();
-    URL.createObjectURL = create;
-    URL.revokeObjectURL = revoke;
+    const originalCreate = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+    const originalRevoke = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+    Object.defineProperty(URL, "createObjectURL", { value: create, configurable: true, writable: true });
+    Object.defineProperty(URL, "revokeObjectURL", { value: revoke, configurable: true, writable: true });
+    restoreUrl = () => {
+      for (const [key, descriptor] of [["createObjectURL", originalCreate], ["revokeObjectURL", originalRevoke]] as const) {
+        if (descriptor) Object.defineProperty(URL, key, descriptor);
+        else Reflect.deleteProperty(URL, key);
+      }
+    };
     const names: string[] = [];
-    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { names.push(this.download); });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { names.push(this.download); });
     render(<LiveMarkdownEditor value="![shot](/assets/shot.png)" onChange={vi.fn()} readOnly ariaLabel="Dl note" />);
     fireEvent.click(label(screen.getByLabelText("Dl note"), "Download image")!);
     await vi.waitFor(() => expect(names).toEqual(["shot.png"]));
     expect(revoke).not.toHaveBeenCalled();
     vi.advanceTimersByTime(60_000);
     expect(revoke).toHaveBeenCalledWith("blob:test");
-    vi.useRealTimers();
-    click.mockRestore();
   });
 
   it("reports a download failure", async () => {
