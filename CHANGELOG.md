@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.10.0](https://github.com/MagnusOlstad/folio/compare/v0.9.0...v0.10.0) (2026-11-10)
+
+
+### Features
+
+* add transcript playback, speaker names and note variables ([#165](https://github.com/MagnusOlstad/folio/issues/165)) ([d4baa1e](https://github.com/MagnusOlstad/folio/commit/d4baa1e194329b551fb820e0dd86a6ef14051da2))
+* describe images with local vision models ([#169](https://github.com/MagnusOlstad/folio/issues/169)) ([29004eb](https://github.com/MagnusOlstad/folio/commit/29004eb3944c122cfff35efd1ce4dc7854e8514f))
+
+
+### Bug Fixes
+
+* **updater:** retry transient failures with api fallback ([#154](https://github.com/MagnusOlstad/folio/issues/154)) ([27f3432](https://github.com/MagnusOlstad/folio/commit/27f343256fded73a1fc8cfc8e4a01e474405ef60))
+
 ## [0.9.0](https://github.com/MagnusOlstad/folio/compare/v0.8.0...v0.9.0) (2026-11-09)
 
 
