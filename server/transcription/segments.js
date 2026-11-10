@@ -185,25 +185,73 @@ export function buildTranscriptResult(text, segments, speakerTurns = null) {
   return { transcript: built.transcript, plainText, segments: built.segments, speakers: built.speakerCount > 0, speakerCount: built.speakerCount, speakerNumbers: built.speakerNumbers }
 }
 
-/**
- * Reassigns one segment to another speaker and rebuilds the derived fields (transcript, speakerNumbers,
- * speakerCount, speakers). Speaker numbers are never renumbered because notes reference `speakerN::` names.
- * Throws a 400-status error for bad input or a result without speaker labels.
- */
-export function reassignSegmentSpeaker(result, index, speaker, { maxSpeakers = 4 } = {}) {
-  const bad = (message) => Object.assign(new Error(message), { status: 400 })
+function badRequest(message) {
+  return Object.assign(new Error(message), { status: 400 })
+}
+
+// Validates that the result has speaker labels and that `index` is a segment in range.
+function labelledSegments(result, index) {
   const segments = Array.isArray(result?.segments) ? result.segments : []
-  if (!segments.length || !segments.every((segment) => Number.isInteger(segment?.speaker))) throw bad('This transcript has no speaker labels.')
-  if (!Number.isInteger(index) || index < 0 || index >= segments.length) throw bad('Segment index is out of range.')
-  if (!Number.isInteger(speaker) || speaker < 1 || speaker > maxSpeakers) throw bad(`Speaker must be a whole number from 1 to ${maxSpeakers}.`)
-  const updated = segments.map((segment, position) => (position === index ? { ...segment, speaker } : segment))
-  const speakerNumbers = speakerNumbersOf(updated)
+  if (!segments.length || !segments.every((segment) => Number.isInteger(segment?.speaker))) throw badRequest('This transcript has no speaker labels.')
+  if (!Number.isInteger(index) || index < 0 || index >= segments.length) throw badRequest('Segment index is out of range.')
+  return segments
+}
+
+// Speaker numbers are never renumbered because notes reference `speakerN::` names.
+function withSegments(result, segments) {
+  const speakerNumbers = speakerNumbersOf(segments)
   return {
     ...result,
-    segments: updated,
-    transcript: formatTranscript(updated, { speakers: true }),
+    segments,
+    transcript: formatTranscript(segments, { speakers: true }),
     speakers: true,
     speakerCount: speakerNumbers.length,
     speakerNumbers,
   }
+}
+
+function checkSpeaker(speaker, maxSpeakers) {
+  if (!Number.isInteger(speaker) || speaker < 1 || speaker > maxSpeakers) throw badRequest(`Speaker must be a whole number from 1 to ${maxSpeakers}.`)
+}
+
+/**
+ * Reassigns one segment to another speaker and rebuilds the derived fields (transcript, speakerNumbers,
+ * speakerCount, speakers). Throws a 400-status error for bad input or a result without speaker labels.
+ */
+export function reassignSegmentSpeaker(result, index, speaker, { maxSpeakers = 4 } = {}) {
+  const segments = labelledSegments(result, index)
+  checkSpeaker(speaker, maxSpeakers)
+  return withSegments(result, segments.map((segment, position) => (position === index ? { ...segment, speaker } : segment)))
+}
+
+/**
+ * Splits one segment at a word boundary. `offset` is a character offset into the segment text; the split
+ * time is estimated proportionally by characters (there are no word timestamps). The second part takes
+ * `speaker` (the same speaker when omitted).
+ */
+export function splitSegment(result, index, offset, speaker, { maxSpeakers = 4 } = {}) {
+  const segments = labelledSegments(result, index)
+  const segment = segments[index]
+  const text = String(segment.text ?? '')
+  if (!Number.isInteger(offset) || offset <= 0 || offset >= text.length) throw badRequest('Split offset is out of range.')
+  const left = text.slice(0, offset).trim()
+  const right = text.slice(offset).trim()
+  if (!left || !right) throw badRequest('Both parts of a split must contain text.')
+  if (text[offset - 1] !== ' ' && text[offset] !== ' ') throw badRequest('Split offset must be at a word boundary.')
+  const target = speaker === undefined || speaker === null ? segment.speaker : speaker
+  checkSpeaker(target, maxSpeakers)
+  const estimate = segment.start + (segment.end - segment.start) * left.length / (left.length + right.length)
+  const time = Math.min(segment.end, Math.max(segment.start, Math.round(estimate * 1000) / 1000))
+  const parts = [{ ...segment, end: time, text: left }, { ...segment, start: time, text: right, speaker: target }]
+  return withSegments(result, [...segments.slice(0, index), ...parts, ...segments.slice(index + 1)])
+}
+
+/** Merges a segment into the one before it (keeping the previous speaker); the inverse of a split. */
+export function mergeSegmentWithPrevious(result, index) {
+  const segments = labelledSegments(result, index)
+  if (index < 1) throw badRequest('The first sentence has no previous sentence to merge with.')
+  const previous = segments[index - 1]
+  const current = segments[index]
+  const merged = { ...previous, end: Math.max(previous.end, current.end), text: `${previous.text} ${current.text}` }
+  return withSegments(result, [...segments.slice(0, index - 1), merged, ...segments.slice(index + 1)])
 }

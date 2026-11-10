@@ -41,7 +41,7 @@ function actions(overrides: Partial<TranscriptionDockActions> = {}): Transcripti
     importFile: vi.fn(), startRecording: vi.fn(), stopRecording: vi.fn(), discardRecording: vi.fn(), retryRecording: vi.fn(),
     installModel: vi.fn(), installSpeakerModel: vi.fn(), setIdentifySpeakers: vi.fn(), setSessionIdentifySpeakers: vi.fn(),
     transcribe: vi.fn(), retranscribe: vi.fn(), cancel: vi.fn(), openTranscript: vi.fn(), regenerateSummary: vi.fn(),
-    deleteSession: vi.fn(async () => undefined), loadResult: vi.fn(async () => storedResult), reassignSpeaker: vi.fn(), renameSpeaker: vi.fn(async () => undefined),
+    deleteSession: vi.fn(async () => undefined), loadResult: vi.fn(async () => storedResult), reassignSpeaker: vi.fn(), splitSegment: vi.fn(), mergeSegment: vi.fn(), renameSpeaker: vi.fn(async () => undefined),
     ...overrides,
   };
 }
@@ -214,7 +214,7 @@ describe("speaker reassignment", () => {
     const menu = screen.getByRole("menu", { name: "Move this sentence to" });
     expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Speaker 2", "New speaker"]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Speaker 2" }));
-    expect(within(player).getByText("Moving a sentence rebuilds the Transcript section of the draft. Edits you made inside that section will be replaced.")).toBeInTheDocument();
+    expect(within(player).getByText("Editing speakers rebuilds the Transcript section of the draft. Edits you made inside that section will be replaced.")).toBeInTheDocument();
     expect(bodies).toEqual([]);
     fireEvent.click(within(player).getByRole("button", { name: "Move sentence" }));
     await waitFor(() => expect(drafts.get("untitled:one")).toContain("**{{speaker2}}** [00:00]\nHello there."));
@@ -226,7 +226,7 @@ describe("speaker reassignment", () => {
     // The confirmation is only shown the first time for a recording.
     fireEvent.click(within(player).getByRole("button", { name: "Wrong speaker?" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "New speaker" }));
-    expect(within(player).queryByText(/Moving a sentence rebuilds/)).not.toBeInTheDocument();
+    expect(within(player).queryByText(/Editing speakers rebuilds/)).not.toBeInTheDocument();
     await waitFor(() => expect(bodies).toHaveLength(2));
     expect(bodies[1]).toEqual({ index: 0, speaker: 3 });
   });

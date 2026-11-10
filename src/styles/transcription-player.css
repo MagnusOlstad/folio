@@ -372,6 +372,72 @@ button.transcription-row-main:focus-visible { outline: 2px solid var(--acid); ou
 .player-reassign-trigger:hover:not(:disabled),
 .player-reassign-trigger:focus-visible { color: var(--ink); }
 .player-note { color: var(--muted); font-size: 10px; }
+.player-reassign-trigger:disabled { opacity: 0.5; cursor: default; }
+
+.player-note-undo {
+  padding: 0;
+  border: 0;
+  color: var(--ink);
+  background: transparent;
+  font: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.player-split { display: flex; flex-direction: column; gap: 6px; }
+.player-split p { margin: 0; }
+.player-split-hint { color: var(--muted); font-size: 10px; }
+
+.player-split-word {
+  display: inline;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: default;
+}
+
+button.player-split-word { cursor: pointer; }
+button.player-split-word:hover,
+button.player-split-word:focus-visible { text-decoration: underline; text-underline-offset: 3px; outline: none; }
+button.player-split-word.is-boundary { box-shadow: -2px 0 0 var(--acid); margin-left: 2px; }
+
+.player-split-who { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; }
+
+.player-split-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 3px 7px;
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.player-split-chip[aria-pressed="true"] { border-color: var(--acid); color: var(--ink); }
+
+.player-split-actions { display: flex; gap: 7px; }
+
+.player-split-actions button {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 4px 8px;
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.player-split-actions button:disabled { opacity: 0.5; cursor: default; }
+.player-split-actions .transcription-retranscribe-confirm-button:not(:disabled) { border-color: var(--acid); color: var(--ink); }
 
 .player-reassign-confirm {
   display: flex;

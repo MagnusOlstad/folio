@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import test from 'node:test'
 import {
   assignSpeakers, buildTranscript, buildTranscriptResult, formatTimestamp, formatTranscript,
-  mergeSpeakerTurns, normalizeSegments, normalizeSpeakerSegments, reassignSegmentSpeaker,
+  mergeSpeakerTurns, normalizeSegments, normalizeSpeakerSegments, reassignSegmentSpeaker, splitSegment, mergeSegmentWithPrevious,
 } from '../server/transcription/segments.js'
 import { stripTranscriptMarkup } from '../server/knowledge/transcript-markup.js'
 import { DIARIZATION_MODELS } from '../server/transcription/models.js'
@@ -201,4 +201,59 @@ test('reassigning a segment speaker rejects bad input', () => {
   }
   assert.throws(() => reassignSegmentSpeaker({ segments: [{ start: 0, end: 1, text: 'A', speaker: null }] }, 0, 1), { status: 400 })
   assert.throws(() => reassignSegmentSpeaker({ segments: [] }, 0, 1), { status: 400 })
+})
+
+function splitFixture() {
+  const segments = [
+    { start: 0, end: 2, text: 'Intro.', speaker: 1, extra: 'keep' },
+    { start: 2, end: 6, text: 'Alpha beta gamma delta', speaker: 1 },
+    { start: 6, end: 8, text: 'Outro.', speaker: 2 },
+  ]
+  return { summary: 'kept', plainText: 'plain', segments, transcript: '', speakers: true, speakerCount: 2, speakerNumbers: [1, 2] }
+}
+
+test('splitting a segment estimates the time by characters and preserves fields', () => {
+  const result = splitFixture()
+  const updated = splitSegment(result, 1, 11, 3)
+  assert.equal(updated.segments.length, 4)
+  assert.deepEqual(updated.segments[1], { start: 2, end: Math.round((2 + 4 * 10 / 21) * 1000) / 1000, text: 'Alpha beta', speaker: 1 })
+  assert.equal(updated.segments[2].start, updated.segments[1].end)
+  assert.equal(updated.segments[2].end, 6)
+  assert.equal(updated.segments[2].text, 'gamma delta')
+  assert.equal(updated.segments[2].speaker, 3)
+  assert.deepEqual(updated.speakerNumbers, [1, 2, 3])
+  assert.equal(updated.summary, 'kept')
+  assert.equal(updated.plainText, 'plain')
+  assert.equal(updated.transcript, formatTranscript(updated.segments, { speakers: true }))
+  assert.deepEqual(updated.segments[0], result.segments[0])
+  assert.equal(result.segments.length, 3)
+  // Omitted or null speaker keeps the same speaker; offset on the space itself also works.
+  assert.equal(splitSegment(result, 1, 5, undefined).segments[2].speaker, 1)
+  assert.equal(splitSegment(result, 1, 5, null).segments[2].text, 'beta gamma delta')
+  const fields = splitSegment({ ...result, segments: [{ ...result.segments[0], text: 'Intro. Done' }] }, 0, 7, 1)
+  assert.equal(fields.segments[1].extra, 'keep')
+})
+
+test('splitting rejects non-boundaries, empty halves and bad speakers', () => {
+  const result = splitFixture()
+  for (const offset of [0, 3, 22, 40, -1, 1.5, '5', undefined]) assert.throws(() => splitSegment(result, 1, offset, 2), { status: 400 })
+  assert.throws(() => splitSegment({ ...result, segments: [{ start: 0, end: 1, text: ' a ', speaker: 1 }] }, 0, 1, 2), { status: 400 })
+  for (const speaker of [0, 5, 1.5, '2']) assert.throws(() => splitSegment(result, 1, 5, speaker), { status: 400 })
+  assert.throws(() => splitSegment(result, 1, 5, 3, { maxSpeakers: 2 }), { status: 400 })
+  for (const index of [-1, 3, 0.5]) assert.throws(() => splitSegment(result, index, 5, 2), { status: 400 })
+  assert.throws(() => splitSegment({ segments: [{ start: 0, end: 1, text: 'a b', speaker: null }] }, 0, 1, 1), { status: 400 })
+})
+
+test('merging with the previous segment keeps its speaker and undoes a split', () => {
+  const result = splitFixture()
+  const split = splitSegment(result, 1, 11, 2)
+  const merged = mergeSegmentWithPrevious(split, 2)
+  assert.deepEqual(merged.segments, result.segments)
+  assert.deepEqual(merged.speakerNumbers, [1, 2])
+  assert.equal(merged.transcript, formatTranscript(result.segments, { speakers: true }))
+  const across = mergeSegmentWithPrevious(result, 2)
+  assert.deepEqual(across.segments[1], { start: 2, end: 8, text: 'Alpha beta gamma delta Outro.', speaker: 1 })
+  assert.throws(() => mergeSegmentWithPrevious(result, 0), { status: 400 })
+  assert.throws(() => mergeSegmentWithPrevious(result, 3), { status: 400 })
+  assert.throws(() => mergeSegmentWithPrevious({ segments: [] }, 1), { status: 400 })
 })

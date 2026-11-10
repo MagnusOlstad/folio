@@ -95,6 +95,23 @@ export function registerRoutes(app, runtime) {
       response.json({ result: await service.reassignSpeaker(request.params.id, index, speaker) })
     } catch (error) { fail(response, error) }
   })
+  app.post('/api/transcriptions/:id/segments/split', async (request, response) => {
+    try {
+      if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
+      const { index, offset, speaker } = request.body ?? {}
+      if (!Number.isInteger(index) || !Number.isInteger(offset)) return response.status(400).json({ error: 'index and offset must be integers.' })
+      if (speaker !== undefined && speaker !== null && !Number.isInteger(speaker)) return response.status(400).json({ error: 'speaker must be an integer.' })
+      response.json({ result: await service.splitSegment(request.params.id, index, offset, speaker) })
+    } catch (error) { fail(response, error) }
+  })
+  app.post('/api/transcriptions/:id/segments/merge', async (request, response) => {
+    try {
+      if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
+      const { index } = request.body ?? {}
+      if (!Number.isInteger(index)) return response.status(400).json({ error: 'index must be an integer.' })
+      response.json({ result: await service.mergeSegment(request.params.id, index) })
+    } catch (error) { fail(response, error) }
+  })
   app.get('/api/transcriptions/:id', async (request, response) => {
     try {
       if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })

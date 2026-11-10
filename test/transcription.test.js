@@ -1005,3 +1005,48 @@ test('recording playback supports ranges and speaker reassignment persists', asy
   await storage.writeManifest({ ...ready, state: 'transcribing' })
   assert.equal((await post(session.id, { index: 0, speaker: 2 })).status, 409)
 })
+
+test('segment split and merge routes persist and validate', async (t) => {
+  const { runtime } = await fixture(t)
+  const service = createTranscriptionService(runtime)
+  t.after(() => service.close())
+  const storage = runtime.transcriptionStorage
+  const base = await startApp(t, runtime, service)
+  const session = await storage.createSession({ fileName: 'meeting.mp3', audioExtension: '.mp3' })
+  const ready = await storage.writeManifest({ ...session, state: 'ready' })
+  const bare = await storage.createSession({ fileName: 'x.wav' })
+  const post = (id, action, body) => fetch(`${base}/api/transcriptions/${id}/segments/${action}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  })
+  assert.equal((await post(bare.id, 'split', { index: 0, offset: 1 })).status, 404)
+  assert.equal((await post(session.id, 'split', { index: 0, offset: 1 })).status, 404)
+  assert.equal((await post(session.id, 'merge', { index: 1 })).status, 404)
+  const segments = [
+    { start: 0, end: 4, text: 'Hello there friend.', speaker: 1 },
+    { start: 4, end: 6, text: 'Hi.', speaker: 2 },
+  ]
+  await storage.writeResult(session.id, { ...buildTranscriptResult('Hello there friend. Hi.', segments, [{ start: 0, end: 4, speaker: 0 }, { start: 4, end: 6, speaker: 1 }]), summary: 'sum' })
+
+  const split = await post(session.id, 'split', { index: 0, offset: 6, speaker: 2 })
+  assert.equal(split.status, 200)
+  const { result } = await split.json()
+  assert.deepEqual(result.segments.map((segment) => [segment.text, segment.speaker]), [['Hello', 1], ['there friend.', 2], ['Hi.', 2]])
+  assert.equal(result.summary, 'sum')
+  assert.deepEqual(await storage.readResult(session.id), result)
+
+  const merge = await post(session.id, 'merge', { index: 1 })
+  assert.equal(merge.status, 200)
+  assert.deepEqual((await merge.json()).result.segments, segments)
+
+  assert.equal((await post(session.id, 'split', { index: 0, offset: 3 })).status, 400)
+  assert.equal((await post(session.id, 'split', { index: 0, offset: 6, speaker: 5 })).status, 400)
+  assert.equal((await post(session.id, 'split', { index: 0, offset: '6' })).status, 400)
+  assert.equal((await post(session.id, 'split', { index: 0, offset: 6, speaker: '2' })).status, 400)
+  assert.equal((await post(session.id, 'merge', { index: 0 })).status, 400)
+  assert.equal((await post(session.id, 'merge', { index: '1' })).status, 400)
+  assert.equal((await post('not-an-id', 'split', { index: 0, offset: 6 })).status, 400)
+  assert.equal((await post('not-an-id', 'merge', { index: 1 })).status, 400)
+  await storage.writeManifest({ ...ready, state: 'transcribing' })
+  assert.equal((await post(session.id, 'split', { index: 0, offset: 6 })).status, 409)
+  assert.equal((await post(session.id, 'merge', { index: 1 })).status, 409)
+})

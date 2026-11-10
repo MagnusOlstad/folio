@@ -49,7 +49,7 @@ function actions(): TranscriptionDockActions {
     regenerateSummary: vi.fn(),
     deleteSession: vi.fn(async () => undefined),
     loadResult: vi.fn(async () => null),
-    reassignSpeaker: vi.fn(), renameSpeaker: vi.fn(),
+    reassignSpeaker: vi.fn(), splitSegment: vi.fn(), mergeSegment: vi.fn(), renameSpeaker: vi.fn(),
   };
 }
 

@@ -6,7 +6,7 @@ import type { RecordingAssociation } from '../model/recording.ts'
 import { systemAudioSupported, type RecordingSource } from '../model/recording-source.ts'
 import { audioDuration } from '../model/audio-duration.ts'
 import { applyRetranscribedResult, regenerateSummary, type DraftWorkContext, type SessionDraft } from './draftWork.ts'
-import { linkedSpeakerNames, reassignSegmentSpeaker, type ReassignOutcome } from './speakerReassign.ts'
+import { linkedSpeakerNames, mergeTranscriptSegment, reassignSegmentSpeaker, splitTranscriptSegment, type ReassignOutcome } from './speakerReassign.ts'
 import { renameSpeakerInDraft } from './speakerRename.ts'
 import { transcriptionAudioUrl } from '../model/audio-url.ts'
 import { playbackStore } from '../model/playback-store.ts'
@@ -71,6 +71,10 @@ export type TranscriptionDockActions = {
   /** Loads the stored result (segments included) of a ready session for the player. */
   loadResult: (session: TranscriptionSession) => Promise<TranscriptionResult | null>
   reassignSpeaker: (session: TranscriptionSession, index: number, speaker: number) => Promise<ReassignOutcome>
+  /** Splits a sentence at a character offset; the rest goes to `speaker` (the same speaker when null). */
+  splitSegment: (session: TranscriptionSession, index: number, offset: number, speaker: number | null) => Promise<ReassignOutcome>
+  /** Merges a sentence into the previous one. */
+  mergeSegment: (session: TranscriptionSession, index: number) => Promise<ReassignOutcome>
   /** Writes a speaker's name into the linked draft, opening the draft first when needed. */
   renameSpeaker: (session: TranscriptionSession, speaker: number, name: string) => Promise<void>
 }
@@ -481,6 +485,8 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
       return response.result ?? null
     },
     reassignSpeaker: (session, index, speaker) => reassignSegmentSpeaker(draftWork, session, index, speaker),
+    splitSegment: (session, index, offset, speaker) => splitTranscriptSegment(draftWork, session, index, offset, speaker),
+    mergeSegment: (session, index) => mergeTranscriptSegment(draftWork, session, index),
     renameSpeaker: (session, speaker, name) => renameSpeakerInDraft(draftWork, session, speaker, name, openTranscriptDraft),
   }
   return { model, actions, draftFiled }
