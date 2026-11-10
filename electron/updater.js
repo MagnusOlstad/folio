@@ -7,9 +7,47 @@ function initialState() {
   return { status: 'checking', version: null, percent: null, error: null }
 }
 
+function errorDetails(error) {
+  const details = []
+  const pending = [error]
+  const seen = new Set()
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (!current || seen.has(current)) continue
+    if (typeof current === 'string') {
+      details.push(current)
+      continue
+    }
+    if (typeof current !== 'object') continue
+    seen.add(current)
+    if (typeof current.message === 'string') details.push(current.message)
+    if (typeof current.code === 'string') details.push(current.code)
+    if (Number.isInteger(current.statusCode)) details.push(`statusCode: ${current.statusCode}`)
+    if (Number.isInteger(current.status)) details.push(`status: ${current.status}`)
+    if (current.cause) pending.push(current.cause)
+    if (current.err) pending.push(current.err)
+  }
+  return details.join(' ')
+}
+
+function isTransientUpdaterError(error) {
+  const details = errorDetails(error)
+  if (/ERR_CHECKSUM_MISMATCH|checksum mismatch|checksum verification failed|signature verification failed|signature is invalid|code signing failed|ERR_CERT_[A-Z0-9_]+|certificate error|certificate is invalid|certificate has expired|unable to verify certificate/i.test(details)) return false
+  const statusMatch = details.match(/(?:statusCode|status)\s*:\s*(\d{3})\b|\b(?:HTTP\s+|HttpError:\s*)(\d{3})\b|\bstatus\s+(\d{3})\b|<\s*(\d{3})\s*>|(?:^|[^A-Z0-9])(?:HTTP_ERROR_|ERR_HTTP_|ERR_UPDATER_HTTP_ERROR_)(\d{3})\b/i)
+  if (statusMatch) {
+    const status = Number(statusMatch.slice(1).find(Boolean))
+    return status === 404 || status === 408 || (status >= 500 && status <= 599)
+  }
+  return /\b(?:ECONNRESET|ETIMEDOUT|EAI_AGAIN|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|ERR_NETWORK|ERR_HTTP2_STREAM_ERROR|ERR_CONNECTION_RESET|ERR_TIMED_OUT|ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION_TIMED_OUT|ERR_CONNECTION_REFUSED|ERR_ADDRESS_UNREACHABLE|ERR_NAME_RESOLUTION_FAILED)\b/i.test(details)
+}
+
 /** Coordinate the packaged macOS updater without importing Electron. */
 export function createUpdaterCoordinator({
   updater,
+  resetPrimaryFeed = null,
+  prepareFallbackFeed = null,
+  retryDelayMs = 500,
+  wait = (delay) => new Promise((resolve) => setTimeout(resolve, delay)),
   getWindow,
   nativeUpdater,
   isPackaged,
@@ -29,6 +67,8 @@ export function createUpdaterCoordinator({
   let hasDownloadedUpdate = false
   let nativeUpdateReady = false
   let nativeStageActive = false
+  let activeOperation = null
+  let lastCheckFeed = 'primary'
   let stagingTimeout = null
   let state = initialState()
 
@@ -39,12 +79,34 @@ export function createUpdaterCoordinator({
     return state
   }
 
+  async function retryTransient(operation) {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await operation()
+      } catch (error) {
+        if (attempt > 0 || !isTransientUpdaterError(error)) throw error
+        await wait(retryDelayMs)
+      }
+    }
+  }
+
   async function check() {
     if (checkPromise) return checkPromise
     checkPromise = (async () => {
       publish({ status: 'checking', error: null })
+      activeOperation = 'checking'
       try {
-        const result = await updater.checkForUpdates()
+        if (resetPrimaryFeed) await resetPrimaryFeed()
+        lastCheckFeed = 'primary'
+        let result
+        try {
+          result = await retryTransient(() => updater.checkForUpdates())
+        } catch (error) {
+          if (!prepareFallbackFeed || !isTransientUpdaterError(error)) throw error
+          await retryTransient(() => prepareFallbackFeed())
+          lastCheckFeed = 'fallback'
+          result = await retryTransient(() => updater.checkForUpdates())
+        }
         const version = result?.updateInfo?.version ?? state.version
         if (state.status === 'checking') publish({ status: result?.isUpdateAvailable ? 'available' : 'idle', version: result?.isUpdateAvailable ? version : null })
         return result
@@ -53,6 +115,7 @@ export function createUpdaterCoordinator({
         publish({ status: 'error', error: 'Could not check for updates. Try again.' })
         return null
       } finally {
+        activeOperation = null
         checkPromise = null
       }
     })()
@@ -150,7 +213,25 @@ export function createUpdaterCoordinator({
         }
         const version = result?.updateInfo?.version ?? state.version
         publish({ status: 'downloading', version, percent: 0, error: null })
-        await updater.downloadUpdate()
+        activeOperation = 'downloading'
+        const downloadWithRetry = () => retryTransient(() => updater.downloadUpdate())
+        try {
+          await downloadWithRetry()
+        } catch (error) {
+          if (lastCheckFeed !== 'primary' || !prepareFallbackFeed || !isTransientUpdaterError(error)) throw error
+          await retryTransient(() => prepareFallbackFeed())
+          lastCheckFeed = 'fallback'
+          const fallbackCheck = await retryTransient(() => updater.checkForUpdates())
+          if (fallbackCheck?.isUpdateAvailable === false) {
+            publish({ status: 'idle', version: null, error: null })
+            return getState()
+          }
+          if (fallbackCheck?.isUpdateAvailable !== true) {
+            throw new Error('Could not confirm an update is available on the fallback feed.')
+          }
+          publish({ status: 'downloading', version: fallbackCheck?.updateInfo?.version ?? version, percent: 0, error: null })
+          await downloadWithRetry()
+        }
         // MacUpdater has configured its native feed by the time downloadUpdate
         // resolves. With autoInstallOnAppQuit=false it leaves the app running;
         // explicitly stage now and wait for the native ready event below.
@@ -161,6 +242,7 @@ export function createUpdaterCoordinator({
         publish({ status: 'error', error: 'Could not download the update. Click to retry.' })
         return getState()
       } finally {
+        activeOperation = null
         downloadPromise = null
       }
     })()
@@ -179,8 +261,18 @@ export function createUpdaterCoordinator({
     pollingTimer?.unref?.()
     updater.autoDownload = false
     updater.autoInstallOnAppQuit = false
-    updater.on('update-available', (info) => publish({ status: 'available', version: info?.version ?? null, error: null }))
-    updater.on('update-not-available', () => publish({ status: 'idle', version: null, error: null }))
+    updater.on('update-available', (info) => {
+      if (activeOperation === 'downloading') {
+        publish({ status: 'downloading', version: info?.version ?? state.version, error: null })
+        return
+      }
+      if (activeOperation === 'checking') return
+      publish({ status: 'available', version: info?.version ?? null, error: null })
+    })
+    updater.on('update-not-available', () => {
+      if (activeOperation) return
+      publish({ status: 'idle', version: null, error: null })
+    })
     updater.on('download-progress', (progress) => publish({ status: 'downloading', percent: Math.round(progress?.percent ?? 0) }))
     updater.on('update-downloaded', (info) => {
       hasDownloadedUpdate = true
@@ -203,6 +295,7 @@ export function createUpdaterCoordinator({
         finishNativeStageWithError('The update could not be staged. Click to retry.')
         return
       }
+      if (activeOperation) return
       installStarted = false
       publish({ status: 'error', error: hasDownloadedUpdate ? 'The update could not be staged. Click to retry.' : 'The update failed. Click to retry.' })
     })

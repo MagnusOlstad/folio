@@ -20,6 +20,7 @@ function coordinatorOptions({ updater, nativeUpdater, ...options }) {
     getWindow: () => ({ webContents: { send() {} } }),
     isPackaged: true,
     platform: 'darwin',
+    wait: async () => {},
     ...options,
   }
 }
@@ -128,6 +129,280 @@ test('updater errors are logged and surfaced for retry', async () => {
   updater.emit('error', new Error('update failed'))
   assert.equal(errors.length, 2)
   assert.equal(coordinator.getState().status, 'error')
+})
+
+test('resets the primary feed before every logical updater check', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  const operations = []
+  updater.checkForUpdates = async () => {
+    operations.push('check')
+    return { isUpdateAvailable: false, updateInfo: { version: '1.0.0' } }
+  }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    resetPrimaryFeed: async () => { operations.push('primary') },
+  }))
+
+  await coordinator.start()
+  await coordinator.checkForUpdates()
+  assert.deepEqual(operations, ['primary', 'check', 'primary', 'check'])
+})
+
+test('a healthy primary check never prepares the API fallback', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let fallbackCalls = 0
+  updater.checkForUpdates = async () => ({ isUpdateAvailable: false, updateInfo: { version: '1.0.0' } })
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    prepareFallbackFeed: async () => { fallbackCalls += 1 },
+  }))
+
+  await coordinator.start()
+  assert.equal(fallbackCalls, 0)
+  assert.equal(coordinator.getState().status, 'idle')
+})
+
+test('transient primary recovery stays on the built-in provider', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let checks = 0
+  let waits = 0
+  let fallbacks = 0
+  updater.checkForUpdates = async () => {
+    checks += 1
+    if (checks === 1) throw new Error('HttpError: 504 Gateway Time-out while fetching https://github.com/owner/repo/releases/403')
+    return { isUpdateAvailable: true, updateInfo: { version: '1.2.3' } }
+  }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    wait: async () => { waits += 1 },
+    prepareFallbackFeed: async () => { fallbacks += 1 },
+  }))
+
+  await coordinator.start()
+  assert.equal(checks, 2)
+  assert.equal(waits, 1)
+  assert.equal(fallbacks, 0)
+  assert.equal(coordinator.getState().status, 'available')
+})
+
+test('transient updater error events stay in the checking state during retry', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let checks = 0
+  updater.checkForUpdates = async () => {
+    checks += 1
+    if (checks === 1) {
+      const error = new Error('HTTP 504 Gateway Time-out')
+      updater.emit('error', error)
+      throw error
+    }
+    return { isUpdateAvailable: false }
+  }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    wait: async () => { assert.equal(coordinator.getState().status, 'checking') },
+    logger: { error() {}, warn() {} },
+  }))
+
+  await coordinator.start()
+  assert.equal(coordinator.getState().status, 'idle')
+})
+
+test('wrapped transient release-feed errors ignore security words in changelog XML', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let checks = 0
+  let fallbacks = 0
+  updater.checkForUpdates = async () => {
+    checks += 1
+    if (checks <= 2) {
+      throw Object.assign(new Error('ERR_UPDATER_INVALID_RELEASE_FEED: HttpError: 504 Gateway Time-out <content>checksum verification and signature support</content>'), {
+        code: 'ERR_UPDATER_INVALID_RELEASE_FEED',
+      })
+    }
+    return { isUpdateAvailable: false }
+  }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    prepareFallbackFeed: async () => { fallbacks += 1 },
+  }))
+
+  await coordinator.start()
+  assert.equal(checks, 3)
+  assert.equal(fallbacks, 1)
+  assert.equal(coordinator.getState().status, 'idle')
+})
+
+test('permanent, malformed configuration, and checksum errors do not retry or fall back', async (context) => {
+  for (const [name, error] of [
+    ['bad request', new Error('HTTP 400 Bad Request')],
+    ['forbidden', new Error('HTTP 403 Forbidden')],
+    ['rate limited', new Error('HTTP 429 Too Many Requests')],
+    ['invalid configuration with numeric URL segments', new Error('Invalid URL https://github.com/owner/repo/releases/504')],
+    ['checksum mismatch', Object.assign(new Error('checksum mismatch'), { code: 'ERR_CHECKSUM_MISMATCH' })],
+    ['signature verification', new Error('signature verification failed')],
+  ]) {
+    await context.test(name, async () => {
+      const { updater, nativeUpdater } = createUpdater()
+      let checks = 0
+      let fallbacks = 0
+      updater.checkForUpdates = async () => { checks += 1; throw error }
+      const coordinator = createUpdaterCoordinator(coordinatorOptions({
+        updater,
+        nativeUpdater,
+        prepareFallbackFeed: async () => { fallbacks += 1 },
+      }))
+
+      await coordinator.start()
+      assert.equal(checks, 1)
+      assert.equal(fallbacks, 0)
+      assert.equal(coordinator.getState().status, 'error')
+    })
+  }
+})
+
+test('exhausted API fallback retries surface a final check error', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let checks = 0
+  let fallbacks = 0
+  let waits = 0
+  updater.checkForUpdates = async () => { checks += 1; throw new Error('status 503: Service Unavailable') }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    wait: async () => { waits += 1 },
+    prepareFallbackFeed: async () => { fallbacks += 1 },
+  }))
+
+  await coordinator.start()
+  assert.equal(checks, 4)
+  assert.equal(fallbacks, 1)
+  assert.equal(waits, 2)
+  assert.equal(coordinator.getState().status, 'error')
+})
+
+test('transient ZIP failure switches once to API feed, rechecks, then downloads', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  const operations = []
+  let checks = 0
+  let downloads = 0
+  updater.checkForUpdates = async () => {
+    checks += 1
+    operations.push(`check-${checks}`)
+    return { isUpdateAvailable: true, updateInfo: { version: checks === 3 ? '1.3.0' : '1.2.3' } }
+  }
+  updater.downloadUpdate = async () => {
+    downloads += 1
+    if (downloads <= 2) throw new Error('Cannot download "asset.zip", status 503: unavailable')
+    return []
+  }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    resetPrimaryFeed: async () => { operations.push('primary') },
+    prepareFallbackFeed: async () => { operations.push('fallback') },
+  }))
+
+  await coordinator.start()
+  await coordinator.startDownload()
+  assert.deepEqual(operations, [
+    'primary', 'check-1',
+    'primary', 'check-2', 'fallback', 'check-3',
+  ])
+  assert.equal(downloads, 3)
+  assert.equal(coordinator.getState().version, '1.3.0')
+  assert.equal(coordinator.getState().status, 'staging')
+})
+
+test('API recheck that finds no newer release does not download or stage', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let checks = 0
+  let downloads = 0
+  let nativeChecks = 0
+  updater.checkForUpdates = async () => {
+    checks += 1
+    return { isUpdateAvailable: checks < 3, updateInfo: { version: '1.2.3' } }
+  }
+  updater.downloadUpdate = async () => { downloads += 1; throw new Error('status 503: unavailable') }
+  nativeUpdater.checkForUpdates = () => { nativeChecks += 1 }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    prepareFallbackFeed: async () => {},
+  }))
+
+  await coordinator.start()
+  await coordinator.startDownload()
+  assert.equal(checks, 3)
+  assert.equal(downloads, 2)
+  assert.equal(nativeChecks, 0)
+  assert.equal(coordinator.getState().status, 'idle')
+})
+
+test('concurrent checks share one primary reset and updater check', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let preparations = 0
+  let checks = 0
+  let finishPreparation
+  updater.checkForUpdates = async () => {
+    checks += 1
+    return { isUpdateAvailable: false }
+  }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    resetPrimaryFeed: () => {
+      preparations += 1
+      if (preparations === 1) return Promise.resolve()
+      return new Promise((resolve) => { finishPreparation = resolve })
+    },
+  }))
+
+  await coordinator.start()
+  const first = coordinator.checkForUpdates()
+  const second = coordinator.checkForUpdates()
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(preparations, 2)
+  assert.equal(checks, 1)
+  finishPreparation()
+  const [firstState, secondState] = await Promise.all([first, second])
+  assert.deepEqual(firstState, secondState)
+  assert.equal(checks, 2)
+})
+
+test('transient primary failure retries once, then checks the API fallback once', async () => {
+  const { updater, nativeUpdater } = createUpdater()
+  let checks = 0
+  let downloads = 0
+  let resets = 0
+  let fallbacks = 0
+  updater.checkForUpdates = async () => {
+    checks += 1
+    if (checks <= 2) throw new Error('HttpError: 504 Gateway Time-out')
+    return { isUpdateAvailable: true, updateInfo: { version: '1.2.3' } }
+  }
+  updater.downloadUpdate = async () => { downloads += 1; return [] }
+  const coordinator = createUpdaterCoordinator(coordinatorOptions({
+    updater,
+    nativeUpdater,
+    resetPrimaryFeed: async () => { resets += 1 },
+    prepareFallbackFeed: async () => { fallbacks += 1 },
+  }))
+
+  await coordinator.start()
+  assert.equal(coordinator.getState().status, 'available')
+  assert.equal(resets, 1)
+  assert.equal(fallbacks, 1)
+  assert.equal(checks, 3)
+  await coordinator.startDownload()
+  assert.equal(resets, 2)
+  assert.equal(fallbacks, 1)
+  assert.equal(checks, 4)
+  assert.equal(downloads, 1)
+  assert.equal(coordinator.getState().status, 'staging')
 })
 
 test('concurrent update clicks share the check, download, and native stage', async () => {

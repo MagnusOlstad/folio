@@ -8,6 +8,7 @@ declare global {
     __publishUpdateState?: (state: MockUpdateState) => void
     __updateListenerCount?: () => number
     __updateSettingsChecks?: number
+    __updateStarts?: number
   }
 }
 
@@ -94,7 +95,7 @@ test('the collapsed pane signals an API release update', async ({ page }) => {
   await expect(expandRightPane.locator('.update-available-dot')).toBeVisible()
 })
 
-test('settings manually checks stable updates and offers download and install', async ({ page }) => {
+test('settings retries a failed update and locks controls while installing', async ({ page }) => {
   await page.addInitScript(() => {
     const browserWindow = globalThis as unknown as Window
     let state: MockUpdateState = { status: 'idle', version: null, percent: null, error: null }
@@ -105,17 +106,23 @@ test('settings manually checks stable updates and offers download and install', 
     }
     Object.defineProperty(browserWindow, '__publishUpdateState', { value: publish })
     Object.defineProperty(browserWindow, '__updateSettingsChecks', { configurable: true, writable: true, value: 0 })
+    Object.defineProperty(browserWindow, '__updateStarts', { configurable: true, writable: true, value: 0 })
     Object.defineProperty(globalThis, 'folio', {
       configurable: true,
       value: {
         getUpdateState: async () => state,
         checkForUpdates: async () => {
           browserWindow.__updateSettingsChecks = (browserWindow.__updateSettingsChecks ?? 0) + 1
-          publish({ status: 'available', version: '0.8.0', percent: null, error: null })
+          publish({ status: 'available', version: '0.9.0', percent: null, error: null })
           return state
         },
         startUpdate: async () => {
-          publish({ status: 'downloading', version: '0.8.0', percent: 20, error: null })
+          browserWindow.__updateStarts = (browserWindow.__updateStarts ?? 0) + 1
+          if (browserWindow.__updateStarts === 1) {
+            publish({ status: 'error', version: '0.9.0', percent: null, error: 'Could not download update. Try again.' })
+            throw new Error('Could not download update. Try again.')
+          }
+          publish({ status: 'downloading', version: '0.9.0', percent: 20, error: null })
           return state
         },
         onUpdateState: (listener: MockUpdateListener) => {
@@ -132,8 +139,27 @@ test('settings manually checks stable updates and offers download and install', 
   await settings.getByRole('button', { name: 'Updates' }).click()
   const updates = settings.getByRole('region', { name: 'Updates settings' })
   await updates.getByRole('button', { name: 'Check for updates' }).click()
-  await expect(updates.getByRole('button', { name: 'Download and install v0.8.0' })).toBeVisible()
+  await expect(updates.getByRole('button', { name: 'Download and install v0.9.0' })).toBeVisible()
   expect(await page.evaluate(() => (globalThis as unknown as Window).__updateSettingsChecks)).toBe(1)
-  await updates.getByRole('button', { name: 'Download and install v0.8.0' }).click()
+
+  await updates.getByRole('button', { name: 'Download and install v0.9.0' }).click()
+  await expect(updates.getByRole('button', { name: 'Retry update' })).toBeVisible()
+  await expect(updates.getByRole('alert').first()).toHaveText('Could not download update. Try again.')
+  expect(await page.evaluate(() => (globalThis as unknown as Window).__updateStarts)).toBe(1)
+
+  await updates.getByRole('button', { name: 'Retry update' }).click()
   await expect(updates.getByRole('progressbar', { name: 'Downloading update' })).toHaveAttribute('value', '20')
+  await expect(updates.getByText('Downloading update: 20%')).toBeVisible()
+  await expect(updates.getByRole('button', { name: 'Check for updates' })).toBeDisabled()
+  expect(await page.evaluate(() => (globalThis as unknown as Window).__updateStarts)).toBe(2)
+
+  await page.evaluate(() => (globalThis as unknown as Window).__publishUpdateState?.({ status: 'staging', version: '0.9.0', percent: null, error: null }))
+  await expect(updates.getByText('Preparing installation…')).toBeVisible()
+  await expect(updates.getByRole('button', { name: 'Check for updates' })).toBeDisabled()
+  await expect(updates.getByRole('button', { name: /Download and install|Retry update/ })).toHaveCount(0)
+
+  await page.evaluate(() => (globalThis as unknown as Window).__publishUpdateState?.({ status: 'installing', version: '0.9.0', percent: null, error: null }))
+  await expect(updates.getByText('Restarting FolioNotes to install the update…')).toBeVisible()
+  await expect(updates.getByRole('button', { name: 'Check for updates' })).toBeDisabled()
+  await expect(updates.getByText('FolioNotes will save pending changes before restarting to finish installation.')).toBeVisible()
 })
