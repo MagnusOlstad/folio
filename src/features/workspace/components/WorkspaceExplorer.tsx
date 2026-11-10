@@ -84,6 +84,8 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
     window.cancelAnimationFrame(activeFileRevealFrameRef.current);
     activeFileRevealFrameRef.current = null;
   }, []);
+  const activeDraftRevealable = Boolean(activeFileId) &&
+    localDraftDocuments.some((draft) => draft.id === activeFileId);
   const activeBundle = bundles.find((bundle) => bundle.id === activeBundleId);
   const collapsedForActiveBundle = collapsedBundle?.bundleId === activeBundleId &&
     collapsedBundle.revealRequest === activeFileRevealRequest;
@@ -99,21 +101,23 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
   }, [activeBundleId, collapsedForActiveBundle, explorerScrollTop, filesLoading]);
 
   useEffect(() => {
-    if (!activeFileId || !activeFileDirectory || filesLoading) return;
-    const ancestors = new Set<string>(["/"]);
-    let currentPath = "";
-    for (const segment of activeFileDirectory.split("/").filter(Boolean)) {
-      currentPath += `/${segment}`;
-      ancestors.add(currentPath);
-    }
-    setExpandedDirectories((current) => {
-      if ([...ancestors].every((path) => current.has(path))) return current;
-      return new Set([...current, ...ancestors]);
-    });
+    if (!activeFileId || filesLoading) return;
+    if (activeFileDirectory) {
+      const ancestors = new Set<string>(["/"]);
+      let currentPath = "";
+      for (const segment of activeFileDirectory.split("/").filter(Boolean)) {
+        currentPath += `/${segment}`;
+        ancestors.add(currentPath);
+      }
+      setExpandedDirectories((current) => {
+        if ([...ancestors].every((path) => current.has(path))) return current;
+        return new Set([...current, ...ancestors]);
+      });
+    } else if (!activeDraftRevealable) return;
     const frame = window.requestAnimationFrame(() => {
       activeFileRevealFrameRef.current = null;
       const tree = treeScrollRef.current;
-      const row = tree && Array.from(tree.querySelectorAll<HTMLButtonElement>(".tree-file[data-file-id]"))
+      const row = tree && Array.from(tree.querySelectorAll<HTMLElement>(".tree-file[data-file-id]"))
         .find((candidate) => candidate.dataset.fileId === activeFileId);
       if (!tree || !row) return;
       const treeBounds = tree.getBoundingClientRect();
@@ -128,7 +132,7 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
       if (activeFileRevealFrameRef.current === frame)
         cancelPendingActiveFileReveal();
     };
-  }, [activeFileDirectory, activeFileId, activeFileRevealRequest, cancelPendingActiveFileReveal, filesLoading, setExpandedDirectories]);
+  }, [activeDraftRevealable, activeFileDirectory, activeFileId, activeFileRevealRequest, cancelPendingActiveFileReveal, filesLoading, setExpandedDirectories]);
 
   const closeContextMenu = useCallback((restoreFocus = true) => {
     const anchor = contextMenu?.anchor;
@@ -232,8 +236,13 @@ export function WorkspaceExplorer(props: WorkspaceExplorerProps) {
                                 <small>{localDraftDocuments.length}</small>
                               </div>
                               {localDraftDocuments.map((draft) => (
-                                <div className="tree-row tree-file draft-tree-row" style={{ "--tree-depth": 1 } as React.CSSProperties} key={draft.id}>
-                                  <button type="button" className="draft-tree-open" onClick={() => openLocalDraft(draft.id)} title="Local draft">
+                                <div
+                                  className={`tree-row tree-file draft-tree-row${activeFileId === draft.id ? " active" : ""}`}
+                                  style={{ "--tree-depth": 1 } as React.CSSProperties}
+                                  data-file-id={draft.id}
+                                  key={draft.id}
+                                >
+                                  <button type="button" className="draft-tree-open" aria-current={activeFileId === draft.id ? "true" : undefined} onClick={() => openLocalDraft(draft.id)} title="Local draft">
                                     <span className="tree-file-mark">D</span>
                                     <span>{draftTitle(drafts[draft.id] ?? draft.content)}</span>
                                   </button>

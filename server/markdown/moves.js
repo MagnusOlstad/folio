@@ -2,6 +2,8 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import YAML from 'yaml'
 
+import { resolveNoteVariablesForIndex } from '../core/note-variables.js'
+
 export function createMarkdownMoves(runtime) {
   const { bundleRoot, markdownLinkTarget, resolveBundleMarkdownPath, normalizeMoveDirectory, parseMarkdownFile,
     readOptionalFile, bundleFileId, readRecords, writeRecords, assertNoBundleSymlinks } = runtime
@@ -429,7 +431,7 @@ async function migrateIndexedRecordsAfterMove(oldId, newId) {
         record.id = nextId
         record.content = nextContent
         record.embeddingInputHash = embeddingInputHash(record)
-        record.chunks = noteChunks(`${record.description}\n\n${nextContent}`).map((content) => {
+        record.chunks = noteChunks(`${record.description}\n\n${resolveNoteVariablesForIndex(nextContent)}`).map((content) => {
           const comparable = embeddingEquivalentText(content)
           const previousIndex = previousChunks.findIndex((chunk) => embeddingEquivalentText(chunk.content) === comparable)
           const previous = previousIndex === -1 ? null : previousChunks.splice(previousIndex, 1)[0]

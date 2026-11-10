@@ -231,81 +231,34 @@ button.update-badge {
 .transcription-dock {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
   padding: 12px;
   color: var(--text);
   font: 12px/1.45 ui-sans-serif, system-ui, sans-serif;
-}
-
-.transcription-input-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 12px;
-  border: 1px dashed var(--line);
+  border: 1px dashed transparent;
   border-radius: 7px;
-  text-align: center;
-  color: var(--muted);
-  background: var(--paper);
 }
 
-.transcription-input-card.is-dragging {
+.transcription-dock.is-dragging {
   border-color: var(--acid);
   background: rgba(var(--acid-rgb), 0.08);
 }
 
-.transcription-input-card.is-recording { border-color: rgba(var(--acid-rgb), 0.75); }
-
-.transcription-input-heading {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--ink);
-}
-
-.transcription-input-help {
-  margin: 0;
-  color: var(--muted);
-}
-
-.transcription-input-actions {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.transcription-input-actions button { min-height: 30px; }
-
-.transcription-item-heading strong {
-  color: var(--text);
-}
-
 .transcription-audio-icon {
   color: var(--acid);
-  font-size: 22px;
+  font-size: 15px;
 }
 
-.transcription-primary,
-.transcription-secondary,
-.transcription-item-actions button {
+.transcription-secondary {
   border: 1px solid var(--line);
   border-radius: 5px;
-  padding: 6px 9px;
+  padding: 4px 8px;
   color: var(--text);
   background: var(--surface);
   font: inherit;
+  font-size: 11px;
   cursor: pointer;
-}
-
-.transcription-primary {
-  border-color: var(--acid);
-  color: var(--surface-deep);
-  background: var(--acid);
-  font-weight: 650;
 }
 
 .transcription-dock button:disabled {
@@ -313,22 +266,23 @@ button.update-badge {
   opacity: 0.55;
 }
 
-.transcription-model-status,
-.transcription-item {
+.transcription-notice {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  align-items: flex-start;
+  gap: 5px;
   min-width: 0;
-  padding: 9px;
-  border: 1px solid rgba(var(--line-rgb), 0.7);
-  border-radius: 6px;
-  background: var(--surface);
+  padding: 7px 9px;
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .transcription-model-state {
   display: flex;
   align-items: center;
   gap: 7px;
+  color: var(--text);
 }
 
 .transcription-status-dot {
@@ -338,22 +292,21 @@ button.update-badge {
   background: var(--muted);
 }
 
-.transcription-model-state.is-ready .transcription-status-dot {
-  background: var(--acid);
-}
-
-.transcription-model-status p,
+.transcription-notice p,
 .transcription-item-error,
 .transcription-empty,
 .transcription-progress,
 .transcription-error {
   margin: 0;
   color: var(--muted);
+  font-size: 11px;
   overflow-wrap: anywhere;
 }
 
+.transcription-notice .transcription-download-progress { align-self: stretch; }
+
 .transcription-download-progress > div {
-  height: 5px;
+  height: 4px;
   overflow: hidden;
   border-radius: 4px;
   background: var(--surface-deep);
@@ -366,56 +319,10 @@ button.update-badge {
   transition: width 160ms ease-out;
 }
 
-.transcription-download-progress small,
-.transcription-item > small {
+.transcription-download-progress small {
   color: var(--muted);
   font-size: 10px;
   overflow-wrap: anywhere;
-}
-
-.transcription-subheading {
-  display: flex;
-  justify-content: space-between;
-  color: var(--text);
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.transcription-pending {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.transcription-item-heading {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  align-items: baseline;
-}
-
-.transcription-item-heading strong {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.transcription-item-heading span {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.transcription-item-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.transcription-item-actions button {
-  padding: 4px 7px;
-  font-size: 10px;
 }
 
 .transcription-error,

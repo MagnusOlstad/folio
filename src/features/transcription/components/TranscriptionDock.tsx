@@ -1,53 +1,41 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { DragEvent } from 'react'
 import type { TranscriptionDockActions, TranscriptionDockModel } from '../hooks/useTranscription.ts'
+import { playbackStore } from '../model/playback-store.ts'
 import type { TranscriptionSession } from '../model/types.ts'
+import { PlusIcon, RecordDotIcon } from './icons.tsx'
+import { ModelNotices } from './ModelNotices.tsx'
+import { RecorderPanel } from './RecorderPanel.tsx'
+import { RecordingSourceSelect } from './RecordingSourceSelect.tsx'
+import { RecordingRow, type RowConfirmation } from './RecordingRow.tsx'
 
 export type TranscriptionDockProps = { model: TranscriptionDockModel; actions: TranscriptionDockActions }
 
-function durationLabel(durationMs: number | null) {
-  if (durationMs === null) return 'Duration unavailable'
-  const totalSeconds = Math.floor(durationMs / 1000)
-  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')}`
-}
-
-function stateLabel(session: TranscriptionSession, processing: boolean) {
-  if (session.state === 'failed') return 'Needs attention'
-  if (session.state === 'ready') return 'Transcript ready'
-  if (session.state === 'transcribing' || processing) return `${session.progressPercent ?? 0}%`
-  return 'Saved audio'
-}
-
-function importedDate(session: TranscriptionSession) {
-  if (!session.createdAt) return ''
-  const date = new Date(session.createdAt)
-  return Number.isNaN(date.valueOf()) ? '' : date.toLocaleString()
-}
-
 export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
   const inputRef = useRef<HTMLInputElement>(null)
-  const confirmationCancelRef = useRef<HTMLButtonElement>(null)
-  const pendingHeadingRef = useRef<HTMLDivElement>(null)
+  const headingRef = useRef<HTMLDivElement>(null)
   const lastDeletingIdRef = useRef<string | null>(null)
   const [dragging, setDragging] = useState(false)
-  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState<{ id: string; kind: RowConfirmation } | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [learnedCounts, setLearnedCounts] = useState<Record<string, number>>({})
+  const playback = useSyncExternalStore(playbackStore.subscribe, playbackStore.getSnapshot)
   const recorder = model.recording
   const recordingPhaseRef = useRef(recorder.phase)
   const stopRecordingRef = useRef(actions.stopRecording)
   const busy = model.phase === 'importing' || model.phase === 'downloading' || model.phase === 'transcribing' || model.phase === 'summarizing' || model.phase === 'cancelling-summary'
-  const controlsBusy = busy || recorder.phase !== 'idle' || model.deletingSessionId !== null
+  const controlsBusy = busy || recorder.phase === 'requesting' || recorder.phase === 'recording' || recorder.phase === 'processing' || recorder.saving
   const status = model.status
   const selectedModelName = status?.modelName ?? (status?.modelId === 'whisperlarge' ? 'Whisper Large v3' : 'Whisper Large v3 Turbo')
   const canTranscribe = status?.canTranscribe === true
+  const speakers = status?.diarization
+  const speakersReady = speakers?.canDiarize === true
+  const speakerOffer = Boolean(speakers) && !speakersReady
 
   useEffect(() => {
     recordingPhaseRef.current = recorder.phase
     stopRecordingRef.current = actions.stopRecording
   }, [actions.stopRecording, recorder.phase])
-
-  useEffect(() => {
-    if (confirmingDeleteId) confirmationCancelRef.current?.focus()
-  }, [confirmingDeleteId])
 
   useEffect(() => {
     if (model.deletingSessionId) {
@@ -58,10 +46,8 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
     if (!deletedId) return
     lastDeletingIdRef.current = null
     if (!model.pending.some((session) => session.id === deletedId)) {
-      setConfirmingDeleteId(null)
-      pendingHeadingRef.current?.focus()
-    } else {
-      confirmationCancelRef.current?.focus()
+      setConfirming(null)
+      headingRef.current?.focus()
     }
   }, [model.deletingSessionId, model.pending])
 
@@ -77,28 +63,39 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
     if (file) actions.importFile(file)
   }
 
+  function load(session: TranscriptionSession) {
+    playbackStore.load(session.id, model.audioUrlFor(session), (session.durationMs ?? 0) / 1000)
+  }
+
+  function togglePlay(session: TranscriptionSession) {
+    setExpandedId(session.id)
+    load(session)
+    playbackStore.toggle()
+  }
+
   return (
-    <section className="transcription-dock" aria-label="Local transcription">
-      <div
-        className={`transcription-input-card${dragging ? ' is-dragging' : ''}${recorder.phase === 'recording' ? ' is-recording' : ''}`}
-        onDragEnter={(event) => { event.preventDefault(); setDragging(true) }}
-        onDragOver={(event) => event.preventDefault()}
-        onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false) }}
-        onDrop={onDrop}
-      >
-        <div className="transcription-input-heading">
+    <section
+      className={`transcription-dock${dragging ? ' is-dragging' : ''}`}
+      aria-label="Local transcription"
+      onDragEnter={(event) => { event.preventDefault(); setDragging(true) }}
+      onDragOver={(event) => event.preventDefault()}
+      onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false) }}
+      onDrop={onDrop}
+    >
+      <div className="transcription-header">
+        <div ref={headingRef} className="transcription-title" tabIndex={-1}>
           <span className="transcription-audio-icon" aria-hidden="true">♫</span>
-          <strong>Add audio</strong>
+          <strong>Recordings</strong>
+          <span className="transcription-count">{model.pending.length}</span>
         </div>
-        <p className="transcription-input-help">Record, choose, or drop an audio file. Audio stays on this device.</p>
-        <div className="transcription-input-actions">
-          {recorder.phase === 'idle' && <button type="button" className="transcription-record-button" onClick={() => void actions.startRecording()} disabled={controlsBusy}>
-            <span aria-hidden="true">●</span> Start recording
-          </button>}
-          <button type="button" className="transcription-primary" onClick={() => inputRef.current?.click()} disabled={controlsBusy}>
-            Choose audio
+        {recorder.phase === 'idle' && (
+          <button type="button" className="transcription-icon-button" aria-label="Start recording" title="Start recording" onClick={() => void actions.startRecording()} disabled={controlsBusy}>
+            <RecordDotIcon />
           </button>
-        </div>
+        )}
+        <button type="button" className="transcription-icon-button" aria-label="Choose audio" title="Choose audio" onClick={() => inputRef.current?.click()} disabled={controlsBusy}>
+          <PlusIcon />
+        </button>
         <input
           ref={inputRef}
           type="file"
@@ -111,108 +108,54 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
             if (file && !controlsBusy) actions.importFile(file)
           }}
         />
-        {(recorder.phase !== 'idle' || recorder.error) && <div className="transcription-recorder">
-          <div className="transcription-recorder-heading">
-            <span className="transcription-recorder-mark" aria-hidden="true">●</span>
-            <div>
-              <strong>{recorder.phase === 'recording' ? 'Recording from microphone' : 'Microphone recording'}</strong>
-              <small>Saved locally as WAV, ready for transcription</small>
-            </div>
-          {recorder.phase === 'recording' && <span className="transcription-recorder-timer" role="timer">{recorder.duration}</span>}
-          {recorder.phase === 'processing' && <span className="transcription-recorder-timer" role="status">Preparing…</span>}
-          </div>
-          <div className="transcription-recorder-actions">
-            {recorder.phase === 'requesting' && <span className="transcription-recorder-hint" role="status">Waiting for microphone permission…</span>}
-            {recorder.phase === 'recording' && <>
-              <span className="transcription-recording-activity" aria-hidden="true"><i /><i /><i /><i /><i /></span>
-              <button type="button" className="transcription-record-button is-stop" onClick={actions.stopRecording}>Stop recording</button>
-              <button type="button" className="transcription-recorder-quiet" onClick={actions.discardRecording}>Discard</button>
-            </>}
-            {recorder.phase === 'processing' && <span className="transcription-recorder-hint" role="status">Converting the recording on this device…</span>}
-            {recorder.phase === 'ready' && <>
-              <span className="transcription-recorder-hint">Recording ready · {recorder.duration}</span>
-              <button type="button" className="transcription-record-button" onClick={() => void actions.retryRecording()} disabled={recorder.saving || busy}>
-                {recorder.saving ? 'Saving…' : 'Retry recording'}
-              </button>
-              <button type="button" className="transcription-recorder-quiet" onClick={actions.discardRecording} disabled={recorder.saving}>Discard</button>
-            </>}
-          </div>
-          {recorder.error && <p className="transcription-recorder-error" role="alert">{recorder.error}</p>}
-        </div>}
       </div>
 
-      <div className="transcription-model-status" role="status" aria-live="polite">
-        <div className={`transcription-model-state${status?.modelState === 'ready' ? ' is-ready' : ''}`}>
-          <span className="transcription-status-dot" aria-hidden="true" />
-          <strong>{status?.modelState === 'ready' ? `${selectedModelName} is ready` : status?.modelState === 'downloading' ? `Downloading ${selectedModelName}` : `${selectedModelName} is not installed`}</strong>
-        </div>
-        {!status?.available && <p>Local transcription requires the FolioNotes desktop app on an Apple Silicon Mac with macOS 14 or later.</p>}
-        {status?.available && !status.helperAvailable && <p>Build the bundled MLX helper to enable local transcription.</p>}
-        {status?.modelState === 'missing' && status.canInstall && (
-          <>
-            <p>Download {status.model} (about {(status.totalBytes / 1_000_000_000).toFixed(1)} GB). The model runs locally.</p>
-            <button type="button" className="transcription-secondary" onClick={actions.installModel} disabled={controlsBusy}>Download {selectedModelName}</button>
-          </>
-        )}
-        {status?.modelState === 'downloading' && (
-          <div className="transcription-download-progress" aria-label={`${selectedModelName} download ${status.downloadPercent}%`}>
-            <div><span style={{ width: `${status.downloadPercent}%` }} /></div>
-            <small>{status.downloadPercent}% · {status.downloadedBytes.toLocaleString()} of about {status.totalBytes.toLocaleString()} bytes</small>
-          </div>
-        )}
-      </div>
+      {recorder.systemAudioSupported && recorder.phase === 'idle' && (
+        <RecordingSourceSelect source={recorder.source} disabled={controlsBusy} onChange={actions.setRecordingSource} />
+      )}
+      <RecorderPanel recorder={recorder} actions={actions} busy={busy} />
+      <ModelNotices
+        status={status}
+        selectedModelName={selectedModelName}
+        speakerOffer={speakerOffer}
+        controlsBusy={controlsBusy}
+        onInstallModel={actions.installModel}
+        onInstallSpeakerModel={actions.installSpeakerModel}
+      />
 
       {model.progress && model.phase !== 'transcribing' && <p className="transcription-progress" role="status">{model.progress}</p>}
       {(model.phase === 'summarizing' || model.phase === 'cancelling-summary') && <p className="transcription-empty">Cancel waits for the current local model request; your draft and original transcript stay unchanged.</p>}
       {model.error && <p className="transcription-error" role="alert">{model.error}</p>}
 
-      <div className="transcription-pending">
-        <div ref={pendingHeadingRef} className="transcription-subheading" tabIndex={-1}>Audio and transcripts <span>{model.pending.length}</span></div>
-        {model.pending.length === 0 ? (
-          <p className="transcription-empty">Imported audio and editable transcript notes will appear here.</p>
-        ) : model.pending.map((session) => {
-          const processing = session.state === 'transcribing' || (busy && model.activeSession?.id === session.id && model.phase === 'transcribing')
-          const summarizing = busy && model.activeSession?.id === session.id
-            && (model.phase === 'summarizing' || model.phase === 'cancelling-summary')
-          const deleting = model.deletingSessionId === session.id
-          const deleteDisabled = controlsBusy || recorder.phase !== 'idle' || processing || summarizing || Boolean(model.deletingSessionId)
-          return (
-            <article className="transcription-item" key={session.id}>
-              <div className="transcription-item-heading">
-                <strong title={session.fileName || 'Audio recording'}>{session.fileName || 'Audio recording'}</strong>
-                <span role={processing ? 'status' : undefined} aria-live={processing ? 'polite' : undefined}>{stateLabel(session, processing)}</span>
-              </div>
-              <small>{importedDate(session)}{session.durationMs === null ? '' : ` · ${durationLabel(session.durationMs)}`}</small>
-              {session.error && <p className="transcription-item-error" role="status">{session.error}</p>}
-              <div className="transcription-item-actions">
-                {session.state === 'ready' ? (
-                  <>
-                    <button type="button" onClick={() => actions.openTranscript(session)} disabled={controlsBusy}>Open draft</button>
-                    <button type="button" onClick={() => actions.regenerateSummary(session)} disabled={controlsBusy}>Summarize draft</button>
-                  </>
-                ) : (
-                  <button type="button" onClick={() => actions.transcribe(session)} disabled={!canTranscribe || controlsBusy || processing}>
-                    {session.state === 'failed' ? 'Retry' : 'Transcribe'}
-                  </button>
-                )}
-                {processing && <button type="button" onClick={() => actions.cancel(session)}>Cancel</button>}
-                {summarizing && <button type="button" onClick={() => actions.cancel(session)} disabled={model.phase === 'cancelling-summary'}>{model.phase === 'cancelling-summary' ? 'Cancelling…' : 'Cancel summary'}</button>}
-                {confirmingDeleteId === session.id ? (
-                  <div className="transcription-delete-confirm" role="group" aria-label={`Confirm deletion of ${session.fileName || 'audio recording'}`}>
-                    <p>Delete this local audio, transcript, and summary? Any opened or saved Markdown note will be kept.</p>
-                    {deleting ? <span role="status">Deleting local session…</span> : <>
-                      <button ref={confirmationCancelRef} type="button" onClick={() => setConfirmingDeleteId(null)} disabled={deleteDisabled}>Cancel</button>
-                      <button type="button" className="transcription-delete-confirm-button" onClick={() => void actions.deleteSession(session)} disabled={deleteDisabled}>Delete recording</button>
-                    </>}
-                  </div>
-                ) : (
-                  <button type="button" className="transcription-delete-button" onClick={() => setConfirmingDeleteId(session.id)} disabled={deleteDisabled}>Delete</button>
-                )}
-              </div>
-            </article>
-          )
-        })}
-      </div>
+      {model.pending.length === 0 ? (
+        <p className="transcription-empty">Record or add audio. Audio stays on this device.</p>
+      ) : (
+        <ul className="transcription-rows" aria-label="Recordings">
+          {model.pending.map((session) => (
+            <RecordingRow
+              key={session.id}
+              session={session}
+              model={model}
+              actions={actions}
+              selectedModelName={selectedModelName}
+              canTranscribe={canTranscribe}
+              controlsBusy={controlsBusy}
+              busy={busy}
+              expanded={expandedId === session.id && session.state === 'ready'}
+              playing={playback.sessionId === session.id && playback.playing}
+              speakerCount={learnedCounts[session.id] ?? session.speakerCount ?? null}
+              confirming={confirming?.id === session.id ? confirming.kind : null}
+              onConfirm={(kind) => setConfirming(kind ? { id: session.id, kind } : null)}
+              onToggleExpand={() => {
+                if (expandedId !== session.id) load(session)
+                setExpandedId(expandedId === session.id ? null : session.id)
+              }}
+              onSpeakerCount={(count) => setLearnedCounts((current) => current[session.id] === count ? current : { ...current, [session.id]: count })}
+              onTogglePlay={() => togglePlay(session)}
+            />
+          ))}
+        </ul>
+      )}
     </section>
   )
 }

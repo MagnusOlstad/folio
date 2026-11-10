@@ -2,8 +2,10 @@ import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
+import { resolveNoteVariablesForIndex } from '../core/note-variables.js'
 import { createSerialQueue } from '../core/queue.js'
 import { collectImageText } from './image-text.js'
+import { stripTranscriptMarkup } from './transcript-markup.js'
 
 export function createKnowledgeIndex(runtime) {
   const { embedModel, embeddingSchemaVersion,
@@ -157,8 +159,14 @@ function boundedEmbeddingText(value, maxBytes = 1600) {
 }
 
 // OCR text of embedded images is index-only; with no image text every input stays byte-identical.
+function indexableText(content) {
+  // Variables resolve first so resolved speaker names are stripped as transcript headers too.
+  return stripTranscriptMarkup(resolveNoteVariablesForIndex(content))
+}
+
 function embeddingBody(record) {
-  return record.imageText ? `${record.content}\n${record.imageText}` : record.content
+  const content = indexableText(record.content)
+  return record.imageText ? `${content}\n${record.imageText}` : content
 }
 
 function embeddingInput(record) {
@@ -181,7 +189,7 @@ function chunkInputHash(record, content) {
 
 function recordChunks(record, previous) {
   const previousChunks = new Map((previous?.chunks || []).map((chunk) => [chunk.embeddingInputHash, chunk]))
-  return noteChunks(`${record.description}\n\n${record.imageText ? `${record.content}\n\n${record.imageText}` : record.content}`).map((content) => {
+  return noteChunks(`${record.description}\n\n${record.imageText ? `${indexableText(record.content)}\n\n${record.imageText}` : indexableText(record.content)}`).map((content) => {
     const embeddingInputHash = chunkInputHash(record, content)
     const previousChunk = previousChunks.get(embeddingInputHash)
     const reusableEmbedding = previous?.embeddingSchemaVersion === embeddingSchemaVersion

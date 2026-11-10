@@ -1,4 +1,5 @@
 import type { TranslatedExportTarget, ViewerDocument } from "../../../domain/types.ts";
+import { resolveNoteVariablesForDisplay } from "../../../lib/note-variables.ts";
 import { filedDraftContent, isUntitledId } from "../../../lib/workspace.ts";
 
 export type NoteExportFormat = "markdown" | "pdf";
@@ -36,7 +37,10 @@ export function noteExportSnapshot(
 ): NoteExportSnapshot {
   const isDraft = isUntitledId(document.id);
   const sourceContent = draft ?? document.content;
-  const content = isDraft ? filedDraftContent(sourceContent) : sourceContent;
+  // Exports leave Folio, so note variables are resolved to their values.
+  const content = resolveNoteVariablesForDisplay(
+    isDraft ? filedDraftContent(sourceContent) : sourceContent,
+  );
   return {
     id: document.id,
     title: isDraft

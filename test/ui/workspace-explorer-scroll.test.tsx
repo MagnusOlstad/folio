@@ -246,3 +246,50 @@ describe("WorkspaceExplorer scroll restoration", () => {
     );
   });
 });
+
+describe("WorkspaceExplorer local draft highlight", () => {
+  const draftDocument = (id: string) => ({ id, content: `Draft ${id}`, createdAt: "2026-01-01" }) as unknown as WorkspaceExplorerProps["localDraftDocuments"][number];
+  const file: BundleFile = {
+    id: "/a.md",
+    name: "a.md",
+    title: "Saved note",
+    createdAt: "2026-01-01",
+    directory: "/",
+    type: "Note",
+    deletable: true,
+    movable: true,
+    filedBy: null,
+    filedAt: null,
+  };
+
+  it("marks only the open draft as active and switches with the active document", () => {
+    const base = {
+      localDraftDocuments: [draftDocument("untitled-1"), draftDocument("untitled-2")],
+      fileTree: buildFileTree([file]),
+    };
+    const { container, rerender } = render(<WorkspaceExplorer {...explorerProps({ ...base, activeFileId: "untitled-2" })} />);
+    const current = () => Array.from(container.querySelectorAll("[aria-current='true']"));
+    expect(current()).toHaveLength(1);
+    expect(container.querySelector("[data-file-id='untitled-2']")?.classList.contains("active")).toBe(true);
+    expect(container.querySelector("[data-file-id='untitled-1']")?.classList.contains("active")).toBe(false);
+    expect(container.querySelector(".tree-file:not(.draft-tree-row).active")).toBeNull();
+
+    rerender(<WorkspaceExplorer {...explorerProps({ ...base, activeFileId: file.id, activeFileDirectory: "/" })} />);
+    expect(container.querySelector(".draft-tree-row.active")).toBeNull();
+    expect(current()).toHaveLength(1);
+    expect(current()[0].closest(".draft-tree-row")).toBeNull();
+  });
+
+  it("reveals a newly active draft row", () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => frames.push(cb));
+    const { container } = render(
+      <WorkspaceExplorer {...explorerProps({ localDraftDocuments: [draftDocument("untitled-1")], activeFileId: "untitled-1", explorerScrollTop: 0 })} />,
+    );
+    const tree = container.querySelector<HTMLDivElement>(".tree-scroll")!;
+    vi.spyOn(tree, "getBoundingClientRect").mockReturnValue({ top: 0, bottom: 100 } as DOMRect);
+    vi.spyOn(container.querySelector(".draft-tree-row")!, "getBoundingClientRect").mockReturnValue({ top: 150, bottom: 170 } as DOMRect);
+    frames.forEach((cb) => cb(0));
+    expect(tree.scrollTop).toBe(70);
+  });
+});

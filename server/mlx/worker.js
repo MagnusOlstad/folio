@@ -5,6 +5,7 @@ import { recordDownloadProgress, summarizeDownloadProgress } from './download-pr
 export function createMlxWorker({ id, definition, executable, cacheRoot, modelDirectory, onExit }) {
   const args = ['--task', definition.task, '--model', definition.repository, '--revision', definition.revision]
   if (definition.task === 'transcription') args.push('--operation', 'transcribe')
+  if (definition.task === 'diarization') args.push('--operation', 'diarize')
   if (modelDirectory) args.push('--model-directory', modelDirectory)
   const child = spawn(executable, args, {
     stdio: ['pipe', 'pipe', 'pipe'],

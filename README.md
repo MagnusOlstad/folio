@@ -26,7 +26,25 @@ FolioNotes is a local-first personal notetaker with one Markdown capture field. 
 - Lifecycle controls for `draft`, `stable`, `deprecated`, and `stale_after`, with stale and deprecated concepts ranked lower in retrieval.
 - Optional per-note background Norwegian/English translation of filed notes (off by default for every note) and on-demand translated export with the selected local generation model, so a read-only translated view opens instantly. Drafts are never sent and nothing is downloaded; see [docs/translation.md](docs/translation.md).
 - Local filesystem storage. No cloud service or account is required.
-- Import AAC, AIFF, FLAC, M4A, MP3, and WAV files from the Transcription tab in the right pane. FolioNotes downloads pinned `mlx-community/whisper-large-v3-turbo` weights on request, transcribes locally on Apple Silicon, and opens an editable Markdown note with the source filename, import time, duration, and source-note link. Regenerate its concise summary with the selected local text model.
+- Import AAC, AIFF, FLAC, M4A, MP3, and WAV files or record the microphone (in the desktop app also system audio on macOS 14.2 or later and Windows, for online meetings), from the Transcription tab in the right pane. FolioNotes downloads pinned `mlx-community/whisper-large-v3-turbo` weights on request, transcribes locally on Apple Silicon, and opens an editable Markdown note with the source filename, import time, duration, and source-note link. Transcript paragraphs start with a `[mm:ss]` timestamp from Whisper's segment times. When the optional Sortformer model (a separate on-device download, up to 4 speakers) is installed, speakers are always identified; without it transcripts have no speaker labels. Turns then read `**Speaker 1** [mm:ss]` followed by the text. Regenerate its concise summary with the selected local text model; it sees the speaker-labelled transcript. Timestamps and speaker headers are left out of the semantic index. See [docs/transcription.md](docs/transcription.md).
+
+## Note variables
+
+A note can define short variables and reuse them, for example to name the speakers of a transcript once:
+
+```markdown
+speaker1:: Kari Nordmann
+speaker2:: Ola
+
+**{{speaker1}}** [00:04]
+Welcome, {{speaker2}}.
+```
+
+- A definition is a whole line `key:: value` (Dataview inline-field style). Keys start with a letter, may contain letters, digits, `_` and `-`, and are case-insensitive. The first definition of a key wins.
+- `{{key}}` (optional inner spaces) is replaced by the value in the live editor, the rendered preview, search, Ask, and exports (Markdown, PDF, clipboard). Undefined references are left as written; in the editor they get a warning underline.
+- Variables are scoped to the note they appear in. YAML frontmatter, fenced code, and inline code are ignored, and values are plain text (no nested references).
+- The stored Markdown is never rewritten. In the editor the raw `{{key}}` shows while the cursor is inside it. In preview and exports, definition lines read `key: value`.
+- Translation leaves `{{key}}` references and `key:: value` lines untouched.
 
 ## Keyboard shortcuts
 

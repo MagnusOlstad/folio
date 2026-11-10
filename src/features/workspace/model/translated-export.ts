@@ -1,5 +1,6 @@
 import type { TranslatedExportJob, TranslatedExportPhase, TranslatedExportTarget, ViewerDocument } from "../../../domain/types.ts";
 import { isUntitledId, serializeDraft } from "../../../lib/workspace.ts";
+import { resolveNoteVariablesForDisplay } from "../../../lib/note-variables.ts";
 import { readStorageItem, writeStorageItem } from "../../../lib/storage.ts";
 import {
   translatedExportFilename,
@@ -122,7 +123,7 @@ export function translatedExportSnapshot(document: ViewerDocument, result: Trans
     id: document.id,
     title: result.title?.trim() || document.title.trim() || "Untitled",
     description: result.description ?? document.description,
-    content: withoutGeneratedMarkers(result.content ?? document.content),
+    content: resolveNoteVariablesForDisplay(withoutGeneratedMarkers(result.content ?? document.content)),
     draft: false,
   };
 }

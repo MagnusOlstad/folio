@@ -1770,6 +1770,26 @@
   text-underline-offset: 3px;
 }
 
+.live-markdown-editor .cm-live-markdown-variable {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: text;
+}
+
+.live-markdown-editor .cm-live-markdown-variable-undefined {
+  color: var(--danger, #d65c58);
+  text-decoration: underline wavy;
+  text-underline-offset: 3px;
+}
+
+.live-markdown-editor .cm-live-markdown-variable-key {
+  color: var(--acid);
+}
+
+.live-markdown-editor .cm-live-markdown-variable-separator {
+  color: var(--muted);
+}
+
 .live-markdown-editor .cm-live-markdown-quote {
   padding-left: 16px;
   border-left: 2px solid var(--line);

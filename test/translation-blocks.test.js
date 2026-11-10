@@ -116,3 +116,16 @@ test('delimiter echoes and wrapping quotes are stripped unless the source has th
   assert.equal(sanitizeModelText('`code`', '`code`'), '`code`')
   assert.equal(sanitizeModelText('"Hello"', '"Hei"'), '"Hello"')
 })
+
+test('note variable definitions and references are protected from translation', () => {
+  const definitions = 'speaker1:: Kari Nordmann\nspeaker2:: Ola'
+  assert.deepEqual(translatableBlocks(splitBody(definitions)), [])
+  const source = '**{{speaker1}}** sa at {{ speaker2 }} kommer `{{speaker1}}`.'
+  const { text, tokens } = protectText(source)
+  assert.ok(!text.includes('{{'))
+  assert.deepEqual(tokens, ['`{{speaker1}}`', '{{speaker1}}', '{{ speaker2 }}'])
+  assert.equal(restoreText(text.replace('sa at', 'said that').replace('kommer', 'is coming'), tokens, text),
+    '**{{speaker1}}** said that {{ speaker2 }} is coming `{{speaker1}}`.')
+  const output = renderItems(splitBody(`${definitions}\n\nHei {{speaker1}}`), (block) => `T(${block.protectedText})`)
+  assert.ok(output.startsWith(definitions))
+})

@@ -61,9 +61,9 @@ export function createTranscriptionStorage(runtime) {
       throw error
     }
   }
-  async function createSession({ id = crypto.randomUUID(), draftId = null, fileName = null, audioExtension = '.wav', sourceNoteId = null, sourceBundleId = null, durationMs = null } = {}) {
+  async function createSession({ id = crypto.randomUUID(), draftId = null, fileName = null, audioExtension = '.wav', sourceNoteId = null, sourceBundleId = null, durationMs = null, identifySpeakers = false } = {}) {
     const now = new Date().toISOString()
-    return writeManifest({ id, state: 'queued', createdAt: now, updatedAt: now, durationMs, draftId, source: 'file', fileName, audioExtension, sourceNoteId, sourceBundleId, error: null })
+    return writeManifest({ id, state: 'queued', createdAt: now, updatedAt: now, durationMs, draftId, source: 'file', fileName, audioExtension, sourceNoteId, sourceBundleId, identifySpeakers: identifySpeakers === true, error: null })
   }
   async function writeResult(id, result) { return mutate(id, async () => { await atomicWrite(filePath(id, 'result.json'), result); return result }) }
   async function readResult(id) {
@@ -86,7 +86,9 @@ export function createTranscriptionStorage(runtime) {
     const sessions = await listSessions()
     const updated = []
     for (const session of sessions) {
-      const next = nextRetryableState(session)
+      // An interrupted re-run leaves the previous result.json intact, so the session goes back to ready.
+      const kept = session.state === 'transcribing' && await readResult(session.id)
+      const next = kept ? { ...session, state: 'ready', error: null } : nextRetryableState(session)
       if (next.state !== session.state) await writeManifest(next)
       updated.push(next)
     }

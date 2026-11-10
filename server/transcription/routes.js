@@ -3,6 +3,8 @@ import { safeAudioFilename, safeTranscriptionId } from './model.js'
 
 const AUDIO_TYPES = new Set(['audio/aac', 'audio/aiff', 'audio/flac', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/x-aiff', 'audio/x-flac', 'audio/x-m4a', 'audio/x-wav', 'application/octet-stream'])
 
+const PLAYBACK_TYPES = { '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.aiff': 'audio/aiff', '.flac': 'audio/flac' }
+
 function fail(response, error) {
   const status = Number.isInteger(error?.status) ? error.status : Number.isInteger(error?.statusCode) ? error.statusCode : 500
   response.status(status).json({ error: error instanceof Error ? error.message : 'Transcription request failed.' })
@@ -16,6 +18,9 @@ export function registerRoutes(app, runtime) {
   })
   app.post('/api/transcriptions/model/install', async (_request, response) => {
     try { response.json(await service.install()) } catch (error) { fail(response, error) }
+  })
+  app.post('/api/transcriptions/speakers/install', async (_request, response) => {
+    try { response.json(await service.installDiarization()) } catch (error) { fail(response, error) }
   })
   app.post('/api/transcriptions/draft-remap', async (request, response) => {
     try {
@@ -39,6 +44,7 @@ export function registerRoutes(app, runtime) {
         durationMs,
         sourceNoteId: typeof request.body?.sourceNoteId === 'string' ? request.body.sourceNoteId : null,
         sourceBundleId: typeof request.body?.sourceBundleId === 'string' ? request.body.sourceBundleId : null,
+        identifySpeakers: request.body?.identifySpeakers === true,
       })
       response.status(201).json({ session })
     } catch (error) { fail(response, error) }
@@ -68,6 +74,44 @@ export function registerRoutes(app, runtime) {
       } finally { service.endUpload(session.id) }
     } catch (error) { fail(response, error) }
   })
+  app.get('/api/transcriptions/:id/audio', async (request, response) => {
+    try {
+      if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
+      const session = await storage.readManifest(request.params.id)
+      if (!session || !(await storage.hasRecording(session))) return response.status(404).json({ error: 'Recording not found.' })
+      const recording = storage.recordingPath(session)
+      response.set('Content-Type', PLAYBACK_TYPES[path.extname(recording).toLowerCase()] || 'application/octet-stream')
+      response.set('Cache-Control', 'no-store')
+      response.sendFile(path.resolve(recording), { acceptRanges: true, cacheControl: false, lastModified: false, etag: false }, (error) => {
+        if (error && !response.headersSent) fail(response, error)
+      })
+    } catch (error) { fail(response, error) }
+  })
+  app.post('/api/transcriptions/:id/segments/speaker', async (request, response) => {
+    try {
+      if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
+      const { index, speaker } = request.body ?? {}
+      if (!Number.isInteger(index) || !Number.isInteger(speaker)) return response.status(400).json({ error: 'index and speaker must be integers.' })
+      response.json({ result: await service.reassignSpeaker(request.params.id, index, speaker) })
+    } catch (error) { fail(response, error) }
+  })
+  app.post('/api/transcriptions/:id/segments/split', async (request, response) => {
+    try {
+      if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
+      const { index, offset, speaker } = request.body ?? {}
+      if (!Number.isInteger(index) || !Number.isInteger(offset)) return response.status(400).json({ error: 'index and offset must be integers.' })
+      if (speaker !== undefined && speaker !== null && !Number.isInteger(speaker)) return response.status(400).json({ error: 'speaker must be an integer.' })
+      response.json({ result: await service.splitSegment(request.params.id, index, offset, speaker) })
+    } catch (error) { fail(response, error) }
+  })
+  app.post('/api/transcriptions/:id/segments/merge', async (request, response) => {
+    try {
+      if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
+      const { index } = request.body ?? {}
+      if (!Number.isInteger(index)) return response.status(400).json({ error: 'index must be an integer.' })
+      response.json({ result: await service.mergeSegment(request.params.id, index) })
+    } catch (error) { fail(response, error) }
+  })
   app.get('/api/transcriptions/:id', async (request, response) => {
     try {
       if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
@@ -87,7 +131,14 @@ export function registerRoutes(app, runtime) {
   app.post('/api/transcriptions/:id/process', async (request, response) => {
     try {
       if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
-      response.json(await service.transcribe(request.params.id))
+      response.json(await service.transcribe(request.params.id, { retranscribe: request.body?.retranscribe === true }))
+    } catch (error) { fail(response, error) }
+  })
+  app.post('/api/transcriptions/:id/options', async (request, response) => {
+    try {
+      if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
+      if (typeof request.body?.identifySpeakers !== 'boolean') return response.status(400).json({ error: 'identifySpeakers must be true or false.' })
+      response.json({ session: await service.updateOptions(request.params.id, { identifySpeakers: request.body.identifySpeakers }) })
     } catch (error) { fail(response, error) }
   })
   app.post('/api/transcriptions/:id/cancel', async (request, response) => {

@@ -27,6 +27,22 @@ export const TRANSCRIPTION_MODELS = Object.freeze({
   }),
 })
 
+/** Sortformer speaker diarization is a separate, optional download (never a Whisper choice). */
+export const DIARIZATION_MODEL_ID = 'sortformer'
+export const DIARIZATION_MODELS = Object.freeze({
+  [DIARIZATION_MODEL_ID]: Object.freeze({
+    id: DIARIZATION_MODEL_ID,
+    name: 'Sortformer Speaker Labels',
+    purpose: 'diarization',
+    repository: 'mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16',
+    revision: 'e23e6404bd9859e93edbf94a740eb1c7fc58f12e',
+    task: 'diarization',
+    downloadSizeBytes: 236_110_000,
+    maxSpeakers: 4,
+    requiredFiles: Object.freeze(['config.json', 'model.safetensors']),
+  }),
+})
+
 export function isTranscriptionModelId(id) {
   return typeof id === 'string' && Object.hasOwn(TRANSCRIPTION_MODELS, id)
 }
