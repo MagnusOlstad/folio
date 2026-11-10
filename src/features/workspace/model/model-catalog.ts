@@ -36,9 +36,18 @@ export function selectedWorkspaceModelCatalog(status: MlxStatus | null, actionMo
     status?.selectedTranscriptionModel ?? "whisper",
     "embeddinggemma",
   ]);
+  // The image-description model can differ from the generation model, so it needs its own row.
+  if (status?.selectedCaptionModel) selectedModels.add(status.selectedCaptionModel);
   return orderedModelCatalog(status, actionModel, action)
     .filter((definition) => selectedModels.has(definition.id)
       || ((definition.id === "lightonocr" || definition.id === "sortformer") && Boolean(status?.models.find((model) => model.id === definition.id)?.installed)));
+}
+
+/** Purpose label for a pane row, reflecting image descriptions when the model is the selected caption model. */
+export function workspaceModelPurpose(definition: { id: MlxModelId; purpose: string }, status: MlxStatus | null) {
+  if (!status?.selectedCaptionModel || status.selectedCaptionModel !== definition.id) return definition.purpose;
+  const generationId = status.selectedGenerationModel ?? MLX_GENERATION_MODEL.id;
+  return generationId === definition.id ? `${definition.purpose} · Image descriptions` : "Image descriptions";
 }
 
 export function formatModelBytes(bytes: number) {

@@ -10,11 +10,12 @@ import {
   nextCaptionState,
   type CaptionPreviewState,
 } from "./image-caption.ts";
-import { imageAltWidthChange, MIN_IMAGE_WIDTH } from "./image-size.ts";
+import { imageAltWidthChange, imageDownloadName, MIN_IMAGE_WIDTH } from "./image-size.ts";
 import { cleanExtractedText, nextOcrState, ocrInsertChange, type OcrPreviewState } from "./image-ocr.ts";
 
 const TOOLBAR_CLASS = "cm-live-markdown-image-toolbar";
 const COPIED_RESET_MS = 1500;
+const DOWNLOAD_REVOKE_MS = 60_000;
 
 const PREVIEW_CLASS = "cm-live-markdown-ocr-preview";
 const CAPTION_PREVIEW_CLASS = "cm-live-markdown-caption-preview";
@@ -37,6 +38,7 @@ const ICONS = {
     "M9 9h10v10H9z",
     "M5 15V5h10",
   ],
+  download: ["M12 4v11", "M7 10.5l5 5 5-5", "M5 20h14"],
   check: ["M5 12.5l4.5 4.5L19 7.5"],
   remove: ["M4 7h16", "M10 11v6", "M14 11v6", "M6 7l1 12h10l1-12", "M9 7V4h6v3"],
   text: ["M4 6h16", "M4 12h10", "M4 18h16"],
@@ -219,6 +221,27 @@ export async function copyImageToClipboard(url: string) {
   await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
 }
 
+/** Saves the image through a temporary download link (Electron shows its native save dialog). */
+export async function downloadImage(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Image request failed (${response.status}).`);
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = imageDownloadName(url, blob.type);
+    document.body.append(link);
+    link.click();
+    link.remove();
+  } catch (error) {
+    URL.revokeObjectURL(objectUrl);
+    throw error;
+  }
+  // The native save dialog may still need the blob, so release it later.
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), DOWNLOAD_REVOKE_MS);
+}
+
 /** Builds the frame holding the image and its hover toolbar. */
 export function createImageFrame(
   view: EditorView,
@@ -256,6 +279,16 @@ export function createImageFrame(
     }, COPIED_RESET_MS);
   });
   toolbar.append(copy);
+
+  const download = createButton("Download image", ICONS.download);
+  download.addEventListener("click", async () => {
+    try {
+      await downloadImage(url);
+    } catch {
+      options.onError?.("Could not download the image.");
+    }
+  });
+  toolbar.append(download);
 
   if (!view.state.readOnly) {
     const remove = createButton("Remove image", ICONS.remove);

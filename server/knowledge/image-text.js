@@ -16,14 +16,29 @@ const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp'])
 // Hashing is the expensive part of a reindex, so remember it per file version.
 const hashMemo = new Map()
 
-/** Mirrors the client cleaner in src/features/workspace/model/image-ocr.ts. */
+const PLACEHOLDER_IMAGE = /!?\[[^\]\n]*\]\(\s*(?:\.\/)?(?:image|img)[_-]?\d+\.(?:png|jpe?g|gif|webp)\s*\)/gi
+const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&nbsp;': ' ' }
+
+/**
+ * Index-only counterpart of cleanExtractedText in src/features/workspace/model/image-ocr.ts: drops
+ * image placeholders and flattens HTML table markup to `a | b` rows so the tags are not embedded.
+ */
 export function cleanOcrText(text) {
-  const normalized = String(text ?? '').replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '')
+  const normalized = String(text ?? '').replace(/\r\n?/g, '\n').replace(PLACEHOLDER_IMAGE, '').replace(/[ \t]+$/gm, '')
   const withoutWrappers = normalized.replace(
     /^<table>\n([\s\S]*?)\n<\/table>$/gm,
     (match, inner) => (/<tr[\s>]/i.test(inner) ? match : inner),
   )
-  return withoutWrappers
+  const flattened = withoutWrappers.replace(/<table\b[^>]*>[\s\S]*?<\/table>/gi, (table) => table
+    .replace(/<\/t[dh]>\s*(?=<t[dh]\b)/gi, ' | ')
+    .replace(/<\/tr>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(?:amp|lt|gt|quot|#39|nbsp);/g, (entity) => ENTITIES[entity])
+    .replace(/[ \t]+/g, ' ')
+    .replace(/^ +| +$/gm, '')
+    .replace(/\n{2,}/g, '\n'))
+  return flattened
     .replace(/^### [A-Za-z]+ - .*\n\*Type: [^*\n]+\*\n(?:\n)?/gm, '')
     .replace(/^\n+|\n+$/g, '')
 }

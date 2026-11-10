@@ -35,8 +35,8 @@ async function writeCaption(bundleRoot, bytes, { model = 'gemma4', revision, tex
 
 test('cleanOcrText strips wrappers and annotation headers like the client cleaner', () => {
   assert.equal(cleanOcrText('<table>\nTotal 12\n</table>\n'), 'Total 12')
-  const realTable = '<table>\n<tr><td>a</td></tr>\n</table>'
-  assert.equal(cleanOcrText(realTable), realTable)
+  assert.equal(cleanOcrText('<table>\n<tr><td>a</td>\n<td>b &amp; c</td></tr>\n<tr><td>d<br />e</td><td></td></tr>\n</table>'), 'a | b & c\nd e |')
+  assert.equal(cleanOcrText('x\n\n![image](image_1.png)\n[image](img-3.jpeg)\n![photo](/assets/real.png)'), 'x\n\n\n\n![photo](/assets/real.png)')
   assert.equal(cleanOcrText('### Image - Receipt\n*Type: photo*\n\nBody  \r\n\n'), 'Body')
   assert.equal(cleanOcrText('\n\nplain   \n\n'), 'plain')
 })

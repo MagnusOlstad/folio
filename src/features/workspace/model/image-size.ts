@@ -66,3 +66,29 @@ export function imageAltWidthChange(source: string, width: number | null) {
   const insert = formatImageAlt(source.slice(2, end), width);
   return { from: 2, to: end, insert };
 }
+
+const MIME_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/svg+xml": "svg",
+  "image/avif": "avif",
+  "image/bmp": "bmp",
+};
+
+/** Download filename: the last path segment of the asset path (the `path` query value of `/api/assets` URLs, else the URL path; decoded, query stripped), else `image.<ext>` from the MIME type. */
+export function imageDownloadName(url: string, mimeType: string) {
+  const [beforeQuery, query = ""] = url.split("#")[0].split("?");
+  const target = new URLSearchParams(query).get("path") ?? beforeQuery;
+  const segment = target.split(/[?#]/)[0].split("/").pop() ?? "";
+  let name = segment;
+  try {
+    name = decodeURIComponent(segment);
+  } catch {
+    // Keep the raw segment when it is not valid percent-encoding.
+  }
+  name = name.replace(/[\\/:*?"<>|]/g, "_").trim();
+  if (name && name !== "." && name !== "..") return name;
+  return `image.${MIME_EXTENSIONS[mimeType.split(";")[0].trim().toLowerCase()] ?? "png"}`;
+}
