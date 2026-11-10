@@ -690,6 +690,7 @@ export function useWorkspaceController(): WorkspaceShellProps {
         remove: models.removeMlxModel,
         select: models.selectGenerationModel,
         selectTranscription: models.selectTranscriptionModel,
+        selectCaption: models.selectCaptionModel,
       },
       onClose: themeSettings.closeSettings,
     },

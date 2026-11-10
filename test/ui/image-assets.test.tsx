@@ -134,11 +134,12 @@ describe("LiveMarkdownEditor image paste", () => {
 describe("LiveMarkdownEditor image toolbar", () => {
   const label = (root: HTMLElement, name: string) => root.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`);
 
-  it("renders copy, remove and an enabled extract button", () => {
+  it("renders copy, remove, extract and describe buttons", () => {
     render(<LiveMarkdownEditor value="![shot](/assets/a.png)" onChange={vi.fn()} ariaLabel="Bar note" />);
     const root = screen.getByLabelText("Bar note");
-    expect(root.querySelectorAll(".cm-live-markdown-image-toolbar button")).toHaveLength(3);
+    expect(root.querySelectorAll(".cm-live-markdown-image-toolbar button")).toHaveLength(5);
     expect(label(root, "Copy image")).not.toBeNull();
+    expect(label(root, "Describe image")?.disabled).toBe(false);
     expect(label(root, "Remove image")).not.toBeNull();
     expect(label(root, "Extract text")?.disabled).toBe(false);
   });
@@ -148,6 +149,7 @@ describe("LiveMarkdownEditor image toolbar", () => {
     const root = screen.getByLabelText("RO bar");
     expect(label(root, "Remove image")).toBeNull();
     expect(label(root, "Copy image")).not.toBeNull();
+    expect(label(root, "Download image")).not.toBeNull();
   });
 
   it("removes the image inline and keeps surrounding text", () => {
@@ -201,6 +203,51 @@ describe("LiveMarkdownEditor image toolbar", () => {
     render(<LiveMarkdownEditor value="![shot](/assets/a.png)" onChange={vi.fn()} onError={onError} ariaLabel="Copy fail" />);
     fireEvent.click(label(screen.getByLabelText("Copy fail"), "Copy image")!);
     await waitFor(() => expect(onError).toHaveBeenCalledWith("Could not copy the image."));
+  });
+});
+
+describe("LiveMarkdownEditor image download", () => {
+  const label = (root: HTMLElement, name: string) => root.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`);
+  let restoreUrl: (() => void) | null = null;
+  afterEach(() => {
+    restoreUrl?.();
+    restoreUrl = null;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("downloads through a temporary link named after the asset and revokes the object URL", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    // A plain object keeps the test independent of Node's and jsdom's Blob internals.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, blob: async () => ({ type: "image/png" }) }));
+    const create = vi.fn(() => "blob:test");
+    const revoke = vi.fn();
+    const originalCreate = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+    const originalRevoke = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+    Object.defineProperty(URL, "createObjectURL", { value: create, configurable: true, writable: true });
+    Object.defineProperty(URL, "revokeObjectURL", { value: revoke, configurable: true, writable: true });
+    restoreUrl = () => {
+      for (const [key, descriptor] of [["createObjectURL", originalCreate], ["revokeObjectURL", originalRevoke]] as const) {
+        if (descriptor) Object.defineProperty(URL, key, descriptor);
+        else Reflect.deleteProperty(URL, key);
+      }
+    };
+    const names: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { names.push(this.download); });
+    render(<LiveMarkdownEditor value="![shot](/assets/shot.png)" onChange={vi.fn()} readOnly ariaLabel="Dl note" />);
+    fireEvent.click(label(screen.getByLabelText("Dl note"), "Download image")!);
+    await vi.waitFor(() => expect(names).toEqual(["shot.png"]));
+    expect(revoke).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(60_000);
+    expect(revoke).toHaveBeenCalledWith("blob:test");
+  });
+
+  it("reports a download failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("no", { status: 404 })));
+    const onError = vi.fn();
+    render(<LiveMarkdownEditor value="![shot](/assets/a.png)" onChange={vi.fn()} onError={onError} ariaLabel="Dl fail" />);
+    fireEvent.click(label(screen.getByLabelText("Dl fail"), "Download image")!);
+    await waitFor(() => expect(onError).toHaveBeenCalledWith("Could not download the image."));
   });
 });
 
@@ -328,9 +375,33 @@ describe("cleanExtractedText", () => {
     expect(cleanExtractedText("### Figure - X\n*Type: photo*\ncaption")).toBe("caption");
   });
 
-  it("keeps real HTML tables untouched", () => {
-    const html = "<table>\n<tr><td>a</td></tr>\n</table>";
-    expect(cleanExtractedText(html)).toBe(html);
+  it("converts the LightOnOCR screenshot grid to a pipe table without placeholders", () => {
+    const raw = [
+      "# Build from Any Surface You Already Use", "", "<table>", "  <tr>", "    <td>", "     [image](image_1.png)", "      <br />",
+      "      <strong>CoCo CLI</strong>", "    </td>", "    <td>", "     [image](image_2.png)", "      <br />",
+      "      <strong>CoCo in Snowsight</strong>", "    </td>", "  </tr>", "  <tr>", "    <td>", "     ![image](image_4.png)", "      <br />",
+      "      <strong>CoCo Extension for VS Code</strong>", "    </td>", "    <td></td>", "  </tr>", "</table>", "",
+    ].join("\n");
+    // The empty cell stays as an empty column so every row keeps the header's column count.
+    expect(cleanExtractedText(raw)).toBe([
+      "# Build from Any Surface You Already Use", "", "| **CoCo CLI** | **CoCo in Snowsight** |", "| --- | --- |", "| **CoCo Extension for VS Code** |  |",
+    ].join("\n"));
+  });
+
+  it("converts cell markup, entities and pipes and pads ragged rows", () => {
+    const raw = "<table><thead><tr><th>A &amp; B</th><th><em>x</em></th></tr></thead><tbody><tr><td>1 | 2<br>3&nbsp;&lt;4&gt;</td></tr></tbody></table>";
+    expect(cleanExtractedText(raw)).toBe("| A & B | *x* |\n| --- | --- |\n| 1 \\| 2 3 <4> |  |");
+  });
+
+  it("removes only placeholder-style image links", () => {
+    expect(cleanExtractedText("a ![image](image_1.png) b [x](img-3.jpeg)\n![ok](/assets/image_1.png) [l](https://e.com/image_1.png)"))
+      .toBe("a  b\n![ok](/assets/image_1.png) [l](https://e.com/image_1.png)");
+  });
+
+  it("leaves tables with spans or nested tables untouched", () => {
+    for (const html of ["<table>\n<tr><td colspan=\"2\">a</td></tr>\n</table>", "<table>\n<tr><td><table><tr><td>a</td></tr></table></td></tr>\n</table>"]) {
+      expect(cleanExtractedText(html)).toBe(html);
+    }
   });
 
   it("leaves plain text untouched", () => {

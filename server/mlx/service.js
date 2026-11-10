@@ -4,14 +4,21 @@ import { randomUUID } from 'node:crypto'
 import { createMlxWorker, terminateMlxWorker } from './worker.js'
 import { findModelSnapshot } from './snapshots.js'
 import { helperPath, nativeMlxAvailable } from './helper-path.js'
-import { OCR_MODEL_ID, OCR_TIMEOUT_MS, cancellationError } from './ocr-models.js'
+import { cancellationError } from './ocr-models.js'
+import { createMlxTasks } from './tasks.js'
+import { createMemoryManager } from './memory-manager.js'
+import { createActiveHeavyTracker } from './active-model.js'
 import { MODEL_DEFINITIONS } from './model-definitions.js'
+import {
+  CAPTION_MODEL_IDS, CAPTION_WORKER_DEFINITIONS,
+  baseModelId, captionRollup, captionWorkerKey, isCaptionModelId,
+  readCaptionModelPreference, writeCaptionModelPreference,
+} from './caption-models.js'
 import { installationProgress } from './progress.js'
-import { DIARIZATION_MODEL_ID, readTranscriptionModelPreference, writeTranscriptionModelPreference } from '../transcription/models.js'
+import { readTranscriptionModelPreference, writeTranscriptionModelPreference } from '../transcription/models.js'
 
-const KEEP_ALIVE_MS = 60 * 60 * 1000
-
-export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKeepAliveMs = KEEP_ALIVE_MS }) {
+// warmKeepAliveMs only caps the per-purpose idle timeouts; memoryOptions (memory-manager.js) are test hooks.
+export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKeepAliveMs = Infinity, ...memoryOptions }) {
   const cacheRoot = path.join(modelRoot, 'hf-cache')
   const executable = helperPath(projectRoot, mlxHelperPath)
   const workers = new Map()
@@ -28,10 +35,12 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   const externalModelAdapters = new Map()
   let transcriptionSelectionTail = Promise.resolve()
   let heavyQueue = Promise.resolve()
-  let activeHeavyModel = null
   const loadingModels = new Set()
   let closed = false
   const isAvailable = nativeMlxAvailable()
+  const activeHeavy = createActiveHeavyTracker({ workers, workerDefinition })
+  const memory = createMemoryManager({ workers, starting, stopping, activeRequests, modelActivities, workerDefinition,
+    warmKeepAliveMs, stopModel: (id) => stopModel(id), ...memoryOptions })
 
   function modelDefinition(id) {
     const model = MODEL_DEFINITIONS[id]
@@ -39,23 +48,31 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     return model
   }
 
+  // Public models plus the internal caption workers; only the former are exposed through the API.
+  function workerDefinition(key) {
+    const definition = CAPTION_WORKER_DEFINITIONS[key] || MODEL_DEFINITIONS[key]
+    if (!definition) throw Object.assign(new Error('Unknown MLX model.'), { statusCode: 404 })
+    return definition
+  }
+
+  const allWorkerDefinitions = () => [...Object.values(MODEL_DEFINITIONS), ...Object.values(CAPTION_WORKER_DEFINITIONS)]
+
   function withModelActivity(id, operation, { activate = true } = {}) {
-    const definition = modelDefinition(id)
+    const definition = workerDefinition(id)
     const run = async () => {
       try {
         if (closed) throw new Error('The MLX service is shutting down.')
         if (activate && definition.purpose !== 'embeddings') {
-          for (const other of Object.values(MODEL_DEFINITIONS)) {
-            if (other.purpose !== 'embeddings' && other.id !== id) await stopModel(other.id)
+          // A model and its caption worker share one snapshot: never keep both copies of the weights.
+          // Everything else is arbitrated by the memory manager (memory.makeRoom in startModel).
+          for (const other of allWorkerDefinitions()) {
+            if (other.id !== id && baseModelId(other.id) === baseModelId(id)) await stopModel(other.id)
           }
-          activeHeavyModel = id
+          activeHeavy.activate(id)
         }
         return await operation()
       } finally {
         modelActivities.set(id, Math.max(0, (modelActivities.get(id) || 1) - 1))
-        if (definition.purpose !== 'embeddings') {
-          activeHeavyModel = [...workers.keys()].find((modelId) => MODEL_DEFINITIONS[modelId]?.purpose !== 'embeddings') || null
-        }
       }
     }
     modelActivities.set(id, (modelActivities.get(id) || 0) + 1)
@@ -94,6 +111,19 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
       await fs.rename(temporaryPath, generationSelectionPath)
       return status()
     }, { activate: false })
+  }
+
+  const selectedCaptionModel = () => readCaptionModelPreference(modelRoot)
+
+  async function selectCaptionModel(id) {
+    if (id !== null && !isCaptionModelId(id)) throw Object.assign(new Error('Choose a caption model.'), { statusCode: 400 })
+    const previous = await selectedCaptionModel()
+    if (previous && previous !== id) {
+      const key = captionWorkerKey(previous)
+      await withModelActivity(key, () => stopModel(key), { activate: false })
+    }
+    await writeCaptionModelPreference(modelRoot, id)
+    return status()
   }
 
   async function selectedTranscriptionModel() {
@@ -156,19 +186,19 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
         if (workers.get(id) !== worker || (activeRequests.get(id) || 0) > 0) return
         await stopModel(id, worker)
       }
-      const work = MODEL_DEFINITIONS[id].purpose === 'embeddings'
+      const work = workerDefinition(id).purpose === 'embeddings'
         ? expire()
         : withModelActivity(id, expire, { activate: false })
       void work.catch(() => {})
-    }, warmKeepAliveMs)
+    }, memory.idleMs(id))
     timer.unref?.()
     idleTimers.set(id, timer)
   }
 
   async function startModel(id, { allowDownload = false, signal = null } = {}) {
-    const definition = modelDefinition(id)
+    const definition = workerDefinition(id)
     if (closed) throw new Error('The MLX service is shutting down.')
-    if (removing.has(id)) throw Object.assign(new Error('This model is being removed. Try again when it finishes.'), { statusCode: 409 })
+    if (removing.has(baseModelId(id))) throw Object.assign(new Error('This model is being removed. Try again when it finishes.'), { statusCode: 409 })
     if (stopping.has(id)) throw Object.assign(new Error('This model is stopping. Try again when it finishes.'), { statusCode: 409 })
     if (!isAvailable) throw new Error('Native MLX models require Apple Silicon and macOS 14 or newer.')
     if (workers.has(id)) return workers.get(id)
@@ -184,12 +214,14 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
         if (closed) throw new Error('The MLX service is shutting down.')
         if (!allowDownload && !snapshot) throw new Error(`${definition.name} is not installed. Choose Install to download it first.`)
         await fs.mkdir(cacheRoot, { recursive: true })
+        await memory.makeRoom(id)
+        if (closed) throw new Error('The MLX service is shutting down.')
         worker = createMlxWorker({ id, definition, executable, cacheRoot, modelDirectory: snapshot, onExit: (closed) => {
           if (workers.get(id) === closed) {
             workers.delete(id)
             stopIdleTimer(id)
           }
-          if (activeHeavyModel === id) activeHeavyModel = null
+          activeHeavy.forget(id)
         } })
         startingWorkers.set(id, worker)
         if (signal) {
@@ -204,6 +236,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
         if (signal?.aborted) throw cancellationError(definition)
         if (closed) throw new Error('The MLX service is shutting down.')
         workers.set(id, worker)
+        memory.noteUsed(id, worker)
         armIdleTimer(id, worker)
         return worker
       } catch (error) {
@@ -246,16 +279,17 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   }
 
   async function touchModel(id, worker) {
+    if (worker) memory.noteUsed(id, worker)
     if (!closed && workers.get(id) === worker && (activeRequests.get(id) || 0) === 0) armIdleTimer(id, worker)
   }
 
   async function run(id, operation, payload, timeoutMs, signal = null, { onEvent = null, unloadAfter = false } = {}) {
-    const definition = modelDefinition(id)
-    if (removing.has(id)) throw Object.assign(new Error('This model is being removed. Try again when it finishes.'), { statusCode: 409 })
+    const definition = workerDefinition(id)
+    if (removing.has(baseModelId(id))) throw Object.assign(new Error('This model is being removed. Try again when it finishes.'), { statusCode: 409 })
     if (unloading.has(id)) throw Object.assign(new Error('This model is stopping. Try again when it finishes.'), { statusCode: 409 })
     if (stopping.has(id)) await stoppingJobs.get(id)
     const execute = async () => {
-      if (removing.has(id) || unloading.has(id)) throw Object.assign(new Error('This model is stopping. Try again when it finishes.'), { statusCode: 409 })
+      if (removing.has(baseModelId(id)) || unloading.has(id)) throw Object.assign(new Error('This model is stopping. Try again when it finishes.'), { statusCode: 409 })
       if (stopping.has(id)) await stoppingJobs.get(id)
       activeRequests.set(id, (activeRequests.get(id) || 0) + 1)
       let worker
@@ -300,16 +334,19 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
       if (requestError) throw requestError
       return result
     }
-    return MODEL_DEFINITIONS[id].purpose === 'embeddings'
+    return definition.purpose === 'embeddings'
       ? executeWithCleanup() : withModelActivity(id, executeWithCleanup)
   }
 
   async function status() {
-    const [selected, selectedTranscription] = await Promise.all([selectedGenerationModel(), selectedTranscriptionModel()])
+    const [selected, selectedTranscription, selectedCaption] = await Promise.all([
+      selectedGenerationModel(), selectedTranscriptionModel(), selectedCaptionModel(),
+    ])
     const models = await Promise.all(Object.values(MODEL_DEFINITIONS).map(async (definition) => {
       const external = externalModels.get(definition.id)
       const externalStatus = external?.status ? await external.status() : null
-      const worker = workers.get(definition.id)
+      const caption = captionRollup(definition.id, { workers, starting, activeRequests, modelActivities })
+      const worker = workers.get(definition.id) || caption.worker
       return {
         id: definition.id,
         name: definition.name,
@@ -319,10 +356,11 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
         selected: definition.purpose === 'generation' ? selected === definition.id
           : definition.purpose === 'transcription' && selectedTranscription === definition.id,
         installed: externalStatus ? Boolean(externalStatus.installed) : await isInstalled(definition),
-        loaded: externalStatus?.loaded ?? workers.has(definition.id),
-        loading: loadingModels.has(definition.id) || starting.has(definition.id) || Boolean(externalStatus?.loading),
-        busy: (activeRequests.get(definition.id) || 0) > 0 || (modelActivities.get(definition.id) || 0) > 0 || Boolean(externalStatus?.busy),
-        requestCount: (activeRequests.get(definition.id) || 0) + (externalStatus?.requestCount || 0),
+        loaded: externalStatus?.loaded ?? Boolean(worker),
+        loading: loadingModels.has(definition.id) || starting.has(definition.id) || caption.loading || Boolean(externalStatus?.loading),
+        busy: (activeRequests.get(definition.id) || 0) > 0 || (modelActivities.get(definition.id) || 0) > 0
+          || caption.busy || Boolean(externalStatus?.busy),
+        requestCount: (activeRequests.get(definition.id) || 0) + caption.requests + (externalStatus?.requestCount || 0),
         memory: externalStatus?.memory || (worker?.memory
           ? { activeBytes: worker.memory.activeBytes || 0,
             cacheBytes: worker.memory.cacheBytes || 0,
@@ -335,12 +373,13 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     return {
       available: isAvailable,
       helperAvailable,
-      keepAliveMs: warmKeepAliveMs,
-      activeModel: activeHeavyModel || [...workers.keys()].find((id) => MODEL_DEFINITIONS[id]?.purpose !== 'embeddings') || null,
+      keepAliveMs: memory.generationIdleMs(),
+      activeModel: baseModelId(activeHeavy.current()),
       installing: [...new Set([...installing, ...models.filter((model) => model.loading).map((model) => model.id)])],
       models,
       selectedGenerationModel: selected,
       selectedTranscriptionModel: selectedTranscription,
+      selectedCaptionModel: selectedCaption,
       downloads: await Promise.all([...new Set([...installing, ...models.filter((model) => model.loading).map((model) => model.id)])]
         .map(async (id) => {
           const external = externalModels.get(id)
@@ -391,8 +430,11 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     if (external?.unload) return withModelActivity(id, async () => external.unload(), { activate: false })
     const operation = async () => {
       if (definition.purpose === 'embeddings') unloading.add(id)
-      try { await stopModel(id); return status() }
-      finally { unloading.delete(id) }
+      try {
+        await stopModel(id)
+        if (isCaptionModelId(id)) await stopModel(captionWorkerKey(id))
+        return status()
+      } finally { unloading.delete(id) }
     }
     return definition.purpose === 'embeddings' ? operation() : withModelActivity(id, operation, { activate: false })
   }
@@ -410,6 +452,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
       const operation = async () => {
         if (definition.purpose === 'embeddings') await waitForRequests(id)
         await stopModel(id)
+        if (isCaptionModelId(id)) await stopModel(captionWorkerKey(id))
         const repoRoot = path.join(cacheRoot, `models--${definition.repository.replaceAll('/', '--')}`)
         await fs.rm(repoRoot, { recursive: true, force: true })
         return status()
@@ -432,41 +475,13 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
     return run('embeddinggemma', 'embed', { input }, 2 * 60_000)
   }
 
-  async function transcribe(audioPath, { signal, modelId = null, onProgress = null } = {}) {
-    const id = modelId || await selectedTranscriptionModel()
-    if (MODEL_DEFINITIONS[id]?.purpose !== 'transcription') throw new Error('The selected MLX model cannot transcribe audio.')
-    let lastPercent = -1
-    return run(id, 'transcribe', { audioPath }, 6 * 60 * 60_000, signal, {
-      unloadAfter: true,
-      onEvent: (event) => {
-        if (event.percent <= lastPercent) return
-        lastPercent = event.percent
-        onProgress?.(event.percent)
-      },
-    })
-  }
-
-  async function diarize(audioPath, { signal, onProgress = null } = {}) {
-    let lastPercent = -1
-    return run(DIARIZATION_MODEL_ID, 'diarize', { audioPath }, 6 * 60 * 60_000, signal, {
-      unloadAfter: true,
-      onEvent: (event) => {
-        if (event.percent <= lastPercent) return
-        lastPercent = event.percent
-        onProgress?.(event.percent)
-      },
-    })
-  }
-
-  async function extractText(imagePath, { signal } = {}) {
-    const definition = modelDefinition(OCR_MODEL_ID)
-    if (!await isInstalled(definition)) throw Object.assign(new Error('Install LightOnOCR in Settings → Models to extract text.'), { statusCode: 409 })
-    const { text } = await run(OCR_MODEL_ID, 'ocr', { imagePath }, OCR_TIMEOUT_MS, signal)
-    return { text: typeof text === 'string' ? text : '', modelId: OCR_MODEL_ID, model: definition.repository, revision: definition.revision }
-  }
+  const { transcribe, diarize, extractText, captionImage } = createMlxTasks({
+    run, isInstalled, modelDefinition, selectedTranscriptionModel, selectedCaptionModel,
+  })
 
   async function close() {
     closed = true
+    memory.monitor.stop()
     for (const id of idleTimers.keys()) stopIdleTimer(id)
     const activeWorkers = new Set([...workers.values(), ...startingWorkers.values()])
     const termination = Promise.all([...activeWorkers].map((worker) => terminateMlxWorker(worker)))
@@ -479,6 +494,6 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   }
 
   return { status, install, load, unload, remove, selectGenerationModel, selectedGenerationModel,
-    selectTranscriptionModel, selectedTranscriptionModel, generate, embed, transcribe, diarize, extractText, close, isBusy: () => [...modelActivities.values()].some((count) => count > 0), withModelActivity, registerExternalModel, keepAliveMs: warmKeepAliveMs,
-    modelDefinitions: MODEL_DEFINITIONS }
+    selectTranscriptionModel, selectedTranscriptionModel, selectCaptionModel, selectedCaptionModel, captionImage, generate, embed, transcribe, diarize, extractText, close, isBusy: () => [...modelActivities.values()].some((count) => count > 0), withModelActivity, registerExternalModel, keepAliveMs: memory.generationIdleMs(),
+    modelDefinitions: MODEL_DEFINITIONS, captionModelIds: CAPTION_MODEL_IDS }
 }

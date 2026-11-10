@@ -142,6 +142,12 @@ for await (const line of lines) {
       await appendLog({ operation: 'ocr', task, model, imagePath: request.imagePath })
       response = { id: request.id, text: control.ocrText ?? '| Bank | Faktisk bankkonto i bank |', memory }
     }
+    else if (request.operation === 'caption' && task !== 'caption') response = { id: request.id, error: 'This helper was started for another task, not caption.', memory }
+    else if (request.operation === 'caption' && control.failCaption) response = { id: request.id, error: 'fixture caption error', memory }
+    else if (request.operation === 'caption') {
+      await appendLog({ operation: 'caption', task, model, imagePath: request.imagePath })
+      response = { id: request.id, text: control.captionText ?? '  A whiteboard\nwith a roadmap.  ', memory }
+    }
     else if (request.operation === 'transcribe' && control.failTranscribe) response = { id: request.id, error: 'fixture transcription error', memory }
     else if (request.operation === 'transcribe') {
       for (const percent of control.transcriptionProgress || []) {

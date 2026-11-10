@@ -159,3 +159,128 @@ test('OCR route extracts text once per image content and honors the cache', asyn
   await fs.symlink(path.join(dataRoot, 'vault', first), path.join(bundleRoot, 'assets', 'link.png'))
   assert.ok([400, 404].includes((await ocr({ path: '/assets/link.png' })).status))
 })
+
+test('caption route describes images once per model, keeps one entry per model, and reports 409 codes', async (context) => {
+  const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-caption-'))
+  const bundleRoot = path.join(dataRoot, 'vault')
+  await fs.mkdir(bundleRoot, { recursive: true })
+  const calls = []
+  let selected = 'gemma4'
+  let failure = null
+  const fakeMlx = {
+    async selectedCaptionModel() { return selected },
+    async captionImage(imagePath, options) {
+      calls.push({ imagePath, signal: options?.signal, modelId: selected })
+      if (failure) throw failure
+      const definition = selected === 'gemma4'
+        ? { repository: 'mlx-community/gemma-4-e4b-it-4bit', revision: '475b9088d29754a3379866cf5aeb6b41acd313c2' }
+        : { repository: 'mlx-community/Qwen3.5-4B-4bit', revision: '0e7ffd5c629ef7719d4cbc04069232580bfa9d9c' }
+      return { text: `A ${selected} caption.`, modelId: selected, model: definition.repository, revision: definition.revision }
+    },
+    async status() { return { available: false, helperAvailable: false, models: [], downloads: [], installing: [] } },
+    async close() {},
+  }
+  const app = await createApp(createRuntime({
+    ...process.env,
+    FOLIO_DATA_ROOT: dataRoot,
+    FOLIO_BUNDLE_ROOT: path.join(dataRoot, 'unused-default-bundle'),
+  }, fakeMlx))
+  const bundle = await app.bundleManager.registry.setup({ name: 'Caption', markdownPath: bundleRoot, source: 'existing' })
+  const server = app.listen(0, '127.0.0.1')
+  await new Promise((resolve, reject) => {
+    server.once('listening', resolve)
+    server.once('error', reject)
+  })
+  const bundleRuntime = app.bundleManager.runtimeFor(bundle)
+  context.after(async () => {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+    await bundleRuntime.embeddingRefresh
+    await fs.rm(dataRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+  })
+  const baseUrl = `http://127.0.0.1:${server.address().port}`
+  const upload = async (name) => {
+    const response = await fetch(`${baseUrl}/api/assets`, {
+      method: 'POST', headers: { 'content-type': 'image/png', 'x-folio-bundle': bundle.id, 'x-folio-filename': name }, body: PNG,
+    })
+    return (await response.json()).path
+  }
+  const caption = (body) => fetch(`${baseUrl}/api/assets/caption`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-folio-bundle': bundle.id }, body: JSON.stringify(body),
+  })
+
+  const first = await upload('first.png')
+  const second = await upload('second.png')
+
+  const fresh = await caption({ path: first })
+  assert.equal(fresh.status, 200)
+  assert.deepEqual(await fresh.json(), { text: 'A gemma4 caption.', cached: false, model: 'gemma4' })
+  assert.equal(calls.length, 1)
+  assert.equal(await fs.realpath(calls[0].imagePath), await fs.realpath(path.join(bundleRoot, first)))
+  const cacheDirectory = path.join(bundleRoot, '.folio', 'caption-cache')
+  const cacheFiles = await fs.readdir(cacheDirectory)
+  assert.equal(cacheFiles.length, 1)
+  const entry = JSON.parse(await fs.readFile(path.join(cacheDirectory, cacheFiles[0]), 'utf8'))
+  assert.equal(entry.version, 1)
+  assert.equal(entry.model, 'gemma4')
+  assert.equal(entry.repository, 'mlx-community/gemma-4-e4b-it-4bit')
+  assert.equal(entry.revision, '475b9088d29754a3379866cf5aeb6b41acd313c2')
+  assert.equal(entry.text, 'A gemma4 caption.')
+  assert.equal(`${entry.sha256}.gemma4.json`, cacheFiles[0])
+  assert.ok(entry.createdAt)
+
+  // Identical bytes under another name hit the cache.
+  const hit = await caption({ path: second })
+  assert.deepEqual(await hit.json(), { text: 'A gemma4 caption.', cached: true, model: 'gemma4' })
+  assert.equal(calls.length, 1)
+
+  // Switching the caption model generates a separate entry; switching back reuses the first one.
+  selected = 'qwen35'
+  const switched = await caption({ path: second })
+  assert.deepEqual(await switched.json(), { text: 'A qwen35 caption.', cached: false, model: 'qwen35' })
+  assert.equal(calls.length, 2)
+  assert.deepEqual((await fs.readdir(cacheDirectory)).sort(), [`${entry.sha256}.gemma4.json`, `${entry.sha256}.qwen35.json`])
+  assert.deepEqual(await (await caption({ path: first })).json(), { text: 'A qwen35 caption.', cached: true, model: 'qwen35' })
+  selected = 'gemma4'
+  assert.deepEqual(await (await caption({ path: first })).json(), { text: 'A gemma4 caption.', cached: true, model: 'gemma4' })
+  assert.equal(calls.length, 2)
+
+  // A legacy single-model entry still counts for the model that made it.
+  const legacyFile = path.join(cacheDirectory, `${entry.sha256}.json`)
+  await fs.writeFile(legacyFile, JSON.stringify({ ...entry, text: 'A legacy caption.' }))
+  await fs.rm(path.join(cacheDirectory, cacheFiles[0]))
+  assert.deepEqual(await (await caption({ path: first })).json(), { text: 'A legacy caption.', cached: true, model: 'gemma4' })
+  selected = 'qwen35'
+  assert.equal((await (await caption({ path: first })).json()).text, 'A qwen35 caption.')
+  await fs.rm(legacyFile)
+  selected = 'gemma4'
+  assert.equal((await (await caption({ path: first })).json()).cached, false)
+  assert.equal(calls.length, 3)
+
+  // A stale revision is regenerated.
+  const staleFile = path.join(cacheDirectory, cacheFiles[0])
+  const current = JSON.parse(await fs.readFile(staleFile, 'utf8'))
+  await fs.writeFile(staleFile, JSON.stringify({ ...current, revision: 'older-revision' }))
+  assert.equal((await (await caption({ path: first })).json()).cached, false)
+  assert.equal(calls.length, 4)
+
+  failure = Object.assign(new Error('Choose a caption model in Settings → Models.'), { statusCode: 409, code: 'CAPTION_MODEL_NOT_SELECTED' })
+  selected = null
+  const notSelected = await caption({ path: first })
+  assert.equal(notSelected.status, 409)
+  assert.deepEqual(await notSelected.json(), { error: 'Choose a caption model in Settings → Models.', code: 'CAPTION_MODEL_NOT_SELECTED' })
+  failure = Object.assign(new Error('Install Gemma 4 E4B in Settings → Models to describe images.'),
+    { statusCode: 409, code: 'CAPTION_MODEL_NOT_INSTALLED', modelId: 'gemma4' })
+  await fs.rm(cacheDirectory, { recursive: true })
+  const notInstalled = await caption({ path: first })
+  assert.equal(notInstalled.status, 409)
+  assert.deepEqual(await notInstalled.json(), {
+    error: 'Install Gemma 4 E4B in Settings → Models to describe images.', code: 'CAPTION_MODEL_NOT_INSTALLED', modelId: 'gemma4',
+  })
+
+  for (const bad of ['/assets/../x.png', '/etc/passwd', '/assets/note.txt', 'assets/x.png', '', undefined]) {
+    assert.equal((await caption({ path: bad })).status, 400, String(bad))
+  }
+  assert.equal((await caption({ path: '/assets/missing.png' })).status, 404)
+  await fs.symlink(path.join(dataRoot, 'vault', first), path.join(bundleRoot, 'assets', 'link.png'))
+  assert.ok([400, 404].includes((await caption({ path: '/assets/link.png' })).status))
+})

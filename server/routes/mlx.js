@@ -12,6 +12,20 @@ export function registerRoutes(app, mlxService, manager, transcriptionService = 
     }
   })
 
+  app.put('/api/mlx/models/caption-selection', async (request, response) => {
+    try {
+      const id = request.body?.id
+      if (id !== null && !mlxService.captionModelIds.includes(id)) {
+        return response.status(400).json({ error: 'Choose a caption model.' })
+      }
+      response.json(await mlxService.selectCaptionModel(id))
+    }
+    catch (error) {
+      const status = Number.isInteger(error.statusCode) ? error.statusCode : 503
+      response.status(status).json({ error: error.message || 'Could not select the caption model.' })
+    }
+  })
+
   app.put('/api/mlx/models/transcription-selection', async (request, response) => {
     try {
       const id = String(request.body?.id || '')

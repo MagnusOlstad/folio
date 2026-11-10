@@ -219,6 +219,20 @@ else
     die "the Gemma 4 compatibility patch does not apply to the pinned mlx-swift-lm source"
 fi
 
+# The vision-language Gemma 4 loader (used for image captions) has the same two
+# defects as the text loader above: its per-layer projection is a custom Module
+# that cannot load quantized weights, and KV-shared tail layers still expect
+# K/V tensors the checkpoint omits. Apply the matching reviewed patch.
+GEMMA4_VLM_PATCH="$EXPERIMENT_DIR/Patches/gemma4-vlm-pinned-3.31.3.patch"
+[[ -f "$GEMMA4_VLM_PATCH" ]] || die "the pinned Gemma 4 vision compatibility patch is missing"
+if patch --dry-run -R --forward -p1 -d "$LOCAL_PACKAGES_DIR/mlx-swift-lm" < "$GEMMA4_VLM_PATCH" >/dev/null 2>&1; then
+    : # already applied in a reusable ignored source tree
+elif patch --dry-run --forward -p1 -d "$LOCAL_PACKAGES_DIR/mlx-swift-lm" < "$GEMMA4_VLM_PATCH" >/dev/null 2>&1; then
+    patch --forward -p1 -d "$LOCAL_PACKAGES_DIR/mlx-swift-lm" < "$GEMMA4_VLM_PATCH"
+else
+    die "the Gemma 4 vision compatibility patch does not apply to the pinned mlx-swift-lm source"
+fi
+
 # EmbeddingGemma's upstream Gemma 3 embedder initializer assigns wrapped
 # submodules through ModuleInfo's guarded setter. Initialize the wrappers
 # directly so the first pinned model load does not hit that fatal setter.

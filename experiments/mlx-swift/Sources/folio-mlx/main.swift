@@ -14,12 +14,17 @@ import MLXAudioSTT
 import MLXAudioVAD
 import FolioMLXProgress
 
-private enum TaskKind: String { case generation, embedding, transcription, diarization, ocr }
+private enum TaskKind: String { case generation, embedding, transcription, diarization, ocr, caption }
 
 private let ocrDefaultMaxTokens = 4096
 // LightOnOCR was trained on ~1540px page renders, so small screenshots must be upscaled (and large
 // ones scaled down) so the longest side is exactly this many pixels; the resize preserves aspect ratio.
 private let ocrLongestEdge: CGFloat = 1540
+
+// Captions only need the gist of an image, so a smaller longest edge keeps vision prefill fast and memory low.
+private let captionDefaultMaxTokens = 200
+private let captionLongestEdge: CGFloat = 896
+private let captionDefaultPrompt = "Describe this image for a personal notes search index. In 2-3 sentences, say what it is (photo, diagram, screenshot, whiteboard...), the main subject, setting and notable objects. Mention key visible words only if important. No preamble."
 
 private struct Message: Decodable {
     let role: String
@@ -351,7 +356,7 @@ private struct FolioMLX {
             let value = arguments.removeFirst()
             switch option {
             case "--task":
-                guard let parsed = TaskKind(rawValue: value) else { throw NSError(domain: "FolioMLX", code: 2, userInfo: [NSLocalizedDescriptionKey: "task must be generation, embedding, transcription, diarization, or ocr"]) }
+                guard let parsed = TaskKind(rawValue: value) else { throw NSError(domain: "FolioMLX", code: 2, userInfo: [NSLocalizedDescriptionKey: "task must be generation, embedding, transcription, diarization, ocr, or caption"]) }
                 task = parsed
             case "--model": modelID = value; modelWasProvided = true
             case "--revision": revision = value; revisionWasProvided = true
@@ -454,22 +459,24 @@ private struct FolioMLX {
         let embedder: EmbedderModelContainer?
         let whisper: WhisperModel?
         var sortformer: SortformerModel?
-        if task == .generation || task == .ocr {
-            log("Loading \(task == .ocr ? "OCR" : "generation") model \(modelID)…")
+        if task == .generation || task == .ocr || task == .caption {
+            let usesVision = task == .ocr || task == .caption
+            log("Loading \(task == .ocr ? "OCR" : (task == .caption ? "caption" : "generation")) model \(modelID)…")
             // Pick the factory explicitly: linking MLXVLM adds its factory to the global
             // registry, which must not change how generation checkpoints are loaded.
             if let modelDirectory {
-                if task == .ocr {
+                if usesVision {
                     generator = try await VLMModelFactory.shared.loadContainer(
                         from: modelDirectory, using: #huggingFaceTokenizerLoader())
                 } else {
                     generator = try await LLMModelFactory.shared.loadContainer(
                         from: modelDirectory, using: #huggingFaceTokenizerLoader())
                 }
-            } else if task == .ocr {
+            } else if usesVision {
                 generator = try await VLMModelFactory.shared.loadContainer(
                     from: #hubDownloader(), using: #huggingFaceTokenizerLoader(),
-                    configuration: ModelConfiguration(id: modelID, revision: revision),
+                    configuration: ModelConfiguration(id: modelID, revision: revision,
+                        extraEOSTokens: task == .caption ? Set(stopTokens(for: modelID)) : []),
                     progressHandler: { progress in writeDownloadProgress(progress) })
             } else {
                 let configuration = ModelConfiguration(id: modelID, revision: revision,
@@ -532,7 +539,7 @@ private struct FolioMLX {
             do {
                 let request = try JSONDecoder().decode(Request.self, from: Data(line.utf8))
                 requestID = request.id
-                switch request.operation ?? (task == .generation ? "generate" : (task == .embedding ? "embed" : (task == .ocr ? "ocr" : (task == .diarization ? "diarize" : "transcribe")))) {
+                switch request.operation ?? (task == .generation ? "generate" : (task == .embedding ? "embed" : (task == .ocr ? "ocr" : (task == .caption ? "caption" : (task == .diarization ? "diarize" : "transcribe"))))) {
                 case "status":
                     writeLine(Response(id: requestID, model: modelID, text: nil, embeddings: nil,
                                        state: "loaded", memory: memoryStatus(), metrics: nil))
@@ -585,6 +592,33 @@ private struct FolioMLX {
                         parameters: GenerateParameters(maxTokens: requestTokens, temperature: 0),
                         noThinking: false, clock: clock)
                     writeLine(generationResponse(id: requestID, model: modelID, generated: generated,
+                                                 coldLoadSeconds: coldLoadSeconds, clock: clock))
+                case "caption":
+                    guard task == .caption, let generator else { throw modelTaskError("caption") }
+                    guard let imagePath = request.imagePath, !imagePath.isEmpty else {
+                        throw NSError(domain: "FolioMLX", code: 16, userInfo: [NSLocalizedDescriptionKey: "imagePath must name a local image file"])
+                    }
+                    let captionURL = URL(fileURLWithPath: imagePath)
+                    var captionIsDirectory: ObjCBool = false
+                    guard FileManager.default.fileExists(atPath: captionURL.path, isDirectory: &captionIsDirectory),
+                          !captionIsDirectory.boolValue else {
+                        throw NSError(domain: "FolioMLX", code: 17, userInfo: [NSLocalizedDescriptionKey: "The selected image file is no longer available."])
+                    }
+                    let captionTokens = request.maxTokens ?? (maxTokensWasProvided ? maxTokens : captionDefaultMaxTokens)
+                    guard captionTokens > 0 else {
+                        throw NSError(domain: "FolioMLX", code: 11, userInfo: [NSLocalizedDescriptionKey: "generation parameters are invalid"])
+                    }
+                    Memory.peakMemory = 0
+                    let captionPrompt = request.prompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                        ? request.prompt! : captionDefaultPrompt
+                    // Greedy decoding with thinking disabled (Qwen 3.5 would otherwise spend the budget reasoning).
+                    let captioned = try await generate(
+                        model: generator, system: nil, prompt: captionPrompt,
+                        images: [.url(captionURL)],
+                        processing: UserInput.Processing(resize: CGSize(width: captionLongestEdge, height: captionLongestEdge)),
+                        parameters: GenerateParameters(maxTokens: captionTokens, temperature: 0),
+                        noThinking: true, clock: clock)
+                    writeLine(generationResponse(id: requestID, model: modelID, generated: captioned,
                                                  coldLoadSeconds: coldLoadSeconds, clock: clock))
                 case "embed":
                     guard task == .embedding, let embedder else { throw modelTaskError("embedding") }

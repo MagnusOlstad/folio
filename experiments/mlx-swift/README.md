@@ -12,7 +12,10 @@ The helper requires Apple Silicon and macOS 14 or newer. It uses MLX Swift
 E4B support backport is in `Patches/gemma4-text-pinned-3.31.3.patch`. The
 EmbeddingGemma initializer fix is in
 `Patches/embeddinggemma-moduleinfo-pinned-3.31.3.patch`. The LightOnOCR
-support is in `Patches/mistral3-lightonocr-pinned-3.31.3.patch`. All three are
+support is in `Patches/mistral3-lightonocr-pinned-3.31.3.patch`. The vision-language
+Gemma 4 loader used for image captions gets the same two fixes (a plain quantizable
+`Linear` per-layer projection and no K/V tensors on KV-shared layers) from
+`Patches/gemma4-vlm-pinned-3.31.3.patch`. All four are
 applied to ignored source copies during the build and do not alter upstream
 package checkouts. It initializes `ModuleInfo` children through the supported module
 update API and defines this checkpoint's projection head as 768→3072→768. The
@@ -109,7 +112,7 @@ DEVELOPER_DIR="/path/to/Xcode.app/Contents/Developer" npm run build:mlx
 ## Helper protocol
 
 The Node service starts one helper process per model with `--task generation`,
-`--task embedding`, `--task transcription`, or `--task ocr`, plus the pinned
+`--task embedding`, `--task transcription`, `--task ocr`, or `--task caption`, plus the pinned
 repository and revision. OCR loads through `VLMModelFactory` (generation keeps
 using `LLMModelFactory` explicitly, so linking `MLXVLM` does not change how
 generation checkpoints load); without `--model-directory` it downloads the
@@ -130,6 +133,12 @@ Run the bounded reader's short, exact, trailing, stereo first-channel, and
 15/60-minute frame-sequencing checks on macOS with
 `Scripts/test-audio-window.sh`. The integration build also exercises the
 upstream `resampleAudio` path used by Whisper.
+
+Caption requests (`{"id", "operation": "caption", "imagePath": "/absolute/path.png",
+"prompt"?, "maxTokens"?}`) run on the installed Gemma 4 E4B or Qwen 3.5 4B snapshot
+through `VLMModelFactory`. They use greedy decoding, thinking disabled, 200 generated
+tokens by default, a default "describe this image for a notes search index" prompt, and
+an 896 px longest edge. The response shape matches OCR.
 
 The helper reports a JSON `ready` event on stdout and then accepts one JSON
 object per stdin line. Generation requests provide a system and user message;

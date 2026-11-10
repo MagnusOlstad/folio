@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import express from 'express'
 import { OCR_MODEL_ID, OCR_MODELS } from '../mlx/ocr-models.js'
+import { captionCacheFileName, captionModelRevision } from '../mlx/caption-models.js'
 
 const MAX_ASSET_BYTES = 20 * 1024 * 1024
 const ASSET_TYPES = new Map([
@@ -56,6 +57,20 @@ function filenameSlug(slugify, header) {
 export const OCR_MODEL_REVISION = OCR_MODELS[OCR_MODEL_ID].revision
 const OCR_CACHE_VERSION = 1
 
+const CAPTION_CACHE_VERSION = 1
+
+// A caption is valid only for the currently selected caption model at its pinned revision.
+async function readCaptionCache(file, sha256, modelId) {
+  try {
+    const entry = JSON.parse(await fs.readFile(file, 'utf8'))
+    if (entry?.version === CAPTION_CACHE_VERSION && entry.sha256 === sha256 && entry.model === modelId
+      && entry.revision === captionModelRevision(modelId) && typeof entry.text === 'string' && entry.text) return entry
+  } catch {
+    // Missing or corrupt cache entries are regenerated.
+  }
+  return null
+}
+
 function parseAssetPath(requested) {
   const match = /^\/assets\/([A-Za-z0-9][A-Za-z0-9._-]*)$/.exec(String(requested || ''))
   const type = match ? EXTENSION_TYPES.get(path.extname(match[1]).toLowerCase()) : null
@@ -78,6 +93,40 @@ export function registerRoutes(app, runtime) {
   // The runtime is a per-request proxy, so read bundle-specific values lazily.
   const assetsDirectory = () => path.join(typeof runtime.getBundleRoot === 'function' ? runtime.getBundleRoot() : runtime.bundleRoot, 'assets')
   const assertNoBundleSymlinks = (...args) => runtime.assertNoBundleSymlinks(...args)
+  const bundleRoot = () => (typeof runtime.getBundleRoot === 'function' ? runtime.getBundleRoot() : runtime.bundleRoot)
+
+  // Validates the requested asset and returns its path and content hash.
+  async function hashAsset(requested) {
+    const filePath = path.join(assetsDirectory(), parseAssetPath(requested))
+    await assertNoBundleSymlinks(filePath)
+    const stat = await fs.stat(filePath)
+    if (!stat.isFile()) throw httpError(404, 'Asset not found.')
+    const sha256 = crypto.createHash('sha256').update(await fs.readFile(filePath)).digest('hex')
+    return { filePath, sha256 }
+  }
+
+  // Aborts the model request when the client disconnects before the response finished.
+  function abortOnClose(response) {
+    const controller = new AbortController()
+    response.on('close', () => {
+      if (!response.writableFinished) controller.abort()
+    })
+    return controller
+  }
+
+  // Cache write failures never discard a result; a successful write makes the text searchable.
+  async function writeCacheEntry(cacheDirectory, cacheFile, sha256, entry) {
+    try {
+      await assertNoBundleSymlinks(cacheDirectory, { allowMissing: true })
+      await fs.mkdir(cacheDirectory, { recursive: true })
+      const temporary = path.join(cacheDirectory, `.${sha256}.${crypto.randomBytes(4).toString('hex')}.tmp`)
+      await fs.writeFile(temporary, JSON.stringify(entry))
+      await fs.rename(temporary, cacheFile)
+      refreshIndexInBackground()
+    } catch {
+      // A cache write failure should not discard the result.
+    }
+  }
 
   // New OCR text becomes searchable once the index is rebuilt; this never delays or fails a response.
   function refreshIndexInBackground() {
@@ -150,18 +199,10 @@ export function registerRoutes(app, runtime) {
   })
 
   app.post('/api/assets/ocr', async (request, response, next) => {
-    const controller = new AbortController()
-    response.on('close', () => {
-      if (!response.writableFinished) controller.abort()
-    })
+    const controller = abortOnClose(response)
     try {
-      const name = parseAssetPath(request.body?.path)
-      const filePath = path.join(assetsDirectory(), name)
-      await assertNoBundleSymlinks(filePath)
-      const stat = await fs.stat(filePath)
-      if (!stat.isFile()) throw httpError(404, 'Asset not found.')
-      const sha256 = crypto.createHash('sha256').update(await fs.readFile(filePath)).digest('hex')
-      const cacheDirectory = path.join(typeof runtime.getBundleRoot === 'function' ? runtime.getBundleRoot() : runtime.bundleRoot, '.folio', 'ocr-cache')
+      const { filePath, sha256 } = await hashAsset(request.body?.path)
+      const cacheDirectory = path.join(bundleRoot(), '.folio', 'ocr-cache')
       const cacheFile = path.join(cacheDirectory, `${sha256}.json`)
 
       const cached = await readOcrCache(cacheFile, sha256)
@@ -172,29 +213,64 @@ export function registerRoutes(app, runtime) {
 
       const result = await runtime.mlxService.extractText(filePath, { signal: controller.signal })
       if (controller.signal.aborted) return
-      const entry = {
+      await writeCacheEntry(cacheDirectory, cacheFile, sha256, {
         version: OCR_CACHE_VERSION,
         sha256,
         model: result.model,
         revision: result.revision,
         text: result.text,
         createdAt: new Date().toISOString(),
-      }
-      try {
-        await assertNoBundleSymlinks(cacheDirectory, { allowMissing: true })
-        await fs.mkdir(cacheDirectory, { recursive: true })
-        const temporary = path.join(cacheDirectory, `.${sha256}.${crypto.randomBytes(4).toString('hex')}.tmp`)
-        await fs.writeFile(temporary, JSON.stringify(entry))
-        await fs.rename(temporary, cacheFile)
-        refreshIndexInBackground()
-      } catch {
-        // A cache write failure should not discard the extracted text.
-      }
+      })
       response.json({ text: result.text, cached: false })
     } catch (error) {
       if (error.code === 'ENOENT') return response.status(404).json({ error: 'Asset not found.' })
       if (error.status) return response.status(error.status).json({ error: error.message })
       if (error.statusCode === 409) return response.status(409).json({ error: error.message })
+      if (controller.signal.aborted) return
+      next(error)
+    }
+  })
+
+  app.post('/api/assets/caption', async (request, response, next) => {
+    const controller = abortOnClose(response)
+    try {
+      const { filePath, sha256 } = await hashAsset(request.body?.path)
+      const cacheDirectory = path.join(bundleRoot(), '.folio', 'caption-cache')
+
+      // Selection errors (409) surface before any cache lookup, so a cache never hides "no model chosen".
+      const selected = await runtime.mlxService.selectedCaptionModel()
+      // Entries are per model; a legacy single-model `<sha>.json` still counts when it was made by the selected model.
+      const cached = selected
+        ? await readCaptionCache(path.join(cacheDirectory, captionCacheFileName(sha256, selected)), sha256, selected)
+          || await readCaptionCache(path.join(cacheDirectory, `${sha256}.json`), sha256, selected)
+        : null
+      if (cached) {
+        response.json({ text: cached.text, cached: true, model: cached.model })
+        return
+      }
+
+      const result = await runtime.mlxService.captionImage(filePath, { signal: controller.signal })
+      if (controller.signal.aborted) return
+      await writeCacheEntry(cacheDirectory, path.join(cacheDirectory, captionCacheFileName(sha256, result.modelId)), sha256, {
+        version: CAPTION_CACHE_VERSION,
+        sha256,
+        model: result.modelId,
+        repository: result.model,
+        revision: result.revision,
+        text: result.text,
+        createdAt: new Date().toISOString(),
+      })
+      response.json({ text: result.text, cached: false, model: result.modelId })
+    } catch (error) {
+      if (error.code === 'ENOENT') return response.status(404).json({ error: 'Asset not found.' })
+      if (error.status) return response.status(error.status).json({ error: error.message })
+      if (error.statusCode === 409) {
+        return response.status(409).json({
+          error: error.message,
+          ...(error.code ? { code: error.code } : {}),
+          ...(error.modelId ? { modelId: error.modelId } : {}),
+        })
+      }
       if (controller.signal.aborted) return
       next(error)
     }

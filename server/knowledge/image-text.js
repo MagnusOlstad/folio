@@ -3,8 +3,10 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 import { OCR_MODEL_ID, OCR_MODELS } from '../mlx/ocr-models.js'
+import { CAPTION_MODEL_IDS, captionCacheFileName, captionModelRevision } from '../mlx/caption-models.js'
 
 const OCR_CACHE_VERSION = 1
+const CAPTION_CACHE_VERSION = 1
 const MAX_IMAGES_PER_DOCUMENT = 24
 const MAX_IMAGE_TEXT_CHARS = 40_000
 const MAX_MEMOIZED_HASHES = 5_000
@@ -14,14 +16,29 @@ const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp'])
 // Hashing is the expensive part of a reindex, so remember it per file version.
 const hashMemo = new Map()
 
-/** Mirrors the client cleaner in src/features/workspace/model/image-ocr.ts. */
+const PLACEHOLDER_IMAGE = /!?\[[^\]\n]*\]\(\s*(?:\.\/)?(?:image|img)[_-]?\d+\.(?:png|jpe?g|gif|webp)\s*\)/gi
+const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&nbsp;': ' ' }
+
+/**
+ * Index-only counterpart of cleanExtractedText in src/features/workspace/model/image-ocr.ts: drops
+ * image placeholders and flattens HTML table markup to `a | b` rows so the tags are not embedded.
+ */
 export function cleanOcrText(text) {
-  const normalized = String(text ?? '').replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '')
+  const normalized = String(text ?? '').replace(/\r\n?/g, '\n').replace(PLACEHOLDER_IMAGE, '').replace(/[ \t]+$/gm, '')
   const withoutWrappers = normalized.replace(
     /^<table>\n([\s\S]*?)\n<\/table>$/gm,
     (match, inner) => (/<tr[\s>]/i.test(inner) ? match : inner),
   )
-  return withoutWrappers
+  const flattened = withoutWrappers.replace(/<table\b[^>]*>[\s\S]*?<\/table>/gi, (table) => table
+    .replace(/<\/t[dh]>\s*(?=<t[dh]\b)/gi, ' | ')
+    .replace(/<\/tr>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(?:amp|lt|gt|quot|#39|nbsp);/g, (entity) => ENTITIES[entity])
+    .replace(/[ \t]+/g, ' ')
+    .replace(/^ +| +$/gm, '')
+    .replace(/\n{2,}/g, '\n'))
+  return flattened
     .replace(/^### [A-Za-z]+ - .*\n\*Type: [^*\n]+\*\n(?:\n)?/gm, '')
     .replace(/^\n+|\n+$/g, '')
 }
@@ -87,6 +104,28 @@ async function cachedText(cacheDirectory, sha256, revision) {
   return ''
 }
 
+async function readCaptionEntry(file, sha256) {
+  try {
+    const entry = JSON.parse(await fs.readFile(file, 'utf8'))
+    if (entry?.version === CAPTION_CACHE_VERSION && entry.sha256 === sha256 && CAPTION_MODEL_IDS.includes(entry.model)
+      && entry.revision === captionModelRevision(entry.model) && typeof entry.text === 'string') return entry
+  } catch {
+    // Missing or unreadable cache entries simply contribute no description.
+  }
+  return null
+}
+
+// A description is searchable if any caption model produced it at that model's pinned revision.
+// Per-model files and the legacy single-model `<sha>.json` are all considered; the newest wins.
+async function cachedCaption(cacheDirectory, sha256) {
+  const files = [...CAPTION_MODEL_IDS.map((id) => captionCacheFileName(sha256, id)), `${sha256}.json`]
+  const entries = (await Promise.all(files.map((name) => readCaptionEntry(path.join(cacheDirectory, name), sha256))))
+    .filter(Boolean)
+  const createdAt = (entry) => Date.parse(entry.createdAt) || 0
+  const newest = entries.reduce((best, entry) => (!best || createdAt(entry) > createdAt(best) ? entry : best), null)
+  return newest ? newest.text.replace(/\s+/g, ' ').trim() : ''
+}
+
 /**
  * Collects cached OCR text for the images each note embeds. The result is index-only text:
  * Markdown files and `record.content` are never changed.
@@ -94,6 +133,7 @@ async function cachedText(cacheDirectory, sha256, revision) {
 export async function collectImageText(documents, { bundleRoot, assertNoBundleSymlinks, revision = OCR_MODELS[OCR_MODEL_ID].revision }) {
   const result = new Map()
   const cacheDirectory = path.join(bundleRoot, '.folio', 'ocr-cache')
+  const captionDirectory = path.join(bundleRoot, '.folio', 'caption-cache')
   const assetsDirectory = path.join(bundleRoot, 'assets')
   const byName = new Map()
 
@@ -103,11 +143,24 @@ export async function collectImageText(documents, { bundleRoot, assertNoBundleSy
         try {
           const filePath = path.join(assetsDirectory, name)
           await assertNoBundleSymlinks(filePath)
-          await assertNoBundleSymlinks(cacheDirectory)
           const stat = await fs.stat(filePath)
           if (!stat.isFile()) return null
           const sha256 = await fileSha256(filePath, stat)
-          return { sha256, text: await cachedText(cacheDirectory, sha256, revision) }
+          let text = ''
+          try {
+            await assertNoBundleSymlinks(cacheDirectory)
+            text = await cachedText(cacheDirectory, sha256, revision)
+          } catch {
+            // A missing or unsafe OCR cache leaves the image with its description only.
+          }
+          let caption = ''
+          try {
+            await assertNoBundleSymlinks(captionDirectory)
+            caption = await cachedCaption(captionDirectory, sha256)
+          } catch {
+            // A missing or unsafe caption cache leaves the image with OCR text only.
+          }
+          return { sha256, text, caption }
         } catch {
           return null
         }
@@ -121,9 +174,10 @@ export async function collectImageText(documents, { bundleRoot, assertNoBundleSy
     const blocks = []
     for (const link of assetImageLinks(document.parsed?.content ?? '').slice(0, MAX_IMAGES_PER_DOCUMENT)) {
       const asset = await textForAsset(link.name)
-      if (!asset?.text || seen.has(asset.sha256)) continue
+      if (!asset || (!asset.text && !asset.caption) || seen.has(asset.sha256)) continue
       seen.add(asset.sha256)
-      blocks.push(`Image text (${link.alt}):\n${asset.text}`)
+      if (asset.text) blocks.push(`Image text (${link.alt}):\n${asset.text}`)
+      if (asset.caption) blocks.push(`Image description (${link.alt}):\n${asset.caption}`)
     }
     if (blocks.length) result.set(document.id, blocks.join('\n\n').slice(0, MAX_IMAGE_TEXT_CHARS))
   }
