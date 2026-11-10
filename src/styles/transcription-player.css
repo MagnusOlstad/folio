@@ -380,22 +380,29 @@ button.transcription-row-main:focus-visible { outline: 2px solid var(--acid); ou
 .player-now-head time { margin-left: auto; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
 .player-now-current { max-height: 10.5em; overflow-y: auto; color: var(--ink); font-size: 13px; line-height: 1.5; overscroll-behavior: contain; }
 
-.player-reassign { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; }
+.player-reassign { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 6px; color: var(--muted); font-size: 10px; }
 
 .player-reassign-trigger {
-  padding: 2px 0;
-  border: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
   color: var(--muted);
   background: transparent;
   font: inherit;
-  font-size: 11px;
-  text-decoration: underline dotted;
-  text-underline-offset: 3px;
+  font-size: 10px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
+.player-reassign-trigger .transcription-icon { flex: none; }
 .player-reassign-trigger:hover:not(:disabled),
-.player-reassign-trigger:focus-visible { color: var(--ink); }
+.player-reassign-trigger:focus-visible,
+.player-reassign-trigger[aria-pressed="true"] { color: var(--ink); }
+.player-reassign-trigger[aria-pressed="true"] { border-color: var(--acid); }
 .player-note { color: var(--muted); font-size: 10px; }
 .player-reassign-trigger:disabled { opacity: 0.5; cursor: default; }
 
@@ -405,6 +412,7 @@ button.transcription-row-main:focus-visible { outline: 2px solid var(--acid); ou
   color: var(--ink);
   background: transparent;
   font: inherit;
+  font-size: inherit;
   text-decoration: underline dotted;
   text-underline-offset: 3px;
   cursor: pointer;
