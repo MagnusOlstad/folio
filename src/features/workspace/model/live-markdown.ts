@@ -15,14 +15,17 @@ import {
 } from "@codemirror/view";
 import type { MutableRefObject } from "react";
 import { assetUrl, resolveAssetHref } from "../../../lib/assets.ts";
+import type { ImageCaptionActions } from "./image-caption-actions.ts";
 import { createImageFrame, isImageToolbarEvent } from "./image-toolbar.ts";
 import { parseImageAlt } from "./image-size.ts";
+import { addVariableDecorations } from "./live-markdown-variables.ts";
 import { parseTable, renderTable, type ParsedTable } from "./table-model.ts";
 
 export type LiveMarkdownCallbacks = {
   onOpenLink?: (href: string) => void;
   onToggleTask?: (lineNumber: number, checked: boolean) => void | Promise<void>;
   onError?: (message: string) => void;
+  captionActions?: ImageCaptionActions | null;
 };
 
 export type LiveMarkdownSelection = { from: number; to: number };
@@ -160,6 +163,7 @@ class ImageWidget extends WidgetType {
       path: this.path,
       width: this.width,
       onError: (message) => this.callbacks.current.onError?.(message),
+      captionActions: this.callbacks.current.captionActions,
     });
   }
 
@@ -565,6 +569,7 @@ function buildDecorations(
     if (/^```/.test(text)) addHidden(ranges, line.from, line.to, !reveal(line.from, line.to));
   }
   addLinkDecorations(ranges, markdownLinks(state), reveal);
+  addVariableDecorations(ranges, state, reveal);
   addImageDecorations(ranges, state, reveal, configuration.callbacks);
   const replacedTables = tableWidgetDecorations(state, reveal);
   // Marks, hidden ranges and images must not overlap a replaced table.

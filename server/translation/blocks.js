@@ -24,11 +24,13 @@ export function hashBlockText(text) {
 }
 
 const PROTECTED_PATTERNS = [
+  /^[ \t]*[A-Za-z][A-Za-z0-9_-]{0,63}::[ \t]+\S.*$/gm, // note variable definitions (key:: value)
   /(`+)[\s\S]*?\1/g, // inline code
   /!\[[^\]\n]*\]\([^)\n]*\)/g, // image references
   /\[\[[^\]\n]+\]\]/g, // wikilinks
   /\]\([^)\n]*\)/g, // link targets
   /https?:\/\/[^\s<>)\]]+/g, // bare URLs
+  /\{\{[ \t]*[A-Za-z][A-Za-z0-9_-]{0,63}[ \t]*\}\}/g, // note variable references
 ]
 
 export function placeholderToken(index) {

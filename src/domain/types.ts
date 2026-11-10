@@ -156,8 +156,13 @@ export type DesktopUpdateState = {
   percent: number | null;
   error: string | null;
 };
-export type MlxModelId = "gemma4" | "qwen35" | "llama32" | "embeddinggemma" | "whisper" | "whisperlarge" | "lightonocr";
+export type MlxModelId = "gemma4" | "qwen35" | "llama32" | "embeddinggemma" | "whisper" | "whisperlarge" | "sortformer" | "lightonocr";
 export type MlxTranscriptionModelId = "whisper" | "whisperlarge";
+export const MLX_CAPTION_MODEL_IDS = ["gemma4", "qwen35"] as const;
+export type MlxCaptionModelId = (typeof MLX_CAPTION_MODEL_IDS)[number];
+export function isMlxCaptionModelId(value: unknown): value is MlxCaptionModelId {
+  return (MLX_CAPTION_MODEL_IDS as readonly unknown[]).includes(value);
+}
 export const MLX_GENERATION_MODEL = { id: "gemma4", name: "Gemma 4 E4B" } as const satisfies {
   id: MlxModelId;
   name: string;
@@ -165,7 +170,7 @@ export const MLX_GENERATION_MODEL = { id: "gemma4", name: "Gemma 4 E4B" } as con
 export type MlxModelStatus = {
   id: MlxModelId;
   name: string;
-  purpose: "generation" | "embeddings" | "transcription" | "ocr";
+  purpose: "generation" | "embeddings" | "transcription" | "diarization" | "ocr";
   downloadSizeBytes: number;
   downloadSizeIsEstimate: boolean;
   selected: boolean;
@@ -190,6 +195,8 @@ export type MlxStatus = {
   installing: MlxModelId[];
   selectedGenerationModel: MlxModelId;
   selectedTranscriptionModel?: MlxTranscriptionModelId;
+  /** Model that writes image descriptions, or null when none is chosen. */
+  selectedCaptionModel?: MlxCaptionModelId | null;
   downloads: { id: MlxModelId; progress: MlxDownloadProgress | null }[];
   models: MlxModelStatus[];
 };

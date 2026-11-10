@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import type { DesktopUpdateState, MlxModelId, MlxStatus, VersionInfo } from "../../domain/types.ts";
-import { selectedWorkspaceModelCatalog, formatModelBytes } from "../workspace/model/model-catalog.ts";
+import { selectedWorkspaceModelCatalog, formatModelBytes, workspaceModelPurpose } from "../workspace/model/model-catalog.ts";
 import type { SettingsCategory } from "../settings/model/settings-category.ts";
 import { useModelPanelCollapse } from "../workspace/hooks/useModelPanelCollapse.ts";
 import { ModelDownloadProgress } from "../workspace/components/ModelDownloadProgress.tsx";
@@ -172,7 +172,7 @@ export function MlxModelStatusPanel({
             const launchMemory = formatModelBytes(model?.downloadSizeBytes ?? definition.bytes);
             const name = model?.name || definition.name;
             const modelState = !mlxStatus ? "Checking status"
-              : loading ? download?.phase === "loading" ? "Loading" : download?.phase === "downloading" || (acting && mlxAction === "install") ? "Downloading" : acting && mlxAction === "unload" ? "Unloading" : acting && mlxAction === "remove" ? "Removing" : acting && (mlxAction === "select" || mlxAction === "select-transcription") ? "Selecting" : "Loading"
+              : loading ? download?.phase === "loading" ? "Loading" : download?.phase === "downloading" || (acting && mlxAction === "install") ? "Downloading" : acting && mlxAction === "unload" ? "Unloading" : acting && mlxAction === "remove" ? "Removing" : acting && (mlxAction === "select" || mlxAction === "select-transcription" || mlxAction === "select-caption") ? "Selecting" : "Loading"
               : !available ? "Unavailable"
               : busy ? "In use"
               : loaded ? "Running"
@@ -197,7 +197,7 @@ export function MlxModelStatusPanel({
                 onClick={() => installed && available ? onToggleMlxModel(id, loaded) : onOpenSettings?.("models")}
               >
                 <span className="model-orbit" aria-hidden="true"><span className="model-blob" /><span className="model-blob-core" /></span>
-                <span className="mlx-model-heading"><strong title={name}>{definition.gridName ?? name}</strong><span>{definition.purpose}{model?.selected ? " · Selected" : ""}</span></span>
+                <span className="mlx-model-heading"><strong title={name}>{definition.gridName ?? name}</strong><span>{workspaceModelPurpose(definition, mlxStatus)}{model?.selected ? " · Selected" : ""}</span></span>
                 <span className={`mlx-model-state${loaded ? " online" : ""}`}><span className="model-state-mark" aria-hidden="true">{loaded || loading ? "▶" : installed ? "■" : "↓"}</span>{modelState}{downloadPercent}</span>
                 <span className="mlx-model-details" id={`model-details-${id}`}>
                   {memory ? <span title={`Active memory ${formatModelBytes(memory.activeBytes)} · ${formatModelBytes(memory.cacheBytes)} allocator cache · ${formatModelBytes(memory.peakResidentBytes)} peak process`}>{formatModelBytes(memory.activeBytes)} active</span>

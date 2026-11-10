@@ -29,7 +29,7 @@ export async function installationProgress({ cacheRoot, definition, installing, 
   const installed = await isInstalled(definition)
   const nativeProgress = worker?.downloadProgress
   if (nativeProgress) downloadedBytes = Math.max(downloadedBytes, nativeProgress.downloadedBytes)
-  const totalBytes = definition.purpose === 'transcription'
+  const totalBytes = definition.purpose === 'transcription' || definition.purpose === 'diarization'
     ? definition.downloadSizeBytes
     : nativeProgress?.totalBytes || definition.downloadSizeBytes
   const percent = installed ? 100 : Math.min(99, Math.floor((downloadedBytes / totalBytes) * 100))

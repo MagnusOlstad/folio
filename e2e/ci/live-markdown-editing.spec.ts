@@ -632,3 +632,55 @@ test("selecting text in the OCR preview keeps the panel and the editor selection
   expect(ocrText).toContain(copied.trim());
   await expect(preview).toBeVisible();
 });
+
+test("describing an image shows a preview and can use it as alt text", async ({ page }) => {
+  const description = "A tabby cat asleep on a grey sofa.";
+  let requestedPath = "";
+  await page.route("**/api/assets/caption", (route) => {
+    requestedPath = (route.request().postDataJSON() as { path: string }).path;
+    return route.fulfill({ json: { text: description, cached: true, model: "gemma4" } });
+  });
+  await openSeededNote(page, "Start Here");
+  const editor = liveEditor(page, "Start Here");
+  await editor.click();
+  await page.keyboard.press(`${modifier}+End`);
+  await page.keyboard.insertText("\n\n![shot|240](/assets/caption-e2e-alt.png)\n\nafter the image");
+  await page.keyboard.press(`${modifier}+End`);
+
+  const frame = editor.locator(".cm-live-markdown-image-frame").filter({ has: page.locator('img[src*="caption-e2e-alt"]') });
+  await frame.hover();
+  await frame.getByRole("button", { name: "Describe image" }).click();
+  const preview = editor.locator(".cm-live-markdown-caption-preview");
+  await expect(preview.locator(".cm-live-markdown-caption-text")).toHaveText(description);
+  await expect(preview).toContainText("(cached)");
+  expect(requestedPath).toBe("/assets/caption-e2e-alt.png");
+
+  await preview.getByRole("button", { name: "Use as alt text" }).click();
+  await expect(preview).toHaveCount(0);
+  const image = frame.locator("img");
+  await expect(image).toHaveAttribute("alt", description);
+  await expect(image).toHaveCSS("width", "240px");
+});
+
+test("describing an image without a caption model points to Settings", async ({ page }) => {
+  await page.route("**/api/assets/caption", (route) =>
+    route.fulfill({
+      status: 409,
+      json: { error: "Choose an image description model in Settings.", code: "CAPTION_MODEL_NOT_SELECTED" },
+    }),
+  );
+  await openSeededNote(page, "Start Here");
+  const editor = liveEditor(page, "Start Here");
+  await editor.click();
+  await page.keyboard.press(`${modifier}+End`);
+  await page.keyboard.insertText("\n\n![shot](/assets/caption-e2e-blocked.png)\n\nafter the image");
+  await page.keyboard.press(`${modifier}+End`);
+
+  const frame = editor.locator(".cm-live-markdown-image-frame").filter({ has: page.locator('img[src*="caption-e2e-blocked"]') });
+  await frame.hover();
+  await frame.getByRole("button", { name: "Describe image" }).click();
+  const panel = editor.locator(".cm-live-markdown-caption-preview");
+  await expect(panel).toContainText("Settings → Models");
+  await panel.getByRole("button", { name: "Open Settings → Models" }).click();
+  await expect(page.getByRole("group", { name: "Image descriptions" })).toBeVisible();
+});

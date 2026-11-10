@@ -26,7 +26,7 @@ app.get('/api/status', async (_request, response) => {
     online: modelStatus.available && modelStatus.helperAvailable,
     classifierModel: selectedModelName, answerModel: selectedModelName, answerModels: [selectedModelName], embedModel, configuredModels, missingModels,
     installingModels: modelStatus.installing, installed, running,
-    warmKeepAlive: `${Math.floor(warmKeepAliveMs / 60_000)}m`, askContextLength, embeddingCoverage,
+    warmKeepAlive: `${Math.floor((mlxService.keepAliveMs ?? warmKeepAliveMs) / 60_000)}m`, askContextLength, embeddingCoverage,
   })
   if (models.find((model) => model.id === 'embeddinggemma')?.loaded
     && (embeddingCoverage.conceptsEmbedded < embeddingCoverage.conceptsTotal

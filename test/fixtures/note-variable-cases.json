@@ -1,0 +1,79 @@
+[
+  {
+    "name": "basic definition and reference",
+    "input": "speaker1:: Kari\n\n**{{speaker1}}** [00:04]\nHello",
+    "definitions": [["speaker1", "Kari"]],
+    "resolved": "speaker1:: Kari\n\n**Kari** [00:04]\nHello",
+    "display": "speaker1: Kari\n\n**Kari** [00:04]\nHello"
+  },
+  {
+    "name": "keys are case-insensitive and spacing in braces is allowed",
+    "input": "Name:: Ola\n{{name}} {{ NAME }} {{  nAmE}}",
+    "definitions": [["name", "Ola"]],
+    "resolved": "Name:: Ola\nOla Ola Ola",
+    "display": "Name: Ola\nOla Ola Ola"
+  },
+  {
+    "name": "first definition wins",
+    "input": "a:: one\na:: two\nA:: three\n{{a}}",
+    "definitions": [["a", "one"]],
+    "resolved": "a:: one\na:: two\nA:: three\none",
+    "display": "a: one\na: two\nA: three\none"
+  },
+  {
+    "name": "undefined references are left as written",
+    "input": "a:: x\n{{b}} {{ c }} {{a}}",
+    "definitions": [["a", "x"]],
+    "resolved": "a:: x\n{{b}} {{ c }} x",
+    "display": "a: x\n{{b}} {{ c }} x"
+  },
+  {
+    "name": "frontmatter is ignored",
+    "input": "---\ntitle:: Hidden\nid: 1\n---\n{{title}}",
+    "definitions": [],
+    "resolved": "---\ntitle:: Hidden\nid: 1\n---\n{{title}}",
+    "display": "---\ntitle:: Hidden\nid: 1\n---\n{{title}}"
+  },
+  {
+    "name": "fenced code is ignored",
+    "input": "a:: x\n```\nb:: y\n{{a}}\n```\n~~~js\n{{a}}\n~~~\n{{a}} {{b}}",
+    "definitions": [["a", "x"]],
+    "resolved": "a:: x\n```\nb:: y\n{{a}}\n```\n~~~js\n{{a}}\n~~~\nx {{b}}",
+    "display": "a: x\n```\nb:: y\n{{a}}\n```\n~~~js\n{{a}}\n~~~\nx {{b}}"
+  },
+  {
+    "name": "inline code is ignored",
+    "input": "a:: x\n`{{a}}` {{a}} ``{{a}}`` {{a}}",
+    "definitions": [["a", "x"]],
+    "resolved": "a:: x\n`{{a}}` x ``{{a}}`` x",
+    "display": "a: x\n`{{a}}` x ``{{a}}`` x"
+  },
+  {
+    "name": "CRLF input",
+    "input": "a:: Kari\r\nHi {{a}}\r\n",
+    "definitions": [["a", "Kari"]],
+    "resolved": "a:: Kari\r\nHi Kari\r\n",
+    "display": "a: Kari\r\nHi Kari\r\n"
+  },
+  {
+    "name": "values containing :: and {{ are literal",
+    "input": "a:: x:: y\nb:: {{a}} and {{\nc:: {{b}}\n{{a}} | {{b}} | {{c}}",
+    "definitions": [["a", "x:: y"], ["b", "{{a}} and {{"], ["c", "{{b}}"]],
+    "resolved": "a:: x:: y\nb:: {{a}} and {{\nc:: {{b}}\nx:: y | {{a}} and {{ | {{b}}",
+    "display": "a: x:: y\nb: {{a}} and {{\nc: {{b}}\nx:: y | {{a}} and {{ | {{b}}"
+  },
+  {
+    "name": "lines that are not definitions",
+    "input": "a::b\n:: x\n1a:: x\nword a:: x\na:: \n{{a}}",
+    "definitions": [],
+    "resolved": "a::b\n:: x\n1a:: x\nword a:: x\na:: \n{{a}}",
+    "display": "a::b\n:: x\n1a:: x\nword a:: x\na:: \n{{a}}"
+  },
+  {
+    "name": "indented definition with trailing whitespace",
+    "input": "  \tk-1_x::\t Value with  spaces  \n{{k-1_x}}",
+    "definitions": [["k-1_x", "Value with  spaces"]],
+    "resolved": "  \tk-1_x::\t Value with  spaces  \nValue with  spaces",
+    "display": "k-1_x: Value with  spaces\nValue with  spaces"
+  }
+]

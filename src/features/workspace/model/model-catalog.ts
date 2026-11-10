@@ -7,6 +7,7 @@ export const modelCatalog: { id: MlxModelId; name: string; gridName?: string; pu
   { id: "embeddinggemma", name: "EmbeddingGemma", purpose: "Semantic search", description: "Fixed embedding model · about 212 MB", bytes: 212_000_000, generation: false },
   { id: "whisper", name: "Whisper Large v3 Turbo", gridName: "Whisper Turbo", purpose: "Transcription", description: "Large v3 Turbo · about 1.6 GB", bytes: 1_610_000_000, generation: false, transcription: true },
   { id: "whisperlarge", name: "Whisper Large v3", gridName: "Whisper Large v3", purpose: "Transcription", description: "Large v3 · about 3.1 GB", bytes: 3_100_000_000, generation: false, transcription: true },
+  { id: "sortformer", name: "Sortformer Speaker Labels", gridName: "Sortformer", purpose: "Speaker labels", description: "Up to 4 speakers · about 236 MB, optional", bytes: 236_110_000, generation: false },
   { id: "lightonocr", name: "LightOnOCR 3 1B", purpose: "Text extraction", description: "BF16 · about 2.0 GB", bytes: 2_020_000_000, generation: false },
 ];
 
@@ -27,7 +28,7 @@ export function orderedModelCatalog(status: MlxStatus | null, actionModel?: MlxM
 
 /**
  * Models shown in the workspace panel follow configured choices plus the fixed embedding model.
- * The optional OCR model appears only once installed, so it is not noise for users who never extract text.
+ * The optional OCR and speaker-label models appear only once installed, so it is not noise for users who never extract text.
  */
 export function selectedWorkspaceModelCatalog(status: MlxStatus | null, actionModel?: MlxModelId | null, action?: string | null) {
   const selectedModels = new Set<MlxModelId>([
@@ -35,9 +36,18 @@ export function selectedWorkspaceModelCatalog(status: MlxStatus | null, actionMo
     status?.selectedTranscriptionModel ?? "whisper",
     "embeddinggemma",
   ]);
+  // The image-description model can differ from the generation model, so it needs its own row.
+  if (status?.selectedCaptionModel) selectedModels.add(status.selectedCaptionModel);
   return orderedModelCatalog(status, actionModel, action)
     .filter((definition) => selectedModels.has(definition.id)
-      || (definition.id === "lightonocr" && Boolean(status?.models.find((model) => model.id === "lightonocr")?.installed)));
+      || ((definition.id === "lightonocr" || definition.id === "sortformer") && Boolean(status?.models.find((model) => model.id === definition.id)?.installed)));
+}
+
+/** Purpose label for a pane row, reflecting image descriptions when the model is the selected caption model. */
+export function workspaceModelPurpose(definition: { id: MlxModelId; purpose: string }, status: MlxStatus | null) {
+  if (!status?.selectedCaptionModel || status.selectedCaptionModel !== definition.id) return definition.purpose;
+  const generationId = status.selectedGenerationModel ?? MLX_GENERATION_MODEL.id;
+  return generationId === definition.id ? `${definition.purpose} · Image descriptions` : "Image descriptions";
 }
 
 export function formatModelBytes(bytes: number) {

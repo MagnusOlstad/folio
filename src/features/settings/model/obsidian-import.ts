@@ -59,6 +59,9 @@ export type ObsidianImportSettings = {
   clearScan: () => void;
 };
 
+/** macOS screen-recording permission, which also gates system audio capture. */
+export type ScreenCaptureAccess = 'granted' | 'denied' | 'not-determined' | 'restricted' | 'unknown';
+
 declare global {
   interface Window {
     folio?: {
@@ -77,6 +80,9 @@ declare global {
       getObsidianImportJob?: (jobId: string) => Promise<ObsidianImportJob>;
       cancelObsidianImport?: (jobId: string) => Promise<ObsidianImportJob>;
       selectFolder?: () => Promise<string | null>;
+      systemAudio?: { supported: boolean };
+      getScreenCaptureAccess?: () => Promise<ScreenCaptureAccess>;
+      openSystemAudioSettings?: () => Promise<void>;
       getUpdateState?: () => Promise<DesktopUpdateState | null>;
       checkForUpdates?: () => Promise<DesktopUpdateState | null>;
       startUpdate?: () => Promise<DesktopUpdateState | null>;

@@ -46,6 +46,13 @@ function altEnd(source: string) {
   return -1;
 }
 
+/** Range of the alt text (between `![` and its closing `]`) relative to the source, or null. */
+export function imageAltBounds(source: string) {
+  if (!source.startsWith("![")) return null;
+  const end = altEnd(source);
+  return end < 0 ? null : { from: 2, to: end };
+}
+
 /**
  * Rewrites only the alt portion of an inline image's Markdown source so it
  * carries the given width (null removes the size). Returns the replacement
@@ -58,4 +65,30 @@ export function imageAltWidthChange(source: string, width: number | null) {
   if (end < 0) return null;
   const insert = formatImageAlt(source.slice(2, end), width);
   return { from: 2, to: end, insert };
+}
+
+const MIME_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/svg+xml": "svg",
+  "image/avif": "avif",
+  "image/bmp": "bmp",
+};
+
+/** Download filename: the last path segment of the asset path (the `path` query value of `/api/assets` URLs, else the URL path; decoded, query stripped), else `image.<ext>` from the MIME type. */
+export function imageDownloadName(url: string, mimeType: string) {
+  const [beforeQuery, query = ""] = url.split("#")[0].split("?");
+  const target = new URLSearchParams(query).get("path") ?? beforeQuery;
+  const segment = target.split(/[?#]/)[0].split("/").pop() ?? "";
+  let name = segment;
+  try {
+    name = decodeURIComponent(segment);
+  } catch {
+    // Keep the raw segment when it is not valid percent-encoding.
+  }
+  name = name.replace(/[\\/:*?"<>|]/g, "_").trim();
+  if (name && name !== "." && name !== "..") return name;
+  return `image.${MIME_EXTENSIONS[mimeType.split(";")[0].trim().toLowerCase()] ?? "png"}`;
 }

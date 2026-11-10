@@ -11,14 +11,20 @@ import HuggingFace
 import Tokenizers
 import MLXAudioCore
 import MLXAudioSTT
+import MLXAudioVAD
 import FolioMLXProgress
 
-private enum TaskKind: String { case generation, embedding, transcription, ocr }
+private enum TaskKind: String { case generation, embedding, transcription, diarization, ocr, caption }
 
 private let ocrDefaultMaxTokens = 4096
 // LightOnOCR was trained on ~1540px page renders, so small screenshots must be upscaled (and large
 // ones scaled down) so the longest side is exactly this many pixels; the resize preserves aspect ratio.
 private let ocrLongestEdge: CGFloat = 1540
+
+// Captions only need the gist of an image, so a smaller longest edge keeps vision prefill fast and memory low.
+private let captionDefaultMaxTokens = 200
+private let captionLongestEdge: CGFloat = 896
+private let captionDefaultPrompt = "Describe this image for a personal notes search index. In 2-3 sentences, say what it is (photo, diagram, screenshot, whiteboard...), the main subject, setting and notable objects. Mention key visible words only if important. No preamble."
 
 private struct Message: Decodable {
     let role: String
@@ -44,6 +50,20 @@ private struct MemoryStatus: Encodable {
     let peakResidentBytes: UInt64?
 }
 
+/// One Whisper segment. Times are seconds from the start of the audio file.
+private struct TranscriptSegment: Encodable {
+    let start: Double
+    let end: Double
+    let text: String
+}
+
+/// One Sortformer speaker turn. `speaker` is the model's 0-based speaker slot (at most 4).
+private struct SpeakerSegment: Encodable {
+    let start: Double
+    let end: Double
+    let speaker: Int
+}
+
 private struct Response: Encodable {
     let id: String?
     let model: String
@@ -52,6 +72,9 @@ private struct Response: Encodable {
     let state: String?
     let memory: MemoryStatus
     let metrics: Metrics?
+    // Optional extras default to nil and are omitted from the JSON when absent.
+    var segments: [TranscriptSegment]? = nil
+    var speakerSegments: [SpeakerSegment]? = nil
 }
 
 private struct ReadyResponse: Encodable {
@@ -177,6 +200,22 @@ private let whisperTokenizerFiles = [
     "generation_config.json",
 ]
 
+/// Sortformer speaker diarization (separate, optional download).
+private struct SortformerVariant {
+    let modelID: String
+    let revision: String
+    let modelFiles: [String]
+
+    static let v21 = SortformerVariant(
+        modelID: "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16",
+        revision: "e23e6404bd9859e93edbf94a740eb1c7fc58f12e",
+        modelFiles: ["config.json", "model.safetensors"])
+
+    static func resolve(modelID: String, revision: String) -> SortformerVariant? {
+        v21.modelID == modelID && v21.revision == revision ? v21 : nil
+    }
+}
+
 private func modelRepository(_ id: String) throws -> Repo.ID {
     guard let repository = Repo.ID(rawValue: id) else {
         throw NSError(domain: "FolioMLX", code: 20,
@@ -257,6 +296,32 @@ private func installWhisperSnapshot(_ variant: WhisperVariant) async throws -> U
     return modelDirectory
 }
 
+private func validateSortformerSnapshot(_ directory: URL, variant: SortformerVariant) throws {
+    let missing = variant.modelFiles.filter { !isNonEmptyFile(directory.appendingPathComponent($0)) }
+    guard missing.isEmpty else {
+        throw NSError(domain: "FolioMLX", code: 31,
+                      userInfo: [NSLocalizedDescriptionKey:
+                        "The installed Sortformer snapshot is incomplete; missing: \(missing.joined(separator: ", "))"])
+    }
+}
+
+private func installSortformerSnapshot(_ variant: SortformerVariant) async throws -> URL {
+    let cache = localHubCache()
+    let client = HubClient(cache: cache)
+    let repo = try modelRepository(variant.modelID)
+    let directory = try await client.downloadSnapshot(
+        of: repo, revision: variant.revision, matching: variant.modelFiles,
+        progressHandler: { progress in writeDownloadProgress(progress, scope: "model") })
+    writeDownloadStageCompletion(scope: "model", directory: directory, files: variant.modelFiles)
+    let expected = try cache.snapshotPath(repo: repo, kind: .model, commitHash: variant.revision)
+    guard directory.standardizedFileURL == expected.standardizedFileURL else {
+        throw NSError(domain: "FolioMLX", code: 33,
+                      userInfo: [NSLocalizedDescriptionKey: "HubClient returned an unexpected Sortformer snapshot path"])
+    }
+    try validateSortformerSnapshot(directory, variant: variant)
+    return directory
+}
+
 private func memoryStatus() -> MemoryStatus {
     let memory = Memory.snapshot()
     var usage = rusage()
@@ -291,7 +356,7 @@ private struct FolioMLX {
             let value = arguments.removeFirst()
             switch option {
             case "--task":
-                guard let parsed = TaskKind(rawValue: value) else { throw NSError(domain: "FolioMLX", code: 2, userInfo: [NSLocalizedDescriptionKey: "task must be generation, embedding, transcription, or ocr"]) }
+                guard let parsed = TaskKind(rawValue: value) else { throw NSError(domain: "FolioMLX", code: 2, userInfo: [NSLocalizedDescriptionKey: "task must be generation, embedding, transcription, diarization, ocr, or caption"]) }
                 task = parsed
             case "--model": modelID = value; modelWasProvided = true
             case "--revision": revision = value; revisionWasProvided = true
@@ -309,6 +374,7 @@ private struct FolioMLX {
         }
 
         var whisperVariant: WhisperVariant?
+        var sortformerVariant: SortformerVariant?
         if task == .transcription {
             if !modelWasProvided && !revisionWasProvided {
                 modelID = WhisperVariant.turbo.modelID
@@ -342,9 +408,33 @@ private struct FolioMLX {
                 }
                 try validateWhisperSnapshot(modelDirectory, variant: variant)
             }
+        } else if task == .diarization {
+            guard let variant = SortformerVariant.resolve(modelID: modelID, revision: revision) else {
+                throw NSError(domain: "FolioMLX", code: 6,
+                              userInfo: [NSLocalizedDescriptionKey: "diarization requires the supported pinned Sortformer model and revision pair"])
+            }
+            sortformerVariant = variant
+            guard operation == "install" || operation == "diarize" else {
+                throw NSError(domain: "FolioMLX", code: 7,
+                              userInfo: [NSLocalizedDescriptionKey: "diarization requires --operation install or --operation diarize"])
+            }
+            if operation == "diarize" {
+                guard let modelDirectory else {
+                    throw NSError(domain: "FolioMLX", code: 8,
+                                  userInfo: [NSLocalizedDescriptionKey: "diarization requires a fully installed local --model-directory"])
+                }
+                let cache = localHubCache()
+                let repository = try modelRepository(variant.modelID)
+                let expected = try cache.snapshotPath(repo: repository, kind: .model, commitHash: variant.revision)
+                guard modelDirectory.standardizedFileURL == expected.standardizedFileURL else {
+                    throw NSError(domain: "FolioMLX", code: 25,
+                                  userInfo: [NSLocalizedDescriptionKey: "diarization must load from the matching pinned HF_HUB_CACHE snapshot"])
+                }
+                try validateSortformerSnapshot(modelDirectory, variant: variant)
+            }
         } else if operation != nil {
             throw NSError(domain: "FolioMLX", code: 9,
-                          userInfo: [NSLocalizedDescriptionKey: "--operation is only supported with --task transcription"])
+                          userInfo: [NSLocalizedDescriptionKey: "--operation is only supported with --task transcription or --task diarization"])
         }
 
         if task == .transcription, operation == "install" {
@@ -355,27 +445,38 @@ private struct FolioMLX {
             return
         }
 
+        if task == .diarization, operation == "install" {
+            guard let sortformerVariant else { fatalError("validated diarization variant was not provided") }
+            let modelDirectory = try await installSortformerSnapshot(sortformerVariant)
+            writeLine(ReadyResponse(model: modelID, task: task.rawValue,
+                                    modelDirectory: modelDirectory.path, memory: memoryStatus()))
+            return
+        }
+
         let clock = ContinuousClock()
         let processStarted = clock.now
         let generator: ModelContainer?
         let embedder: EmbedderModelContainer?
         let whisper: WhisperModel?
-        if task == .generation || task == .ocr {
-            log("Loading \(task == .ocr ? "OCR" : "generation") model \(modelID)…")
+        var sortformer: SortformerModel?
+        if task == .generation || task == .ocr || task == .caption {
+            let usesVision = task == .ocr || task == .caption
+            log("Loading \(task == .ocr ? "OCR" : (task == .caption ? "caption" : "generation")) model \(modelID)…")
             // Pick the factory explicitly: linking MLXVLM adds its factory to the global
             // registry, which must not change how generation checkpoints are loaded.
             if let modelDirectory {
-                if task == .ocr {
+                if usesVision {
                     generator = try await VLMModelFactory.shared.loadContainer(
                         from: modelDirectory, using: #huggingFaceTokenizerLoader())
                 } else {
                     generator = try await LLMModelFactory.shared.loadContainer(
                         from: modelDirectory, using: #huggingFaceTokenizerLoader())
                 }
-            } else if task == .ocr {
+            } else if usesVision {
                 generator = try await VLMModelFactory.shared.loadContainer(
                     from: #hubDownloader(), using: #huggingFaceTokenizerLoader(),
-                    configuration: ModelConfiguration(id: modelID, revision: revision),
+                    configuration: ModelConfiguration(id: modelID, revision: revision,
+                        extraEOSTokens: task == .caption ? Set(stopTokens(for: modelID)) : []),
                     progressHandler: { progress in writeDownloadProgress(progress) })
             } else {
                 let configuration = ModelConfiguration(id: modelID, revision: revision,
@@ -393,9 +494,21 @@ private struct FolioMLX {
                 guard let modelDirectory else { fatalError("validated transcription snapshot was not provided") }
                 guard let whisperVariant else { fatalError("validated transcription variant was not provided") }
                 try validateWhisperSnapshot(modelDirectory, variant: whisperVariant)
-                whisper = try await WhisperModel.fromDirectory(modelDirectory, cache: localHubCache())
+                let loadedWhisper = try await WhisperModel.fromDirectory(modelDirectory, cache: localHubCache())
+                // Folio needs real segment times, so enable timestamp tokens (see the pinned Whisper patch).
+                loadedWhisper.timestampsEnabled = true
+                whisper = loadedWhisper
                 generator = nil
                 embedder = nil
+            } else if task == .diarization {
+                log("Loading diarization model \(modelID)…")
+                guard let modelDirectory else { fatalError("validated diarization snapshot was not provided") }
+                guard let sortformerVariant else { fatalError("validated diarization variant was not provided") }
+                try validateSortformerSnapshot(modelDirectory, variant: sortformerVariant)
+                sortformer = try SortformerModel.fromModelDirectory(modelDirectory)
+                generator = nil
+                embedder = nil
+                whisper = nil
             } else {
                 log("Loading embedding model \(modelID)…")
                 if let modelDirectory {
@@ -426,7 +539,7 @@ private struct FolioMLX {
             do {
                 let request = try JSONDecoder().decode(Request.self, from: Data(line.utf8))
                 requestID = request.id
-                switch request.operation ?? (task == .generation ? "generate" : (task == .embedding ? "embed" : (task == .ocr ? "ocr" : "transcribe"))) {
+                switch request.operation ?? (task == .generation ? "generate" : (task == .embedding ? "embed" : (task == .ocr ? "ocr" : (task == .caption ? "caption" : (task == .diarization ? "diarize" : "transcribe"))))) {
                 case "status":
                     writeLine(Response(id: requestID, model: modelID, text: nil, embeddings: nil,
                                        state: "loaded", memory: memoryStatus(), metrics: nil))
@@ -480,6 +593,33 @@ private struct FolioMLX {
                         noThinking: false, clock: clock)
                     writeLine(generationResponse(id: requestID, model: modelID, generated: generated,
                                                  coldLoadSeconds: coldLoadSeconds, clock: clock))
+                case "caption":
+                    guard task == .caption, let generator else { throw modelTaskError("caption") }
+                    guard let imagePath = request.imagePath, !imagePath.isEmpty else {
+                        throw NSError(domain: "FolioMLX", code: 16, userInfo: [NSLocalizedDescriptionKey: "imagePath must name a local image file"])
+                    }
+                    let captionURL = URL(fileURLWithPath: imagePath)
+                    var captionIsDirectory: ObjCBool = false
+                    guard FileManager.default.fileExists(atPath: captionURL.path, isDirectory: &captionIsDirectory),
+                          !captionIsDirectory.boolValue else {
+                        throw NSError(domain: "FolioMLX", code: 17, userInfo: [NSLocalizedDescriptionKey: "The selected image file is no longer available."])
+                    }
+                    let captionTokens = request.maxTokens ?? (maxTokensWasProvided ? maxTokens : captionDefaultMaxTokens)
+                    guard captionTokens > 0 else {
+                        throw NSError(domain: "FolioMLX", code: 11, userInfo: [NSLocalizedDescriptionKey: "generation parameters are invalid"])
+                    }
+                    Memory.peakMemory = 0
+                    let captionPrompt = request.prompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                        ? request.prompt! : captionDefaultPrompt
+                    // Greedy decoding with thinking disabled (Qwen 3.5 would otherwise spend the budget reasoning).
+                    let captioned = try await generate(
+                        model: generator, system: nil, prompt: captionPrompt,
+                        images: [.url(captionURL)],
+                        processing: UserInput.Processing(resize: CGSize(width: captionLongestEdge, height: captionLongestEdge)),
+                        parameters: GenerateParameters(maxTokens: captionTokens, temperature: 0),
+                        noThinking: true, clock: clock)
+                    writeLine(generationResponse(id: requestID, model: modelID, generated: captioned,
+                                                 coldLoadSeconds: coldLoadSeconds, clock: clock))
                 case "embed":
                     guard task == .embedding, let embedder else { throw modelTaskError("embedding") }
                     guard let input = request.input, !input.isEmpty,
@@ -506,8 +646,26 @@ private struct FolioMLX {
                     synchronizeDefaultStream()
                     Memory.clearCache()
                     synchronizeDefaultStream()
-                    writeLine(Response(id: requestID, model: modelID, text: output,
-                                       embeddings: nil, state: nil, memory: memoryStatus(), metrics: nil))
+                    writeLine(Response(id: requestID, model: modelID, text: output.text,
+                                       embeddings: nil, state: nil, memory: memoryStatus(), metrics: nil,
+                                       segments: output.segments))
+                case "diarize":
+                    guard task == .diarization, let sortformer else { throw modelTaskError("diarization") }
+                    guard let audioPath = request.audioPath, !audioPath.isEmpty else {
+                        throw NSError(domain: "FolioMLX", code: 14, userInfo: [NSLocalizedDescriptionKey: "audioPath must name a local audio file"])
+                    }
+                    let audioURL = URL(fileURLWithPath: audioPath)
+                    guard FileManager.default.fileExists(atPath: audioURL.path) else {
+                        throw NSError(domain: "FolioMLX", code: 15, userInfo: [NSLocalizedDescriptionKey: "The selected audio file is no longer available."])
+                    }
+                    Memory.peakMemory = 0
+                    let speakerSegments = try await diarizeAudio(sortformer, from: audioURL, requestID: requestID)
+                    synchronizeDefaultStream()
+                    Memory.clearCache()
+                    synchronizeDefaultStream()
+                    writeLine(Response(id: requestID, model: modelID, text: nil,
+                                       embeddings: nil, state: nil, memory: memoryStatus(), metrics: nil,
+                                       speakerSegments: speakerSegments))
                 default:
                     throw NSError(domain: "FolioMLX", code: 13, userInfo: [NSLocalizedDescriptionKey: "unknown operation"])
                 }
@@ -522,16 +680,31 @@ private struct FolioMLX {
     }
 }
 
-private func transcribeAudio(_ whisper: WhisperModel, from url: URL, requestID: String?) throws -> String {
+private func transcribeAudio(_ whisper: WhisperModel, from url: URL, requestID: String?) throws
+    -> (text: String, segments: [TranscriptSegment]) {
     let reader = try AudioWindowReader(url: url)
     var transcriptParts: [String] = []
-    while let window = try reader.nextWindow() {
-        let part = try autoreleasepool { () throws -> String in
+    var segments: [TranscriptSegment] = []
+    while true {
+        // Each window is transcribed independently, so segment times are offset by where it starts.
+        let windowStart = Double(reader.completedFrames) / Double(reader.sampleRate)
+        guard let window = try reader.nextWindow() else { break }
+        let part = try autoreleasepool { () throws -> (text: String, segments: [TranscriptSegment]) in
             let samples = try resampleAudio(window.samples, from: reader.sampleRate, to: 16_000)
             let audio = MLXArray(samples)
-            return whisper.generate(audio: audio).text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let output = whisper.generate(audio: audio)
+            let windowSegments = (output.segments ?? []).compactMap { raw -> TranscriptSegment? in
+                guard let text = (raw["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !text.isEmpty,
+                      let start = raw["start"] as? Double,
+                      let end = raw["end"] as? Double,
+                      start.isFinite, end.isFinite else { return nil }
+                return TranscriptSegment(start: windowStart + start, end: windowStart + max(start, end), text: text)
+            }
+            return (output.text.trimmingCharacters(in: .whitespacesAndNewlines), windowSegments)
         }
-        if !part.isEmpty { transcriptParts.append(part) }
+        if !part.text.isEmpty { transcriptParts.append(part.text) }
+        segments.append(contentsOf: part.segments)
         synchronizeDefaultStream()
         Memory.clearCache()
         synchronizeDefaultStream()
@@ -539,7 +712,43 @@ private func transcribeAudio(_ whisper: WhisperModel, from url: URL, requestID: 
             ? min(99, Int(window.completedFrames * 100 / reader.totalFrames)) : 99
         writeLine(TranscriptionProgressResponse(id: requestID, percent: percent))
     }
-    return transcriptParts.joined(separator: " ")
+    return (transcriptParts.joined(separator: " "), segments)
+}
+
+/// Runs Sortformer's streaming path, which keeps memory bounded on long recordings (the offline
+/// `generate` encodes the whole file at once). The 16 kHz mono samples are held in memory
+/// (about 230 MB per hour), then diarized in 5 s chunks.
+private func diarizeAudio(_ model: SortformerModel, from url: URL, requestID: String?) async throws -> [SpeakerSegment] {
+    let sampleRate = 16_000
+    let chunkSeconds: Float = 5
+    let reader = try AudioWindowReader(url: url)
+    var samples: [Float] = []
+    while let window = try reader.nextWindow() {
+        try autoreleasepool {
+            samples.append(contentsOf: try resampleAudio(window.samples, from: reader.sampleRate, to: sampleRate))
+        }
+        // Reading and resampling is the first tenth of the progress.
+        let percent = reader.totalFrames > 0 ? min(10, Int(window.completedFrames * 10 / reader.totalFrames)) : 10
+        writeLine(TranscriptionProgressResponse(id: requestID, percent: percent))
+    }
+    guard !samples.isEmpty else { return [] }
+
+    let expectedChunks = max(1, Int((Double(samples.count) / Double(sampleRate) / Double(chunkSeconds)).rounded(.up)))
+    var segments: [SpeakerSegment] = []
+    var completedChunks = 0
+    for try await output in model.generateStream(
+        audio: MLXArray(samples), sampleRate: sampleRate, chunkDuration: chunkSeconds,
+        threshold: 0.5, minDuration: 0.1, mergeGap: 0.3
+    ) {
+        for segment in output.segments where segment.end > segment.start {
+            segments.append(SpeakerSegment(start: Double(segment.start), end: Double(segment.end),
+                                           speaker: segment.speaker))
+        }
+        completedChunks += 1
+        let percent = min(99, 10 + completedChunks * 89 / expectedChunks)
+        writeLine(TranscriptionProgressResponse(id: requestID, percent: percent))
+    }
+    return segments
 }
 
 private func generationResponse(id: String?, model: String, generated: GenerationOutput,

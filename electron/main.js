@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import fsSync from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, autoUpdater, BrowserWindow, Menu, dialog, ipcMain, screen, shell } from 'electron'
+import { app, autoUpdater, BrowserWindow, Menu, desktopCapturer, dialog, ipcMain, screen, session, shell, systemPreferences } from 'electron'
 import packageMetadata from '../package.json' with { type: 'json' }
 import { createUpdaterCoordinator } from './updater.js'
 import { configureStableGithubReleaseFeed } from './update-feed.js'
@@ -305,6 +305,30 @@ async function createWindow() {
   await mainWindow.loadURL(localUrl)
 }
 
+const SYSTEM_AUDIO_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
+
+// System audio is captured through getDisplayMedia with loopback audio. Only the app's own
+// pages may use it; the video track is dropped by the renderer straight away.
+function registerSystemAudioCapture() {
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+    let requesterOrigin = null
+    try { requesterOrigin = new URL(request.securityOrigin || request.frame?.url || '').origin } catch { /* denied below */ }
+    if (!localUrl || requesterOrigin !== localUrl) {
+      callback({})
+      return
+    }
+    desktopCapturer.getSources({ types: ['screen'] })
+      .then((sources) => callback(sources[0] ? { video: sources[0], audio: 'loopback' } : {}))
+      .catch(() => callback({}))
+  })
+  ipcMain.handle('folio:get-screen-capture-access', () => (
+    process.platform === 'darwin' ? systemPreferences.getMediaAccessStatus('screen') : 'unknown'
+  ))
+  ipcMain.handle('folio:open-system-audio-settings', async () => {
+    if (process.platform === 'darwin') await shell.openExternal(SYSTEM_AUDIO_SETTINGS_URL)
+  })
+}
+
 async function initializeUpdater() {
   if (!app.isPackaged || !isMac || updaterCoordinator) return
 
@@ -444,6 +468,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('folio:get-obsidian-import-job', (_event, jobId) => localRuntime.getObsidianImportJob(jobId))
   ipcMain.handle('folio:cancel-obsidian-import', (_event, jobId) => localRuntime.cancelObsidianImport(jobId))
 
+  registerSystemAudioCapture()
   await createWindow()
   await initializeUpdater()
 
@@ -477,6 +502,8 @@ app.on('before-quit', () => {
   ipcMain.removeHandler('folio:save-pdf-export')
   ipcMain.removeHandler('folio:select-obsidian-vault')
   ipcMain.removeHandler('folio:select-folder')
+  ipcMain.removeHandler('folio:get-screen-capture-access')
+  ipcMain.removeHandler('folio:open-system-audio-settings')
   ipcMain.removeHandler('folio:start-obsidian-import')
   ipcMain.removeHandler('folio:get-obsidian-import-job')
   ipcMain.removeHandler('folio:cancel-obsidian-import')

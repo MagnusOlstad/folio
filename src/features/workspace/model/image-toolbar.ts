@@ -1,13 +1,24 @@
 import { syntaxTree } from "@codemirror/language";
 import type { EditorView } from "@codemirror/view";
-import { extractImageText } from "../../../lib/assets.ts";
-import { imageAltWidthChange, MIN_IMAGE_WIDTH } from "./image-size.ts";
+import { describeImage, extractImageText, ImageCaptionModelError } from "../../../lib/assets.ts";
+import type { ImageCaptionActions } from "./image-caption-actions.ts";
+import {
+  captionAltChange,
+  captionInsertChange,
+  captionModelName,
+  cleanCaptionText,
+  nextCaptionState,
+  type CaptionPreviewState,
+} from "./image-caption.ts";
+import { imageAltWidthChange, imageDownloadName, MIN_IMAGE_WIDTH } from "./image-size.ts";
 import { cleanExtractedText, nextOcrState, ocrInsertChange, type OcrPreviewState } from "./image-ocr.ts";
 
 const TOOLBAR_CLASS = "cm-live-markdown-image-toolbar";
 const COPIED_RESET_MS = 1500;
+const DOWNLOAD_REVOKE_MS = 60_000;
 
 const PREVIEW_CLASS = "cm-live-markdown-ocr-preview";
+const CAPTION_PREVIEW_CLASS = "cm-live-markdown-caption-preview";
 const HANDLE_CLASS = "cm-live-markdown-image-resize";
 
 export type ImageToolbarOptions = {
@@ -16,6 +27,8 @@ export type ImageToolbarOptions = {
   /** Width in CSS pixels from the `alt|width` suffix, or null for natural size. */
   width?: number | null;
   onError?: (message: string) => void;
+  /** Lets the description panel open Settings → Models or start a model download. */
+  captionActions?: ImageCaptionActions | null;
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -25,9 +38,11 @@ const ICONS = {
     "M9 9h10v10H9z",
     "M5 15V5h10",
   ],
+  download: ["M12 4v11", "M7 10.5l5 5 5-5", "M5 20h14"],
   check: ["M5 12.5l4.5 4.5L19 7.5"],
   remove: ["M4 7h16", "M10 11v6", "M14 11v6", "M6 7l1 12h10l1-12", "M9 7V4h6v3"],
   text: ["M4 6h16", "M4 12h10", "M4 18h16"],
+  describe: ["M11 4a7 7 0 1 0 0 14a7 7 0 0 0 0-14z", "M20 20l-4-4"],
 } as const;
 
 function createIcon(paths: readonly string[]) {
@@ -64,7 +79,7 @@ function createButton(label: string, icon: readonly string[], extraClass?: strin
 /** True when a DOM event originated inside an image toolbar or its text preview. */
 export function isImageToolbarEvent(event: Event) {
   const target = event.target;
-  return target instanceof Element && target.closest(`.${TOOLBAR_CLASS}, .${PREVIEW_CLASS}, .${HANDLE_CLASS}`) !== null;
+  return target instanceof Element && target.closest(`.${TOOLBAR_CLASS}, .${PREVIEW_CLASS}, .${CAPTION_PREVIEW_CLASS}, .${HANDLE_CLASS}`) !== null;
 }
 
 /** Finds the Markdown range of the Image node that the frame widget replaces. */
@@ -206,7 +221,81 @@ export async function copyImageToClipboard(url: string) {
   await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
 }
 
+/** Saves the image through a temporary download link (Electron shows its native save dialog). */
+export async function downloadImage(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Image request failed (${response.status}).`);
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = imageDownloadName(url, blob.type);
+    document.body.append(link);
+    link.click();
+    link.remove();
+  } catch (error) {
+    URL.revokeObjectURL(objectUrl);
+    throw error;
+  }
+  // The native save dialog may still need the blob, so release it later.
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), DOWNLOAD_REVOKE_MS);
+}
+
 /** Builds the frame holding the image and its hover toolbar. */
+type PanelControllerOptions = {
+  frame: HTMLElement;
+  view: EditorView;
+  button: HTMLButtonElement;
+  idleTitle: string;
+  busyTitle: string;
+  /** Runs when the panel closes, before focus returns to the editor. */
+  onClose: () => void;
+};
+
+/**
+ * Shared lifecycle for the panels under an image (extracted text, description): one open panel at
+ * a time, closed by Escape in the editor (capture phase) and restoring focus when it held it, plus
+ * the busy state of the toolbar button that opens it.
+ */
+function createPanelController({ frame, view, button, idleTitle, busyTitle, onClose }: PanelControllerOptions) {
+  let panel: HTMLElement | null = null;
+  const stopListening = () => view.dom.removeEventListener("keydown", onKeydown, true);
+  const close = () => {
+    const hadFocus = panel?.contains(frame.ownerDocument.activeElement) ?? false;
+    panel?.remove();
+    panel = null;
+    stopListening();
+    onClose();
+    if (hadFocus) view.focus();
+    view.requestMeasure();
+  };
+  function onKeydown(event: KeyboardEvent) {
+    if (!frame.isConnected) {
+      stopListening();
+      return;
+    }
+    if (event.key === "Escape" && panel) close();
+  }
+  return {
+    close,
+    isOpen: () => panel !== null,
+    show(next: HTMLElement) {
+      panel = next;
+      frame.append(next);
+      view.dom.addEventListener("keydown", onKeydown, true);
+      view.requestMeasure();
+    },
+    setBusy(busy: boolean) {
+      button.classList.toggle("is-busy", busy);
+      button.disabled = busy;
+      if (busy) button.setAttribute("aria-busy", "true");
+      else button.removeAttribute("aria-busy");
+      button.title = busy ? busyTitle : idleTitle;
+    },
+  };
+}
+
 export function createImageFrame(
   view: EditorView,
   image: HTMLImageElement,
@@ -244,6 +333,16 @@ export function createImageFrame(
   });
   toolbar.append(copy);
 
+  const download = createButton("Download image", ICONS.download);
+  download.addEventListener("click", async () => {
+    try {
+      await downloadImage(url);
+    } catch {
+      options.onError?.("Could not download the image.");
+    }
+  });
+  toolbar.append(download);
+
   if (!view.state.readOnly) {
     const remove = createButton("Remove image", ICONS.remove);
     remove.addEventListener("click", () => {
@@ -255,51 +354,61 @@ export function createImageFrame(
   const extract = createButton("Extract text", ICONS.text);
   toolbar.append(extract);
 
+  const ocrPanel = createPanelController({
+    frame, view, button: extract, idleTitle: "Extract text", busyTitle: "Extracting…",
+    onClose: () => { ocrState = nextOcrState(ocrState, { type: "close" }); },
+  });
   let ocrState: OcrPreviewState = { status: "idle" };
-  let preview: HTMLElement | null = null;
-  const closePreview = () => {
-    const hadFocus = preview?.contains(frame.ownerDocument.activeElement) ?? false;
-    preview?.remove();
-    preview = null;
-    view.dom.removeEventListener("keydown", onKeydown, true);
-    ocrState = nextOcrState(ocrState, { type: "close" });
-    if (hadFocus) view.focus();
-    view.requestMeasure();
-  };
-  function onKeydown(event: KeyboardEvent) {
-    if (!frame.isConnected) {
-      view.dom.removeEventListener("keydown", onKeydown, true);
-      return;
-    }
-    if (event.key === "Escape" && preview) closePreview();
-  }
-  const setBusy = (busy: boolean) => {
-    extract.classList.toggle("is-busy", busy);
-    extract.disabled = busy;
-    if (busy) extract.setAttribute("aria-busy", "true");
-    else extract.removeAttribute("aria-busy");
-    extract.title = busy ? "Extracting…" : "Extract text";
-  };
   extract.addEventListener("click", async () => {
     if (ocrState.status === "preview") {
-      closePreview();
+      ocrPanel.close();
       return;
     }
     if (ocrState.status !== "idle") return;
     ocrState = nextOcrState(ocrState, { type: "start" });
-    setBusy(true);
+    ocrPanel.setBusy(true);
     try {
       const result = await extractImageText(options.path);
       ocrState = nextOcrState(ocrState, { type: "success", ...result });
-      preview = createOcrPreview(view, frame, result.text, result.cached, options, closePreview);
-      frame.append(preview);
-      view.dom.addEventListener("keydown", onKeydown, true);
-      view.requestMeasure();
+      ocrPanel.show(createOcrPreview(view, frame, result.text, result.cached, options, ocrPanel.close));
     } catch (error) {
       ocrState = nextOcrState(ocrState, { type: "failure" });
       options.onError?.(error instanceof Error ? error.message : "Could not extract text.");
     } finally {
-      setBusy(false);
+      ocrPanel.setBusy(false);
+    }
+  });
+
+  const describe = createButton("Describe image", ICONS.describe);
+  toolbar.append(describe);
+
+  const captionPanel = createPanelController({
+    frame, view, button: describe, idleTitle: "Describe image", busyTitle: "Describing…",
+    onClose: () => { captionState = nextCaptionState(captionState, { type: "close" }); },
+  });
+  let captionState: CaptionPreviewState = { status: "idle" };
+  describe.addEventListener("click", async () => {
+    if (captionState.status === "preview" || captionState.status === "blocked") {
+      captionPanel.close();
+      return;
+    }
+    if (captionState.status !== "idle") return;
+    captionState = nextCaptionState(captionState, { type: "start" });
+    captionPanel.setBusy(true);
+    try {
+      const result = await describeImage(options.path);
+      captionState = nextCaptionState(captionState, { type: "success", ...result });
+      captionPanel.show(createCaptionPreview(view, frame, result.text, result.cached, options, captionPanel.close));
+    } catch (error) {
+      if (error instanceof ImageCaptionModelError && options.captionActions) {
+        captionState = nextCaptionState(captionState, { type: "blocked", code: error.code, modelId: error.modelId });
+        captionPanel.show(createCaptionBlockedPanel(error, options.captionActions, captionPanel.close));
+      } else {
+        captionState = nextCaptionState(captionState, { type: "failure" });
+        options.onError?.(error instanceof Error ? error.message : "Could not describe the image.");
+      }
+    } finally {
+      captionPanel.setBusy(false);
     }
   });
 
@@ -384,6 +493,132 @@ function createOcrPreview(
     note.textContent = "(cached)";
     actions.append(note);
   }
+
+  panel.append(body, actions);
+  return panel;
+}
+
+function createCaptionPanel(label: string) {
+  const panel = document.createElement("div");
+  panel.className = `${CAPTION_PREVIEW_CLASS} ${PREVIEW_CLASS}`;
+  panel.setAttribute("role", "region");
+  panel.setAttribute("aria-label", label);
+  // See createOcrPreview: focusing the panel keeps the widget alive while its text is selected.
+  panel.tabIndex = -1;
+  return panel;
+}
+
+/** Builds the image description panel shown under the image. */
+function createCaptionPreview(
+  view: EditorView,
+  frame: HTMLElement,
+  rawText: string,
+  cached: boolean,
+  options: ImageToolbarOptions,
+  close: () => void,
+) {
+  const text = cleanCaptionText(rawText);
+  const panel = createCaptionPanel("Image description");
+
+  const body = document.createElement("div");
+  body.className = "cm-live-markdown-caption-text";
+  body.textContent = text || "No description was returned for this image.";
+
+  const actions = document.createElement("div");
+  actions.className = "cm-live-markdown-ocr-actions";
+
+  if (text) {
+    const copy = createTextButton("Copy");
+    let resetTimer: number | undefined;
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        options.onError?.("Could not copy the description.");
+        return;
+      }
+      copy.textContent = "Copied";
+      window.clearTimeout(resetTimer);
+      resetTimer = window.setTimeout(() => {
+        copy.textContent = "Copy";
+      }, COPIED_RESET_MS);
+    });
+    actions.append(copy);
+
+    if (!view.state.readOnly) {
+      const insert = createTextButton("Insert below");
+      insert.addEventListener("click", () => {
+        const range = findImageRange(view, frame);
+        const change = range && !view.state.readOnly ? captionInsertChange(view.state.doc, range, text) : null;
+        if (change) view.dispatch({ changes: change, userEvent: "input" });
+        close();
+      });
+      actions.append(insert);
+
+      const useAlt = createTextButton("Use as alt text");
+      useAlt.addEventListener("click", () => {
+        const range = findImageRange(view, frame);
+        const change = range && !view.state.readOnly
+          ? captionAltChange(view.state.sliceDoc(range.from, range.to), text)
+          : null;
+        if (range && change) {
+          view.dispatch({
+            changes: { from: range.from + change.from, to: range.from + change.to, insert: change.insert },
+            userEvent: "input",
+          });
+        }
+        close();
+      });
+      actions.append(useAlt);
+    }
+  }
+
+  const dismiss = createTextButton("Close");
+  dismiss.addEventListener("click", close);
+  actions.append(dismiss);
+
+  if (cached) {
+    const note = document.createElement("span");
+    note.className = "cm-live-markdown-ocr-note";
+    note.textContent = "(cached)";
+    actions.append(note);
+  }
+
+  panel.append(body, actions);
+  return panel;
+}
+
+/** Builds the panel that explains a missing caption model and offers the fix. */
+function createCaptionBlockedPanel(error: ImageCaptionModelError, captionActions: ImageCaptionActions, close: () => void) {
+  const panel = createCaptionPanel("Image description unavailable");
+  panel.setAttribute("role", "alert");
+
+  const body = document.createElement("div");
+  body.className = "cm-live-markdown-caption-text";
+  const modelId = error.modelId;
+  body.textContent = error.code === "CAPTION_MODEL_NOT_INSTALLED"
+    ? `${captionModelName(modelId)} is chosen for image descriptions but is not downloaded yet.`
+    : "Choose a model for image descriptions in Settings → Models.";
+
+  const actions = document.createElement("div");
+  actions.className = "cm-live-markdown-ocr-actions";
+
+  if (error.code === "CAPTION_MODEL_NOT_INSTALLED" && modelId) {
+    const install = createTextButton(`Download ${captionModelName(modelId)}`);
+    install.addEventListener("click", () => {
+      captionActions.installModel(modelId);
+      close();
+    });
+    actions.append(install);
+  }
+  const settings = createTextButton("Open Settings → Models");
+  settings.addEventListener("click", () => {
+    captionActions.openModelSettings();
+    close();
+  });
+  const dismiss = createTextButton("Close");
+  dismiss.addEventListener("click", close);
+  actions.append(settings, dismiss);
 
   panel.append(body, actions);
   return panel;

@@ -142,12 +142,25 @@ for await (const line of lines) {
       await appendLog({ operation: 'ocr', task, model, imagePath: request.imagePath })
       response = { id: request.id, text: control.ocrText ?? '| Bank | Faktisk bankkonto i bank |', memory }
     }
+    else if (request.operation === 'caption' && task !== 'caption') response = { id: request.id, error: 'This helper was started for another task, not caption.', memory }
+    else if (request.operation === 'caption' && control.failCaption) response = { id: request.id, error: 'fixture caption error', memory }
+    else if (request.operation === 'caption') {
+      await appendLog({ operation: 'caption', task, model, imagePath: request.imagePath })
+      response = { id: request.id, text: control.captionText ?? '  A whiteboard\nwith a roadmap.  ', memory }
+    }
     else if (request.operation === 'transcribe' && control.failTranscribe) response = { id: request.id, error: 'fixture transcription error', memory }
     else if (request.operation === 'transcribe') {
       for (const percent of control.transcriptionProgress || []) {
         process.stdout.write(`${JSON.stringify({ event: 'transcription-progress', id: request.id, percent })}\n`)
       }
-      response = { id: request.id, text: 'Fixture transcription.', memory }
+      response = { id: request.id, text: 'Fixture transcription.', segments: [{ start: 0, end: 1.5, text: 'Fixture transcription.' }], memory }
+    }
+    else if (request.operation === 'diarize' && task !== 'diarization') response = { id: request.id, error: 'This helper was started for another task, not diarization.', memory }
+    else if (request.operation === 'diarize') {
+      for (const percent of control.transcriptionProgress || []) {
+        process.stdout.write(`${JSON.stringify({ event: 'transcription-progress', id: request.id, percent })}\n`)
+      }
+      response = { id: request.id, speakerSegments: [{ start: 0, end: 1.5, speaker: 0 }], memory }
     }
     else response = { id: request.id, error: `unknown operation: ${request.operation}`, memory }
     await appendLog({ event: 'response', operation: request.operation, error: response.error, memory: response.memory })

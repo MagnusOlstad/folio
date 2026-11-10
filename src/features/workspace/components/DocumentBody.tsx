@@ -81,6 +81,7 @@ export function DocumentBody({
         onSelectionChange={(from, to) => onSelectionChange(document.id, from, to)}
         focusRequestId={focusRequestId}
         onFocusRequestConsumed={onFocusRequestConsumed}
+        documentId={document.id}
         ariaLabel="Write a new note"
       />
     );
@@ -114,6 +115,7 @@ export function DocumentBody({
         onSelectionChange={(from, to) => onSelectionChange(document.id, from, to)}
         focusRequestId={focusRequestId}
         onFocusRequestConsumed={onFocusRequestConsumed}
+        documentId={document.id}
         ariaLabel={`Edit ${document.title}`}
       />
     );

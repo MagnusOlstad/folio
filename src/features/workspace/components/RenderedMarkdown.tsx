@@ -14,6 +14,7 @@ import type { PluggableList } from "unified";
 import type { ViewerDocument } from "../../../domain/types.ts";
 import { assetUrl, resolveAssetHref } from "../../../lib/assets.ts";
 import { conceptUrl, resolveBundleLink } from "../../../lib/paths.ts";
+import { resolveNoteVariablesForDisplay } from "../../../lib/note-variables.ts";
 import { sourcePosition } from "../../../lib/workspace.ts";
 import { parseImageAlt } from "../model/image-size.ts";
 import { folioMarkdown } from "../model/folio-markdown.ts";
@@ -138,6 +139,11 @@ export function RenderedMarkdown({
     }));
   }
 
+  const displayContent = useMemo(
+    () => resolveNoteVariablesForDisplay(document.content),
+    [document.content],
+  );
+
   const components = useMemo<Components>(
     () => ({
       a: ({ href, children }) => {
@@ -256,7 +262,7 @@ export function RenderedMarkdown({
         rehypePlugins={searchPlugins}
         components={components}
       >
-        {document.content}
+        {displayContent}
       </ReactMarkdown>
     </div>
   );

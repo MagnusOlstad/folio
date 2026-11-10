@@ -7,6 +7,8 @@ import express from 'express'
 import { createMlxService } from '../server/mlx/service.js'
 import { registerRoutes } from '../server/routes/mlx.js'
 
+// A budget no worker fits in: every idle worker is evicted before the next one starts.
+const TIGHT_MEMORY = { totalMemory: () => 1, reserveBytes: 0 }
 const helperPath = path.resolve('test/fixtures/fake-mlx-helper.js')
 const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
 const originalArch = Object.getOwnPropertyDescriptor(process, 'arch')
@@ -24,7 +26,7 @@ function restorePlatform() {
   os.release = originalOsRelease
 }
 
-async function fixture(t, { warmKeepAliveMs = 60_000 } = {}) {
+async function fixture(t, { warmKeepAliveMs = 60_000, ...memoryOptions } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-mlx-test-'))
   const logPath = path.join(root, 'helper.jsonl')
   const previous = {
@@ -44,6 +46,9 @@ async function fixture(t, { warmKeepAliveMs = 60_000 } = {}) {
     modelRoot: path.join(root, 'models'),
     mlxHelperPath: helperPath,
     warmKeepAliveMs,
+    totalMemory: () => 1024 ** 4,
+    readLevel: async () => null,
+    ...memoryOptions,
   })
   t.after(async () => {
     await service.close()
@@ -95,6 +100,7 @@ test('models install explicitly into their pinned snapshots and use the JSONL wo
     { id: 'lightonocr', purpose: 'ocr', downloadSizeBytes: 2_020_000_000, selected: false },
     { id: 'whisper', purpose: 'transcription', downloadSizeBytes: 1_610_000_000, selected: true },
     { id: 'whisperlarge', purpose: 'transcription', downloadSizeBytes: 3_090_000_000, selected: false },
+    { id: 'sortformer', purpose: 'diarization', downloadSizeBytes: 236_110_000, selected: false },
   ])
 
   await assert.rejects(service.load('gemma4'), /not installed/)
@@ -297,6 +303,20 @@ test('transcription progress is request scoped and never resolves the request, t
   assert.equal((await service.status()).models.find((model) => model.id === 'whisperlarge').loaded, false)
 })
 
+test('Sortformer diarization uses its own worker with the diarize operation and unloads after each run', async (t) => {
+  const { root, logPath, service } = await fixture(t)
+  await setControl(root, { transcriptionProgress: [40, 99] })
+  await service.install('sortformer')
+  assert.equal((await service.status()).models.find((model) => model.id === 'sortformer').purpose, 'diarization')
+  const progress = []
+  const result = await service.diarize('/tmp/recording.wav', { onProgress: (percent) => progress.push(percent) })
+  assert.deepEqual(result.speakerSegments, [{ start: 0, end: 1.5, speaker: 0 }])
+  assert.deepEqual(progress, [40, 99])
+  assert.equal((await service.status()).models.find((model) => model.id === 'sortformer').loaded, false)
+  assert.ok((await readLog(logPath)).some((entry) => entry.event === 'response' && entry.operation === 'diarize' && !entry.error))
+  await assert.rejects(service.selectTranscriptionModel('sortformer'), /Choose a transcription model/)
+})
+
 test('transcription worker also unloads when inference fails and queued generation can proceed', async (t) => {
   const { root, service } = await fixture(t)
   const whisper = service.modelDefinitions.whisper
@@ -462,8 +482,8 @@ test('waits for active embedding work before unload and removal', async (t) => {
   assert.equal((await service.status()).models.find((model) => model.id === 'embeddinggemma').loaded, false)
 })
 
-test('serializes generation and Whisper workers globally while embeddings coexist', async (t) => {
-  const { root, logPath, service } = await fixture(t)
+test('serializes heavy operations globally and evicts idle heavy workers on a tight budget while embeddings coexist', async (t) => {
+  const { root, logPath, service } = await fixture(t, TIGHT_MEMORY)
   const whisperDirectory = path.join(root, 'whisper-snapshot')
   await fs.mkdir(whisperDirectory, { recursive: true })
   for (const name of ['config.json', 'weights.safetensors', 'tokenizer.json', 'tokenizer_config.json',
@@ -510,7 +530,7 @@ test('serializes generation and Whisper workers globally while embeddings coexis
   assert.ok(readyEvents.some((entry) => entry.task === 'embedding'))
 })
 
-test('switches between Turbo and full Whisper workers while preserving embedding workers', async (t) => {
+test('switches between Turbo and full Whisper workers while preserving loaded generation and embedding workers', async (t) => {
   const { root, logPath, service } = await fixture(t)
   const snapshots = new Map()
   for (const id of ['whisper', 'whisperlarge']) {
@@ -558,13 +578,13 @@ test('switches between Turbo and full Whisper workers while preserving embedding
     service.modelDefinitions.gemma4.repository,
     service.modelDefinitions.whisper.repository,
     service.modelDefinitions.whisperlarge.repository,
-    service.modelDefinitions.gemma4.repository,
   ])
+  assert.equal((await service.status()).models.find((model) => model.id === 'gemma4').loaded, true)
   assert.equal(snapshots.size, 2)
 })
 
 test('queues heavy model loading behind in-flight generation without overlapping processes', async (t) => {
-  const { root, logPath, service } = await fixture(t)
+  const { root, logPath, service } = await fixture(t, TIGHT_MEMORY)
   await service.install('gemma4')
   await setControl(root, { operationDelayMs: 100 })
   const generation = service.generate([{ role: 'user', content: 'Planning note.' }])
@@ -592,7 +612,7 @@ test('queues heavy model loading behind in-flight generation without overlapping
 })
 
 test('cancels Whisper startup and waits for its process before the next heavy model starts', async (t) => {
-  const { root, logPath, service } = await fixture(t)
+  const { root, logPath, service } = await fixture(t, TIGHT_MEMORY)
   const whisperDirectory = path.join(root, 'whisper-snapshot')
   await fs.mkdir(whisperDirectory, { recursive: true })
   for (const name of ['config.json', 'weights.safetensors', 'tokenizer.json', 'tokenizer_config.json',
@@ -702,8 +722,8 @@ test('request and shutdown failures clean up worker state', async (t) => {
   assert.equal(failedShutdown.memory.cacheBytes, 0)
 })
 
-test('LightOnOCR installs, loads, extracts text, and shares the heavy-model slot with generation', async (t) => {
-  const { root, logPath, service } = await fixture(t)
+test('LightOnOCR installs, loads, extracts text, and evicts an idle generation worker on a tight budget', async (t) => {
+  const { root, logPath, service } = await fixture(t, TIGHT_MEMORY)
   const definition = service.modelDefinitions.lightonocr
   assert.equal(definition.repository, 'lightonai/LightOnOCR-3-1B')
   assert.equal(definition.revision, '23d544085c886bbdace647bcfab91203299417e2')
@@ -761,4 +781,261 @@ test('LightOnOCR propagates helper errors and keeps the worker usable', async (t
   await assert.rejects(service.extractText(path.join(root, 'scan.png')), /fixture ocr error/)
   await setControl(root, { ocrText: 'Korte renter' })
   assert.equal((await service.extractText(path.join(root, 'scan.png'))).text, 'Korte renter')
+})
+
+test('caption model selection defaults to none, persists, and is rejected for other models', async (t) => {
+  const { root, service } = await fixture(t)
+  assert.equal((await service.status()).selectedCaptionModel, null)
+  assert.equal(await service.selectedCaptionModel(), null)
+  const selected = await service.selectCaptionModel('qwen35')
+  assert.equal(selected.selectedCaptionModel, 'qwen35')
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, 'models', 'caption-model.json'), 'utf8')), { id: 'qwen35' })
+  assert.deepEqual(selected.models.map((model) => model.id), (await service.status()).models.map((model) => model.id))
+  assert.equal(selected.models.find((model) => model.id === 'qwen35').installed, false)
+  await assert.rejects(service.selectCaptionModel('llama32'), (error) => error.statusCode === 400)
+  await assert.rejects(service.selectCaptionModel('gemma4:caption'), (error) => error.statusCode === 400)
+  const reopened = createMlxService({ projectRoot: root, modelRoot: path.join(root, 'models'), mlxHelperPath: helperPath })
+  t.after(() => reopened.close())
+  assert.equal(await reopened.selectedCaptionModel(), 'qwen35')
+  assert.equal((await service.selectCaptionModel(null)).selectedCaptionModel, null)
+})
+
+test('captionImage reports missing selection and missing installs with 409 codes', async (t) => {
+  const { root, logPath, service } = await fixture(t)
+  const imagePath = path.join(root, 'photo.png')
+  await assert.rejects(service.captionImage(imagePath), (error) => {
+    assert.equal(error.statusCode, 409)
+    assert.equal(error.code, 'CAPTION_MODEL_NOT_SELECTED')
+    assert.equal(error.message, 'Choose a caption model in Settings → Models.')
+    return true
+  })
+  await service.selectCaptionModel('qwen35')
+  await assert.rejects(service.captionImage(imagePath), (error) => {
+    assert.equal(error.statusCode, 409)
+    assert.equal(error.code, 'CAPTION_MODEL_NOT_INSTALLED')
+    assert.equal(error.modelId, 'qwen35')
+    assert.equal(error.message, 'Install Qwen 3.5 4B (4-bit) in Settings → Models to describe images.')
+    return true
+  })
+  assert.deepEqual(await readLog(logPath), [])
+})
+
+test('captions run in a caption-task worker that rolls up into the base model and swaps with its generation worker', async (t) => {
+  const { root, logPath, service } = await fixture(t, TIGHT_MEMORY)
+  await service.install('gemma4')
+  await service.selectCaptionModel('gemma4')
+  const generationPid = (await readLog(logPath)).find((entry) => entry.event === 'ready' && entry.task === 'generation').pid
+
+  const imagePath = path.join(root, 'photo.png')
+  const result = await service.captionImage(imagePath)
+  assert.deepEqual(result, {
+    text: 'A whiteboard with a roadmap.', modelId: 'gemma4',
+    model: 'mlx-community/gemma-4-e4b-it-4bit', revision: service.modelDefinitions.gemma4.revision,
+  })
+  const calls = await readLog(logPath)
+  const ready = calls.filter((entry) => entry.event === 'ready').at(-1)
+  assert.equal(ready.task, 'caption')
+  assert.equal(ready.model, 'mlx-community/gemma-4-e4b-it-4bit')
+  assert.ok(ready.modelDirectory)
+  assert.ok(calls.some((entry) => entry.operation === 'caption' && entry.task === 'caption' && entry.imagePath === imagePath))
+  assertProcessExited(generationPid)
+
+  const status = await service.status()
+  assert.deepEqual(status.models.map((model) => model.id), ['gemma4', 'qwen35', 'llama32', 'embeddinggemma', 'lightonocr', 'whisper', 'whisperlarge', 'sortformer'])
+  const gemma = status.models.find((model) => model.id === 'gemma4')
+  assert.equal(gemma.loaded, true)
+  assert.equal(gemma.busy, false)
+  assert.deepEqual(gemma.memory, { activeBytes: 128_000_000, cacheBytes: 32_000_000, peakResidentBytes: 256_000_000 })
+  assert.equal(status.activeModel, 'gemma4')
+
+  // Generation takes the heavy slot back and stops the caption worker.
+  const captionPid = ready.pid
+  await service.generate([{ role: 'user', content: 'Planning note.' }])
+  assertProcessExited(captionPid)
+  assert.equal((await service.status()).models.find((model) => model.id === 'gemma4').loaded, true)
+
+  // OCR evicts a loaded caption worker as well.
+  await service.captionImage(imagePath)
+  const secondCaptionPid = (await readLog(logPath)).filter((entry) => entry.event === 'ready' && entry.task === 'caption').at(-1).pid
+  await service.install('lightonocr')
+  assertProcessExited(secondCaptionPid)
+  assert.equal((await service.status()).models.find((model) => model.id === 'gemma4').loaded, false)
+})
+
+test('caption requests mark the base model busy and removing the model stops its caption worker', async (t) => {
+  const { root, logPath, service } = await fixture(t)
+  await service.install('gemma4')
+  await service.selectCaptionModel('gemma4')
+  await setControl(root, { operationDelayMs: 300 })
+  const pending = service.captionImage(path.join(root, 'photo.png'))
+  await waitUntil(async () => (await service.status()).models.find((model) => model.id === 'gemma4').requestCount === 1)
+  assert.equal((await service.status()).models.find((model) => model.id === 'gemma4').busy, true)
+  await pending
+  await setControl(root, {})
+  const captionPid = (await readLog(logPath)).filter((entry) => entry.event === 'ready' && entry.task === 'caption').at(-1).pid
+  const removed = await service.remove('gemma4')
+  assertProcessExited(captionPid)
+  assert.equal(removed.models.find((model) => model.id === 'gemma4').installed, false)
+  assert.equal(removed.models.find((model) => model.id === 'gemma4').loaded, false)
+})
+
+test('an idle caption worker unloads after its short timeout and helper errors keep it usable', async (t) => {
+  const { root, logPath, service } = await fixture(t, { warmKeepAliveMs: 80 })
+  await service.install('qwen35')
+  await service.selectCaptionModel('qwen35')
+  await setControl(root, { failCaption: true })
+  await assert.rejects(service.captionImage(path.join(root, 'photo.png')), /fixture caption error/)
+  await setControl(root, { captionText: 'A cat on a sofa.' })
+  assert.equal((await service.captionImage(path.join(root, 'photo.png'))).text, 'A cat on a sofa.')
+  const pid = (await readLog(logPath)).filter((entry) => entry.event === 'ready' && entry.task === 'caption').at(-1).pid
+  await waitUntil(async () => (await service.status()).models.find((model) => model.id === 'qwen35').loaded === false, 3_000)
+  assertProcessExited(pid)
+})
+
+test('caption selection route accepts models or null and rejects anything else', async (t) => {
+  const { service } = await fixture(t)
+  const app = express()
+  app.use(express.json())
+  registerRoutes(app, service, { registry: { get: () => null, list: () => [] } })
+  const server = app.listen(0, '127.0.0.1')
+  await new Promise((resolve) => server.once('listening', resolve))
+  t.after(() => new Promise((resolve) => server.close(resolve)))
+  const put = (body) => fetch(`http://127.0.0.1:${server.address().port}/api/mlx/models/caption-selection`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  })
+  const chosen = await put({ id: 'gemma4' })
+  assert.equal(chosen.status, 200)
+  assert.equal((await chosen.json()).selectedCaptionModel, 'gemma4')
+  const cleared = await put({ id: null })
+  assert.equal((await cleared.json()).selectedCaptionModel, null)
+  for (const body of [{ id: 'llama32' }, { id: 'gemma4:caption' }, {}, { id: '' }]) {
+    assert.equal((await put(body)).status, 400, JSON.stringify(body))
+  }
+})
+
+const readyTasks = async (logPath) => (await readLog(logPath)).filter((entry) => entry.event === 'ready').map((entry) => entry.task)
+const loadedIds = async (service) => (await service.status()).models.filter((model) => model.loaded).map((model) => model.id).sort()
+
+test('idle workers unload after their per-purpose timeout and status reports the generation value', async (t) => {
+  const { service } = await fixture(t, {
+    warmKeepAliveMs: Infinity,
+    idleUnloadOverrides: { generation: 400, embeddings: 120 },
+  })
+  assert.equal((await service.status()).keepAliveMs, 400)
+  await service.install('gemma4')
+  await service.install('embeddinggemma')
+  await waitUntil(async () => !(await loadedIds(service)).includes('embeddinggemma'))
+  assert.deepEqual(await loadedIds(service), ['gemma4'])
+  await waitUntil(async () => (await loadedIds(service)).length === 0, 3_000)
+})
+
+test('warmKeepAliveMs caps the default idle timeouts', async (t) => {
+  const { service } = await fixture(t, { warmKeepAliveMs: 45 })
+  assert.equal((await service.status()).keepAliveMs, 45)
+})
+
+test('admission evicts the least recently used idle worker before a heavy model starts', async (t) => {
+  const { logPath, service } = await fixture(t, { totalMemory: () => 6.4e9, reserveBytes: 0 })
+  await service.install('embeddinggemma')
+  assert.deepEqual(await loadedIds(service), ['embeddinggemma'])
+  await service.install('gemma4')
+  assert.deepEqual(await loadedIds(service), ['gemma4'])
+  assert.deepEqual(await readyTasks(logPath), ['embedding', 'generation'])
+})
+
+test('admission never stops a busy worker and still starts the heavy model', async (t) => {
+  const { root, logPath, service } = await fixture(t, { totalMemory: () => 6.4e9, reserveBytes: 0 })
+  await service.install('embeddinggemma')
+  await setControl(root, { operationDelayMs: 150 })
+  const embedding = service.embed(['busy sentence'])
+  await waitUntil(async () => (await readLog(logPath)).some((entry) => entry.event === 'request' && entry.operation === 'embed'))
+  await service.install('gemma4')
+  assert.deepEqual(await loadedIds(service), ['embeddinggemma', 'gemma4'])
+  await embedding
+})
+
+test('the pressure monitor stops idle workers under low memory and leaves busy ones', async (t) => {
+  let level = 80
+  const { root, logPath, service } = await fixture(t, { readLevel: async () => level, pressureIntervalMs: 30 })
+  await service.install('embeddinggemma')
+  await service.install('gemma4')
+  await waitUntil(async () => (await readyTasks(logPath)).length === 2)
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  assert.deepEqual(await loadedIds(service), ['embeddinggemma', 'gemma4'])
+  await setControl(root, { operationDelayMs: 400 })
+  const busy = service.generate([{ role: 'user', content: 'Planning note.' }])
+  await waitUntil(async () => (await readLog(logPath)).some((entry) => entry.event === 'request' && entry.operation === 'generate'))
+  level = 5
+  await waitUntil(async () => !(await loadedIds(service)).includes('embeddinggemma'))
+  assert.deepEqual(await loadedIds(service), ['gemma4'])
+  await busy
+  await waitUntil(async () => (await loadedIds(service)).length === 0)
+})
+
+test('the pressure monitor only polls while workers are loaded and stops on close', async (t) => {
+  let reads = 0
+  const { service } = await fixture(t, {
+    readLevel: async () => { reads += 1; return 90 }, pressureIntervalMs: 20,
+    idleUnloadOverrides: { embeddings: 60 },
+  })
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  assert.equal(reads, 0)
+  await service.install('embeddinggemma')
+  await waitUntil(() => reads > 0)
+  await waitUntil(async () => (await loadedIds(service)).length === 0)
+  await new Promise((resolve) => setTimeout(resolve, 60))
+  const settled = reads
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  assert.equal(reads, settled)
+  await service.install('embeddinggemma')
+  await service.close()
+  const afterClose = reads
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  assert.equal(reads, afterClose)
+})
+
+test('with ample memory a Qwen caption worker and a Gemma generation worker stay loaded together', async (t) => {
+  const { root, logPath, service } = await fixture(t)
+  await service.install('qwen35')
+  await service.unload('qwen35')
+  await service.install('gemma4')
+  await service.selectCaptionModel('qwen35')
+  await service.captionImage(path.join(root, 'photo.png'))
+  assert.deepEqual(await loadedIds(service), ['gemma4', 'qwen35'])
+  const ready = (await readLog(logPath)).filter((entry) => entry.event === 'ready')
+  assert.equal(ready.length, 3)
+  await service.generate([{ role: 'user', content: 'Planning note.' }])
+  await service.captionImage(path.join(root, 'photo.png'))
+  assert.equal((await readLog(logPath)).filter((entry) => entry.event === 'ready').length, 3)
+  for (const { pid } of ready.slice(1)) process.kill(pid, 0)
+  assert.equal((await service.status()).activeModel, 'qwen35')
+})
+
+test('with little memory starting one heavy worker stops the least recently used idle other', async (t) => {
+  // Budget 3.7 GB: the Qwen caption worker (3.06 GB download plus headroom) does not fit next to Gemma.
+  const { root, logPath, service } = await fixture(t, { totalMemory: () => 3.7e9, reserveBytes: 0 })
+  await service.install('qwen35')
+  await service.unload('qwen35')
+  await service.install('gemma4')
+  assert.deepEqual(await loadedIds(service), ['gemma4'])
+  const gemmaPid = (await readLog(logPath)).findLast((entry) => entry.event === 'ready' && entry.task === 'generation').pid
+  await service.selectCaptionModel('qwen35')
+  await service.captionImage(path.join(root, 'photo.png'))
+  assert.deepEqual(await loadedIds(service), ['qwen35'])
+  assertProcessExited(gemmaPid)
+  assert.equal((await service.status()).activeModel, 'qwen35')
+})
+
+test('a model and its caption worker never stay loaded together, in either direction', async (t) => {
+  const { root, logPath, service } = await fixture(t)
+  await service.install('gemma4')
+  await service.selectCaptionModel('gemma4')
+  const generationPid = (await readLog(logPath)).find((entry) => entry.event === 'ready' && entry.task === 'generation').pid
+  await service.captionImage(path.join(root, 'photo.png'))
+  assertProcessExited(generationPid)
+  const captionPid = (await readLog(logPath)).findLast((entry) => entry.event === 'ready' && entry.task === 'caption').pid
+  await service.generate([{ role: 'user', content: 'Planning note.' }])
+  assertProcessExited(captionPid)
+  assert.deepEqual(await loadedIds(service), ['gemma4'])
+  assert.equal((await service.status()).activeModel, 'gemma4')
 })

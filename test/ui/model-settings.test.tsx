@@ -26,6 +26,7 @@ const status: MlxStatus = {
 function renderSettings(overrides: Partial<ModelSettingsControls> = {}) {
   const select = vi.fn();
   const selectTranscription = vi.fn();
+  const selectCaption = vi.fn();
   const install = vi.fn();
   const remove = vi.fn();
   const rendered = render(
@@ -35,10 +36,10 @@ function renderSettings(overrides: Partial<ModelSettingsControls> = {}) {
       obsidianImport={{ supported: false, busy: false, scan: null, job: null, error: "", selectVault: () => {}, confirmImport: () => {}, cancelImport: () => {}, clearScan: () => {} }}
       onClose={vi.fn()}
       initialCategory="models"
-      modelSettings={{ status, actionModel: null, action: null, error: "", install, remove, select, selectTranscription, ...overrides }}
+      modelSettings={{ status, actionModel: null, action: null, error: "", install, remove, select, selectTranscription, selectCaption, ...overrides }}
     />,
   );
-  return { ...rendered, select, selectTranscription, install, remove };
+  return { ...rendered, select, selectTranscription, selectCaption, install, remove };
 }
 
 describe("model settings", () => {
@@ -67,7 +68,7 @@ describe("model settings", () => {
     const { rerender } = render(
       <SettingsDialog
         themeId="original" onSelectTheme={vi.fn()} obsidianImport={{ supported: false, busy: false, scan: null, job: null, error: "", selectVault: () => {}, confirmImport: () => {}, cancelImport: () => {}, clearScan: () => {} }}
-        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: started, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn() }}
+        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: started, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn(), selectCaption: vi.fn() }}
       />,
     );
 
@@ -78,7 +79,7 @@ describe("model settings", () => {
     rerender(
       <SettingsDialog
         themeId="original" onSelectTheme={vi.fn()} obsidianImport={{ supported: false, busy: false, scan: null, job: null, error: "", selectVault: () => {}, confirmImport: () => {}, cancelImport: () => {}, clearScan: () => {} }}
-        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, downloads: [{ id, progress: { downloadedBytes: 0, totalBytes: 0, percent: 0, phase: "downloading" } }] }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn() }}
+        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, downloads: [{ id, progress: { downloadedBytes: 0, totalBytes: 0, percent: 0, phase: "downloading" } }] }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn(), selectCaption: vi.fn() }}
       />,
     );
     expect(progress()).not.toHaveAttribute("value");
@@ -87,7 +88,7 @@ describe("model settings", () => {
     rerender(
       <SettingsDialog
         themeId="original" onSelectTheme={vi.fn()} obsidianImport={{ supported: false, busy: false, scan: null, job: null, error: "", selectVault: () => {}, confirmImport: () => {}, cancelImport: () => {}, clearScan: () => {} }}
-        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, downloads: [{ id, progress: { downloadedBytes: 1_000_000_000, totalBytes: 4_000_000_000, percent: 25, phase: "downloading" } }], models: status.models.map((item) => item.id === id ? { ...item, loading: true } : item) }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn() }}
+        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, downloads: [{ id, progress: { downloadedBytes: 1_000_000_000, totalBytes: 4_000_000_000, percent: 25, phase: "downloading" } }], models: status.models.map((item) => item.id === id ? { ...item, loading: true } : item) }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn(), selectCaption: vi.fn() }}
       />,
     );
     expect(progress()).toHaveAttribute("value", "25");
@@ -97,7 +98,7 @@ describe("model settings", () => {
     rerender(
       <SettingsDialog
         themeId="original" onSelectTheme={vi.fn()} obsidianImport={{ supported: false, busy: false, scan: null, job: null, error: "", selectVault: () => {}, confirmImport: () => {}, cancelImport: () => {}, clearScan: () => {} }}
-        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, downloads: [{ id, progress: { downloadedBytes: 3_000_000_000, totalBytes: 4_000_000_000, percent: 75, phase: "downloading" } }] }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn() }}
+        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, downloads: [{ id, progress: { downloadedBytes: 3_000_000_000, totalBytes: 4_000_000_000, percent: 75, phase: "downloading" } }] }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn(), selectCaption: vi.fn() }}
       />,
     );
     expect(progress()).toHaveAttribute("value", "75");
@@ -105,7 +106,7 @@ describe("model settings", () => {
     rerender(
       <SettingsDialog
         themeId="original" onSelectTheme={vi.fn()} obsidianImport={{ supported: false, busy: false, scan: null, job: null, error: "", selectVault: () => {}, confirmImport: () => {}, cancelImport: () => {}, clearScan: () => {} }}
-        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, downloads: [{ id, progress: { downloadedBytes: 4_000_000_000, totalBytes: 4_000_000_000, percent: 100, phase: "loading" } }], models: status.models.map((item) => item.id === id ? { ...item, installed: true, loading: true } : item) }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn() }}
+        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, downloads: [{ id, progress: { downloadedBytes: 4_000_000_000, totalBytes: 4_000_000_000, percent: 100, phase: "loading" } }], models: status.models.map((item) => item.id === id ? { ...item, installed: true, loading: true } : item) }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn(), selectCaption: vi.fn() }}
       />,
     );
     expect(screen.getByRole("progressbar", { name: `Loading model ${name}` })).not.toHaveAttribute("value");
@@ -115,7 +116,7 @@ describe("model settings", () => {
     rerender(
       <SettingsDialog
         themeId="original" onSelectTheme={vi.fn()} obsidianImport={{ supported: false, busy: false, scan: null, job: null, error: "", selectVault: () => {}, confirmImport: () => {}, clearScan: () => {} }}
-        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, installing: [], downloads: [], models: status.models.map((item) => item.id === id ? { ...item, installed: true } : item) }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn() }}
+        onClose={vi.fn()} initialCategory="models" modelSettings={{ status: { ...started, installing: [], downloads: [], models: status.models.map((item) => item.id === id ? { ...item, installed: true } : item) }, actionModel: null, action: null, error: "", install: vi.fn(), remove: vi.fn(), select: vi.fn(), selectTranscription: vi.fn(), selectCaption: vi.fn() }}
       />,
     );
     expect(screen.queryByRole("progressbar", { name: new RegExp(name) })).not.toBeInTheDocument();
@@ -142,7 +143,7 @@ describe("model settings", () => {
     expect(turbo).toBeChecked();
     fireEvent.click(large);
     expect(actions.selectTranscription).toHaveBeenCalledWith("whisperlarge");
-    expect(screen.getByRole("radio", { name: /Gemma 4 E4B/ })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /^Gemma 4 E4B/ })).toBeChecked();
     const row = screen.getByText("Whisper Large v3 Turbo").closest(".model-settings-row") as HTMLElement;
     fireEvent.click(within(row).getByRole("button", { name: "Remove" }));
     expect(actions.remove).toHaveBeenCalledWith("whisper");
@@ -158,8 +159,8 @@ describe("model settings", () => {
 
   it("selects one generation model, keeps EmbeddingGemma fixed, and reports byte progress", () => {
     const actions = renderSettings();
-    expect(screen.getByRole("radio", { name: /Gemma 4 E4B/ })).toBeChecked();
-    fireEvent.click(screen.getByRole("radio", { name: /Qwen 3.5 4B/ }));
+    expect(screen.getByRole("radio", { name: /^Gemma 4 E4B/ })).toBeChecked();
+    fireEvent.click(screen.getByRole("radio", { name: /^Qwen 3.5 4B/ }));
     expect(actions.select).toHaveBeenCalledWith("qwen35");
     expect(screen.queryByRole("radio", { name: /EmbeddingGemma/ })).not.toBeInTheDocument();
     expect(screen.getByText("50% · 1.53 GB of 3.06 GB")).toBeInTheDocument();
@@ -175,5 +176,36 @@ describe("model settings", () => {
     renderSettings({ status: { ...status, helperAvailable: false } });
     expect(screen.getByText(/helper is not ready/i)).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Download" }).every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+  });
+});
+
+describe("image description model settings", () => {
+  it("defaults to None and selects a caption model", () => {
+    const { selectCaption } = renderSettings();
+    const group = screen.getByRole("group", { name: "Image descriptions" });
+    expect(within(group).getByRole("radio", { name: /None/ })).toBeChecked();
+    expect(within(group).getByText(/reuses the Filing & Ask model weights/)).toBeInTheDocument();
+    fireEvent.click(within(group).getByRole("radio", { name: /^Use Qwen 3.5 4B/ }));
+    expect(selectCaption).toHaveBeenCalledWith("qwen35");
+    fireEvent.click(within(group).getByRole("radio", { name: /^Use Gemma 4 E4B/ }));
+    expect(selectCaption).toHaveBeenCalledWith("gemma4");
+  });
+
+  it("shows download state and offers a download when the chosen model is missing", () => {
+    const { install } = renderSettings({ status: { ...status, installing: [], downloads: [], selectedCaptionModel: "qwen35" } });
+    const group = screen.getByRole("group", { name: "Image descriptions" });
+    expect(within(group).getByText("Downloaded")).toBeInTheDocument();
+    expect(within(group).getByText(/Not downloaded · about 3\.1 GB/)).toBeInTheDocument();
+    fireEvent.click(within(group).getByRole("button", { name: "Download" }));
+    expect(install).toHaveBeenCalledWith("qwen35");
+    expect(within(group).getByRole("status")).toHaveTextContent(/not downloaded/);
+  });
+
+  it("can switch back to None", () => {
+    const { selectCaption } = renderSettings({ status: { ...status, selectedCaptionModel: "gemma4" } });
+    const group = screen.getByRole("group", { name: "Image descriptions" });
+    expect(within(group).getByRole("radio", { name: /^Use Gemma 4 E4B/ })).toBeChecked();
+    fireEvent.click(within(group).getByRole("radio", { name: /None/ }));
+    expect(selectCaption).toHaveBeenCalledWith(null);
   });
 });

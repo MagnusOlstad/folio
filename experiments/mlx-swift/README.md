@@ -12,7 +12,10 @@ The helper requires Apple Silicon and macOS 14 or newer. It uses MLX Swift
 E4B support backport is in `Patches/gemma4-text-pinned-3.31.3.patch`. The
 EmbeddingGemma initializer fix is in
 `Patches/embeddinggemma-moduleinfo-pinned-3.31.3.patch`. The LightOnOCR
-support is in `Patches/mistral3-lightonocr-pinned-3.31.3.patch`. All three are
+support is in `Patches/mistral3-lightonocr-pinned-3.31.3.patch`. The vision-language
+Gemma 4 loader used for image captions gets the same two fixes (a plain quantizable
+`Linear` per-layer projection and no K/V tensors on KV-shared layers) from
+`Patches/gemma4-vlm-pinned-3.31.3.patch`. All four are
 applied to ignored source copies during the build and do not alter upstream
 package checkouts. It initializes `ModuleInfo` children through the supported module
 update API and defines this checkpoint's projection head as 768→3072→768. The
@@ -78,10 +81,15 @@ The build fetches the pinned Swift sources and verified Cmlx framework into
 the ignored `.cache` directory, compiles the helper, then stages a relocatable
 app tree at `.cache/staged/Folio.app`. This builds the runtime only; it does
 not download either model. The build applies
-`Patches/whisper-language-detection-pinned-8d86630.patch` to the ignored audio
-package copy. It detects Whisper's language from the encoder output when no
-language is supplied, then includes the detected language token in the decoder
-prompt. `npm run desktop` and the macOS packaging scripts run this build before
+`Patches/whisper-language-detection-pinned-8d86630.patch` and then
+`Patches/whisper-timestamps-pinned-8d86630.patch` to the ignored audio
+package copy. The first detects Whisper's language from the encoder output when
+no language is supplied, then includes the detected language token in the
+decoder prompt. The second adds an opt-in `timestampsEnabled` switch that makes
+Whisper decode timestamp tokens and return one `{start, end, text}` segment per
+timestamped span; `folio-mlx` turns it on and offsets segments by their window.
+The `diarization` task loads Sortformer from `MLXAudioVAD` (optional, installed
+on request; its pinned revision is still a placeholder in this checkout). `npm run desktop` and the macOS packaging scripts run this build before
 launching or packaging Folio.
 The package declares Swift tools version 6.1; this build has been validated with
 Swift 6.4. The preflight verifies that the selected SwiftPM launches and leaves
@@ -104,7 +112,7 @@ DEVELOPER_DIR="/path/to/Xcode.app/Contents/Developer" npm run build:mlx
 ## Helper protocol
 
 The Node service starts one helper process per model with `--task generation`,
-`--task embedding`, `--task transcription`, or `--task ocr`, plus the pinned
+`--task embedding`, `--task transcription`, `--task ocr`, or `--task caption`, plus the pinned
 repository and revision. OCR loads through `VLMModelFactory` (generation keeps
 using `LLMModelFactory` explicitly, so linking `MLXVLM` does not change how
 generation checkpoints load); without `--model-directory` it downloads the
@@ -125,6 +133,12 @@ Run the bounded reader's short, exact, trailing, stereo first-channel, and
 15/60-minute frame-sequencing checks on macOS with
 `Scripts/test-audio-window.sh`. The integration build also exercises the
 upstream `resampleAudio` path used by Whisper.
+
+Caption requests (`{"id", "operation": "caption", "imagePath": "/absolute/path.png",
+"prompt"?, "maxTokens"?}`) run on the installed Gemma 4 E4B or Qwen 3.5 4B snapshot
+through `VLMModelFactory`. They use greedy decoding, thinking disabled, 200 generated
+tokens by default, a default "describe this image for a notes search index" prompt, and
+an 896 px longest edge. The response shape matches OCR.
 
 The helper reports a JSON `ready` event on stdout and then accepts one JSON
 object per stdin line. Generation requests provide a system and user message;

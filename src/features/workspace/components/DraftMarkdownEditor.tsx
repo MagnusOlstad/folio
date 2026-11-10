@@ -18,6 +18,7 @@ type DraftMarkdownEditorProps = {
   focusRequestId?: number;
   onFocusRequestConsumed?: () => void;
   ariaLabel: string;
+  documentId?: string;
   initialSelection?: { from: number; to: number };
   onSelectionChange?: (from: number, to: number) => void;
 };
@@ -33,6 +34,7 @@ export function DraftMarkdownEditor({
   focusRequestId,
   onFocusRequestConsumed,
   ariaLabel,
+  documentId,
   initialSelection,
   onSelectionChange,
 }: DraftMarkdownEditorProps) {
@@ -196,6 +198,7 @@ export function DraftMarkdownEditor({
         onFocusRequestConsumed={onFocusRequestConsumed}
         autoFocus
         placeholder="Write your note…"
+        documentId={documentId}
         ariaLabel={ariaLabel}
       />
     </div>

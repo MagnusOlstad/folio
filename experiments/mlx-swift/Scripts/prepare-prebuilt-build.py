@@ -78,15 +78,20 @@ def main() -> None:
         text = text.replace(original, replacement)
     audio_manifest.write_text(text)
 
-    whisper_patch = experiment / "Patches" / "whisper-language-detection-pinned-8d86630.patch"
-    if not whisper_patch.is_file():
-        raise SystemExit(f"pinned Whisper language detection patch is missing: {whisper_patch}")
-    with whisper_patch.open("rb") as patch_file:
-        subprocess.run(
-            ["patch", "--forward", "-p1", "-d", str(local / "mlx-audio-swift")],
-            stdin=patch_file,
-            check=True,
-        )
+    # Applied in order: the timestamp patch is written against the language-detection result.
+    for patch_name, description in (
+        ("whisper-language-detection-pinned-8d86630.patch", "Whisper language detection"),
+        ("whisper-timestamps-pinned-8d86630.patch", "Whisper segment timestamps"),
+    ):
+        whisper_patch = experiment / "Patches" / patch_name
+        if not whisper_patch.is_file():
+            raise SystemExit(f"pinned {description} patch is missing: {whisper_patch}")
+        with whisper_patch.open("rb") as patch_file:
+            subprocess.run(
+                ["patch", "--forward", "-p1", "-d", str(local / "mlx-audio-swift")],
+                stdin=patch_file,
+                check=True,
+            )
 
     build.mkdir(parents=True, exist_ok=True)
     (build / "Sources").mkdir(exist_ok=True)

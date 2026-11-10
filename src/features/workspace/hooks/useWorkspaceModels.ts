@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MLX_GENERATION_MODEL } from "../../../domain/types.ts";
-import type { MlxModelId, MlxStatus, MlxTranscriptionModelId, VersionInfo } from "../../../domain/types.ts";
+import { isMlxCaptionModelId, MLX_GENERATION_MODEL } from "../../../domain/types.ts";
+import type { MlxCaptionModelId, MlxModelId, MlxStatus, MlxTranscriptionModelId, VersionInfo } from "../../../domain/types.ts";
 import { api, apiWithRetry } from "../../../lib/api.ts";
 import { refreshTranslationSettings } from "./useTranslationSettings.ts";
 
-type ModelAction = "install" | "load" | "unload" | "remove" | "select" | "select-transcription";
+type ModelAction = "install" | "load" | "unload" | "remove" | "select" | "select-transcription" | "select-caption";
 
 export function useWorkspaceModels(setMessage: (message: string) => void, enabled = true) {
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
@@ -68,8 +68,10 @@ export function useWorkspaceModels(setMessage: (message: string) => void, enable
     if (generationSignature !== null) previousSignatureRef.current = generationSignature;
   }, [generationSignature]);
 
-  async function runMlxAction(id: MlxModelId, action: ModelAction) {
+  async function runMlxAction(id: MlxModelId | null, action: ModelAction) {
     if (actionRef.current) return;
+    if (action === "select-caption" && id !== null && !isMlxCaptionModelId(id)) return;
+    if (id === null && action !== "select-caption") return;
     if (action === "select" && (id === "embeddinggemma" || id === "whisper" || id === "whisperlarge")) return;
     if (action === "select-transcription" && id !== "whisper" && id !== "whisperlarge") return;
     actionRef.current = true;
@@ -79,14 +81,15 @@ export function useWorkspaceModels(setMessage: (message: string) => void, enable
     setModelError("");
     setMessage("");
     try {
-      const selectionAction = action === "select" || action === "select-transcription";
-      const selectionPath = action === "select-transcription" ? "/api/mlx/models/transcription-selection" : "/api/mlx/models/selection";
+      const selectionAction = action === "select" || action === "select-transcription" || action === "select-caption";
+      const selectionPath = action === "select-transcription" ? "/api/mlx/models/transcription-selection"
+        : action === "select-caption" ? "/api/mlx/models/caption-selection" : "/api/mlx/models/selection";
       await api<MlxStatus>(selectionAction ? selectionPath : `/api/mlx/models/${id}/${action}`, {
         method: selectionAction ? "PUT" : "POST",
         ...(selectionAction ? { body: JSON.stringify({ id }) } : {}),
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : `Could not ${action} ${id}`;
+      const message = error instanceof Error ? error.message : `Could not ${action} ${id ?? "caption model"}`;
       if (mountedRef.current) { setModelError(message); setMessage(message); }
     } finally {
       // A failed mutation may still have changed helper state. Invalidate any
@@ -107,6 +110,7 @@ export function useWorkspaceModels(setMessage: (message: string) => void, enable
   return {
     versionInfo, setVersionInfo, selectedAnswerModel, selectedAnswerModelMissing, selectedTranscriptionModel,
     mlxStatus, setMlxStatus, mlxActionModel, mlxAction, modelError: modelError || statusError,
+    selectCaptionModel: (id: MlxCaptionModelId | null) => runMlxAction(id, "select-caption"),
     installMlxModel: (id: MlxModelId) => runMlxAction(id, "install"),
     removeMlxModel: (id: MlxModelId) => runMlxAction(id, "remove"),
     selectGenerationModel: (id: MlxModelId) => runMlxAction(id, "select"),
