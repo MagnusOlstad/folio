@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReassignOutcome } from '../hooks/speakerReassign.ts'
 import { formatClock, reassignOptions, speakerColor, speakerDisplayName } from '../model/playback-turns.ts'
 import { nearestBoundary, sentenceWords } from '../model/split-sentence.ts'
@@ -37,7 +37,20 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
   const [working, setWorking] = useState(false)
   const [note, setNote] = useState<Note | null>(null)
   const [error, setError] = useState('')
+  const currentRef = useRef<HTMLParagraphElement>(null)
   const current = segments[index]
+  const currentStart = current?.start ?? 0
+  const currentEnd = current?.end ?? 0
+  const showingText = splitting === null
+
+  // Very long sentences scroll inside a capped box; keep the approximate playhead (by characters) in view.
+  useEffect(() => {
+    const box = currentRef.current
+    if (!box || box.scrollHeight <= box.clientHeight || !(currentEnd > currentStart)) return
+    const ratio = Math.min(1, Math.max(0, (time - currentStart) / (currentEnd - currentStart)))
+    const target = ratio * box.scrollHeight
+    if (target < box.scrollTop || target > box.scrollTop + box.clientHeight) box.scrollTop = Math.max(0, target - box.clientHeight / 3)
+  }, [time, currentStart, currentEnd, showingText])
   if (!current) return null
   const speaker = current.speaker ?? null
   const splitTarget = splitting ? segments[splitting.index] : undefined
@@ -112,7 +125,7 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
       <p className="player-now-neighbour">{segments[index - 1]?.text.trim() || ' '}</p>
       <div className="player-now-head">
         {speaker !== null && <i className="player-dot" style={{ background: speakerColor(speaker) }} aria-hidden="true" />}
-        <strong>{speaker !== null ? speakerDisplayName(speaker, names) : 'Speaker unknown'}</strong>
+        <strong title={speaker !== null ? speakerDisplayName(speaker, names) : undefined}>{speaker !== null ? speakerDisplayName(speaker, names) : 'Speaker unknown'}</strong>
         <time>{formatClock(current.start)}</time>
       </div>
       {splitting && splitTarget ? (
@@ -126,7 +139,7 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
           onSubmit={(offset, target) => split(splitting.index, offset, target)}
         />
       ) : (
-        <p className="player-now-current">{current.text.trim()}</p>
+        <p className="player-now-current" ref={currentRef}>{current.text.trim()}</p>
       )}
       <p className="player-now-neighbour">{segments[index + 1]?.text.trim() || ' '}</p>
       {hasSpeakers && (

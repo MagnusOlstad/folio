@@ -665,7 +665,7 @@ const MEETING_SEGMENTS = [
 ]
 const MEETING_TURNS = [{ start: 0, end: 4, speaker: 0 }, { start: 4, end: 8, speaker: 1 }, { start: 8, end: 12, speaker: 0 }]
 
-test('speaker recognition defaults off and the transcript gets timestamps from Whisper segments', async (t) => {
+test('without the speaker model the transcript gets timestamps from Whisper segments and no speaker labels', async (t) => {
   const { runtime } = await fixture(t)
   await installSnapshot(runtime)
   runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
@@ -700,6 +700,7 @@ test('a helper without segments keeps the plain transcript and skips speaker lab
   const plain = await service.transcribe((await recordedSession(runtime, service)).id)
   assert.equal(plain.result.transcript, 'Only text.')
   assert.deepEqual(plain.result.segments, [])
+  assert.match(plain.result.speakerWarning, /did not return segment timestamps/)
   const labelled = await service.transcribe((await recordedSession(runtime, service, { identifySpeakers: true })).id)
   assert.equal(labelled.result.transcript, 'Only text.')
   assert.match(labelled.result.speakerWarning, /did not return segment timestamps/)
@@ -713,9 +714,12 @@ test('Sortformer downloads on request with its pinned revision, then labels spea
   runtime.diarizationModel = PINNED_SORTFORMER
   runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
   const service = createTranscriptionService(runtime)
-  const session = await recordedSession(runtime, service, { identifySpeakers: true })
-  await assert.rejects(service.transcribe(session.id), /Download Sortformer Speaker Labels/)
-  assert.equal((await runtime.transcriptionStorage.readManifest(session.id)).state, 'recorded')
+  const session = await recordedSession(runtime, service)
+  runtime.transcriptionRunner = async ({ request }) => ({ id: request.id, text: 'Hello there.', segments: [{ start: 1, end: 2, text: 'Hello there.' }] })
+  const unlabelled = await service.transcribe(session.id)
+  assert.equal(unlabelled.result.speakers, false, 'transcription succeeds without speaker labels when the speaker model is missing')
+  assert.equal(unlabelled.result.speakerWarning, undefined)
+  assert.equal(unlabelled.result.transcript, '[00:01] Hello there.')
 
   let installArgs
   runtime.transcriptionInstaller = async ({ args }) => { installArgs = args; await installSortformer(runtime); return { event: 'ready' } }
@@ -742,8 +746,8 @@ test('Sortformer downloads on request with its pinned revision, then labels spea
     progress.push(service.active.get(session.id).progressPercent)
     return { id: request.id, speakerSegments: MEETING_TURNS }
   }
-  const completed = await service.transcribe(session.id)
-  assert.deepEqual(order, ['transcribe', 'diarize'])
+  const completed = await service.transcribe(session.id, { retranscribe: true })
+  assert.deepEqual(order, ['transcribe', 'diarize'], 'diarization runs although the session never opted in')
   assert.ok(progress[0] <= 85 && progress[1] > 85 && progress[1] <= 99)
   assert.equal(completed.result.transcript, [
     '**{{speaker1}}** [00:00]\nWelcome to the review.',
@@ -756,7 +760,7 @@ test('Sortformer downloads on request with its pinned revision, then labels spea
   assert.deepEqual((await runtime.transcriptionStorage.readResult(session.id)).speakerNumbers, [1, 2])
   assert.equal(completed.result.speakerWarning, undefined)
   assert.equal(completed.session.progressPercent, 100)
-  assert.equal(completed.session.identifySpeakers, true)
+  assert.equal(completed.session.identifySpeakers, false)
   await service.close()
 })
 
@@ -887,7 +891,7 @@ test('a failed or cancelled re-transcription keeps the previous result and the r
   await service.close()
 })
 
-test('re-transcription uses the session\'s updated speaker choice and rejects option changes while active', async (t) => {
+test('re-transcription labels speakers when the model is installed and still rejects option changes while active', async (t) => {
   const { runtime } = await fixture(t)
   await installSnapshot(runtime)
   runtime.diarizationModel = PINNED_SORTFORMER
@@ -905,7 +909,8 @@ test('re-transcription uses the session\'s updated speaker choice and rejects op
   }
   const service = createTranscriptionService(runtime)
   const session = await recordedSession(runtime, service)
-  assert.equal((await service.transcribe(session.id)).result.speakers, false)
+  const first = await service.transcribe(session.id)
+  assert.equal(first.result.speakers, true, 'the session never opted in, yet speakers are identified')
   await service.updateOptions(session.id, { identifySpeakers: true })
   hold = true
   const running = service.transcribe(session.id, { retranscribe: true })
@@ -913,7 +918,7 @@ test('re-transcription uses the session\'s updated speaker choice and rejects op
   await assert.rejects(service.updateOptions(session.id, { identifySpeakers: false }), /while a transcription is running/)
   release()
   const redone = await running
-  assert.deepEqual(operations, ['transcribe', 'transcribe', 'diarize'])
+  assert.deepEqual(operations, ['transcribe', 'diarize', 'transcribe', 'diarize'])
   assert.deepEqual(redone.result.speakerNumbers, [1, 2])
   assert.match(redone.result.transcript, /^\*\*\{\{speaker1\}\}\*\* \[00:00\]/)
   await service.close()

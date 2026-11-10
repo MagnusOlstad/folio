@@ -9,6 +9,7 @@ import { applyRetranscribedResult, regenerateSummary, type DraftWorkContext, typ
 import { linkedSpeakerNames, mergeTranscriptSegment, reassignSegmentSpeaker, splitTranscriptSegment, type ReassignOutcome } from './speakerReassign.ts'
 import { renameSpeakerInDraft } from './speakerRename.ts'
 import { transcriptionAudioUrl } from '../model/audio-url.ts'
+import { plainTranscriptResult } from '../model/plain-transcript.ts'
 import { playbackStore } from '../model/playback-store.ts'
 import {
   mergeTranscriptionDraft,
@@ -41,8 +42,6 @@ export type TranscriptionDockModel = {
   status: TranscriptionStatus | null
   progress: string
   error: string
-  /** Applies to the next import or recording; each session keeps its own saved copy. */
-  identifySpeakers: boolean
   deletingSessionId: string | null
   recording: RecordingModel
   /** Speaker names from the session's open draft (`speakerN::`), or null when no draft is open. */
@@ -59,13 +58,12 @@ export type TranscriptionDockActions = {
   retryRecording: () => Promise<void>
   installModel: () => void
   installSpeakerModel: () => void
-  setIdentifySpeakers: (value: boolean) => void
-  setSessionIdentifySpeakers: (session: TranscriptionSession, value: boolean) => void
   transcribe: (session: TranscriptionSession) => void
   /** Re-runs transcription on a ready session and replaces the transcript in its open draft. */
   retranscribe: (session: TranscriptionSession) => void
   cancel: (session: TranscriptionSession) => void
-  openTranscript: (session: TranscriptionSession) => void
+  /** Opens the transcript in a new draft; `speakers: false` writes plain paragraphs and leaves the draft unlinked from the session. */
+  openTranscript: (session: TranscriptionSession, options?: { speakers: boolean }) => void
   regenerateSummary: (session: TranscriptionSession) => void
   deleteSession: (session: TranscriptionSession) => Promise<void>
   /** Loads the stored result (segments included) of a ready session for the player. */
@@ -114,8 +112,6 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
   const [progress, setProgress] = useState('')
   const [error, setError] = useState('')
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
-  const [identifySpeakers, setIdentifySpeakersState] = useState(false)
-  const identifySpeakersRef = useRef(false)
   const activeBundle = useRef(sourceBundleId)
   const activeTranscriptionId = useRef<string | null>(null)
   const bundleGeneration = useRef(0)
@@ -216,7 +212,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
       const durationMs = await audioDuration(file)
       const created = await apiForBundle<SessionResponse>(importBundle, '/api/transcriptions', {
         method: 'POST',
-        body: JSON.stringify({ fileName: file.name, durationMs, sourceBundleId: importBundle, identifySpeakers: identifySpeakersRef.current }),
+        body: JSON.stringify({ fileName: file.name, durationMs, sourceBundleId: importBundle }),
       })
       await apiForBundle(importBundle, `/api/transcriptions/${encodeURIComponent(created.session.id)}/audio`, {
         method: 'PUT',
@@ -277,25 +273,6 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
       setProgress('')
       await refresh()
     } finally { busyRef.current = false }
-  }
-
-  function setIdentifySpeakers(value: boolean) {
-    identifySpeakersRef.current = value
-    setIdentifySpeakersState(value)
-  }
-
-  async function setSessionIdentifySpeakers(session: TranscriptionSession, value: boolean) {
-    if (busyRef.current || session.state === 'transcribing') return
-    setIdentifySpeakers(value)
-    setError('')
-    try {
-      const response = await apiForBundle<SessionResponse>(session.sourceBundleId ?? null,
-        `/api/transcriptions/${encodeURIComponent(session.id)}/options`, { method: 'POST', body: JSON.stringify({ identifySpeakers: value }) })
-      setPending((sessions) => sessions.map((item) => item.id === session.id ? { ...item, identifySpeakers: response.session.identifySpeakers === true } : item))
-    } catch (optionError) {
-      setError(errorMessage(optionError, 'Could not change the speaker label setting.'))
-    }
-    await refresh()
   }
 
   function openTranscriptDraft(session: TranscriptionSession, result: TranscriptionProcessResponse['result'], transform?: (content: string) => string) {
@@ -385,7 +362,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     await refresh()
   }
 
-  async function openTranscript(session: TranscriptionSession) {
+  async function openTranscript(session: TranscriptionSession, withSpeakers: boolean) {
     if (deletingRef.current === session.id) return
     const taskBundle = session.sourceBundleId ?? null
     const taskGeneration = bundleGeneration.current
@@ -394,7 +371,12 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
       const response = await apiForBundle<TranscriptionProcessResponse>(taskBundle, `/api/transcriptions/${encodeURIComponent(session.id)}`)
       if (activeBundle.current !== taskBundle || bundleGeneration.current !== taskGeneration) return
       if (!response.result) throw new Error('No transcript has been saved for this audio yet. Transcribe it first.')
-      openTranscriptDraft({ ...session, sourceBundleId: taskBundle }, response.result)
+      if (withSpeakers) openTranscriptDraft({ ...session, sourceBundleId: taskBundle }, response.result)
+      else {
+        // Not registered in sessionDrafts: speaker edits rebuild the linked draft only, so this plain copy stays untouched.
+        draftsRef.current.createDraft(mergeTranscriptionDraft(session, plainTranscriptResult(response.result)))
+        setMessage('Transcript opened as plain text in a new editable draft.')
+      }
     } catch (openError) {
       if (activeBundle.current === taskBundle && bundleGeneration.current === taskGeneration) {
         setError(errorMessage(openError, 'Could not open the transcript note.'))
@@ -447,7 +429,6 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
       ? `${pending.find((session) => session.id === activeSession?.id)?.progressPercent ?? 0}%`
       : progress,
     error,
-    identifySpeakers,
     deletingSessionId,
     recording: {
       phase: recorder.phase,
@@ -472,12 +453,10 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     retryRecording: recorder.retry,
     installModel: () => void installModel(),
     installSpeakerModel: () => void installSpeakerModel(),
-    setIdentifySpeakers,
-    setSessionIdentifySpeakers: (session, value) => void setSessionIdentifySpeakers(session, value),
     transcribe: (session) => void transcribe(session),
     retranscribe: (session) => void transcribe(session, true),
     cancel: (session) => void cancel(session),
-    openTranscript: (session) => void openTranscript(session),
+    openTranscript: (session, options) => void openTranscript(session, options?.speakers !== false),
     regenerateSummary: (session) => void regenerateSummary(draftWork, session),
     deleteSession,
     loadResult: async (session) => {

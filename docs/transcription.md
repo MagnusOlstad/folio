@@ -26,7 +26,9 @@ Past one hour the prefix is `[h:mm:ss]`. If a helper build returns no segments, 
 
 ## Speaker labels (optional)
 
-"Identify speakers" is a per-transcription choice in the Transcription tab, shown for both imports and recordings and off by default. The choice is saved on the session (`identifySpeakers` in `session.json`), so a retry uses the same setting; it can be changed per item whenever the session is not transcribing, including before a re-transcription (below).
+Speaker labels are always attempted: whenever the Sortformer speaker model is installed, every transcription is followed by a speaker pass. Without the model, transcription still succeeds and the transcript simply has no speaker labels; the Transcription tab offers the model download. The legacy `identifySpeakers` field in `session.json` and `POST /api/transcriptions/:id/options` are kept for compatibility but no longer decide whether speakers are identified.
+
+**Open draft**: for a transcript with speaker labels, a row offers "Open draft with speakers" (linked to the recording, so speaker renames, moves and splits update it) and "Open draft as plain text" (paragraphs without speaker headings or timestamps, no `## Speakers` section, not linked to the recording). Without speaker labels there is a single "Open draft".
 
 - Speaker recognition uses NVIDIA's Sortformer through `MLXAudioVAD` (`mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16`), a separate download that happens only on request. It is pinned to Hugging Face commit `e23e6404bd9859e93edbf94a740eb1c7fc58f12e` (`config.json` and `model.safetensors`, about 236 MB) and supports up to 4 speakers.
 - It runs after Whisper has finished, in its own MLX model slot, so Whisper is unloaded first and both models are not resident together.
@@ -57,10 +59,10 @@ speaker2:: Speaker 2
 
 ## Re-transcribe
 
-A ready session keeps its audio, so it can be transcribed again (for example with a different Whisper model selected, or with speaker labels switched on). The Transcription tab offers **Re-transcribe** on ready items; it asks for inline confirmation and shows the per-session "Identify speakers" toggle first.
+A ready session keeps its audio, so it can be transcribed again (for example with a different Whisper model selected, or with speaker labels switched on). The Transcription tab offers **Re-transcribe** on ready items; it asks for inline confirmation.
 
 - API: `POST /api/transcriptions/:id/process` with `{ "retranscribe": true }`. Without the flag a ready session still returns its stored result unchanged. `POST /api/transcriptions/:id/options` now also accepts a ready session (it is rejected only while the session is transcribing).
-- The run uses the currently selected Whisper model and the session's `identifySpeakers`. `result.json` is replaced only on success; on failure or cancellation the previous result and the `ready` state are kept.
+- The run uses the currently selected Whisper model and identifies speakers when the speaker model is installed. `result.json` is replaced only on success; on failure or cancellation the previous result and the `ready` state are kept.
 - A successful run replaces only the `## Transcript` section of the linked open draft. In `## Speakers` every existing `speakerN::` line is kept (including names you edited), definitions for newly appearing speakers are appended, and the section is created before `## Transcript` if the draft had none. The title, summary, and other text are untouched. With no open linked draft, a new draft is created as "Open draft" does. The merge is `applyRetranscription` in `src/features/transcription/model/retranscribe.ts`.
 
 ## Playback and speaker correction

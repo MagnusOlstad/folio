@@ -188,8 +188,8 @@ export function createTranscriptionService(runtime) {
       if (!(await runtime.transcriptionStorage.hasRecording(session))) {
         throw Object.assign(new Error('The audio file is missing. Re-import it to continue.'), { status: 409 })
       }
-      const identifySpeakers = session.identifySpeakers === true
-      if (identifySpeakers) await diarization.requireReady()
+      // Speaker labels always run when the speaker model is installed; without it the transcript has none.
+      const identifySpeakers = await diarization.isReady()
       const controller = new AbortController()
       let finishActive
       const finished = new Promise((resolve) => { finishActive = resolve })

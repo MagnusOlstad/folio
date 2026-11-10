@@ -98,6 +98,11 @@ export function createDiarizationSupport({ runtime, cacheRoot, executable, avail
     return status()
   }
 
+  /** True when the speaker model is installed, so speaker labels can run. Never throws. */
+  async function isReady() {
+    return Boolean(await snapshot())
+  }
+
   /** Throws a user-facing 409 unless speaker labels can run now. Called before Whisper starts. */
   async function requireReady() {
     if (!(await snapshot())) {
@@ -152,5 +157,5 @@ export function createDiarizationSupport({ runtime, cacheRoot, executable, avail
     })
   }
 
-  return { status, install, requireReady, run, register, model }
+  return { status, install, isReady, requireReady, run, register, model }
 }

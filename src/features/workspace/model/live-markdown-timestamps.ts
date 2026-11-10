@@ -1,10 +1,11 @@
 import { RangeSetBuilder, StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
-import { Decoration, EditorView, ViewPlugin, type DecorationSet } from "@codemirror/view";
+import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { playbackStore, type PlaybackStore } from "../../transcription/model/playback-store.ts";
 import {
   activeTimestampIndex,
   parseTranscriptTimestamps,
-  timestampBlockLines,
+  timestampBlockRange,
+  timestampsInRange,
   type TranscriptTimestamp,
 } from "../../transcription/model/transcript-timestamps.ts";
 
@@ -15,59 +16,76 @@ type TimestampOptions = {
 };
 
 type TimestampState = {
+  /** Re-parsed only when the document changes. */
   stamps: TranscriptTimestamp[];
   /** Playhead seconds while the loaded recording is this draft's; null otherwise. */
   seconds: number | null;
-  decorations: DecorationSet;
+  /** Line highlight for the playing turn; rebuilt only when the playhead moves to another turn. */
+  highlight: DecorationSet;
 };
 
 const setPlayhead = StateEffect.define<number | null>();
 const playingTurn = Decoration.line({ class: "cm-live-markdown-playing-turn" });
 
-function build(doc: Text, stamps: TranscriptTimestamp[], seconds: number | null): DecorationSet {
-  const builder = new RangeSetBuilder<Decoration>();
-  const text = doc.toString();
+function highlightFor(doc: Text, stamps: TranscriptTimestamp[], seconds: number | null): DecorationSet {
   const active = seconds === null ? -1 : activeTimestampIndex(stamps, seconds);
-  const block = active >= 0 ? timestampBlockLines(stamps, active, doc.lines, text) : null;
-  // Line decorations and marks share positions; add in document order.
-  const lineStarts = new Map<number, true>();
-  if (block) for (let line = block.start; line <= block.end; line += 1) lineStarts.set(line, true);
-  const items: Array<{ from: number; to: number; kind: "line" | "mark"; seconds?: number }> = [];
-  for (const line of lineStarts.keys()) items.push({ from: doc.line(line + 1).from, to: doc.line(line + 1).from, kind: "line" });
-  for (const stamp of stamps) items.push({ from: stamp.from, to: stamp.to, kind: "mark", seconds: stamp.seconds });
-  items.sort((a, b) => a.from - b.from || (a.kind === "line" ? -1 : 1));
-  for (const item of items) {
-    if (item.kind === "line") builder.add(item.from, item.to, playingTurn);
-    else builder.add(item.from, item.to, Decoration.mark({
-      class: "cm-live-markdown-timestamp",
-      attributes: { "data-seconds": String(item.seconds), title: "Play from here" },
-    }));
+  if (active < 0) return Decoration.none;
+  const block = timestampBlockRange(stamps, active, doc.lines, (line) => doc.line(line + 1).text);
+  const builder = new RangeSetBuilder<Decoration>();
+  for (let line = block.start; line <= block.end; line += 1) {
+    const from = doc.line(line + 1).from;
+    builder.add(from, from, playingTurn);
+  }
+  return builder.finish();
+}
+
+/** Marks for the timestamps inside the visible ranges only, so a transcript with thousands of stamps stays cheap. */
+function visibleMarks(view: EditorView, stamps: TranscriptTimestamp[]): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  let last = -1;
+  for (const range of view.visibleRanges) {
+    for (const stamp of timestampsInRange(stamps, range.from, range.to)) {
+      if (stamp.from < last) continue;
+      last = stamp.to;
+      builder.add(stamp.from, stamp.to, Decoration.mark({
+        class: "cm-live-markdown-timestamp",
+        attributes: { "data-seconds": String(stamp.seconds), title: "Play from here" },
+      }));
+    }
   }
   return builder.finish();
 }
 
 /**
- * Transcript timestamps (`[mm:ss]`) become clickable marks that seek the linked recording, and the turn that
- * contains the playhead gets a line highlight. Marks only style text, so it stays editable everywhere.
+ * Transcript timestamps (`[mm:ss]` or `[h:mm:ss]`) become clickable marks that seek the linked recording, and the
+ * turn that contains the playhead gets a line highlight. Marks only style text, so it stays editable everywhere.
  */
 export function liveMarkdownTimestamps({ getDocumentId, store = playbackStore }: TimestampOptions): Extension {
   const field = StateField.define<TimestampState>({
     create(state) {
-      const stamps = parseTranscriptTimestamps(state.doc.toString());
-      return { stamps, seconds: null, decorations: build(state.doc, stamps, null) };
+      return { stamps: parseTranscriptTimestamps(state.doc.toString()), seconds: null, highlight: Decoration.none };
     },
     update(value, transaction) {
       let seconds = value.seconds;
-      let changed = false;
+      let moved = false;
       for (const effect of transaction.effects) {
-        if (effect.is(setPlayhead)) { seconds = effect.value; changed = true; }
+        if (effect.is(setPlayhead)) { seconds = effect.value; moved = true; }
       }
-      if (!transaction.docChanged && !changed) return value;
+      if (!transaction.docChanged && !moved) return value;
       const stamps = transaction.docChanged ? parseTranscriptTimestamps(transaction.newDoc.toString()) : value.stamps;
-      return { stamps, seconds, decorations: build(transaction.newDoc, stamps, seconds) };
+      return { stamps, seconds, highlight: highlightFor(transaction.newDoc, stamps, seconds) };
     },
-    provide: (self) => EditorView.decorations.from(self, (value) => value.decorations),
+    provide: (self) => EditorView.decorations.from(self, (value) => value.highlight),
   });
+
+  const marks = ViewPlugin.fromClass(class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) { this.decorations = visibleMarks(view, view.state.field(field).stamps); }
+    update(update: ViewUpdate) {
+      // Playhead movement never touches the marks.
+      if (update.docChanged || update.viewportChanged) this.decorations = visibleMarks(update.view, update.state.field(field).stamps);
+    }
+  }, { decorations: (plugin) => plugin.decorations });
 
   const follower = ViewPlugin.fromClass(class {
     private readonly unsubscribe: () => void;
@@ -96,6 +114,7 @@ export function liveMarkdownTimestamps({ getDocumentId, store = playbackStore }:
 
   return [
     field,
+    marks,
     follower,
     EditorView.domEventHandlers({
       click: (event, view) => {

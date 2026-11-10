@@ -48,7 +48,7 @@ export function ModelNotices({ status, selectedModelName, speakerOffer, controls
             <strong>{speakers.modelState === 'downloading' ? `Downloading ${speakers.modelName}` : `${speakers.modelName} is not installed`}</strong>
           </div>
           {speakers.modelState === 'missing' && <>
-            <p>Speaker labels need {speakers.model} (about {Math.round(speakers.totalBytes / 1_000_000)} MB). It runs locally and is only downloaded when you ask.</p>
+            <p>Speaker labels need {speakers.model} (about {Math.round(speakers.totalBytes / 1_000_000)} MB). It runs locally. Until it is installed, transcripts have no speaker labels.</p>
             <button type="button" className="transcription-secondary" onClick={onInstallSpeakerModel} disabled={controlsBusy || !speakers.canInstall}>Download {speakers.modelName}</button>
           </>}
           {speakers.modelState === 'downloading' && (

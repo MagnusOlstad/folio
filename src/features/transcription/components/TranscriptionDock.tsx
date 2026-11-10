@@ -30,10 +30,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
   const canTranscribe = status?.canTranscribe === true
   const speakers = status?.diarization
   const speakersReady = speakers?.canDiarize === true
-  const confirmingRetranscribeId = confirming?.kind === 'retranscribe' ? confirming.id : null
-  const speakerLabelsWanted = model.identifySpeakers || model.pending.some((session) => session.identifySpeakers === true
-    && (session.state !== 'ready' || session.id === confirmingRetranscribeId))
-  const speakerOffer = Boolean(speakers) && speakerLabelsWanted && !speakersReady
+  const speakerOffer = Boolean(speakers) && !speakersReady
 
   useEffect(() => {
     recordingPhaseRef.current = recorder.phase
@@ -140,8 +137,6 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
               session={session}
               model={model}
               actions={actions}
-              speakers={speakers}
-              speakersReady={speakersReady}
               selectedModelName={selectedModelName}
               canTranscribe={canTranscribe}
               controlsBusy={controlsBusy}
