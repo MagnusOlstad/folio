@@ -57,14 +57,6 @@ export function totalDuration(segments: readonly TranscriptionSegment[], mediaDu
   return Math.max(lastEnd, sessionSeconds ?? 0)
 }
 
-/** Percentage offsets of a bar on a lane. Bars keep a visible minimum width. */
-export function laneGeometry(turn: Pick<Turn, 'start' | 'end'>, duration: number) {
-  if (!(duration > 0)) return { left: 0, width: 0 }
-  const left = Math.min(100, Math.max(0, (turn.start / duration) * 100))
-  const width = Math.min(100 - left, Math.max(0.6, ((turn.end - turn.start) / duration) * 100))
-  return { left, width }
-}
-
 export function laneTimeAt(fraction: number, duration: number) {
   return Math.min(duration, Math.max(0, fraction * duration))
 }

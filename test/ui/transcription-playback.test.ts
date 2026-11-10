@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createPlaybackStore } from "../../src/features/transcription/model/playback-store.ts";
 import {
-  adjacentTurnStart, buildTurns, findSegmentIndex, formatClock, laneGeometry, reassignOptions, soloStep,
+  adjacentTurnStart, buildTurns, findSegmentIndex, formatClock, reassignOptions, soloStep,
   speakerDisplayName, turnCounts,
 } from "../../src/features/transcription/model/playback-turns.ts";
 import {
@@ -33,12 +33,6 @@ describe("playback turns", () => {
     expect(findSegmentIndex(segments, 7.9)).toBe(1);
     expect(findSegmentIndex(segments, 8)).toBe(2);
     expect(findSegmentIndex(segments, 999)).toBe(4);
-  });
-
-  it("computes lane geometry in percentages with a minimum width", () => {
-    expect(laneGeometry({ start: 15, end: 30 }, 60)).toEqual({ left: 25, width: 25 });
-    expect(laneGeometry({ start: 0, end: 0 }, 60).width).toBeGreaterThan(0);
-    expect(laneGeometry({ start: 0, end: 5 }, 0)).toEqual({ left: 0, width: 0 });
   });
 
   it("skips gaps between a speaker's turns and stops after the last one", () => {
@@ -129,6 +123,20 @@ describe("playback store", () => {
     expect(audio.paused).toBe(true);
     store.skipTurn(-1);
     expect(audio.currentTime).toBe(20);
+  });
+
+  it("keeps a session's turns while another recording is loaded in between", () => {
+    const { audio, store } = setup();
+    store.setTurns("s1", buildTurns(segments));
+    store.load("s2", "/audio/s2", 30);
+    store.load("s1", "/audio/s1", 30);
+    audio.currentTime = 9;
+    store.seekCurrent(9);
+    store.skipTurn(1);
+    expect(audio.currentTime).toBe(12);
+    store.clearTurns("s1");
+    store.skipTurn(1);
+    expect(audio.currentTime).toBe(12);
   });
 
   it("cycles the playback rate", () => {

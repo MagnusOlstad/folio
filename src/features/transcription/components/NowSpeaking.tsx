@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReassignOutcome } from '../hooks/speakerReassign.ts'
 import { formatClock, reassignOptions, speakerColor, speakerDisplayName } from '../model/playback-turns.ts'
 import { nearestBoundary, sentenceWords } from '../model/split-sentence.ts'
@@ -25,7 +25,7 @@ type NowSpeakingProps = {
   onApplied: (outcome: ReassignOutcome) => void
 }
 
-type Pending = { confirmLabel: string; run: () => Promise<void> }
+type Pending = { index: number; confirmLabel: string; run: () => Promise<void> }
 type Note = { text: string; undo: (() => Promise<ReassignOutcome>) | null }
 type Splitting = { index: number; boundary: number | null }
 
@@ -39,7 +39,11 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
   const [note, setNote] = useState<Note | null>(null)
   const [error, setError] = useState('')
   const currentRef = useRef<HTMLParagraphElement>(null)
-  const current = segments[index]
+  // The shown sentence is frozen while a confirmation or split is open so edits hit what the user sees.
+  const shown = pending?.index ?? splitting?.index ?? index
+  const current = segments[shown]
+  const currentText = current?.text ?? ''
+  const canSplit = useMemo(() => sentenceWords(currentText).length >= 2, [currentText])
   const currentStart = current?.start ?? 0
   const currentEnd = current?.end ?? 0
   const showingText = splitting === null
@@ -55,6 +59,7 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
   if (!current) return null
   const speaker = current.speaker ?? null
   const splitTarget = splitting ? segments[splitting.index] : undefined
+  const at = shown
 
   async function perform(action: () => Promise<ReassignOutcome>, message: string, undo: (() => Promise<ReassignOutcome>) | null) {
     setPending(null)
@@ -74,7 +79,7 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
   function request(confirmLabel: string, run: () => Promise<void>) {
     setNote(null)
     if (confirmedSessions.has(sessionId)) void run()
-    else setPending({ confirmLabel, run })
+    else setPending({ index: shown, confirmLabel, run })
   }
 
   async function undo() {
@@ -92,26 +97,25 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
   }
 
   function reassign(target: number) {
-    request('Move sentence', () => perform(() => onReassign(index, target), `Moved to ${speakerDisplayName(target, names)}.`, null))
+    request('Move sentence', () => perform(() => onReassign(at, target), `Moved to ${speakerDisplayName(target, names)}.`, null))
   }
 
-  function split(at: number, offset: number, target: number) {
-    request('Split sentence', () => perform(() => onSplit(at, offset, target), `Split. The rest is now ${speakerDisplayName(target, names)}.`, () => onMerge(at + 1)))
+  function split(sentence: number, offset: number, target: number) {
+    request('Split sentence', () => perform(() => onSplit(sentence, offset, target), `Split. The rest is now ${speakerDisplayName(target, names)}.`, () => onMerge(sentence + 1)))
   }
 
   function merge() {
-    const previous = segments[index - 1]
+    const previous = segments[at - 1]
     if (!previous) return
     const offset = previous.text.length + 1
     const restoredSpeaker = current?.speaker ?? null
-    const at = index
     request('Merge sentences', () => perform(() => onMerge(at), 'Merged with the previous sentence.', () => onSplit(at - 1, offset, restoredSpeaker)))
   }
 
   function startSplit() {
     setNote(null)
-    const words = sentenceWords(current?.text ?? '')
-    setSplitting({ index, boundary: current ? nearestBoundary(words, current.text.length, current.start, current.end, time) : null })
+    const words = sentenceWords(currentText)
+    setSplitting({ index: at, boundary: current ? nearestBoundary(words, current.text.length, current.start, current.end, time) : null })
   }
 
   const moveItems: RowMenuItem[] = reassignOptions(present, speaker).map((option) => ({
@@ -123,7 +127,7 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
 
   return (
     <div className="player-now" aria-label="Now speaking">
-      <p className="player-now-neighbour">{segments[index - 1]?.text.trim() || ' '}</p>
+      <p className="player-now-neighbour">{segments[shown - 1]?.text.trim() || ' '}</p>
       <div className="player-now-head">
         {speaker !== null && <i className="player-dot" style={{ background: speakerColor(speaker) }} aria-hidden="true" />}
         <strong title={speaker !== null ? speakerDisplayName(speaker, names) : undefined}>{speaker !== null ? speakerDisplayName(speaker, names) : 'Speaker unknown'}</strong>
@@ -142,7 +146,7 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
       ) : (
         <p className="player-now-current" ref={currentRef}>{current.text.trim()}</p>
       )}
-      <p className="player-now-neighbour">{segments[index + 1]?.text.trim() || ' '}</p>
+      <p className="player-now-neighbour">{segments[shown + 1]?.text.trim() || ' '}</p>
       {hasSpeakers && (
         <div className="player-reassign" role="group" aria-label="Fix this sentence">
           <RowMenu
@@ -162,10 +166,10 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
             title="Split this sentence where another speaker starts"
             aria-label="Split this sentence where another speaker starts"
             aria-pressed={splitting !== null}
-            disabled={working || (splitting === null && sentenceWords(current.text).length < 2)}
+            disabled={working || (splitting === null && !canSplit)}
             onClick={() => (splitting !== null ? setSplitting(null) : startSplit())}
           ><ScissorsIcon />Split</button>
-          {index > 0 && (
+          {shown > 0 && (
             <button
               type="button"
               className="player-reassign-trigger"

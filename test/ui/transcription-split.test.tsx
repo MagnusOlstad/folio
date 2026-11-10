@@ -20,8 +20,8 @@ function setup(index: number, time = 0, overrides: Partial<Parameters<typeof Now
     onReassign: vi.fn(async () => outcome), onSplit: vi.fn(async () => outcome), onMerge: vi.fn(async () => outcome), onApplied: vi.fn(),
     ...overrides,
   };
-  render(<NowSpeaking {...props} />);
-  return props;
+  const { rerender } = render(<NowSpeaking {...props} />);
+  return { ...props, rerender: (next: Partial<Parameters<typeof NowSpeaking>[0]>) => rerender(<NowSpeaking {...props} {...next} />) };
 }
 
 function confirmSplit() {
@@ -102,6 +102,18 @@ describe("split and merge controls", () => {
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     await waitFor(() => expect(props.onSplit).toHaveBeenCalledWith(0, 13, 2));
     await waitFor(() => expect(screen.queryByText(/Merged with the previous sentence\./)).not.toBeInTheDocument());
+  });
+
+  it("keeps the sentence under a pending confirmation while playback moves on", async () => {
+    const props = setup(0);
+    fireEvent.click(screen.getByRole("button", { name: "Wrong speaker? Move this sentence to another speaker" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Speaker 2" }));
+    expect(props.onReassign).not.toHaveBeenCalled();
+    props.rerender({ index: 2, time: 13 });
+    expect(screen.getByText("Hello there.")).toBeInTheDocument();
+    expect(screen.queryByText("Okay")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Move sentence" }));
+    await waitFor(() => expect(props.onReassign).toHaveBeenCalledWith(0, 2));
   });
 
   it("undoes a split by merging the second half back", async () => {

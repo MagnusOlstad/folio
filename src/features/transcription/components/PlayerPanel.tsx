@@ -44,7 +44,10 @@ export function PlayerPanel({ id, session, model, actions, onSpeakerCount }: Pla
   useEffect(() => {
     playbackStore.load(session.id, audioUrl, (session.durationMs ?? 0) / 1000)
   }, [session.id, audioUrl, session.durationMs])
-  useEffect(() => { playbackStore.setTurns(session.id, turns) }, [session.id, turns])
+  useEffect(() => {
+    playbackStore.setTurns(session.id, turns)
+    return () => playbackStore.clearTurns(session.id)
+  }, [session.id, turns])
   useEffect(() => { if (speakers.length) onSpeakerCount(speakers.length) }, [speakers.length, onSpeakerCount])
 
   async function renameSpeaker(speaker: number, name: string) {
