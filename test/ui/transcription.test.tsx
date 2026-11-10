@@ -22,7 +22,7 @@ function model(overrides: Partial<TranscriptionDockModel> = {}): TranscriptionDo
     progress: "",
     error: "",
     deletingSessionId: null,
-    recording: { phase: "idle", duration: "0:00", error: "", saving: false },
+    recording: { phase: "idle", duration: "0:00", error: "", saving: false, source: "microphone", systemAudioSupported: false, systemAudioBlocked: false, levels: { mic: 0, system: 0 }, silent: { mic: false, system: false } },
     speakerNamesFor: () => null,
     audioUrlFor: (item) => `/api/transcriptions/${item.id}/audio`,
     ...overrides,
@@ -33,6 +33,7 @@ function actions(): TranscriptionDockActions {
   return {
     importFile: vi.fn(),
     startRecording: vi.fn(),
+    setRecordingSource: vi.fn(),
     stopRecording: vi.fn(),
     discardRecording: vi.fn(),
     retryRecording: vi.fn(),
@@ -267,7 +268,7 @@ describe("transcription UI", () => {
     const dockActions = actions();
     render(<TranscriptionDock model={model({
       pending: [{ ...session, state: "transcribing" }],
-      recording: { phase: "recording", duration: "0:03", error: "", saving: false },
+      recording: { phase: "recording", duration: "0:03", error: "", saving: false, source: "microphone", systemAudioSupported: false, systemAudioBlocked: false, levels: { mic: 0, system: 0 }, silent: { mic: false, system: false } },
     })} actions={dockActions} />);
     openMenu();
     expect(menuItem("Delete…")).toBeDisabled();

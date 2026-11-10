@@ -2,6 +2,16 @@
 
 Audio is transcribed on-device with Whisper through the bundled MLX helper (`folio-mlx`). Nothing leaves the machine.
 
+## Recording sources
+
+The recorder in the Recordings dock captures the microphone by default. In the desktop app on macOS 14.2 or later and Windows a **Record** menu next to it also offers **System audio** and **Microphone + system audio** (the default there), so a Zoom, Teams, or Meet call on headphones can be recorded with both sides in one file. The choice is remembered in `folio:recording-source`. The browser build only offers the microphone.
+
+- System audio is captured with Chromium's loopback capture through `getDisplayMedia`. The Electron main process answers the request for the app's own window only, and the renderer discards the video track immediately; no screen content is recorded.
+- On macOS, allow FolioNotes under System Settings > Privacy & Security > Screen & System Audio Recording (the recorder offers an **Open System Settings** button when capture fails), then try again. macOS may ask you to restart the app after granting access.
+- Mixed recordings are mixed on this device into one mono stream. Use headphones so the meeting is not also picked up by the microphone.
+- While recording, small level meters show each source. A source that stays silent for 8 seconds gets an inline warning, for example when the meeting is not playing on this Mac. Stopping the screen/audio share from macOS ends the recording and keeps what was captured.
+- Recordings are converted on-device to mono 16-bit WAV at 16 kHz (Whisper's native rate), about 115 MB per hour. A recording can run up to 4 hours; the existing 500 MB audio limit still applies after conversion. The result goes through the normal import, transcription, and speaker-label flow.
+
 ## Transcript format
 
 Whisper runs with timestamp tokens enabled and reports one segment per timestamped span (`start`, `end`, `text`, in seconds from the start of the file). The helper transcribes the audio in 30 second windows and offsets every segment by its window start. The server turns the segments into Markdown under `## Transcript`:

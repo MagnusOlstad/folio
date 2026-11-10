@@ -6,6 +6,7 @@ import type { TranscriptionSession } from '../model/types.ts'
 import { PlusIcon, RecordDotIcon } from './icons.tsx'
 import { ModelNotices } from './ModelNotices.tsx'
 import { RecorderPanel } from './RecorderPanel.tsx'
+import { RecordingSourceSelect } from './RecordingSourceSelect.tsx'
 import { RecordingRow, type RowConfirmation } from './RecordingRow.tsx'
 
 export type TranscriptionDockProps = { model: TranscriptionDockModel; actions: TranscriptionDockActions }
@@ -109,6 +110,9 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
         />
       </div>
 
+      {recorder.systemAudioSupported && recorder.phase === 'idle' && (
+        <RecordingSourceSelect source={recorder.source} disabled={controlsBusy} onChange={actions.setRecordingSource} />
+      )}
       <RecorderPanel recorder={recorder} actions={actions} busy={busy} />
       <ModelNotices
         status={status}
