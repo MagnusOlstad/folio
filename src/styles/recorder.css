@@ -158,30 +158,6 @@
   .transcription-recording-activity i { animation: none; }
 }
 
-.transcription-item-speakers {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  flex-basis: 100%;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.4;
-  cursor: pointer;
-}
-
-.transcription-item-speakers input {
-  flex: none;
-  margin: 0;
-  accent-color: var(--acid);
-}
-
-.transcription-item-speakers small {
-  color: var(--muted);
-  font-size: 10px;
-  opacity: 0.8;
-}
-
 .transcription-retranscribe-confirm {
   display: flex;
   flex-basis: 100%;

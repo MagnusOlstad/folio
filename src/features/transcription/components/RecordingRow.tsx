@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef } from 'react'
 import type { TranscriptionDockActions, TranscriptionDockModel } from '../hooks/useTranscription.ts'
-import type { SpeakerModelStatus, TranscriptionSession } from '../model/types.ts'
+import type { TranscriptionSession } from '../model/types.ts'
 import { formatClock } from '../model/playback-turns.ts'
 import { ChevronIcon, PauseIcon, PlayIcon, WaveIcon } from './icons.tsx'
 import { PlayerPanel } from './PlayerPanel.tsx'
@@ -12,8 +12,6 @@ type RecordingRowProps = {
   session: TranscriptionSession
   model: TranscriptionDockModel
   actions: TranscriptionDockActions
-  speakers: SpeakerModelStatus | undefined
-  speakersReady: boolean
   selectedModelName: string
   canTranscribe: boolean
   controlsBusy: boolean
@@ -33,7 +31,7 @@ function durationLabel(durationMs: number | null) {
 }
 
 export function RecordingRow(props: RecordingRowProps) {
-  const { session, model, actions, speakers, speakersReady, selectedModelName, canTranscribe, controlsBusy, busy, expanded, playing, speakerCount, confirming, onConfirm } = props
+  const { session, model, actions, selectedModelName, canTranscribe, controlsBusy, busy, expanded, playing, speakerCount, confirming, onConfirm } = props
   const panelId = useId()
   const name = session.fileName || 'audio recording'
   const cancelRef = useRef<HTMLButtonElement>(null)
@@ -42,8 +40,8 @@ export function RecordingRow(props: RecordingRowProps) {
   const summarizing = busy && model.activeSession?.id === session.id && (model.phase === 'summarizing' || model.phase === 'cancelling-summary')
   const deleting = model.deletingSessionId === session.id
   const ready = session.state === 'ready'
-  const speakersBlocked = session.identifySpeakers === true && Boolean(speakers) && !speakersReady
   const deleteDisabled = controlsBusy || model.recording.phase !== 'idle' || processing || summarizing || Boolean(model.deletingSessionId)
+  const hasSpeakers = (speakerCount ?? 0) > 0
   const draftOpen = ready && model.speakerNamesFor(session) !== null
 
   useEffect(() => { if (confirming === 'delete') cancelRef.current?.focus() }, [confirming])
@@ -60,37 +58,16 @@ export function RecordingRow(props: RecordingRowProps) {
     meta = [durationLabel(session.durationMs), speakerCount ? `${speakerCount} ${speakerCount === 1 ? 'speaker' : 'speakers'}` : '', draftOpen ? 'draft open' : ''].filter(Boolean).join(' · ')
   } else meta = `${durationLabel(session.durationMs)} · not transcribed`
 
-  function speakerOption() {
-    if (!speakers) return null
-    return (
-      <label className="transcription-item-speakers">
-        <input
-          type="checkbox"
-          aria-label={`Identify speakers in ${name}`}
-          checked={session.identifySpeakers === true}
-          onChange={(event) => actions.setSessionIdentifySpeakers(session, event.currentTarget.checked)}
-          disabled={controlsBusy || processing}
-        />
-        <span>Identify speakers</span>
-        <small>{`up to ${speakers.maxSpeakers} · slower`}</small>
-      </label>
-    )
-  }
-
   const items: RowMenuItem[] = []
   if (ready) {
     items.push(
-      { key: 'open', label: 'Open draft', onSelect: () => actions.openTranscript(session), disabled: controlsBusy },
+      hasSpeakers
+        ? { key: 'open', label: 'Open draft with speakers', onSelect: () => actions.openTranscript(session, { speakers: true }), disabled: controlsBusy }
+        : { key: 'open', label: 'Open draft', onSelect: () => actions.openTranscript(session), disabled: controlsBusy },
+      { key: 'open-plain', label: 'Open draft as plain text', onSelect: () => actions.openTranscript(session, { speakers: false }), disabled: controlsBusy },
       { key: 'summarize', label: 'Summarize again', onSelect: () => actions.regenerateSummary(session), disabled: controlsBusy },
       { key: 'retranscribe', label: 'Re-transcribe…', onSelect: () => onConfirm('retranscribe'), disabled: controlsBusy || !canTranscribe },
     )
-  } else if (speakers) {
-    items.push({
-      key: 'speakers', label: 'Identify speakers', ariaLabel: `Identify speakers in ${name}`,
-      checked: session.identifySpeakers === true,
-      onSelect: () => actions.setSessionIdentifySpeakers(session, session.identifySpeakers !== true),
-      disabled: controlsBusy || processing,
-    })
   }
   items.push({ key: 'delete', label: 'Delete…', onSelect: () => onConfirm('delete'), disabled: deleteDisabled, destructive: true })
 
@@ -121,7 +98,7 @@ export function RecordingRow(props: RecordingRowProps) {
           </div>
         )}
         {!ready && !processing && !summarizing && (
-          <button type="button" className="transcription-row-action" onClick={() => actions.transcribe(session)} disabled={!canTranscribe || controlsBusy || speakersBlocked}>
+          <button type="button" className="transcription-row-action" onClick={() => actions.transcribe(session)} disabled={!canTranscribe || controlsBusy}>
             {session.state === 'failed' ? 'Retry' : 'Transcribe'}
           </button>
         )}
@@ -134,17 +111,15 @@ export function RecordingRow(props: RecordingRowProps) {
         <RowMenu label={`More actions for ${name}`} items={items} />
       </div>
       {ready && expanded && <PlayerPanel id={panelId} session={session} model={model} actions={actions} onSpeakerCount={props.onSpeakerCount} />}
-      {speakersBlocked && <p className="transcription-item-error" role="status">Speaker labels need the {speakers?.modelName} model. Download it above, or turn speaker labels off for this audio.</p>}
       {ready && confirming === 'retranscribe' && (
         <div className="transcription-retranscribe-confirm" role="group" aria-label={`Confirm re-transcription of ${name}`}>
           <p>Transcribe again with {selectedModelName}? Only the Transcript section of the open draft is replaced; speaker names you set are kept.</p>
-          {speakerOption()}
           <button type="button" onClick={() => onConfirm(null)}>Cancel</button>
           <button
             type="button"
             className="transcription-retranscribe-confirm-button"
             onClick={() => { onConfirm(null); actions.retranscribe(session) }}
-            disabled={!canTranscribe || controlsBusy || speakersBlocked}
+            disabled={!canTranscribe || controlsBusy}
           >Re-transcribe</button>
         </div>
       )}

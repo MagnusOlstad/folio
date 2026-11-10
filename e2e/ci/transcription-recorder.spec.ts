@@ -68,7 +68,7 @@ test('records microphone audio, converts it to WAV, and saves it through local i
   expect(upload.bytes.subarray(8, 12).toString('ascii')).toBe('WAVE')
   expect(sessionState.value?.fileName).toMatch(/^Recording .*\.wav$/)
   expect(creationBody).not.toHaveProperty('sourceNoteId')
-  expect(creationBody).toMatchObject({ identifySpeakers: false })
+  expect(creationBody).not.toHaveProperty('identifySpeakers')
   await expect(page.locator('.transcription-row')).toHaveCount(1)
   await expect(page.locator('.transcription-row-action')).toHaveText(['Transcribe'])
 })

@@ -30,7 +30,7 @@ const storedResult: TranscriptionResult = { summary: "", transcript, segments, s
 
 function model(overrides: Partial<TranscriptionDockModel> = {}): TranscriptionDockModel {
   return {
-    phase: "idle", activeSession: null, pending: [], status: null, progress: "", error: "", identifySpeakers: false,
+    phase: "idle", activeSession: null, pending: [], status: null, progress: "", error: "",
     deletingSessionId: null, recording: { phase: "idle", duration: "0:00", error: "", saving: false },
     speakerNamesFor: () => null, audioUrlFor: (item) => `/api/transcriptions/${item.id}/audio`, ...overrides,
   };
@@ -39,7 +39,7 @@ function model(overrides: Partial<TranscriptionDockModel> = {}): TranscriptionDo
 function actions(overrides: Partial<TranscriptionDockActions> = {}): TranscriptionDockActions {
   return {
     importFile: vi.fn(), startRecording: vi.fn(), stopRecording: vi.fn(), discardRecording: vi.fn(), retryRecording: vi.fn(),
-    installModel: vi.fn(), installSpeakerModel: vi.fn(), setIdentifySpeakers: vi.fn(), setSessionIdentifySpeakers: vi.fn(),
+    installModel: vi.fn(), installSpeakerModel: vi.fn(),
     transcribe: vi.fn(), retranscribe: vi.fn(), cancel: vi.fn(), openTranscript: vi.fn(), regenerateSummary: vi.fn(),
     deleteSession: vi.fn(async () => undefined), loadResult: vi.fn(async () => storedResult), reassignSpeaker: vi.fn(), splitSegment: vi.fn(), mergeSegment: vi.fn(), renameSpeaker: vi.fn(async () => undefined),
     ...overrides,
@@ -76,10 +76,10 @@ describe("recordings list", () => {
     const trigger = screen.getByRole("button", { name: "More actions for meeting.wav" });
     expect(trigger).toHaveAttribute("aria-haspopup", "menu");
     fireEvent.click(trigger);
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Open draft", "Summarize again", "Re-transcribe…", "Delete…"]);
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Open draft", "Open draft as plain text", "Summarize again", "Re-transcribe…", "Delete…"]);
     expect(screen.getByRole("menuitem", { name: "Open draft" })).toHaveFocus();
     fireEvent.keyDown(screen.getByRole("menuitem", { name: "Open draft" }), { key: "ArrowDown" });
-    expect(screen.getByRole("menuitem", { name: "Summarize again" })).toHaveFocus();
+    expect(screen.getByRole("menuitem", { name: "Open draft as plain text" })).toHaveFocus();
     fireEvent.keyDown(screen.getByRole("menuitem", { name: "Summarize again" }), { key: "Escape" });
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
