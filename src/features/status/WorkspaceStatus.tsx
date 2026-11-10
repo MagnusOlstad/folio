@@ -172,7 +172,7 @@ export function MlxModelStatusPanel({
             const launchMemory = formatModelBytes(model?.downloadSizeBytes ?? definition.bytes);
             const name = model?.name || definition.name;
             const modelState = !mlxStatus ? "Checking status"
-              : loading ? download?.phase === "loading" ? "Loading" : download?.phase === "downloading" || (acting && mlxAction === "install") ? "Downloading" : acting && mlxAction === "unload" ? "Unloading" : acting && mlxAction === "remove" ? "Removing" : acting && (mlxAction === "select" || mlxAction === "select-transcription") ? "Selecting" : "Loading"
+              : loading ? download?.phase === "loading" ? "Loading" : download?.phase === "downloading" || (acting && mlxAction === "install") ? "Downloading" : acting && mlxAction === "unload" ? "Unloading" : acting && mlxAction === "remove" ? "Removing" : acting && (mlxAction === "select" || mlxAction === "select-transcription" || mlxAction === "select-caption") ? "Selecting" : "Loading"
               : !available ? "Unavailable"
               : busy ? "In use"
               : loaded ? "Running"

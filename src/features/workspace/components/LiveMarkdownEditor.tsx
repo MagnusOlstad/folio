@@ -35,6 +35,7 @@ import {
   setLiveMarkdownFocus,
   type LiveMarkdownCallbacks,
 } from "../model/live-markdown.ts";
+import { useImageCaptionActions } from "../model/image-caption-actions.ts";
 import { imageUploadExtension } from "../model/image-paste.ts";
 import { liveMarkdownTimestamps } from "../model/live-markdown-timestamps.ts";
 import { createNoteSearchPanel } from "../model/note-search-panel.ts";
@@ -183,7 +184,9 @@ export function LiveMarkdownEditor({
   const documentIdRef = useRef(documentId);
   const onFocusRequestConsumedRef = useRef(onFocusRequestConsumed);
   const ariaLabelCompartment = useRef(new Compartment());
+  const captionActions = useImageCaptionActions();
   const callbacksRef = useRef<LiveMarkdownCallbacks>({
+    captionActions,
     onOpenLink: readOnly ? undefined : onOpenLink,
     onToggleTask: readOnly ? undefined : onToggleTask,
     onError: (message) => onErrorRef.current?.(message),
@@ -204,12 +207,14 @@ export function LiveMarkdownEditor({
     onFocusRequestConsumedRef.current = onFocusRequestConsumed;
     ariaLabelRef.current = ariaLabel;
     callbacksRef.current = {
+      captionActions,
       onOpenLink: readOnly ? undefined : onOpenLink,
       onToggleTask: readOnly || !onToggleTask ? undefined : performTaskToggle,
       onError: (message) => onErrorRef.current?.(message),
     };
   }, [
     ariaLabel,
+    captionActions,
     onBlur,
     onChange,
     onFile,

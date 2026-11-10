@@ -2012,6 +2012,18 @@
   user-select: text;
 }
 
+.live-markdown-editor .cm-live-markdown-caption-text {
+  max-height: 320px;
+  padding: 10px 12px;
+  overflow: auto;
+  font-size: 0.9em;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+  user-select: text;
+}
+
 .live-markdown-editor .cm-live-markdown-ocr-actions {
   display: flex;
   align-items: center;

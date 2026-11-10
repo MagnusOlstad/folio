@@ -3,8 +3,10 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 import { OCR_MODEL_ID, OCR_MODELS } from '../mlx/ocr-models.js'
+import { CAPTION_MODEL_IDS, captionModelRevision } from '../mlx/caption-models.js'
 
 const OCR_CACHE_VERSION = 1
+const CAPTION_CACHE_VERSION = 1
 const MAX_IMAGES_PER_DOCUMENT = 24
 const MAX_IMAGE_TEXT_CHARS = 40_000
 const MAX_MEMOIZED_HASHES = 5_000
@@ -87,6 +89,20 @@ async function cachedText(cacheDirectory, sha256, revision) {
   return ''
 }
 
+// A description is searchable if any caption model produced it at that model's pinned revision.
+async function cachedCaption(cacheDirectory, sha256) {
+  try {
+    const entry = JSON.parse(await fs.readFile(path.join(cacheDirectory, `${sha256}.json`), 'utf8'))
+    if (entry?.version === CAPTION_CACHE_VERSION && entry.sha256 === sha256 && CAPTION_MODEL_IDS.includes(entry.model)
+      && entry.revision === captionModelRevision(entry.model) && typeof entry.text === 'string') {
+      return entry.text.replace(/\s+/g, ' ').trim()
+    }
+  } catch {
+    // Missing or unreadable cache entries simply contribute no description.
+  }
+  return ''
+}
+
 /**
  * Collects cached OCR text for the images each note embeds. The result is index-only text:
  * Markdown files and `record.content` are never changed.
@@ -94,6 +110,7 @@ async function cachedText(cacheDirectory, sha256, revision) {
 export async function collectImageText(documents, { bundleRoot, assertNoBundleSymlinks, revision = OCR_MODELS[OCR_MODEL_ID].revision }) {
   const result = new Map()
   const cacheDirectory = path.join(bundleRoot, '.folio', 'ocr-cache')
+  const captionDirectory = path.join(bundleRoot, '.folio', 'caption-cache')
   const assetsDirectory = path.join(bundleRoot, 'assets')
   const byName = new Map()
 
@@ -103,11 +120,24 @@ export async function collectImageText(documents, { bundleRoot, assertNoBundleSy
         try {
           const filePath = path.join(assetsDirectory, name)
           await assertNoBundleSymlinks(filePath)
-          await assertNoBundleSymlinks(cacheDirectory)
           const stat = await fs.stat(filePath)
           if (!stat.isFile()) return null
           const sha256 = await fileSha256(filePath, stat)
-          return { sha256, text: await cachedText(cacheDirectory, sha256, revision) }
+          let text = ''
+          try {
+            await assertNoBundleSymlinks(cacheDirectory)
+            text = await cachedText(cacheDirectory, sha256, revision)
+          } catch {
+            // A missing or unsafe OCR cache leaves the image with its description only.
+          }
+          let caption = ''
+          try {
+            await assertNoBundleSymlinks(captionDirectory)
+            caption = await cachedCaption(captionDirectory, sha256)
+          } catch {
+            // A missing or unsafe caption cache leaves the image with OCR text only.
+          }
+          return { sha256, text, caption }
         } catch {
           return null
         }
@@ -121,9 +151,10 @@ export async function collectImageText(documents, { bundleRoot, assertNoBundleSy
     const blocks = []
     for (const link of assetImageLinks(document.parsed?.content ?? '').slice(0, MAX_IMAGES_PER_DOCUMENT)) {
       const asset = await textForAsset(link.name)
-      if (!asset?.text || seen.has(asset.sha256)) continue
+      if (!asset || (!asset.text && !asset.caption) || seen.has(asset.sha256)) continue
       seen.add(asset.sha256)
-      blocks.push(`Image text (${link.alt}):\n${asset.text}`)
+      if (asset.text) blocks.push(`Image text (${link.alt}):\n${asset.text}`)
+      if (asset.caption) blocks.push(`Image description (${link.alt}):\n${asset.caption}`)
     }
     if (blocks.length) result.set(document.id, blocks.join('\n\n').slice(0, MAX_IMAGE_TEXT_CHARS))
   }

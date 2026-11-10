@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { CSSProperties, PointerEvent } from "react";
 import { SettingsDialog } from "../../settings/components/SettingsDialog.tsx";
 import type { SettingsDialogProps } from "../../settings/components/SettingsDialog.tsx";
@@ -17,6 +17,7 @@ import type { NoteExportSnapshot } from "../model/note-export.ts";
 import { NoteHistoryPanel } from "./NoteHistoryPanel.tsx";
 import { isUntitledId } from "../../../lib/workspace.ts";
 import type { SettingsCategory } from "../../settings/model/settings-category.ts";
+import { ImageCaptionActionsContext, type ImageCaptionActions } from "../model/image-caption-actions.ts";
 import type { TranscriptionDockProps } from "../../transcription/components/TranscriptionDock.tsx";
 
 type WorkspaceAppProps = WorkspaceStatusProps & {
@@ -104,7 +105,13 @@ export function WorkspaceShell({
       <p>Open a filed note to see its earlier versions.</p>
     </div>
   );
+  const { onOpenSettings, onInstallMlxModel } = app;
+  const captionActions = useMemo<ImageCaptionActions>(() => ({
+    openModelSettings: () => onOpenSettings("models"),
+    installModel: (id) => void onInstallMlxModel(id),
+  }), [onOpenSettings, onInstallMlxModel]);
   return (
+    <ImageCaptionActionsContext.Provider value={captionActions}>
     <main className="shell">
       <section
         className={`workspace${layout.sidebarOpen ? "" : " sidebar-hidden"}${layout.rightPaneOpen ? "" : " right-pane-hidden"}`}
@@ -179,5 +186,6 @@ export function WorkspaceShell({
         />
       ) : null}
     </main>
+    </ImageCaptionActionsContext.Provider>
   );
 }

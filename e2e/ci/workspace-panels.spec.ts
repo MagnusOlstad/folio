@@ -128,7 +128,7 @@ test('workspace model rows follow settings and stay readable in wide and narrow 
 
   await panel.getByRole('button', { name: 'Manage', exact: true }).click()
   const settings = page.getByRole('region', { name: 'Local models' })
-  const qwenChoice = settings.getByRole('radio', { name: /Qwen 3\.5 4B/ })
+  const qwenChoice = settings.getByRole('radio', { name: /^Qwen 3\.5 4B/ })
   await qwenChoice.click()
   await expect(qwenChoice).toBeChecked()
   const whisperLargeChoice = settings.getByRole('radio', { name: /Whisper Large v3.*3\.1 GB/ })

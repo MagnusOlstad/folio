@@ -134,11 +134,12 @@ describe("LiveMarkdownEditor image paste", () => {
 describe("LiveMarkdownEditor image toolbar", () => {
   const label = (root: HTMLElement, name: string) => root.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`);
 
-  it("renders copy, remove and an enabled extract button", () => {
+  it("renders copy, remove, extract and describe buttons", () => {
     render(<LiveMarkdownEditor value="![shot](/assets/a.png)" onChange={vi.fn()} ariaLabel="Bar note" />);
     const root = screen.getByLabelText("Bar note");
-    expect(root.querySelectorAll(".cm-live-markdown-image-toolbar button")).toHaveLength(3);
+    expect(root.querySelectorAll(".cm-live-markdown-image-toolbar button")).toHaveLength(4);
     expect(label(root, "Copy image")).not.toBeNull();
+    expect(label(root, "Describe image")?.disabled).toBe(false);
     expect(label(root, "Remove image")).not.toBeNull();
     expect(label(root, "Extract text")?.disabled).toBe(false);
   });

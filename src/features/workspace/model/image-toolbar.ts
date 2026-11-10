@@ -1,6 +1,15 @@
 import { syntaxTree } from "@codemirror/language";
 import type { EditorView } from "@codemirror/view";
-import { extractImageText } from "../../../lib/assets.ts";
+import { describeImage, extractImageText, ImageCaptionModelError } from "../../../lib/assets.ts";
+import type { ImageCaptionActions } from "./image-caption-actions.ts";
+import {
+  captionAltChange,
+  captionInsertChange,
+  captionModelName,
+  cleanCaptionText,
+  nextCaptionState,
+  type CaptionPreviewState,
+} from "./image-caption.ts";
 import { imageAltWidthChange, MIN_IMAGE_WIDTH } from "./image-size.ts";
 import { cleanExtractedText, nextOcrState, ocrInsertChange, type OcrPreviewState } from "./image-ocr.ts";
 
@@ -8,6 +17,7 @@ const TOOLBAR_CLASS = "cm-live-markdown-image-toolbar";
 const COPIED_RESET_MS = 1500;
 
 const PREVIEW_CLASS = "cm-live-markdown-ocr-preview";
+const CAPTION_PREVIEW_CLASS = "cm-live-markdown-caption-preview";
 const HANDLE_CLASS = "cm-live-markdown-image-resize";
 
 export type ImageToolbarOptions = {
@@ -16,6 +26,8 @@ export type ImageToolbarOptions = {
   /** Width in CSS pixels from the `alt|width` suffix, or null for natural size. */
   width?: number | null;
   onError?: (message: string) => void;
+  /** Lets the description panel open Settings → Models or start a model download. */
+  captionActions?: ImageCaptionActions | null;
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -28,6 +40,7 @@ const ICONS = {
   check: ["M5 12.5l4.5 4.5L19 7.5"],
   remove: ["M4 7h16", "M10 11v6", "M14 11v6", "M6 7l1 12h10l1-12", "M9 7V4h6v3"],
   text: ["M4 6h16", "M4 12h10", "M4 18h16"],
+  describe: ["M11 4a7 7 0 1 0 0 14a7 7 0 0 0 0-14z", "M20 20l-4-4"],
 } as const;
 
 function createIcon(paths: readonly string[]) {
@@ -64,7 +77,7 @@ function createButton(label: string, icon: readonly string[], extraClass?: strin
 /** True when a DOM event originated inside an image toolbar or its text preview. */
 export function isImageToolbarEvent(event: Event) {
   const target = event.target;
-  return target instanceof Element && target.closest(`.${TOOLBAR_CLASS}, .${PREVIEW_CLASS}, .${HANDLE_CLASS}`) !== null;
+  return target instanceof Element && target.closest(`.${TOOLBAR_CLASS}, .${PREVIEW_CLASS}, .${CAPTION_PREVIEW_CLASS}, .${HANDLE_CLASS}`) !== null;
 }
 
 /** Finds the Markdown range of the Image node that the frame widget replaces. */
@@ -303,6 +316,65 @@ export function createImageFrame(
     }
   });
 
+  const describe = createButton("Describe image", ICONS.describe);
+  toolbar.append(describe);
+
+  let captionState: CaptionPreviewState = { status: "idle" };
+  let captionPanel: HTMLElement | null = null;
+  const closeCaption = () => {
+    const hadFocus = captionPanel?.contains(frame.ownerDocument.activeElement) ?? false;
+    captionPanel?.remove();
+    captionPanel = null;
+    view.dom.removeEventListener("keydown", onCaptionKeydown, true);
+    captionState = nextCaptionState(captionState, { type: "close" });
+    if (hadFocus) view.focus();
+    view.requestMeasure();
+  };
+  function onCaptionKeydown(event: KeyboardEvent) {
+    if (!frame.isConnected) {
+      view.dom.removeEventListener("keydown", onCaptionKeydown, true);
+      return;
+    }
+    if (event.key === "Escape" && captionPanel) closeCaption();
+  }
+  const showCaptionPanel = (panel: HTMLElement) => {
+    captionPanel = panel;
+    frame.append(panel);
+    view.dom.addEventListener("keydown", onCaptionKeydown, true);
+    view.requestMeasure();
+  };
+  const setDescribeBusy = (busy: boolean) => {
+    describe.classList.toggle("is-busy", busy);
+    describe.disabled = busy;
+    if (busy) describe.setAttribute("aria-busy", "true");
+    else describe.removeAttribute("aria-busy");
+    describe.title = busy ? "Describing…" : "Describe image";
+  };
+  describe.addEventListener("click", async () => {
+    if (captionState.status === "preview" || captionState.status === "blocked") {
+      closeCaption();
+      return;
+    }
+    if (captionState.status !== "idle") return;
+    captionState = nextCaptionState(captionState, { type: "start" });
+    setDescribeBusy(true);
+    try {
+      const result = await describeImage(options.path);
+      captionState = nextCaptionState(captionState, { type: "success", ...result });
+      showCaptionPanel(createCaptionPreview(view, frame, result.text, result.cached, options, closeCaption));
+    } catch (error) {
+      if (error instanceof ImageCaptionModelError && options.captionActions) {
+        captionState = nextCaptionState(captionState, { type: "blocked", code: error.code, modelId: error.modelId });
+        showCaptionPanel(createCaptionBlockedPanel(error, options.captionActions, closeCaption));
+      } else {
+        captionState = nextCaptionState(captionState, { type: "failure" });
+        options.onError?.(error instanceof Error ? error.message : "Could not describe the image.");
+      }
+    } finally {
+      setDescribeBusy(false);
+    }
+  });
+
   if (options.width) image.style.width = `${options.width}px`;
   frame.append(image, toolbar);
   if (!view.state.readOnly) attachResizeHandle(view, frame, image, options);
@@ -384,6 +456,132 @@ function createOcrPreview(
     note.textContent = "(cached)";
     actions.append(note);
   }
+
+  panel.append(body, actions);
+  return panel;
+}
+
+function createCaptionPanel(label: string) {
+  const panel = document.createElement("div");
+  panel.className = `${CAPTION_PREVIEW_CLASS} ${PREVIEW_CLASS}`;
+  panel.setAttribute("role", "region");
+  panel.setAttribute("aria-label", label);
+  // See createOcrPreview: focusing the panel keeps the widget alive while its text is selected.
+  panel.tabIndex = -1;
+  return panel;
+}
+
+/** Builds the image description panel shown under the image. */
+function createCaptionPreview(
+  view: EditorView,
+  frame: HTMLElement,
+  rawText: string,
+  cached: boolean,
+  options: ImageToolbarOptions,
+  close: () => void,
+) {
+  const text = cleanCaptionText(rawText);
+  const panel = createCaptionPanel("Image description");
+
+  const body = document.createElement("div");
+  body.className = "cm-live-markdown-caption-text";
+  body.textContent = text || "No description was returned for this image.";
+
+  const actions = document.createElement("div");
+  actions.className = "cm-live-markdown-ocr-actions";
+
+  if (text) {
+    const copy = createTextButton("Copy");
+    let resetTimer: number | undefined;
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        options.onError?.("Could not copy the description.");
+        return;
+      }
+      copy.textContent = "Copied";
+      window.clearTimeout(resetTimer);
+      resetTimer = window.setTimeout(() => {
+        copy.textContent = "Copy";
+      }, COPIED_RESET_MS);
+    });
+    actions.append(copy);
+
+    if (!view.state.readOnly) {
+      const insert = createTextButton("Insert below");
+      insert.addEventListener("click", () => {
+        const range = findImageRange(view, frame);
+        const change = range && !view.state.readOnly ? captionInsertChange(view.state.doc, range, text) : null;
+        if (change) view.dispatch({ changes: change, userEvent: "input" });
+        close();
+      });
+      actions.append(insert);
+
+      const useAlt = createTextButton("Use as alt text");
+      useAlt.addEventListener("click", () => {
+        const range = findImageRange(view, frame);
+        const change = range && !view.state.readOnly
+          ? captionAltChange(view.state.sliceDoc(range.from, range.to), text)
+          : null;
+        if (range && change) {
+          view.dispatch({
+            changes: { from: range.from + change.from, to: range.from + change.to, insert: change.insert },
+            userEvent: "input",
+          });
+        }
+        close();
+      });
+      actions.append(useAlt);
+    }
+  }
+
+  const dismiss = createTextButton("Close");
+  dismiss.addEventListener("click", close);
+  actions.append(dismiss);
+
+  if (cached) {
+    const note = document.createElement("span");
+    note.className = "cm-live-markdown-ocr-note";
+    note.textContent = "(cached)";
+    actions.append(note);
+  }
+
+  panel.append(body, actions);
+  return panel;
+}
+
+/** Builds the panel that explains a missing caption model and offers the fix. */
+function createCaptionBlockedPanel(error: ImageCaptionModelError, captionActions: ImageCaptionActions, close: () => void) {
+  const panel = createCaptionPanel("Image description unavailable");
+  panel.setAttribute("role", "alert");
+
+  const body = document.createElement("div");
+  body.className = "cm-live-markdown-caption-text";
+  const modelId = error.modelId;
+  body.textContent = error.code === "CAPTION_MODEL_NOT_INSTALLED"
+    ? `${captionModelName(modelId)} is chosen for image descriptions but is not downloaded yet.`
+    : "Choose a model for image descriptions in Settings → Models.";
+
+  const actions = document.createElement("div");
+  actions.className = "cm-live-markdown-ocr-actions";
+
+  if (error.code === "CAPTION_MODEL_NOT_INSTALLED" && modelId) {
+    const install = createTextButton(`Download ${captionModelName(modelId)}`);
+    install.addEventListener("click", () => {
+      captionActions.installModel(modelId);
+      close();
+    });
+    actions.append(install);
+  }
+  const settings = createTextButton("Open Settings → Models");
+  settings.addEventListener("click", () => {
+    captionActions.openModelSettings();
+    close();
+  });
+  const dismiss = createTextButton("Close");
+  dismiss.addEventListener("click", close);
+  actions.append(settings, dismiss);
 
   panel.append(body, actions);
   return panel;

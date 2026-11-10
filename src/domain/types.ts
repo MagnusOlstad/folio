@@ -158,6 +158,7 @@ export type DesktopUpdateState = {
 };
 export type MlxModelId = "gemma4" | "qwen35" | "llama32" | "embeddinggemma" | "whisper" | "whisperlarge" | "sortformer" | "lightonocr";
 export type MlxTranscriptionModelId = "whisper" | "whisperlarge";
+export type MlxCaptionModelId = "gemma4" | "qwen35";
 export const MLX_GENERATION_MODEL = { id: "gemma4", name: "Gemma 4 E4B" } as const satisfies {
   id: MlxModelId;
   name: string;
@@ -190,6 +191,8 @@ export type MlxStatus = {
   installing: MlxModelId[];
   selectedGenerationModel: MlxModelId;
   selectedTranscriptionModel?: MlxTranscriptionModelId;
+  /** Model that writes image descriptions, or null when none is chosen. */
+  selectedCaptionModel?: MlxCaptionModelId | null;
   downloads: { id: MlxModelId; progress: MlxDownloadProgress | null }[];
   models: MlxModelStatus[];
 };

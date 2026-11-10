@@ -1,3 +1,4 @@
+import type { MlxCaptionModelId } from "../domain/types.ts";
 import { getActiveBundleId } from "./api.ts";
 
 export const SUPPORTED_IMAGE_TYPES = [
@@ -128,4 +129,66 @@ export async function extractImageText(path: string): Promise<ExtractedImageText
   if (typeof body.text !== "string")
     throw new Error("The server returned invalid extracted text.");
   return { text: body.text, cached: body.cached === true };
+}
+
+export type ImageCaptionModelId = MlxCaptionModelId;
+export type ImageCaption = { text: string; cached: boolean; model: ImageCaptionModelId };
+
+/** Raised when image descriptions cannot run because no usable caption model is set up. */
+export class ImageCaptionModelError extends Error {
+  readonly code: "CAPTION_MODEL_NOT_SELECTED" | "CAPTION_MODEL_NOT_INSTALLED";
+  readonly modelId: ImageCaptionModelId | null;
+
+  constructor(
+    code: "CAPTION_MODEL_NOT_SELECTED" | "CAPTION_MODEL_NOT_INSTALLED",
+    message: string,
+    modelId: ImageCaptionModelId | null,
+  ) {
+    super(message);
+    this.name = "ImageCaptionModelError";
+    this.code = code;
+    this.modelId = modelId;
+  }
+}
+
+function isCaptionModelId(value: unknown): value is ImageCaptionModelId {
+  return value === "gemma4" || value === "qwen35";
+}
+
+/** Asks the selected local vision model to describe an uploaded image. */
+export async function describeImage(path: string): Promise<ImageCaption> {
+  const bundleId = getActiveBundleId();
+  let response: Response;
+  try {
+    response = await fetch("/api/assets/caption", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(bundleId
+          ? { "x-folio-bundle": bundleId, "x-folio-bundle-id": bundleId }
+          : {}),
+      },
+      body: JSON.stringify({ path }),
+    });
+  } catch {
+    throw new Error("The local FolioNotes service is not ready yet.");
+  }
+  let result: unknown = null;
+  try {
+    result = await response.json();
+  } catch {
+    result = null;
+  }
+  const body = result && typeof result === "object" ? (result as Record<string, unknown>) : {};
+  if (!response.ok) {
+    const message = typeof body.error === "string" ? body.error : `Could not describe the image (${response.status}).`;
+    if (response.status === 409 && body.code === "CAPTION_MODEL_NOT_SELECTED")
+      throw new ImageCaptionModelError("CAPTION_MODEL_NOT_SELECTED", message, null);
+    if (response.status === 409 && body.code === "CAPTION_MODEL_NOT_INSTALLED")
+      throw new ImageCaptionModelError("CAPTION_MODEL_NOT_INSTALLED", message, isCaptionModelId(body.modelId) ? body.modelId : null);
+    throw new Error(message);
+  }
+  if (typeof body.text !== "string" || !isCaptionModelId(body.model))
+    throw new Error("The server returned an invalid image description.");
+  return { text: body.text, cached: body.cached === true, model: body.model };
 }

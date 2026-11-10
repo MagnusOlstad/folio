@@ -1,4 +1,4 @@
-import type { MlxModelId, MlxStatus, MlxTranscriptionModelId } from "../../../domain/types.ts";
+import type { MlxCaptionModelId, MlxModelId, MlxStatus, MlxTranscriptionModelId } from "../../../domain/types.ts";
 
 import { ModelDownloadProgress } from "../../workspace/components/ModelDownloadProgress.tsx";
 import { modelCatalog } from "../../workspace/model/model-catalog.ts";
@@ -12,6 +12,7 @@ export type ModelSettingsControls = {
   remove: (id: MlxModelId) => void;
   select: (id: MlxModelId) => void;
   selectTranscription: (id: MlxTranscriptionModelId) => void;
+  selectCaption: (id: MlxCaptionModelId | null) => void;
 };
 
 export function ModelSettings({ controls }: { controls: ModelSettingsControls }) {
@@ -19,6 +20,27 @@ export function ModelSettings({ controls }: { controls: ModelSettingsControls })
   const canManage = Boolean(controls.status?.available && controls.status.helperAvailable);
   const selectedTranscriptionModel = controls.status?.selectedTranscriptionModel ?? "whisper";
   const selectedTranscriptionInstalled = Boolean(models.find((model) => model.id === selectedTranscriptionModel)?.installed);
+  const selectedCaptionModel = controls.status?.selectedCaptionModel ?? null;
+  const renderCaptionOption = (id: MlxCaptionModelId) => {
+    const definition = modelCatalog.find((item) => item.id === id)!;
+    const model = models.find((item) => item.id === id);
+    const selected = selectedCaptionModel === id;
+    const installing = Boolean(controls.status?.installing.includes(id) || controls.status?.downloads.some((item) => item.id === id));
+    const busy = Boolean(model?.busy || model?.loading || installing || controls.actionModel !== null);
+    return (
+      <article className="model-settings-row" key={id}>
+        <label>
+          <input type="radio" name="folio-caption-model" value={id} checked={selected} onChange={() => controls.selectCaption(id)} disabled={!canManage || controls.action !== null} />
+          <span><strong>Use {definition.name}</strong><small>{model?.installed ? "Downloaded" : `Not downloaded · ${definition.description.replace(/^4-bit · /, "")}`}</small></span>
+        </label>
+        {selected && !model?.installed ? (
+          <div className="model-settings-actions">
+            <button type="button" onClick={() => controls.install(id)} disabled={!canManage || busy}>{installing ? "Downloading…" : "Download"}</button>
+          </div>
+        ) : null}
+      </article>
+    );
+  };
   const renderModel = (definition: typeof modelCatalog[number]) => {
     const model = models.find((item) => item.id === definition.id);
     const download = controls.status?.downloads.find((item) => item.id === definition.id)?.progress;
@@ -71,6 +93,18 @@ export function ModelSettings({ controls }: { controls: ModelSettingsControls })
         <p>Choose a local speech recognition model. If your choice is missing, install it below before transcribing.</p>
         {modelCatalog.filter((definition) => definition.transcription).map(renderModel)}
         {controls.status && canManage && !selectedTranscriptionInstalled ? <p role="status">The selected transcription model is not installed. Transcription will wait until it is downloaded.</p> : null}
+      </fieldset>
+      <fieldset className="model-settings-group" aria-label="Image descriptions">
+        <legend>Image descriptions</legend>
+        <p>Choose a model to describe images with the magnifier button in the image toolbar. It reuses the Filing &amp; Ask model weights, so there is no extra download if that model is already installed.</p>
+        {(["gemma4", "qwen35"] as const).map(renderCaptionOption)}
+        <article className="model-settings-row">
+          <label>
+            <input type="radio" name="folio-caption-model" value="none" checked={selectedCaptionModel === null} onChange={() => controls.selectCaption(null)} disabled={!canManage || controls.action !== null} />
+            <span><strong>None</strong><small>Image descriptions are off</small></span>
+          </label>
+        </article>
+        {controls.status && canManage && selectedCaptionModel && !models.find((model) => model.id === selectedCaptionModel)?.installed ? <p role="status">The selected image description model is not downloaded. Download it above to describe images.</p> : null}
       </fieldset>
       {modelCatalog.filter((definition) => !definition.generation && !definition.transcription).map(renderModel)}
       {controls.error ? <p className="settings-model-error" role="alert">{controls.error}</p> : null}

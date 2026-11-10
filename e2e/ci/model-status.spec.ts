@@ -219,7 +219,7 @@ test('selects, persists, downloads, and removes a missing transcription variant 
   await expect(largeChoice).not.toBeChecked()
   await largeChoice.click()
   await expect(largeChoice).toBeChecked()
-  await expect(settings.getByRole('radio', { name: /Gemma 4/ })).toBeChecked()
+  await expect(settings.getByRole('radio', { name: /^Gemma 4/ })).toBeChecked()
   await expect(settings.getByRole('status')).toContainText('selected transcription model is not installed')
   expect(selections).toEqual(['whisperlarge'])
   expect(selectionRequestCount).toBe(1)

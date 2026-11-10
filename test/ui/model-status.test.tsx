@@ -92,7 +92,7 @@ describe("model status", () => {
     function ProgressHarness() {
       const models = useWorkspaceModels(vi.fn());
       return <>
-        <ModelSettings controls={{ status: models.mlxStatus, actionModel: models.mlxActionModel, action: models.mlxAction, error: models.modelError, install: models.installMlxModel, remove: models.removeMlxModel, select: models.selectGenerationModel, selectTranscription: models.selectTranscriptionModel }} />
+        <ModelSettings controls={{ status: models.mlxStatus, actionModel: models.mlxActionModel, action: models.mlxAction, error: models.modelError, install: models.installMlxModel, remove: models.removeMlxModel, select: models.selectGenerationModel, selectTranscription: models.selectTranscriptionModel, selectCaption: models.selectCaptionModel }} />
         <MlxModelStatusPanel mlxStatus={models.mlxStatus} mlxActionModel={models.mlxActionModel} mlxAction={models.mlxAction} onInstallMlxModel={models.installMlxModel} onToggleMlxModel={models.toggleMlxModel} onOpenSettings={vi.fn()} />
       </>;
     }
