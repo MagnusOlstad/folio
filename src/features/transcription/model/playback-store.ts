@@ -28,7 +28,8 @@ const POLL_MS = 100
 export function createPlaybackStore(createAudio: () => HTMLAudioElement = () => new Audio()) {
   let snapshot: PlaybackSnapshot = IDLE
   let audio: HTMLAudioElement | null = null
-  let turns: readonly Turn[] = []
+  // Turns are kept per session so a panel's turns survive another recording being loaded in between.
+  const turnsBySession = new Map<string, readonly Turn[]>()
   let resolvers: PlaybackResolvers = {}
   let poll: number | null = null
   const listeners = new Set<() => void>()
@@ -40,7 +41,12 @@ export function createPlaybackStore(createAudio: () => HTMLAudioElement = () => 
     for (const listener of [...listeners]) listener()
   }
 
+  function activeTurns(): readonly Turn[] {
+    return (snapshot.sessionId && turnsBySession.get(snapshot.sessionId)) || []
+  }
+
   function applySolo(element: HTMLAudioElement) {
+    const turns = activeTurns()
     if (snapshot.solo === null || !turns.length) return
     const step = soloStep(turns, snapshot.solo, element.currentTime)
     if (step.kind === 'jump') element.currentTime = step.to
@@ -87,23 +93,21 @@ export function createPlaybackStore(createAudio: () => HTMLAudioElement = () => 
       media.src = src
       media.defaultPlaybackRate = snapshot.rate
       media.playbackRate = snapshot.rate
-      turns = []
       update({ sessionId, currentTime: 0, duration: durationHint, playing: false, solo: null })
     },
     unload(sessionId: string) {
       if (snapshot.sessionId !== sessionId) return
       if (audio) { audio.pause(); audio.removeAttribute('src') }
-      turns = []
       if (poll !== null) { window.clearInterval(poll); poll = null }
       update({ ...IDLE, rate: snapshot.rate })
     },
-    setTurns(sessionId: string, next: readonly Turn[]) {
-      if (snapshot.sessionId === sessionId) turns = next
-    },
+    setTurns(sessionId: string, next: readonly Turn[]) { turnsBySession.set(sessionId, next) },
+    clearTurns(sessionId: string) { turnsBySession.delete(sessionId) },
 
     play() {
       if (!snapshot.sessionId) return
       const media = element()
+      const turns = activeTurns()
       if (snapshot.solo !== null) {
         const step = soloStep(turns, snapshot.solo, media.currentTime)
         if (step.kind === 'end') media.currentTime = turns.find((turn) => turn.speaker === snapshot.solo)?.start ?? 0
@@ -135,7 +139,7 @@ export function createPlaybackStore(createAudio: () => HTMLAudioElement = () => 
     seekCurrent(seconds: number) { return snapshot.sessionId ? store.seek(snapshot.sessionId, seconds) : false },
     skipTurn(direction: 1 | -1) {
       if (!snapshot.sessionId) return
-      const target = adjacentTurnStart(turns, snapshot.currentTime, direction, snapshot.solo)
+      const target = adjacentTurnStart(activeTurns(), snapshot.currentTime, direction, snapshot.solo)
       if (target !== null) store.seek(snapshot.sessionId, target)
     },
     setRate(rate: number) {
