@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { createSerialQueue } from '../core/queue.js'
 import { markdownFromResult, splitTranscript } from './model.js'
 import { createDiarizationSupport } from './diarization.js'
-import { buildTranscriptResult, normalizeSegments, reassignSegmentSpeaker } from './segments.js'
+import { buildTranscriptResult, mergeSegmentWithPrevious, normalizeSegments, reassignSegmentSpeaker, splitSegment as splitResultSegment } from './segments.js'
 import { folderBytes, installedSnapshot } from './snapshots.js'
 import { DEFAULT_TRANSCRIPTION_MODEL_ID, DIARIZATION_MODELS, DIARIZATION_MODEL_ID, TRANSCRIPTION_MODELS } from './models.js'
 import { createSessionLocks } from './locks.js'
@@ -296,7 +296,7 @@ export function createTranscriptionService(runtime) {
   }
 
   const speakerEdits = new Map()
-  async function reassignSpeaker(id, index, speaker) {
+  async function editSegments(id, transform) {
     const storage = runtime.transcriptionStorage
     const run = async () => {
       const session = await storage.readManifest(id)
@@ -306,13 +306,17 @@ export function createTranscriptionService(runtime) {
       }
       const result = await storage.readResult(id)
       if (!result) throw Object.assign(new Error('Transcription result not found.'), { status: 404 })
-      const updated = reassignSegmentSpeaker(result, index, speaker, { maxSpeakers: DIARIZATION_MODELS[DIARIZATION_MODEL_ID].maxSpeakers })
-      return storage.writeResult(id, updated)
+      return storage.writeResult(id, transform(result))
     }
     const next = (speakerEdits.get(id) ?? Promise.resolve()).catch(() => undefined).then(run)
     speakerEdits.set(id, next)
     try { return await next } finally { if (speakerEdits.get(id) === next) speakerEdits.delete(id) }
   }
+
+  const maxSpeakers = () => DIARIZATION_MODELS[DIARIZATION_MODEL_ID].maxSpeakers
+  const reassignSpeaker = (id, index, speaker) => editSegments(id, (result) => reassignSegmentSpeaker(result, index, speaker, { maxSpeakers: maxSpeakers() }))
+  const splitSegment = (id, index, offset, speaker) => editSegments(id, (result) => splitResultSegment(result, index, offset, speaker, { maxSpeakers: maxSpeakers() }))
+  const mergeSegment = (id, index) => editSegments(id, (result) => mergeSegmentWithPrevious(result, index))
 
   async function updateDraftId(id, draftId) {
     const session = await runtime.transcriptionStorage.readManifest(id)
@@ -472,6 +476,8 @@ export function createTranscriptionService(runtime) {
     installDiarization: diarization.install,
     updateOptions,
     reassignSpeaker,
+    splitSegment,
+    mergeSegment,
     transcribe,
     cancel,
     updateDraftId,

@@ -108,7 +108,10 @@ export function PlayerPanel({ id, session, model, actions, onSpeakerCount }: Pla
           present={speakers}
           names={names}
           hasSpeakers={hasSpeakers}
+          time={time}
           onReassign={(index, speaker) => actions.reassignSpeaker(session, index, speaker)}
+          onSplit={(index, offset, speaker) => actions.splitSegment(session, index, offset, speaker)}
+          onMerge={(index) => actions.mergeSegment(session, index)}
           onApplied={(outcome) => setResult(outcome.result)}
         />
       )}
