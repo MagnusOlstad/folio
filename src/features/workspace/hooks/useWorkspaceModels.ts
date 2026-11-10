@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MLX_GENERATION_MODEL } from "../../../domain/types.ts";
+import { isMlxCaptionModelId, MLX_GENERATION_MODEL } from "../../../domain/types.ts";
 import type { MlxCaptionModelId, MlxModelId, MlxStatus, MlxTranscriptionModelId, VersionInfo } from "../../../domain/types.ts";
 import { api, apiWithRetry } from "../../../lib/api.ts";
 import { refreshTranslationSettings } from "./useTranslationSettings.ts";
@@ -70,7 +70,7 @@ export function useWorkspaceModels(setMessage: (message: string) => void, enable
 
   async function runMlxAction(id: MlxModelId | null, action: ModelAction) {
     if (actionRef.current) return;
-    if (action === "select-caption" && id !== null && id !== "gemma4" && id !== "qwen35") return;
+    if (action === "select-caption" && id !== null && !isMlxCaptionModelId(id)) return;
     if (id === null && action !== "select-caption") return;
     if (action === "select" && (id === "embeddinggemma" || id === "whisper" || id === "whisperlarge")) return;
     if (action === "select-transcription" && id !== "whisper" && id !== "whisperlarge") return;

@@ -41,13 +41,28 @@ test('admission evicts idle workers least recently used first and never busy one
   assert.deepEqual(planAdmissionEvictions({ needBytes: 9, budgetBytes: 10, loaded }), ['old', 'new'])
 })
 
-test('pressure eviction runs only below the threshold, largest idle worker first', () => {
+test('pressure evicts idle workers unused for the grace period, largest first', () => {
+  const now = 1_000_000
   const loaded = [
-    { id: 'small', bytes: 1, idle: true }, { id: 'busy', bytes: 9, idle: false }, { id: 'large', bytes: 5, idle: true },
+    { id: 'small', bytes: 1, idle: true, lastUsed: now - 61_000 },
+    { id: 'busy', bytes: 9, idle: false, lastUsed: now - 600_000 },
+    { id: 'large', bytes: 5, idle: true, lastUsed: now - 60_000 },
+    { id: 'recent', bytes: 7, idle: true, lastUsed: now - 1_000 },
   ]
-  assert.deepEqual(planPressureEvictions({ level: 20, loaded }), [])
-  assert.deepEqual(planPressureEvictions({ level: Number.NaN, loaded }), [])
-  assert.deepEqual(planPressureEvictions({ level: 19, loaded }), ['large', 'small'])
+  assert.deepEqual(planPressureEvictions({ level: 20, loaded, now }), [])
+  assert.deepEqual(planPressureEvictions({ level: Number.NaN, loaded, now }), [])
+  assert.deepEqual(planPressureEvictions({ level: 19, loaded, now }), ['large', 'small'])
+})
+
+test('critical pressure evicts every idle worker regardless of recency', () => {
+  const now = 1_000_000
+  const loaded = [
+    { id: 'recent', bytes: 7, idle: true, lastUsed: now - 1 },
+    { id: 'busy', bytes: 9, idle: false, lastUsed: now - 600_000 },
+    { id: 'old', bytes: 2, idle: true, lastUsed: now - 600_000 },
+  ]
+  assert.deepEqual(planPressureEvictions({ level: 9, loaded, now }), ['recent', 'old'])
+  assert.deepEqual(planPressureEvictions({ level: 10, loaded, now }), ['old'])
 })
 
 test('the level reader parses sysctl output and ignores failures or other platforms', async () => {

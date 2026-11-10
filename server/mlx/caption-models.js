@@ -7,10 +7,14 @@ import { MODEL_DEFINITIONS } from './model-definitions.js'
 // keyed `<id>:caption`. The keys are internal: they never appear as models in the status payload.
 export const CAPTION_MODEL_IDS = Object.freeze(['gemma4', 'qwen35'])
 export const CAPTION_TIMEOUT_MS = 5 * 60_000
-export const CAPTION_IDLE_MS = 60_000
 
 export function isCaptionModelId(id) {
   return CAPTION_MODEL_IDS.includes(id)
+}
+
+/** Caption cache entries are kept per model so switching models never discards a description. */
+export function captionCacheFileName(sha256, modelId) {
+  return `${sha256}.${modelId}.json`
 }
 
 export function captionWorkerKey(id) {

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 import { OCR_MODEL_ID, OCR_MODELS } from '../mlx/ocr-models.js'
-import { CAPTION_MODEL_IDS, captionModelRevision } from '../mlx/caption-models.js'
+import { CAPTION_MODEL_IDS, captionCacheFileName, captionModelRevision } from '../mlx/caption-models.js'
 
 const OCR_CACHE_VERSION = 1
 const CAPTION_CACHE_VERSION = 1
@@ -104,18 +104,26 @@ async function cachedText(cacheDirectory, sha256, revision) {
   return ''
 }
 
-// A description is searchable if any caption model produced it at that model's pinned revision.
-async function cachedCaption(cacheDirectory, sha256) {
+async function readCaptionEntry(file, sha256) {
   try {
-    const entry = JSON.parse(await fs.readFile(path.join(cacheDirectory, `${sha256}.json`), 'utf8'))
+    const entry = JSON.parse(await fs.readFile(file, 'utf8'))
     if (entry?.version === CAPTION_CACHE_VERSION && entry.sha256 === sha256 && CAPTION_MODEL_IDS.includes(entry.model)
-      && entry.revision === captionModelRevision(entry.model) && typeof entry.text === 'string') {
-      return entry.text.replace(/\s+/g, ' ').trim()
-    }
+      && entry.revision === captionModelRevision(entry.model) && typeof entry.text === 'string') return entry
   } catch {
     // Missing or unreadable cache entries simply contribute no description.
   }
-  return ''
+  return null
+}
+
+// A description is searchable if any caption model produced it at that model's pinned revision.
+// Per-model files and the legacy single-model `<sha>.json` are all considered; the newest wins.
+async function cachedCaption(cacheDirectory, sha256) {
+  const files = [...CAPTION_MODEL_IDS.map((id) => captionCacheFileName(sha256, id)), `${sha256}.json`]
+  const entries = (await Promise.all(files.map((name) => readCaptionEntry(path.join(cacheDirectory, name), sha256))))
+    .filter(Boolean)
+  const createdAt = (entry) => Date.parse(entry.createdAt) || 0
+  const newest = entries.reduce((best, entry) => (!best || createdAt(entry) > createdAt(best) ? entry : best), null)
+  return newest ? newest.text.replace(/\s+/g, ' ').trim() : ''
 }
 
 /**

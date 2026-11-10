@@ -24,12 +24,12 @@ async function writeAsset(bundleRoot, name, bytes, text, revision = OCR_MODEL_RE
   }))
 }
 
-async function writeCaption(bundleRoot, bytes, { model = 'gemma4', revision, text }) {
+async function writeCaption(bundleRoot, bytes, { model = 'gemma4', revision, text, createdAt = new Date().toISOString(), legacy = false }) {
   const sha256 = crypto.createHash('sha256').update(bytes).digest('hex')
   const directory = path.join(bundleRoot, '.folio', 'caption-cache')
   await fs.mkdir(directory, { recursive: true })
-  await fs.writeFile(path.join(directory, `${sha256}.json`), JSON.stringify({
-    version: 1, sha256, model, repository: 'test/repo', revision, text, createdAt: new Date().toISOString(),
+  await fs.writeFile(path.join(directory, legacy ? `${sha256}.json` : `${sha256}.${model}.json`), JSON.stringify({
+    version: 1, sha256, model, repository: 'test/repo', revision, text, createdAt,
   }))
 }
 
@@ -88,7 +88,7 @@ test('collectImageText adds valid image descriptions next to OCR text for the sa
   await writeAsset(bundleRoot, 'stale.png', stale, null)
   await writeCaption(bundleRoot, stale, { revision: 'older-revision', text: 'Outdated words.' })
   await writeAsset(bundleRoot, 'unknown.png', unknown, null)
-  await writeCaption(bundleRoot, unknown, { model: 'llama32', revision: gemma, text: 'Wrong model.' })
+  await writeCaption(bundleRoot, unknown, { model: 'llama32', revision: gemma, text: 'Wrong model.', legacy: true })
   const result = await collectImageText([
     { id: '/a.md', parsed: { content: '![Both](/assets/both.png)\n![G](/assets/gemma.png)\n![Q](/assets/qwen.png)\n![S](/assets/stale.png)\n![U](/assets/unknown.png)' } },
   ], { bundleRoot, assertNoBundleSymlinks: async () => {} })
@@ -97,6 +97,33 @@ test('collectImageText adds valid image descriptions next to OCR text for the sa
     'Image description (Both):\nA scanned invoice on a desk.',
     'Image description (G):\nA whiteboard roadmap.',
     'Image description (Q):\nA red bicycle.',
+  ].join('\n\n'))
+})
+
+test('collectImageText indexes the newest valid description across per-model and legacy caption files', async (context) => {
+  const bundleRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-image-caption-newest-'))
+  context.after(() => fs.rm(bundleRoot, { recursive: true, force: true }))
+  const gemma = captionModelRevision('gemma4')
+  const qwen = captionModelRevision('qwen35')
+  const switched = syntheticPng('switched')
+  const legacyOnly = syntheticPng('legacy-only')
+  const staleNewest = syntheticPng('stale-newest')
+  await writeAsset(bundleRoot, 'switched.png', switched, null)
+  await writeCaption(bundleRoot, switched, { revision: gemma, text: 'Older gemma words.', createdAt: '2026-01-01T00:00:00.000Z' })
+  await writeCaption(bundleRoot, switched, { model: 'qwen35', revision: qwen, text: 'Newer qwen words.', createdAt: '2026-02-01T00:00:00.000Z' })
+  await writeCaption(bundleRoot, switched, { revision: gemma, text: 'Legacy oldest.', createdAt: '2025-01-01T00:00:00.000Z', legacy: true })
+  await writeAsset(bundleRoot, 'legacy.png', legacyOnly, null)
+  await writeCaption(bundleRoot, legacyOnly, { revision: gemma, text: 'Legacy only.', legacy: true })
+  await writeAsset(bundleRoot, 'stale.png', staleNewest, null)
+  await writeCaption(bundleRoot, staleNewest, { revision: gemma, text: 'Valid but older.', createdAt: '2026-01-01T00:00:00.000Z' })
+  await writeCaption(bundleRoot, staleNewest, { model: 'qwen35', revision: 'older-revision', text: 'Newer but stale.', createdAt: '2026-03-01T00:00:00.000Z' })
+  const result = await collectImageText([
+    { id: '/a.md', parsed: { content: '![A](/assets/switched.png)\n![B](/assets/legacy.png)\n![C](/assets/stale.png)' } },
+  ], { bundleRoot, assertNoBundleSymlinks: async () => {} })
+  assert.equal(result.get('/a.md'), [
+    'Image description (A):\nNewer qwen words.',
+    'Image description (B):\nLegacy only.',
+    'Image description (C):\nValid but older.',
   ].join('\n\n'))
 })
 

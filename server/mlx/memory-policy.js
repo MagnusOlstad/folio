@@ -13,6 +13,8 @@ export const IDLE_UNLOAD_MS = Object.freeze({
 })
 export const PRESSURE_POLL_MS = 15_000
 export const PRESSURE_LEVEL_THRESHOLD = 20
+export const PRESSURE_CRITICAL_LEVEL = 10
+export const PRESSURE_GRACE_MS = 60_000
 export const ESTIMATE_HEADROOM = 1.2
 export const MIN_RESERVE_BYTES = 3 * 1024 ** 3
 export const RESERVE_FRACTION = 0.25
@@ -54,10 +56,21 @@ export function planAdmissionEvictions({ needBytes, budgetBytes, loaded }) {
   return evict
 }
 
-/** Under memory pressure every idle worker goes, largest first. */
-export function planPressureEvictions({ level, loaded, threshold = PRESSURE_LEVEL_THRESHOLD }) {
+/**
+ * Under memory pressure idle workers go, largest first. Below the threshold only workers unused for
+ * the grace period are stopped, so a model used a moment ago keeps its normal idle timeout; below
+ * the critical level every idle worker goes regardless of recency.
+ */
+export function planPressureEvictions({
+  level, loaded, now = Date.now(), threshold = PRESSURE_LEVEL_THRESHOLD, criticalLevel = PRESSURE_CRITICAL_LEVEL,
+  graceMs = PRESSURE_GRACE_MS,
+}) {
   if (!Number.isFinite(level) || level >= threshold) return []
-  return loaded.filter((worker) => worker.idle).sort((a, b) => b.bytes - a.bytes).map((worker) => worker.id)
+  const critical = level < criticalLevel
+  return loaded
+    .filter((worker) => worker.idle && (critical || now - worker.lastUsed >= graceMs))
+    .sort((a, b) => b.bytes - a.bytes)
+    .map((worker) => worker.id)
 }
 
 export function totalMemoryBytes() {

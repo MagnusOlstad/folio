@@ -7,6 +7,7 @@ import { helperPath, nativeMlxAvailable } from './helper-path.js'
 import { cancellationError } from './ocr-models.js'
 import { createMlxTasks } from './tasks.js'
 import { createMemoryManager } from './memory-manager.js'
+import { createActiveHeavyTracker } from './active-model.js'
 import { MODEL_DEFINITIONS } from './model-definitions.js'
 import {
   CAPTION_MODEL_IDS, CAPTION_WORKER_DEFINITIONS,
@@ -34,10 +35,10 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
   const externalModelAdapters = new Map()
   let transcriptionSelectionTail = Promise.resolve()
   let heavyQueue = Promise.resolve()
-  let activeHeavyModel = null
   const loadingModels = new Set()
   let closed = false
   const isAvailable = nativeMlxAvailable()
+  const activeHeavy = createActiveHeavyTracker({ workers, workerDefinition })
   const memory = createMemoryManager({ workers, starting, stopping, activeRequests, modelActivities, workerDefinition,
     warmKeepAliveMs, stopModel: (id) => stopModel(id), ...memoryOptions })
 
@@ -62,17 +63,16 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
       try {
         if (closed) throw new Error('The MLX service is shutting down.')
         if (activate && definition.purpose !== 'embeddings') {
+          // A model and its caption worker share one snapshot: never keep both copies of the weights.
+          // Everything else is arbitrated by the memory manager (memory.makeRoom in startModel).
           for (const other of allWorkerDefinitions()) {
-            if (other.purpose !== 'embeddings' && other.id !== id) await stopModel(other.id)
+            if (other.id !== id && baseModelId(other.id) === baseModelId(id)) await stopModel(other.id)
           }
-          activeHeavyModel = id
+          activeHeavy.activate(id)
         }
         return await operation()
       } finally {
         modelActivities.set(id, Math.max(0, (modelActivities.get(id) || 1) - 1))
-        if (definition.purpose !== 'embeddings') {
-          activeHeavyModel = [...workers.keys()].find((modelId) => workerDefinition(modelId).purpose !== 'embeddings') || null
-        }
       }
     }
     modelActivities.set(id, (modelActivities.get(id) || 0) + 1)
@@ -221,7 +221,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
             workers.delete(id)
             stopIdleTimer(id)
           }
-          if (activeHeavyModel === id) activeHeavyModel = null
+          activeHeavy.forget(id)
         } })
         startingWorkers.set(id, worker)
         if (signal) {
@@ -374,7 +374,7 @@ export function createMlxService({ projectRoot, modelRoot, mlxHelperPath, warmKe
       available: isAvailable,
       helperAvailable,
       keepAliveMs: memory.generationIdleMs(),
-      activeModel: baseModelId(activeHeavyModel || [...workers.keys()].find((id) => workerDefinition(id).purpose !== 'embeddings') || null),
+      activeModel: baseModelId(activeHeavy.current()),
       installing: [...new Set([...installing, ...models.filter((model) => model.loading).map((model) => model.id)])],
       models,
       selectedGenerationModel: selected,

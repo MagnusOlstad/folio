@@ -59,7 +59,7 @@ export function createMemoryManager({
     read: () => readLevel(),
     isActive: () => workers.size > 0,
     intervalMs: pressureIntervalMs,
-    onTick: (level) => stopAll(planPressureEvictions({ level, loaded: loadedWorkers() })),
+    onTick: (level) => stopAll(planPressureEvictions({ level, loaded: loadedWorkers(), now: Date.now() })),
   })
 
   return { idleMs, generationIdleMs, makeRoom, noteUsed, monitor }

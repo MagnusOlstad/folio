@@ -158,7 +158,11 @@ export type DesktopUpdateState = {
 };
 export type MlxModelId = "gemma4" | "qwen35" | "llama32" | "embeddinggemma" | "whisper" | "whisperlarge" | "sortformer" | "lightonocr";
 export type MlxTranscriptionModelId = "whisper" | "whisperlarge";
-export type MlxCaptionModelId = "gemma4" | "qwen35";
+export const MLX_CAPTION_MODEL_IDS = ["gemma4", "qwen35"] as const;
+export type MlxCaptionModelId = (typeof MLX_CAPTION_MODEL_IDS)[number];
+export function isMlxCaptionModelId(value: unknown): value is MlxCaptionModelId {
+  return (MLX_CAPTION_MODEL_IDS as readonly unknown[]).includes(value);
+}
 export const MLX_GENERATION_MODEL = { id: "gemma4", name: "Gemma 4 E4B" } as const satisfies {
   id: MlxModelId;
   name: string;

@@ -243,6 +243,59 @@ export async function downloadImage(url: string) {
 }
 
 /** Builds the frame holding the image and its hover toolbar. */
+type PanelControllerOptions = {
+  frame: HTMLElement;
+  view: EditorView;
+  button: HTMLButtonElement;
+  idleTitle: string;
+  busyTitle: string;
+  /** Runs when the panel closes, before focus returns to the editor. */
+  onClose: () => void;
+};
+
+/**
+ * Shared lifecycle for the panels under an image (extracted text, description): one open panel at
+ * a time, closed by Escape in the editor (capture phase) and restoring focus when it held it, plus
+ * the busy state of the toolbar button that opens it.
+ */
+function createPanelController({ frame, view, button, idleTitle, busyTitle, onClose }: PanelControllerOptions) {
+  let panel: HTMLElement | null = null;
+  const stopListening = () => view.dom.removeEventListener("keydown", onKeydown, true);
+  const close = () => {
+    const hadFocus = panel?.contains(frame.ownerDocument.activeElement) ?? false;
+    panel?.remove();
+    panel = null;
+    stopListening();
+    onClose();
+    if (hadFocus) view.focus();
+    view.requestMeasure();
+  };
+  function onKeydown(event: KeyboardEvent) {
+    if (!frame.isConnected) {
+      stopListening();
+      return;
+    }
+    if (event.key === "Escape" && panel) close();
+  }
+  return {
+    close,
+    isOpen: () => panel !== null,
+    show(next: HTMLElement) {
+      panel = next;
+      frame.append(next);
+      view.dom.addEventListener("keydown", onKeydown, true);
+      view.requestMeasure();
+    },
+    setBusy(busy: boolean) {
+      button.classList.toggle("is-busy", busy);
+      button.disabled = busy;
+      if (busy) button.setAttribute("aria-busy", "true");
+      else button.removeAttribute("aria-busy");
+      button.title = busy ? busyTitle : idleTitle;
+    },
+  };
+}
+
 export function createImageFrame(
   view: EditorView,
   image: HTMLImageElement,
@@ -301,110 +354,61 @@ export function createImageFrame(
   const extract = createButton("Extract text", ICONS.text);
   toolbar.append(extract);
 
+  const ocrPanel = createPanelController({
+    frame, view, button: extract, idleTitle: "Extract text", busyTitle: "Extracting…",
+    onClose: () => { ocrState = nextOcrState(ocrState, { type: "close" }); },
+  });
   let ocrState: OcrPreviewState = { status: "idle" };
-  let preview: HTMLElement | null = null;
-  const closePreview = () => {
-    const hadFocus = preview?.contains(frame.ownerDocument.activeElement) ?? false;
-    preview?.remove();
-    preview = null;
-    view.dom.removeEventListener("keydown", onKeydown, true);
-    ocrState = nextOcrState(ocrState, { type: "close" });
-    if (hadFocus) view.focus();
-    view.requestMeasure();
-  };
-  function onKeydown(event: KeyboardEvent) {
-    if (!frame.isConnected) {
-      view.dom.removeEventListener("keydown", onKeydown, true);
-      return;
-    }
-    if (event.key === "Escape" && preview) closePreview();
-  }
-  const setBusy = (busy: boolean) => {
-    extract.classList.toggle("is-busy", busy);
-    extract.disabled = busy;
-    if (busy) extract.setAttribute("aria-busy", "true");
-    else extract.removeAttribute("aria-busy");
-    extract.title = busy ? "Extracting…" : "Extract text";
-  };
   extract.addEventListener("click", async () => {
     if (ocrState.status === "preview") {
-      closePreview();
+      ocrPanel.close();
       return;
     }
     if (ocrState.status !== "idle") return;
     ocrState = nextOcrState(ocrState, { type: "start" });
-    setBusy(true);
+    ocrPanel.setBusy(true);
     try {
       const result = await extractImageText(options.path);
       ocrState = nextOcrState(ocrState, { type: "success", ...result });
-      preview = createOcrPreview(view, frame, result.text, result.cached, options, closePreview);
-      frame.append(preview);
-      view.dom.addEventListener("keydown", onKeydown, true);
-      view.requestMeasure();
+      ocrPanel.show(createOcrPreview(view, frame, result.text, result.cached, options, ocrPanel.close));
     } catch (error) {
       ocrState = nextOcrState(ocrState, { type: "failure" });
       options.onError?.(error instanceof Error ? error.message : "Could not extract text.");
     } finally {
-      setBusy(false);
+      ocrPanel.setBusy(false);
     }
   });
 
   const describe = createButton("Describe image", ICONS.describe);
   toolbar.append(describe);
 
+  const captionPanel = createPanelController({
+    frame, view, button: describe, idleTitle: "Describe image", busyTitle: "Describing…",
+    onClose: () => { captionState = nextCaptionState(captionState, { type: "close" }); },
+  });
   let captionState: CaptionPreviewState = { status: "idle" };
-  let captionPanel: HTMLElement | null = null;
-  const closeCaption = () => {
-    const hadFocus = captionPanel?.contains(frame.ownerDocument.activeElement) ?? false;
-    captionPanel?.remove();
-    captionPanel = null;
-    view.dom.removeEventListener("keydown", onCaptionKeydown, true);
-    captionState = nextCaptionState(captionState, { type: "close" });
-    if (hadFocus) view.focus();
-    view.requestMeasure();
-  };
-  function onCaptionKeydown(event: KeyboardEvent) {
-    if (!frame.isConnected) {
-      view.dom.removeEventListener("keydown", onCaptionKeydown, true);
-      return;
-    }
-    if (event.key === "Escape" && captionPanel) closeCaption();
-  }
-  const showCaptionPanel = (panel: HTMLElement) => {
-    captionPanel = panel;
-    frame.append(panel);
-    view.dom.addEventListener("keydown", onCaptionKeydown, true);
-    view.requestMeasure();
-  };
-  const setDescribeBusy = (busy: boolean) => {
-    describe.classList.toggle("is-busy", busy);
-    describe.disabled = busy;
-    if (busy) describe.setAttribute("aria-busy", "true");
-    else describe.removeAttribute("aria-busy");
-    describe.title = busy ? "Describing…" : "Describe image";
-  };
   describe.addEventListener("click", async () => {
     if (captionState.status === "preview" || captionState.status === "blocked") {
-      closeCaption();
+      captionPanel.close();
       return;
     }
     if (captionState.status !== "idle") return;
     captionState = nextCaptionState(captionState, { type: "start" });
-    setDescribeBusy(true);
+    captionPanel.setBusy(true);
     try {
       const result = await describeImage(options.path);
       captionState = nextCaptionState(captionState, { type: "success", ...result });
-      showCaptionPanel(createCaptionPreview(view, frame, result.text, result.cached, options, closeCaption));
+      captionPanel.show(createCaptionPreview(view, frame, result.text, result.cached, options, captionPanel.close));
     } catch (error) {
       if (error instanceof ImageCaptionModelError && options.captionActions) {
         captionState = nextCaptionState(captionState, { type: "blocked", code: error.code, modelId: error.modelId });
-        showCaptionPanel(createCaptionBlockedPanel(error, options.captionActions, closeCaption));
+        captionPanel.show(createCaptionBlockedPanel(error, options.captionActions, captionPanel.close));
       } else {
         captionState = nextCaptionState(captionState, { type: "failure" });
         options.onError?.(error instanceof Error ? error.message : "Could not describe the image.");
       }
     } finally {
-      setDescribeBusy(false);
+      captionPanel.setBusy(false);
     }
   });
 

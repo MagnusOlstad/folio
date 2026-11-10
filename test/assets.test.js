@@ -160,7 +160,7 @@ test('OCR route extracts text once per image content and honors the cache', asyn
   assert.ok([400, 404].includes((await ocr({ path: '/assets/link.png' })).status))
 })
 
-test('caption route describes images once per model, invalidates on model switch, and reports 409 codes', async (context) => {
+test('caption route describes images once per model, keeps one entry per model, and reports 409 codes', async (context) => {
   const dataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'folio-caption-'))
   const bundleRoot = path.join(dataRoot, 'vault')
   await fs.mkdir(bundleRoot, { recursive: true })
@@ -225,7 +225,7 @@ test('caption route describes images once per model, invalidates on model switch
   assert.equal(entry.repository, 'mlx-community/gemma-4-e4b-it-4bit')
   assert.equal(entry.revision, '475b9088d29754a3379866cf5aeb6b41acd313c2')
   assert.equal(entry.text, 'A gemma4 caption.')
-  assert.equal(`${entry.sha256}.json`, cacheFiles[0])
+  assert.equal(`${entry.sha256}.gemma4.json`, cacheFiles[0])
   assert.ok(entry.createdAt)
 
   // Identical bytes under another name hit the cache.
@@ -233,19 +233,35 @@ test('caption route describes images once per model, invalidates on model switch
   assert.deepEqual(await hit.json(), { text: 'A gemma4 caption.', cached: true, model: 'gemma4' })
   assert.equal(calls.length, 1)
 
-  // Switching the caption model regenerates and overwrites the entry.
+  // Switching the caption model generates a separate entry; switching back reuses the first one.
   selected = 'qwen35'
   const switched = await caption({ path: second })
   assert.deepEqual(await switched.json(), { text: 'A qwen35 caption.', cached: false, model: 'qwen35' })
   assert.equal(calls.length, 2)
-  assert.equal(JSON.parse(await fs.readFile(path.join(cacheDirectory, cacheFiles[0]), 'utf8')).model, 'qwen35')
-  assert.equal((await (await caption({ path: first })).json()).cached, true)
+  assert.deepEqual((await fs.readdir(cacheDirectory)).sort(), [`${entry.sha256}.gemma4.json`, `${entry.sha256}.qwen35.json`])
+  assert.deepEqual(await (await caption({ path: first })).json(), { text: 'A qwen35 caption.', cached: true, model: 'qwen35' })
+  selected = 'gemma4'
+  assert.deepEqual(await (await caption({ path: first })).json(), { text: 'A gemma4 caption.', cached: true, model: 'gemma4' })
+  assert.equal(calls.length, 2)
 
-  // A stale revision is regenerated.
-  const current = JSON.parse(await fs.readFile(path.join(cacheDirectory, cacheFiles[0]), 'utf8'))
-  await fs.writeFile(path.join(cacheDirectory, cacheFiles[0]), JSON.stringify({ ...current, revision: 'older-revision' }))
+  // A legacy single-model entry still counts for the model that made it.
+  const legacyFile = path.join(cacheDirectory, `${entry.sha256}.json`)
+  await fs.writeFile(legacyFile, JSON.stringify({ ...entry, text: 'A legacy caption.' }))
+  await fs.rm(path.join(cacheDirectory, cacheFiles[0]))
+  assert.deepEqual(await (await caption({ path: first })).json(), { text: 'A legacy caption.', cached: true, model: 'gemma4' })
+  selected = 'qwen35'
+  assert.equal((await (await caption({ path: first })).json()).text, 'A qwen35 caption.')
+  await fs.rm(legacyFile)
+  selected = 'gemma4'
   assert.equal((await (await caption({ path: first })).json()).cached, false)
   assert.equal(calls.length, 3)
+
+  // A stale revision is regenerated.
+  const staleFile = path.join(cacheDirectory, cacheFiles[0])
+  const current = JSON.parse(await fs.readFile(staleFile, 'utf8'))
+  await fs.writeFile(staleFile, JSON.stringify({ ...current, revision: 'older-revision' }))
+  assert.equal((await (await caption({ path: first })).json()).cached, false)
+  assert.equal(calls.length, 4)
 
   failure = Object.assign(new Error('Choose a caption model in Settings → Models.'), { statusCode: 409, code: 'CAPTION_MODEL_NOT_SELECTED' })
   selected = null

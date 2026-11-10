@@ -1,4 +1,4 @@
-import type { MlxCaptionModelId, MlxModelId, MlxStatus, MlxTranscriptionModelId } from "../../../domain/types.ts";
+import { MLX_CAPTION_MODEL_IDS, type MlxCaptionModelId, type MlxModelId, type MlxStatus, type MlxTranscriptionModelId } from "../../../domain/types.ts";
 
 import { ModelDownloadProgress } from "../../workspace/components/ModelDownloadProgress.tsx";
 import { modelCatalog } from "../../workspace/model/model-catalog.ts";
@@ -97,7 +97,7 @@ export function ModelSettings({ controls }: { controls: ModelSettingsControls })
       <fieldset className="model-settings-group" aria-label="Image descriptions">
         <legend>Image descriptions</legend>
         <p>Choose a model to describe images with the magnifier button in the image toolbar. It reuses the Filing &amp; Ask model weights, so there is no extra download if that model is already installed.</p>
-        {(["gemma4", "qwen35"] as const).map(renderCaptionOption)}
+        {MLX_CAPTION_MODEL_IDS.map(renderCaptionOption)}
         <article className="model-settings-row">
           <label>
             <input type="radio" name="folio-caption-model" value="none" checked={selectedCaptionModel === null} onChange={() => controls.selectCaption(null)} disabled={!canManage || controls.action !== null} />

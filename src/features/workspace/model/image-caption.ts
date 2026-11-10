@@ -1,5 +1,6 @@
 import type { Text } from "@codemirror/state";
-import type { ImageCaptionModelId } from "../../../lib/assets.ts";
+import type { MlxCaptionModelId } from "../../../domain/types.ts";
+import { modelCatalog } from "./model-catalog.ts";
 import { imageAltBounds, parseImageAlt } from "./image-size.ts";
 
 export type CaptionBlockedCode = "CAPTION_MODEL_NOT_SELECTED" | "CAPTION_MODEL_NOT_INSTALLED";
@@ -7,13 +8,13 @@ export type CaptionBlockedCode = "CAPTION_MODEL_NOT_SELECTED" | "CAPTION_MODEL_N
 export type CaptionPreviewState =
   | { status: "idle" }
   | { status: "describing" }
-  | { status: "preview"; text: string; cached: boolean; model: ImageCaptionModelId }
-  | { status: "blocked"; code: CaptionBlockedCode; modelId: ImageCaptionModelId | null };
+  | { status: "preview"; text: string; cached: boolean; model: MlxCaptionModelId }
+  | { status: "blocked"; code: CaptionBlockedCode; modelId: MlxCaptionModelId | null };
 
 export type CaptionPreviewAction =
   | { type: "start" }
-  | { type: "success"; text: string; cached: boolean; model: ImageCaptionModelId }
-  | { type: "blocked"; code: CaptionBlockedCode; modelId: ImageCaptionModelId | null }
+  | { type: "success"; text: string; cached: boolean; model: MlxCaptionModelId }
+  | { type: "blocked"; code: CaptionBlockedCode; modelId: MlxCaptionModelId | null }
   | { type: "failure" }
   | { type: "close" };
 
@@ -77,6 +78,6 @@ export function captionAltChange(source: string, text: string) {
 }
 
 /** Human-readable name for the caption model ids. */
-export function captionModelName(id: ImageCaptionModelId | null) {
-  return id === "gemma4" ? "Gemma 4 E4B" : id === "qwen35" ? "Qwen 3.5 4B" : "an image description model";
+export function captionModelName(id: MlxCaptionModelId | null) {
+  return modelCatalog.find((model) => model.id === id)?.name ?? "an image description model";
 }
