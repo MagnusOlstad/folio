@@ -291,7 +291,7 @@ test('merging with the previous segment keeps its speaker and undoes a split', (
   assert.throws(() => mergeSegmentWithPrevious({ segments: [] }, 1), { status: 400 })
 })
 
-test('segment speaker names survive merging away the last occurrence and splitting it back', () => {
+test('merging away the last occurrence drops that speaker name and a later split shows none', () => {
   const result = {
     speakerNames: { '1': 'Alex', '2': 'Sam' },
     segments: [
@@ -301,9 +301,22 @@ test('segment speaker names survive merging away the last occurrence and splitti
   }
   const merged = mergeSegmentWithPrevious(result, 1)
   assert.deepEqual(merged.speakerNumbers, [1])
-  assert.deepEqual(merged.speakerNames, result.speakerNames)
+  assert.deepEqual(merged.speakerNames, { '1': 'Alex' })
   const restored = splitSegment(merged, 0, 11, 2)
   assert.deepEqual(restored.speakerNumbers, [1, 2])
-  assert.deepEqual(restored.speakerNames, result.speakerNames)
-  assert.equal(restored.segments[1].speaker, 2)
+  assert.deepEqual(restored.speakerNames, { '1': 'Alex' })
+})
+
+test('segment edits drop names of speakers that are no longer present', () => {
+  const result = { segments: [
+    { start: 0, end: 1, text: 'A', speaker: 1 },
+    { start: 1, end: 2, text: 'B', speaker: 2 },
+  ], speakerNames: { '1': 'Alex', '2': 'Sam' } }
+  const reassigned = reassignSegmentSpeaker(result, 1, 1)
+  assert.deepEqual(reassigned.speakerNames, { '1': 'Alex' })
+  const solo = reassignSegmentSpeaker({ ...result, speakerNames: { '2': 'Sam' } }, 1, 1)
+  assert.equal('speakerNames' in solo, false)
+  const split = splitSegment({ ...reassigned, segments: [{ start: 0, end: 2, text: 'One two.', speaker: 1 }] }, 0, 4, 2)
+  assert.deepEqual(split.speakerNumbers, [1, 2])
+  assert.deepEqual(split.speakerNames, { '1': 'Alex' })
 })

@@ -58,8 +58,6 @@ export function PlayerPanel({ id, session, model, actions, onSpeakerCount }: Pla
   function applySpeakerMerge(outcome: ReassignOutcome, source: number, target: number) {
     const current = playbackStore.getSnapshot()
     if (current.sessionId === session.id) {
-      const nextTurns = buildTurns(outcome.result.segments ?? [])
-      playbackStore.setTurns(session.id, nextTurns)
       if (current.solo === source) playbackStore.setSolo(target)
       else if (current.solo !== null && !outcome.result.speakerNumbers?.includes(current.solo)) playbackStore.setSolo(null)
     }
@@ -121,6 +119,12 @@ export function PlayerPanel({ id, session, model, actions, onSpeakerCount }: Pla
         onMerge={mergeSpeakers} onApplied={applySpeakerMerge} />}
 
       {error && <p className="transcription-item-error" role="status">{error}</p>}
+      {result?.summary?.trim() && (
+        <section className="player-summary" aria-label="Summary">
+          <h4 className="player-summary-title">Summary</h4>
+          <p className="player-summary-text">{result.summary.trim()}</p>
+        </section>
+      )}
       {result && segments.length > 0 && (
         <NowSpeaking
           segments={segments}

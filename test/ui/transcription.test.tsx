@@ -1058,7 +1058,7 @@ describe("transcription UI", () => {
     expect(screen.queryByRole("checkbox", { name: /Identify speakers/ })).not.toBeInTheDocument();
     expect(dockActions.retranscribe).not.toHaveBeenCalled();
     const group = screen.getByRole("group", { name: "Confirm re-transcription of meeting.wav" });
-    expect(group).toHaveTextContent("saved recording transcript will be replaced");
+    expect(group).toHaveTextContent("saved recording transcript and speaker names will be replaced");
     expect(group).toHaveTextContent("Open drafts will stay unchanged");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("group", { name: /Confirm re-transcription/ })).not.toBeInTheDocument();

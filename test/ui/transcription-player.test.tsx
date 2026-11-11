@@ -174,6 +174,39 @@ describe("player", () => {
     expect(dockActions.mergeSpeakers).toHaveBeenCalledWith(ready, 2, 1);
   });
 
+  it("moves focus to the merge status after each of two consecutive merges", async () => {
+    const three = [...segments, { start: 20, end: 25, text: "Third voice.", speaker: 3 }];
+    const stage = (map: Record<number, number>): TranscriptionResult => {
+      const merged = three.map((segment) => ({ ...segment, speaker: map[segment.speaker] ?? segment.speaker }));
+      const numbers = [...new Set(merged.map((segment) => segment.speaker))];
+      return { ...storedResult, segments: merged, speakerNumbers: numbers, speakerCount: numbers.length };
+    };
+    const results = [stage({ 2: 1 }), stage({ 2: 1, 3: 1 })];
+    const mergeSpeakers = vi.fn(async () => ({ result: results.shift()! }));
+    const dockActions = actions({ mergeSpeakers, loadResult: vi.fn(async () => stage({})) });
+    render(<TranscriptionDock model={model({ pending: [ready] })} actions={dockActions} />);
+    const player = await expandReadyRow();
+    for (const [target, source] of [[/Speaker 1 · /, /Speaker 2 · /], [/Speaker 1 · /, /Speaker 3 · /]] as const) {
+      fireEvent.click(await within(player).findByRole("button", { name: "Merge speakers" }));
+      fireEvent.click(within(player).getByRole("button", { name: target }));
+      fireEvent.click(within(player).getByRole("button", { name: source }));
+      fireEvent.click(within(player).getByRole("button", { name: "Merge", exact: true }));
+      await waitFor(() => expect(within(player).getByRole("status")).toHaveFocus());
+      (within(player).getByRole("status") as HTMLElement).blur();
+    }
+    expect(mergeSpeakers).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows the saved summary and reloads it when the session updates", async () => {
+    const loadResult = vi.fn(async () => ({ ...storedResult, summary: "- First point" }));
+    const view = render(<TranscriptionDock model={model({ pending: [ready] })} actions={actions({ loadResult })} />);
+    const player = await expandReadyRow();
+    expect(await within(player).findByText("- First point")).toBeInTheDocument();
+    loadResult.mockImplementation(async () => ({ ...storedResult, summary: "- Second point" }));
+    view.rerender(<TranscriptionDock model={model({ pending: [{ ...ready, updatedAt: "2026-10-02T11:00:00.000Z" }] })} actions={actions({ loadResult })} />);
+    expect(await screen.findByText("- Second point")).toBeInTheDocument();
+  });
+
   it("toggles playback with Space only when focus is inside the player", async () => {
     render(<TranscriptionDock model={model({ pending: [ready] })} actions={actions()} />);
     const player = await expandReadyRow();

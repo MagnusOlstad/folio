@@ -113,7 +113,7 @@ export function RecordingRow(props: RecordingRowProps) {
       {ready && expanded && <PlayerPanel id={panelId} session={session} model={model} actions={actions} onSpeakerCount={props.onSpeakerCount} />}
       {ready && confirming === 'retranscribe' && (
         <div className="transcription-retranscribe-confirm" role="group" aria-label={`Confirm re-transcription of ${name}`}>
-          <p>Transcribe again with {selectedModelName}? The saved recording transcript will be replaced. Open drafts will stay unchanged.</p>
+          <p>Transcribe again with {selectedModelName}? The saved recording transcript and speaker names will be replaced. Open drafts will stay unchanged.</p>
           <button type="button" onClick={() => onConfirm(null)}>Cancel</button>
           <button
             type="button"

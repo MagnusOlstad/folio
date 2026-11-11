@@ -604,8 +604,11 @@ test('summary generation persists summary fields without replacing the canonical
   const raw = { summary: 'Original summary.', transcript: 'Original transcript.' }
   await runtime.transcriptionStorage.writeResult(session.id, raw)
 
+  const before = (await runtime.transcriptionStorage.readManifest(session.id)).updatedAt
+  await new Promise((resolve) => setTimeout(resolve, 5))
   const derived = await service.summarize(session.id)
 
+  assert.notEqual((await runtime.transcriptionStorage.readManifest(session.id)).updatedAt, before)
   assert.equal(derived.summary, 'Derived summary.')
   assert.equal(derived.transcript, 'Original transcript.')
   assert.deepEqual(await runtime.transcriptionStorage.readResult(session.id), derived)
@@ -1091,4 +1094,35 @@ test('segment split and merge routes persist and validate', async (t) => {
   await storage.writeManifest({ ...ready, state: 'transcribing' })
   assert.equal((await post(session.id, 'split', { index: 0, offset: 6 })).status, 409)
   assert.equal((await post(session.id, 'merge', { index: 1 })).status, 409)
+})
+
+test('summary generation refuses to save when the transcript changed during generation', async (t) => {
+  const { runtime } = await fixture(t)
+  const service = createTranscriptionService(runtime)
+  const session = await runtime.transcriptionStorage.createSession({ fileName: 'meeting.wav' })
+  const raw = { summary: '', transcript: 'Original transcript.' }
+  await runtime.transcriptionStorage.writeResult(session.id, raw)
+  runtime.mlxService = { generate: async () => {
+    await runtime.transcriptionStorage.writeResult(session.id, { ...raw, transcript: 'Edited transcript.' })
+    return { text: 'Stale summary.' }
+  } }
+  await assert.rejects(service.summarize(session.id), (error) => error.status === 409 && /transcript changed/.test(error.message))
+  assert.equal((await runtime.transcriptionStorage.readResult(session.id)).summary, '')
+  await service.close()
+})
+
+test('re-transcribing resets speaker names instead of carrying them over by number', async (t) => {
+  const { runtime } = await fixture(t)
+  await installSnapshot(runtime)
+  runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
+  runtime.transcriptionRunner = async ({ request }) => ({ id: request.id, text: 'Hello.', segments: [{ start: 0, end: 1, text: 'Hello.' }] })
+  const service = createTranscriptionService(runtime)
+  const session = await recordedSession(runtime, service)
+  await service.transcribe(session.id)
+  const first = await runtime.transcriptionStorage.readResult(session.id)
+  await runtime.transcriptionStorage.writeResult(session.id, { ...first, speakerNames: { '1': 'Alex' } })
+  const redone = await service.transcribe(session.id, { retranscribe: true })
+  assert.equal(redone.result.speakerNames, undefined)
+  assert.equal((await runtime.transcriptionStorage.readResult(session.id)).speakerNames, undefined)
+  await service.close()
 })

@@ -520,3 +520,7 @@ button.player-split-word.is-boundary { box-shadow: -2px 0 0 var(--acid); margin-
   background: rgba(var(--acid-rgb), 0.1);
   box-shadow: inset 2px 0 0 var(--acid);
 }
+
+.player-summary { display: grid; gap: 4px; }
+.player-summary-title { margin: 0; color: var(--muted); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.player-summary-text { margin: 0; color: var(--ink); font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }

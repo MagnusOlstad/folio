@@ -3,7 +3,6 @@
 
 const SPEAKERS_HEADING = /^##\s+speakers\s*$/i
 const DEFINITION = /^speaker(\d{1,3})\s*::\s*(.*)$/i
-const REFERENCE = /\{\{\s*speaker(\d{1,3})\s*\}\}/gi
 
 type SpeakerSource = {
   speakers?: boolean | number[]
@@ -43,25 +42,6 @@ function sectionBounds(lines: string[]) {
   return { start, end: next < 0 ? lines.length : next }
 }
 
-/** `speakerN:: name` definitions in the `## Speakers` section only; the first definition of a number wins. */
-export function parseSpeakerNames(markdown: string): Map<number, string> {
-  const lines = markdown.replace(/\r\n/g, '\n').split('\n')
-  const bounds = sectionBounds(lines)
-  const names = new Map<number, string>()
-  if (!bounds) return names
-  for (const line of lines.slice(bounds.start + 1, bounds.end)) {
-    const match = DEFINITION.exec(line.trim())
-    const name = match?.[2].trim()
-    if (match && name && !names.has(Number(match[1]))) names.set(Number(match[1]), name)
-  }
-  return names
-}
-
-/** Replaces `{{speakerN}}` with the defined name, or "Speaker N" when the draft defines none. */
-export function resolveSpeakerNames(transcript: string, names: Map<number, string>) {
-  return transcript.replace(REFERENCE, (_match, digits: string) => names.get(Number(digits)) ?? `Speaker ${Number(digits)}`)
-}
-
 /**
  * Makes sure every number has a definition line in the `## Speakers` section. Existing lines are never
  * edited or removed; the section is created before `## Transcript` (or at the end) when it is missing.
@@ -94,45 +74,3 @@ export function reconcileSpeakersSection(markdown: string, numbers: number[]) {
 }
 
 export const MAX_SPEAKER_NAME_LENGTH = 64
-
-/** Single-line, trimmed, at most 64 characters; blank resets to "Speaker N". */
-export function normalizeSpeakerName(number: number, name: string) {
-  const cleaned = name.replace(/\s+/g, ' ').trim().slice(0, MAX_SPEAKER_NAME_LENGTH).trim()
-  return cleaned || `Speaker ${number}`
-}
-
-/**
- * Sets `speakerN:: name` in the `## Speakers` section: the first existing definition of that number is
- * rewritten in place, otherwise the line is added to the section (created before `## Transcript`, or at
- * the end, when missing). Every other line is untouched and the document's line endings are kept.
- */
-export function setSpeakerName(markdown: string, number: number, name: string) {
-  const eol = markdown.includes('\r\n') ? '\r\n' : '\n'
-  const lines = markdown.split(/\r?\n/)
-  const line = `speaker${number}:: ${normalizeSpeakerName(number, name)}`
-  const bounds = sectionBounds(lines)
-  if (bounds) {
-    const existing = lines.findIndex((candidate, index) => index > bounds.start && index < bounds.end
-      && Number(DEFINITION.exec(candidate.trim())?.[1]) === number)
-    if (existing >= 0) lines[existing] = line
-    else {
-      let last = bounds.end - 1
-      while (last > bounds.start && lines[last].trim() === '') last -= 1
-      const insert = last === bounds.start ? ['', line] : [line]
-      lines.splice(last + 1, 0, ...insert)
-      const after = last + 1 + insert.length
-      if (after < lines.length && lines[after].trim() !== '') lines.splice(after, 0, '')
-    }
-    return lines.join(eol)
-  }
-  const block = ['## Speakers', '', line, '']
-  const transcriptAt = lines.findIndex((candidate) => /^##\s+transcript\s*$/i.test(candidate.trim()))
-  if (transcriptAt >= 0) lines.splice(transcriptAt, 0, ...block)
-  else {
-    while (lines.length && lines[lines.length - 1].trim() === '') lines.pop()
-    lines.push('', ...block)
-  }
-  return lines.join(eol)
-}
-
-/** Retargets note variable references to the surviving identity and removes the absorbed definition. */

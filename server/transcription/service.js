@@ -271,15 +271,6 @@ export function createTranscriptionService(runtime) {
         const built = buildTranscriptResult(response.text, segments, speakerTurns)
         const result = { summary: '', ...built, ...(speakerWarning ? { speakerWarning } : {}),
           markdown: markdownFromResult({ summary: '', transcript: built.transcript }, built.transcript), generatedAt: new Date().toISOString() }
-        if (rerun) {
-          const previous = await runtime.transcriptionStorage.readResult(id)
-          const priorNames = previous?.speakerNames
-          if (priorNames && typeof priorNames === 'object') {
-            const present = new Set(result.speakerNumbers ?? [])
-            const speakerNames = Object.fromEntries(Object.entries(priorNames).filter(([number]) => present.has(Number(number))))
-            if (Object.keys(speakerNames).length) result.speakerNames = speakerNames
-          }
-        }
         await runtime.transcriptionStorage.writeResult(id, result)
         const ready = await runtime.transcriptionStorage.writeManifest({ ...(await runtime.transcriptionStorage.readManifest(id)), state: 'ready', error: null })
         return { session: withProgress(ready), result }
@@ -330,6 +321,10 @@ export function createTranscriptionService(runtime) {
     return updated.length
   }
 
+  function resolveTranscriptNames(result) {
+    return String(result.transcript || '').replace(/\{\{\s*speaker(\d{1,3})\s*\}\}/gi, (_match, digits) => result.speakerNames?.[digits] || `Speaker ${Number(digits)}`)
+  }
+
   async function summarize(id) {
     locks.beginSummary(id)
     try {
@@ -344,7 +339,7 @@ export function createTranscriptionService(runtime) {
     try {
       const sourceResult = await runtime.transcriptionStorage.readResult(id)
       if (!sourceResult) throw Object.assign(new Error('Transcription result not found.'), { status: 404 })
-      const content = String(sourceResult.transcript || '').replace(/\{\{\s*speaker(\d{1,3})\s*\}\}/gi, (_match, digits) => sourceResult.speakerNames?.[digits] || `Speaker ${Number(digits)}`)
+      const content = resolveTranscriptNames(sourceResult)
       if (!content) throw Object.assign(new Error('Add transcript text before generating a summary.'), { status: 400 })
       if (content.length > 250_000) throw Object.assign(new Error('The transcript is too long to summarize safely. Shorten it and try again.'), { status: 413 })
       const pieces = splitTranscript(content, 10_000)
@@ -380,10 +375,15 @@ export function createTranscriptionService(runtime) {
       }
       const summary = finalPieces[0] || ''
       if (!summary) throw new Error('The selected local language model returned an empty summary.')
-      return await recordingEdits.editSegments(id, (latest) => {
+      const saved = await recordingEdits.editSegments(id, (latest) => {
+        if (resolveTranscriptNames(latest) !== content) throw Object.assign(new Error('The transcript changed while the summary was being generated. Summarize again.'), { status: 409 })
         if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. The saved recording was kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
         return { ...latest, summary, summaryGeneratedAt: new Date().toISOString(), markdown: markdownFromResult({ summary, transcript: latest.transcript }, latest.transcript) }
       })
+      // Bump the manifest so open players notice the saved summary and reload the result.
+      const touched = await runtime.transcriptionStorage.readManifest(id)
+      if (touched) await runtime.transcriptionStorage.writeManifest(touched)
+      return saved
     } catch (error) {
       if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. The saved recording was kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
       if ([400, 404, 409, 413].includes(error?.status)) throw error

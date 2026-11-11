@@ -200,8 +200,11 @@ function labelledSegments(result, index) {
 // Speaker numbers are never renumbered because notes reference `speakerN::` names.
 function withSegments(result, segments) {
   const speakerNumbers = speakerNumbersOf(segments)
+  const { speakerNames: priorNames, ...base } = result
+  const kept = Object.entries(priorNames || {}).filter(([number]) => speakerNumbers.includes(Number(number)))
   return {
-    ...result,
+    ...base,
+    ...(kept.length ? { speakerNames: Object.fromEntries(kept) } : {}),
     segments,
     transcript: formatTranscript(segments, { speakers: true }),
     speakers: true,
@@ -248,16 +251,12 @@ export function mergeRecordingSpeakers(result, source, target, { maxSpeakers = 4
   const present = new Set(segments.map((segment) => segment.speaker))
   if (!present.has(source) || !present.has(target)) throw badRequest('Both speakers must be present in this transcript.')
   const merged = withSegments(result, segments.map((segment) => segment.speaker === source ? { ...segment, speaker: target } : segment))
-  const speakerNames = { ...(result.speakerNames || {}) }
-  delete speakerNames[String(source)]
-  const targetName = speakerNames[String(target)]
+  const targetName = merged.speakerNames?.[String(target)]
   const sourceName = result.speakerNames?.[String(source)]
   const targetIsDefault = !targetName || targetName === `Speaker ${target}`
   const sourceIsCustom = typeof sourceName === 'string' && sourceName !== `Speaker ${source}`
-  if (targetIsDefault && sourceIsCustom) speakerNames[String(target)] = sourceName
-  else if (targetIsDefault) delete speakerNames[String(target)]
-  const { speakerNames: _names, ...base } = merged
-  return { ...base, ...(Object.keys(speakerNames).length ? { speakerNames } : {}) }
+  if (!targetIsDefault || !sourceIsCustom) return merged
+  return { ...merged, speakerNames: { ...merged.speakerNames, [String(target)]: sourceName } }
 }
 
 /**
