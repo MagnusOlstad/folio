@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/MagnusOlstad/folio/compare/v0.10.0...v0.11.0) (2026-11-11)
+
+
+### Features
+
+* **transcription:** merge speakers and persist recording edits ([#170](https://github.com/MagnusOlstad/folio/issues/170)) ([6968d5d](https://github.com/MagnusOlstad/folio/commit/6968d5da84567572bc8fc4d0630b45dde75d8cbe))
+
 ## [0.10.0](https://github.com/MagnusOlstad/folio/compare/v0.9.0...v0.10.0) (2026-11-10)
 
 
