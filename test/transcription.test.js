@@ -861,16 +861,22 @@ test('a failed or cancelled re-transcription keeps the previous result and the r
   await installSnapshot(runtime)
   runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
   let mode = 'ok'
+  let signalRunnerStarted
+  const cancelRunnerStarted = new Promise((resolve) => { signalRunnerStarted = resolve })
   runtime.transcriptionRunner = async ({ request, signal }) => {
     if (mode === 'fail') throw new Error('Whisper crashed.')
     if (mode === 'cancel') {
-      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
+      await new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true })
+        signalRunnerStarted()
+      })
       throw Object.assign(new Error('Transcription was cancelled.'), { code: 'TRANSCRIPTION_CANCELLED' })
     }
     return { id: request.id, text: 'Original.', segments: [{ start: 0, end: 1, text: 'Original.' }] }
   }
   const service = createTranscriptionService(runtime)
   const session = await recordedSession(runtime, service)
+  t.after(async () => { await service.cancel(session.id); await service.close() })
   await service.transcribe(session.id)
   mode = 'fail'
   await assert.rejects(service.transcribe(session.id, { retranscribe: true }), /Whisper crashed/)
@@ -882,7 +888,7 @@ test('a failed or cancelled re-transcription keeps the previous result and the r
   mode = 'cancel'
   const running = service.transcribe(session.id, { retranscribe: true })
   const rejection = assert.rejects(running, /cancelled/)
-  while (!service.active.has(session.id)) await new Promise((resolve) => setTimeout(resolve, 5))
+  await cancelRunnerStarted
   assert.equal((await runtime.transcriptionStorage.readManifest(session.id)).state, 'transcribing')
   await service.cancel(session.id)
   await rejection

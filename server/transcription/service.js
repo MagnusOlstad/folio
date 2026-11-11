@@ -5,12 +5,13 @@ import { randomUUID } from 'node:crypto'
 import { createSerialQueue } from '../core/queue.js'
 import { markdownFromResult, splitTranscript } from './model.js'
 import { createDiarizationSupport } from './diarization.js'
-import { buildTranscriptResult, mergeRecordingSpeakers, mergeSegmentWithPrevious, normalizeSegments, reassignSegmentSpeaker, renameRecordingSpeaker, splitSegment as splitResultSegment } from './segments.js'
+import { buildTranscriptResult, normalizeSegments } from './segments.js'
 import { folderBytes, installedSnapshot } from './snapshots.js'
 import { DEFAULT_TRANSCRIPTION_MODEL_ID, DIARIZATION_MODELS, DIARIZATION_MODEL_ID, TRANSCRIPTION_MODELS } from './models.js'
 import { createSessionLocks } from './locks.js'
 import { runHelper } from './helper.js'
 import { recordDownloadProgress, summarizeDownloadProgress } from '../mlx/download-progress.js'
+import { createRecordingEdits } from './recording-edits.js'
 
 export const TRANSCRIPTION_MODEL = Object.freeze({
   id: TRANSCRIPTION_MODELS.whisper.repository,
@@ -38,6 +39,12 @@ export function createTranscriptionService(runtime) {
   const active = new Map()
   const activeSummaries = new Map()
   const locks = createSessionLocks()
+  const recordingEdits = createRecordingEdits({
+    storage: runtime.transcriptionStorage,
+    active,
+    locks,
+    maxSpeakers: () => DIARIZATION_MODELS[DIARIZATION_MODEL_ID].maxSpeakers,
+  })
   const installing = new Map()
   const installProgress = new Map()
   const installPromises = new Map()
@@ -304,31 +311,6 @@ export function createTranscriptionService(runtime) {
     return runtime.transcriptionStorage.writeManifest({ ...session, identifySpeakers: identifySpeakers === true })
   }
 
-  const speakerEdits = new Map()
-  async function editSegments(id, transform) {
-    const storage = runtime.transcriptionStorage
-    const run = async () => {
-      const session = await storage.readManifest(id)
-      if (!session) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
-      if (active.has(id) || locks.pendingTranscriptions.has(id) || session.state === 'transcribing') {
-        throw Object.assign(new Error('Speakers cannot be changed while a transcription is running.'), { status: 409 })
-      }
-      const result = await storage.readResult(id)
-      if (!result) throw Object.assign(new Error('Transcription result not found.'), { status: 404 })
-      return storage.writeResult(id, transform(result))
-    }
-    const next = (speakerEdits.get(id) ?? Promise.resolve()).catch(() => undefined).then(run)
-    speakerEdits.set(id, next)
-    try { return await next } finally { if (speakerEdits.get(id) === next) speakerEdits.delete(id) }
-  }
-
-  const maxSpeakers = () => DIARIZATION_MODELS[DIARIZATION_MODEL_ID].maxSpeakers
-  const reassignSpeaker = (id, index, speaker) => editSegments(id, (result) => reassignSegmentSpeaker(result, index, speaker, { maxSpeakers: maxSpeakers() }))
-  const renameSpeaker = (id, speaker, name) => editSegments(id, (result) => renameRecordingSpeaker(result, speaker, name, { maxSpeakers: maxSpeakers() }))
-  const splitSegment = (id, index, offset, speaker) => editSegments(id, (result) => splitResultSegment(result, index, offset, speaker, { maxSpeakers: maxSpeakers() }))
-  const mergeSegment = (id, index) => editSegments(id, (result) => mergeSegmentWithPrevious(result, index))
-  const mergeSpeakers = (id, source, target) => editSegments(id, (result) => mergeRecordingSpeakers(result, source, target, { maxSpeakers: maxSpeakers() }))
-
   async function updateDraftId(id, draftId) {
     const session = await runtime.transcriptionStorage.readManifest(id)
     if (!session) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
@@ -398,7 +380,7 @@ export function createTranscriptionService(runtime) {
       }
       const summary = finalPieces[0] || ''
       if (!summary) throw new Error('The selected local language model returned an empty summary.')
-      return await editSegments(id, (latest) => {
+      return await recordingEdits.editSegments(id, (latest) => {
         if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. The saved recording was kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
         return { ...latest, summary, summaryGeneratedAt: new Date().toISOString(), markdown: markdownFromResult({ summary, transcript: latest.transcript }, latest.transcript) }
       })
@@ -489,11 +471,11 @@ export function createTranscriptionService(runtime) {
     selectModel,
     installDiarization: diarization.install,
     updateOptions,
-    reassignSpeaker,
-    renameSpeaker,
-    splitSegment,
-    mergeSegment,
-    mergeSpeakers,
+    reassignSpeaker: recordingEdits.reassignSpeaker,
+    renameSpeaker: recordingEdits.renameSpeaker,
+    splitSegment: recordingEdits.splitSegment,
+    mergeSegment: recordingEdits.mergeSegment,
+    mergeSpeakers: recordingEdits.mergeSpeakers,
     transcribe,
     cancel,
     updateDraftId,
