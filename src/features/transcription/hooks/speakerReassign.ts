@@ -1,6 +1,6 @@
 import { apiForBundle } from '../../../lib/api.ts'
 import { applyRetranscription } from '../model/retranscribe.ts'
-import { parseSpeakerNames } from '../model/speakers.ts'
+import { mergeSpeakerIdentity, parseSpeakerNames } from '../model/speakers.ts'
 import type { TranscriptionResult, TranscriptionSession } from '../model/types.ts'
 import { linkedDraft, type DraftWorkContext } from './draftWork.ts'
 
@@ -37,4 +37,16 @@ export function splitTranscriptSegment(ctx: DraftWorkContext, session: Transcrip
 /** Merges one segment into the previous one. */
 export function mergeTranscriptSegment(ctx: DraftWorkContext, session: TranscriptionSession, index: number) {
   return editSegments(ctx, session, 'merge', { index })
+}
+
+/** Merges all segments assigned to a speaker; updates only the transcript and speaker definitions in an open draft. */
+export async function mergeRecordingSpeakers(ctx: DraftWorkContext, session: TranscriptionSession, source: number, target: number): Promise<ReassignOutcome> {
+  const bundle = session.sourceBundleId ?? null
+  const response = await apiForBundle<{ result: TranscriptionResult }>(bundle,
+    `/api/transcriptions/${encodeURIComponent(session.id)}/speakers/merge`,
+    { method: 'POST', body: JSON.stringify({ source, target }) })
+  const existing = linkedDraft(ctx, session.id, bundle)
+  if (!existing) return { result: response.result, draftUpdated: false }
+  ctx.draftsRef.current.updateDraftContent(existing.draft.draftId, mergeSpeakerIdentity(existing.content, source, target))
+  return { result: response.result, draftUpdated: true }
 }

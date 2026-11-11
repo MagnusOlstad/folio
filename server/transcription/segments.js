@@ -224,6 +224,17 @@ export function reassignSegmentSpeaker(result, index, speaker, { maxSpeakers = 4
   return withSegments(result, segments.map((segment, position) => (position === index ? { ...segment, speaker } : segment)))
 }
 
+/** Reassigns every segment for one existing speaker to another without changing other segment data. */
+export function mergeRecordingSpeakers(result, source, target, { maxSpeakers = 4 } = {}) {
+  const segments = labelledSegments(result, 0)
+  checkSpeaker(source, maxSpeakers)
+  checkSpeaker(target, maxSpeakers)
+  if (source === target) throw badRequest('Choose two different speakers.')
+  const present = new Set(segments.map((segment) => segment.speaker))
+  if (!present.has(source) || !present.has(target)) throw badRequest('Both speakers must be present in this transcript.')
+  return withSegments(result, segments.map((segment) => segment.speaker === source ? { ...segment, speaker: target } : segment))
+}
+
 /**
  * Splits one segment at a word boundary. `offset` is a character offset into the segment text; the split
  * time is estimated proportionally by characters (there are no word timestamps). The second part takes

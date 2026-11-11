@@ -986,6 +986,9 @@ test('recording playback supports ranges and speaker reassignment persists', asy
   const post = (id, body) => fetch(`${base}/api/transcriptions/${id}/segments/speaker`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
   })
+  const mergeSpeakers = (id, body) => fetch(`${base}/api/transcriptions/${id}/speakers/merge`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  })
   assert.equal((await post(bare.id, { index: 0, speaker: 1 })).status, 404)
   assert.equal((await post(session.id, { index: 0, speaker: 1 })).status, 404)
   const segments = [
@@ -1002,6 +1005,17 @@ test('recording playback supports ranges and speaker reassignment persists', asy
   assert.deepEqual((await storage.readResult(session.id)), result)
   assert.deepEqual((await (await fetch(`${base}/api/transcriptions/${session.id}`)).json()).result, result)
 
+  const mergedResponse = await mergeSpeakers(session.id, { source: 3, target: 1 })
+  assert.equal(mergedResponse.status, 200)
+  const merged = (await mergedResponse.json()).result
+  assert.deepEqual(merged.segments.map((segment) => segment.speaker), [1, 1])
+  assert.deepEqual(merged.speakerNumbers, [1])
+  assert.equal(merged.summary, 'sum')
+  assert.deepEqual(await storage.readResult(session.id), merged)
+  for (const body of [{ source: 1, target: 1 }, { source: 1, target: 2 }, { source: '1', target: 2 }, { source: 0, target: 1 }]) {
+    assert.equal((await mergeSpeakers(session.id, body)).status, 400)
+  }
+
   assert.equal((await post(session.id, { index: 9, speaker: 1 })).status, 400)
   assert.equal((await post(session.id, { index: 0, speaker: 5 })).status, 400)
   assert.equal((await post(session.id, { index: 0, speaker: 0 })).status, 400)
@@ -1009,6 +1023,7 @@ test('recording playback supports ranges and speaker reassignment persists', asy
   assert.equal((await post('not-an-id', { index: 0, speaker: 1 })).status, 400)
   await storage.writeManifest({ ...ready, state: 'transcribing' })
   assert.equal((await post(session.id, { index: 0, speaker: 2 })).status, 409)
+  assert.equal((await mergeSpeakers(session.id, { source: 1, target: 2 })).status, 409)
 })
 
 test('segment split and merge routes persist and validate', async (t) => {

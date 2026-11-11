@@ -7,6 +7,7 @@ import {
   buildTurns, findSegmentIndex, formatClock, segmentSpeakers, totalDuration, turnCounts,
 } from '../model/playback-turns.ts'
 import type { TranscriptionSession } from '../model/types.ts'
+import type { ReassignOutcome } from '../hooks/speakerReassign.ts'
 import { NextIcon, PauseIcon, PlayIcon, PrevIcon } from './icons.tsx'
 import { NowSpeaking } from './NowSpeaking.tsx'
 import { SpeakerChips } from './SpeakerChips.tsx'
@@ -28,6 +29,7 @@ export function PlayerPanel({ id, session, model, actions, onSpeakerCount }: Pla
   const draftNames = model.speakerNamesFor(session)
   // Names just saved fill in until the draft adapter reports them (a draft created by the rename can lag a render).
   const [renamed, setRenamed] = useState<ReadonlyMap<number, string>>(new Map())
+  const [mergingSpeakers, setMergingSpeakers] = useState(false)
   const names = useMemo(() => renamed.size ? new Map([...renamed, ...(draftNames ?? [])]) : draftNames, [draftNames, renamed])
   const segments = useMemo(() => result?.segments ?? [], [result])
   const turns = useMemo(() => buildTurns(segments), [segments])
@@ -53,6 +55,23 @@ export function PlayerPanel({ id, session, model, actions, onSpeakerCount }: Pla
   async function renameSpeaker(speaker: number, name: string) {
     await actions.renameSpeaker(session, speaker, name)
     setRenamed((current) => new Map(current).set(speaker, normalizeSpeakerName(speaker, name)))
+  }
+
+  function applySpeakerMerge(outcome: ReassignOutcome, source: number, target: number) {
+    const current = playbackStore.getSnapshot()
+    if (current.sessionId === session.id) {
+      const nextTurns = buildTurns(outcome.result.segments ?? [])
+      playbackStore.setTurns(session.id, nextTurns)
+      if (current.solo === source) playbackStore.setSolo(target)
+      else if (current.solo !== null && !outcome.result.speakerNumbers?.includes(current.solo)) playbackStore.setSolo(null)
+    }
+    setResult(outcome.result)
+  }
+
+  async function mergeSpeakers(source: number, target: number) {
+    setMergingSpeakers(true)
+    try { return await actions.mergeSpeakers(session, source, target) }
+    finally { setMergingSpeakers(false) }
   }
 
   function focusPanel() { rootRef.current?.focus() }
@@ -100,7 +119,8 @@ export function PlayerPanel({ id, session, model, actions, onSpeakerCount }: Pla
         />
       )}
 
-      {hasSpeakers && <SpeakerChips speakers={speakers} names={names} counts={counts} solo={solo} active={active} onRename={renameSpeaker} />}
+      {hasSpeakers && <SpeakerChips speakers={speakers} names={names} counts={counts} solo={solo} active={active} onRename={renameSpeaker}
+        onMerge={mergeSpeakers} onApplied={applySpeakerMerge} />}
 
       {error && <p className="transcription-item-error" role="status">{error}</p>}
       {result && segments.length > 0 && (
@@ -116,6 +136,7 @@ export function PlayerPanel({ id, session, model, actions, onSpeakerCount }: Pla
           onSplit={(index, offset, speaker) => actions.splitSegment(session, index, offset, speaker)}
           onMerge={(index) => actions.mergeSegment(session, index)}
           onApplied={(outcome) => setResult(outcome.result)}
+          locked={mergingSpeakers}
         />
       )}
       {result && segments.length === 0 && <p className="transcription-empty">This recording has no timed segments to follow.</p>}

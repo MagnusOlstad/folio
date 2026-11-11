@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { playbackStore } from '../model/playback-store.ts'
 import { speakerColor, speakerDisplayName } from '../model/playback-turns.ts'
 import { MAX_SPEAKER_NAME_LENGTH } from '../model/speakers.ts'
 import { PencilIcon } from './icons.tsx'
+import type { ReassignOutcome } from '../hooks/speakerReassign.ts'
 
 type SpeakerChipsProps = {
   speakers: readonly number[]
@@ -12,16 +13,56 @@ type SpeakerChipsProps = {
   solo: number | null
   active: boolean
   onRename: (speaker: number, name: string) => Promise<void>
+  onMerge: (source: number, target: number) => Promise<ReassignOutcome>
+  onApplied: (outcome: ReassignOutcome, source: number, target: number) => void
 }
 
 /** Solo chips for each speaker; the pencil beside a chip renames that speaker in the linked draft. */
-export function SpeakerChips({ speakers, names, counts, solo, active, onRename }: SpeakerChipsProps) {
+export function SpeakerChips({ speakers, names, counts, solo, active, onRename, onMerge, onApplied }: SpeakerChipsProps) {
   const [editing, setEditing] = useState<number | null>(null)
   const [value, setValue] = useState('')
   const [saving, setSaving] = useState(false)
   const [note, setNote] = useState('')
   const [error, setError] = useState('')
+  const [selecting, setSelecting] = useState(false)
+  const [selected, setSelected] = useState<number[]>([])
+  const [survivor, setSurvivor] = useState<number | null>(null)
+  const focusIntent = useRef<'trigger' | null>(null)
+  const focusTarget = useRef<HTMLButtonElement | null>(null)
+  const statusRef = useRef<HTMLParagraphElement | null>(null)
   const finishedRef = useRef(true)
+
+  function cancelMerge(restoreFocus = true) { if (restoreFocus) focusIntent.current = 'trigger'; setSelecting(false); setSelected([]); setSurvivor(null); setError('') }
+  useEffect(() => { if (note.startsWith('Speakers merged')) statusRef.current?.focus() }, [note])
+  useEffect(() => {
+    if (selecting) return
+    if (focusIntent.current === 'trigger') {
+      focusTarget.current?.focus()
+      focusIntent.current = null
+      return
+    }
+  }, [selecting, speakers])
+  function toggleSelection(speaker: number) {
+    setSelected((current) => {
+      if (current.includes(speaker)) return current.filter((item) => item !== speaker)
+      if (current.length >= 2) return [current[1], speaker]
+      return [...current, speaker]
+    })
+    setSurvivor(null)
+  }
+  async function confirmMerge() {
+    if (selected.length !== 2 || survivor === null || saving) return
+    const source = selected.find((speaker) => speaker !== survivor)
+    if (source === undefined) return
+    setSaving(true); setError('')
+    try {
+      const outcome = await onMerge(source, survivor)
+      onApplied(outcome, source, survivor)
+      setNote(outcome.draftUpdated ? 'Speakers merged in the recording and draft.' : 'Speakers merged in the saved recording.')
+      cancelMerge(false)
+    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not merge speakers.') }
+    finally { setSaving(false) }
+  }
 
   function startEditing(speaker: number) {
     finishedRef.current = false
@@ -54,7 +95,7 @@ export function SpeakerChips({ speakers, names, counts, solo, active, onRename }
 
   return (
     <>
-      <div className="player-chips" role="group" aria-label="Play one speaker">
+      <div className={`player-chips${selecting ? ' is-merging' : ''}`} role="group" aria-label={selecting ? 'Select two speakers to merge' : 'Play one speaker'} onKeyDown={(event) => { if (event.key === 'Escape' && selecting && !saving) { event.preventDefault(); event.stopPropagation(); cancelMerge() } }}>
         {speakers.map((speaker) => {
           const name = speakerDisplayName(speaker, names)
           const dot = <i className="player-dot" style={{ background: speakerColor(speaker) }} aria-hidden="true" />
@@ -77,26 +118,36 @@ export function SpeakerChips({ speakers, names, counts, solo, active, onRename }
             )
           }
           return (
-            <span key={speaker} className={`player-chip-group${solo === speaker ? ' is-solo' : ''}`}>
+              <span key={speaker} className={`player-chip-group${selecting ? (selected.includes(speaker) ? ' is-merge-selected' : '') : solo === speaker ? ' is-solo' : ''}`}>
               <button
                 type="button"
                 className="player-chip"
-                aria-pressed={solo === speaker}
-                onClick={() => playbackStore.setSolo(solo === speaker ? null : speaker)}
-                disabled={!active}
+                aria-pressed={selecting ? selected.includes(speaker) : solo === speaker}
+                onClick={() => selecting ? toggleSelection(speaker) : playbackStore.setSolo(solo === speaker ? null : speaker)}
+                disabled={selecting ? saving : !active}
               >
                 {dot}
                 <span className="player-chip-name" title={name}>{name}</span>{' '}
                 <span className="player-chip-count">· {counts.get(speaker) ?? 0}</span>
               </button>
-              <button type="button" className="player-chip-edit" aria-label={`Rename ${name}`} title={`Rename ${name}`} onClick={() => startEditing(speaker)} disabled={saving}>
+              {!selecting && <button type="button" className="player-chip-edit" aria-label={`Rename ${name}`} title={`Rename ${name}`} onClick={() => startEditing(speaker)} disabled={saving}>
                 <PencilIcon />
-              </button>
+              </button>}
             </span>
           )
         })}
       </div>
-      {note && <p className="player-note" role="status">{note}</p>}
+      {speakers.length >= 2 && <div className="player-merge-controls" onKeyDown={(event) => { if (event.key === 'Escape' && selecting && !saving) { event.preventDefault(); event.stopPropagation(); cancelMerge() } }}>
+        {!selecting ? <button ref={focusTarget} type="button" className="player-merge-trigger" onClick={() => { setError(''); setNote(''); setSelecting(true) }} disabled={saving}>Merge speakers</button> : <>
+          <span className="player-merge-hint">Select two speakers, then choose which name to keep.</span>
+          {selected.length === 2 && <span className="player-merge-survivors" role="group" aria-label="Keep speaker identity">
+            {selected.map((speaker) => <button type="button" key={speaker} className={`player-merge-keep${survivor === speaker ? ' is-selected' : ''}`} aria-pressed={survivor === speaker} title={`Keep ${speakerDisplayName(speaker, names)}`} onClick={() => setSurvivor(speaker)} disabled={saving}>Keep {speakerDisplayName(speaker, names)}</button>)}
+          </span>}
+          <button type="button" className="player-merge-confirm" onClick={() => void confirmMerge()} disabled={selected.length !== 2 || survivor === null || saving}>{saving ? 'Merging…' : 'Merge'}</button>
+          <button type="button" className="player-merge-cancel" onClick={() => cancelMerge()} disabled={saving}>Cancel</button>
+        </>}
+      </div>}
+      {note && <p ref={statusRef} className="player-note" role="status" tabIndex={-1}>{note}</p>}
       {error && <p className="transcription-item-error" role="alert">{error}</p>}
     </>
   )

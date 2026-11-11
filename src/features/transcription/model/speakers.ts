@@ -126,3 +126,14 @@ export function setSpeakerName(markdown: string, number: number, name: string) {
   }
   return lines.join(eol)
 }
+
+/** Retargets note variable references to the surviving identity and removes the absorbed definition. */
+export function mergeSpeakerIdentity(markdown: string, source: number, target: number) {
+  const remapped = markdown.replace(new RegExp(`\\{\\{\\s*speaker${source}\\s*\\}\\}`, 'gi'), `{{speaker${target}}}`)
+  const lines = remapped.replace(/\r\n/g, '\n').split('\n')
+  const bounds = sectionBounds(lines)
+  if (!bounds) return remapped
+  const definition = new RegExp(`^speaker${source}\\s*::`, 'i')
+  const kept = lines.filter((line, index) => index <= bounds.start || index >= bounds.end || !definition.test(line.trim()))
+  return kept.join(markdown.includes('\r\n') ? '\r\n' : '\n')
+}

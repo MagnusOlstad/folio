@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import test from 'node:test'
 import {
   assignSpeakers, buildTranscript, buildTranscriptResult, formatTimestamp, formatTranscript,
-  mergeSpeakerTurns, normalizeSegments, normalizeSpeakerSegments, reassignSegmentSpeaker, splitSegment, mergeSegmentWithPrevious,
+  mergeSpeakerTurns, normalizeSegments, normalizeSpeakerSegments, reassignSegmentSpeaker, splitSegment, mergeSegmentWithPrevious, mergeRecordingSpeakers,
 } from '../server/transcription/segments.js'
 import { stripTranscriptMarkup } from '../server/knowledge/transcript-markup.js'
 import { DIARIZATION_MODELS } from '../server/transcription/models.js'
@@ -201,6 +201,25 @@ test('reassigning a segment speaker rejects bad input', () => {
   }
   assert.throws(() => reassignSegmentSpeaker({ segments: [{ start: 0, end: 1, text: 'A', speaker: null }] }, 0, 1), { status: 400 })
   assert.throws(() => reassignSegmentSpeaker({ segments: [] }, 0, 1), { status: 400 })
+})
+
+test('merging recording speakers preserves segment fields and identity numbers', () => {
+  const result = { ...splitFixture(), segments: [
+    { start: 0, end: 1, text: 'A', speaker: 1, extra: { keep: true } },
+    { start: 1, end: 2, text: 'B', speaker: 2, custom: 'preserve' },
+    { start: 2, end: 3, text: 'C', speaker: 3 },
+  ] }
+  const merged = mergeRecordingSpeakers(result, 2, 1)
+  assert.deepEqual(merged.segments, [
+    result.segments[0], { ...result.segments[1], speaker: 1 }, result.segments[2],
+  ])
+  assert.deepEqual(merged.speakerNumbers, [1, 3])
+  assert.equal(merged.speakerCount, 2)
+  assert.equal(merged.summary, result.summary)
+  assert.equal(merged.transcript, formatTranscript(merged.segments, { speakers: true }))
+  for (const [source, target] of [[1, 1], [0, 2], [2, 5], [4, 1], [3, 4]]) {
+    assert.throws(() => mergeRecordingSpeakers(result, source, target), { status: 400 })
+  }
 })
 
 function splitFixture() {

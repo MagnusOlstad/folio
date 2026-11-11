@@ -6,7 +6,7 @@ import type { RecordingAssociation } from '../model/recording.ts'
 import { systemAudioSupported, type RecordingSource } from '../model/recording-source.ts'
 import { audioDuration } from '../model/audio-duration.ts'
 import { applyRetranscribedResult, regenerateSummary, type DraftWorkContext, type SessionDraft } from './draftWork.ts'
-import { linkedSpeakerNames, mergeTranscriptSegment, reassignSegmentSpeaker, splitTranscriptSegment, type ReassignOutcome } from './speakerReassign.ts'
+import { linkedSpeakerNames, mergeRecordingSpeakers, mergeTranscriptSegment, reassignSegmentSpeaker, splitTranscriptSegment, type ReassignOutcome } from './speakerReassign.ts'
 import { renameSpeakerInDraft } from './speakerRename.ts'
 import { transcriptionAudioUrl } from '../model/audio-url.ts'
 import { plainTranscriptResult } from '../model/plain-transcript.ts'
@@ -73,6 +73,7 @@ export type TranscriptionDockActions = {
   splitSegment: (session: TranscriptionSession, index: number, offset: number, speaker: number | null) => Promise<ReassignOutcome>
   /** Merges a sentence into the previous one. */
   mergeSegment: (session: TranscriptionSession, index: number) => Promise<ReassignOutcome>
+  mergeSpeakers: (session: TranscriptionSession, source: number, target: number) => Promise<ReassignOutcome>
   /** Writes a speaker's name into the linked draft, opening the draft first when needed. */
   renameSpeaker: (session: TranscriptionSession, speaker: number, name: string) => Promise<void>
 }
@@ -466,6 +467,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
     reassignSpeaker: (session, index, speaker) => reassignSegmentSpeaker(draftWork, session, index, speaker),
     splitSegment: (session, index, offset, speaker) => splitTranscriptSegment(draftWork, session, index, offset, speaker),
     mergeSegment: (session, index) => mergeTranscriptSegment(draftWork, session, index),
+    mergeSpeakers: (session, source, target) => mergeRecordingSpeakers(draftWork, session, source, target),
     renameSpeaker: (session, speaker, name) => renameSpeakerInDraft(draftWork, session, speaker, name, openTranscriptDraft),
   }
   return { model, actions, draftFiled }

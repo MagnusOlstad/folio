@@ -41,7 +41,7 @@ function actions(overrides: Partial<TranscriptionDockActions> = {}): Transcripti
     importFile: vi.fn(), startRecording: vi.fn(), stopRecording: vi.fn(), discardRecording: vi.fn(), retryRecording: vi.fn(),
     installModel: vi.fn(), installSpeakerModel: vi.fn(),
     transcribe: vi.fn(), retranscribe: vi.fn(), cancel: vi.fn(), openTranscript: vi.fn(), regenerateSummary: vi.fn(),
-    deleteSession: vi.fn(async () => undefined), loadResult: vi.fn(async () => storedResult), reassignSpeaker: vi.fn(), splitSegment: vi.fn(), mergeSegment: vi.fn(), renameSpeaker: vi.fn(async () => undefined),
+    deleteSession: vi.fn(async () => undefined), loadResult: vi.fn(async () => storedResult), reassignSpeaker: vi.fn(), splitSegment: vi.fn(), mergeSegment: vi.fn(), mergeSpeakers: vi.fn(), renameSpeaker: vi.fn(async () => undefined),
     ...overrides,
   };
 }
@@ -152,6 +152,25 @@ describe("player", () => {
     expect(audio.paused).toBe(true);
     fireEvent.click(chip);
     expect(chip).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("keeps the playhead in place when the soloed speaker is absorbed", async () => {
+    const mergedResult: TranscriptionResult = {
+      ...storedResult, speakerNumbers: [1], speakerCount: 1,
+      segments: segments.map((segment) => ({ ...segment, speaker: 1 })),
+      transcript: "**{{speaker1}}** [00:00]\nHello there. Hi, thanks. Let us begin. Sounds good.",
+    };
+    const dockActions = actions({ mergeSpeakers: vi.fn(async () => ({ result: mergedResult, draftUpdated: false })) });
+    render(<TranscriptionDock model={model({ pending: [ready] })} actions={dockActions} />);
+    const player = await expandReadyRow();
+    fireEvent.click(await within(player).findByRole("button", { name: /Speaker 2 · 2/ }));
+    const playhead = FakeAudio.last!.currentTime;
+    fireEvent.click(within(player).getByRole("button", { name: "Merge speakers" }));
+    fireEvent.click(within(player).getByRole("button", { name: /Speaker 2 · 2/ }));
+    fireEvent.click(within(player).getByRole("button", { name: /Speaker 1 · 2/ }));
+    fireEvent.click(within(player).getByRole("button", { name: "Keep Speaker 1" }));
+    fireEvent.click(within(player).getByRole("button", { name: "Merge", exact: true }));
+    await waitFor(() => expect(playbackStore.getSnapshot()).toMatchObject({ solo: 1, currentTime: playhead }));
   });
 
   it("toggles playback with Space only when focus is inside the player", async () => {

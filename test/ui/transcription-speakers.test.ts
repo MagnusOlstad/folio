@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applyRetranscription } from "../../src/features/transcription/model/retranscribe.ts";
 import {
   parseSpeakerNames,
+  mergeSpeakerIdentity,
   reconcileSpeakersSection,
   resolveSpeakerNames,
   resultSpeakerNumbers,
@@ -112,5 +113,12 @@ describe("setSpeakerName", () => {
 
   it("round-trips through parseSpeakerNames", () => {
     expect(parseSpeakerNames(setSpeakerName(note, 2, "Ola")).get(2)).toBe("Ola");
+  });
+});
+
+describe("mergeSpeakerIdentity", () => {
+  it("retargets references, removes only the absorbed definition, and keeps custom content and name", () => {
+    const draft = "# Meeting\n\n## Summary\n\n{{speaker2}} spoke first.\n\n## Speakers\n\nspeaker1:: Alex\nspeaker2:: Sam\nKeep this note.\n\n## Transcript\n\n**{{speaker2}}** [00:00]\nHi.\n";
+    expect(mergeSpeakerIdentity(draft, 2, 1)).toBe("# Meeting\n\n## Summary\n\n{{speaker1}} spoke first.\n\n## Speakers\n\nspeaker1:: Alex\nKeep this note.\n\n## Transcript\n\n**{{speaker1}}** [00:00]\nHi.\n");
   });
 });

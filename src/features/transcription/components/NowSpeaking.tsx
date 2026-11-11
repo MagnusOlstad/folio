@@ -23,6 +23,7 @@ type NowSpeakingProps = {
   onSplit: (index: number, offset: number, speaker: number | null) => Promise<ReassignOutcome>
   onMerge: (index: number) => Promise<ReassignOutcome>
   onApplied: (outcome: ReassignOutcome) => void
+  locked?: boolean
 }
 
 type Pending = { index: number; confirmLabel: string; run: () => Promise<void> }
@@ -32,7 +33,7 @@ type Splitting = { index: number; boundary: number | null }
 const DRAFT_CLOSED = " Draft not open, so only the recording's transcript changed."
 
 /** Previous (muted), current (large) and next (muted) segment with "Wrong speaker?", split and merge corrections. */
-export function NowSpeaking({ sessionId, segments, index, time, present, names, hasSpeakers, onReassign, onSplit, onMerge, onApplied }: NowSpeakingProps) {
+export function NowSpeaking({ sessionId, segments, index, time, present, names, hasSpeakers, onReassign, onSplit, onMerge, onApplied, locked = false }: NowSpeakingProps) {
   const [pending, setPending] = useState<Pending | null>(null)
   const [splitting, setSplitting] = useState<Splitting | null>(null)
   const [working, setWorking] = useState(false)
@@ -62,6 +63,7 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
   const at = shown
 
   async function perform(action: () => Promise<ReassignOutcome>, message: string, undo: (() => Promise<ReassignOutcome>) | null) {
+    if (locked) return
     setPending(null)
     setSplitting(null)
     setWorking(true)
@@ -77,6 +79,7 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
   }
 
   function request(confirmLabel: string, run: () => Promise<void>) {
+    if (locked) return
     setNote(null)
     if (confirmedSessions.has(sessionId)) void run()
     else setPending({ index: shown, confirmLabel, run })
@@ -84,7 +87,7 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
 
   async function undo() {
     const revert = note?.undo
-    if (!revert) return
+    if (!revert || locked) return
     setWorking(true)
     setError('')
     try {
@@ -141,7 +144,7 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
           names={names}
           initialBoundary={splitting.boundary}
           onCancel={() => setSplitting(null)}
-          onSubmit={(offset, target) => split(splitting.index, offset, target)}
+          onSubmit={(offset, target) => { if (!locked) split(splitting.index, offset, target) }}
         />
       ) : (
         <p className="player-now-current" ref={currentRef}>{current.text.trim()}</p>
@@ -157,7 +160,7 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
               Speaker<ChevronIcon />
             </>}
             triggerClassName="player-reassign-trigger"
-            disabled={working}
+            disabled={working || locked}
             items={moveItems}
           />
           <button
@@ -166,7 +169,7 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
             title="Split this sentence where another speaker starts"
             aria-label="Split this sentence where another speaker starts"
             aria-pressed={splitting !== null}
-            disabled={working || (splitting === null && !canSplit)}
+            disabled={working || locked || (splitting === null && !canSplit)}
             onClick={() => (splitting !== null ? setSplitting(null) : startSplit())}
           ><ScissorsIcon />Split</button>
           {shown > 0 && (
@@ -175,7 +178,7 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
               className="player-reassign-trigger"
               title="Merge with the previous sentence"
               aria-label="Merge with the previous sentence"
-              disabled={working || splitting !== null}
+              disabled={working || locked || splitting !== null}
               onClick={merge}
             ><MergeUpIcon />Merge</button>
           )}
@@ -184,8 +187,8 @@ export function NowSpeaking({ sessionId, segments, index, time, present, names, 
       {pending && (
         <div className="player-reassign-confirm" role="group" aria-label="Confirm speaker change">
           <p>Editing speakers rebuilds the Transcript section of the draft. Edits you made inside that section will be replaced.</p>
-          <button type="button" onClick={() => setPending(null)}>Cancel</button>
-          <button type="button" className="transcription-retranscribe-confirm-button" onClick={() => void pending.run()}>{pending.confirmLabel}</button>
+          <button type="button" onClick={() => setPending(null)} disabled={locked}>Cancel</button>
+          <button type="button" className="transcription-retranscribe-confirm-button" onClick={() => void pending.run()} disabled={locked}>{pending.confirmLabel}</button>
         </div>
       )}
       {note && (

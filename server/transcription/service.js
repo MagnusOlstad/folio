@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { createSerialQueue } from '../core/queue.js'
 import { markdownFromResult, splitTranscript } from './model.js'
 import { createDiarizationSupport } from './diarization.js'
-import { buildTranscriptResult, mergeSegmentWithPrevious, normalizeSegments, reassignSegmentSpeaker, splitSegment as splitResultSegment } from './segments.js'
+import { buildTranscriptResult, mergeRecordingSpeakers, mergeSegmentWithPrevious, normalizeSegments, reassignSegmentSpeaker, splitSegment as splitResultSegment } from './segments.js'
 import { folderBytes, installedSnapshot } from './snapshots.js'
 import { DEFAULT_TRANSCRIPTION_MODEL_ID, DIARIZATION_MODELS, DIARIZATION_MODEL_ID, TRANSCRIPTION_MODELS } from './models.js'
 import { createSessionLocks } from './locks.js'
@@ -317,6 +317,7 @@ export function createTranscriptionService(runtime) {
   const reassignSpeaker = (id, index, speaker) => editSegments(id, (result) => reassignSegmentSpeaker(result, index, speaker, { maxSpeakers: maxSpeakers() }))
   const splitSegment = (id, index, offset, speaker) => editSegments(id, (result) => splitResultSegment(result, index, offset, speaker, { maxSpeakers: maxSpeakers() }))
   const mergeSegment = (id, index) => editSegments(id, (result) => mergeSegmentWithPrevious(result, index))
+  const mergeSpeakers = (id, source, target) => editSegments(id, (result) => mergeRecordingSpeakers(result, source, target, { maxSpeakers: maxSpeakers() }))
 
   async function updateDraftId(id, draftId) {
     const session = await runtime.transcriptionStorage.readManifest(id)
@@ -478,6 +479,7 @@ export function createTranscriptionService(runtime) {
     reassignSpeaker,
     splitSegment,
     mergeSegment,
+    mergeSpeakers,
     transcribe,
     cancel,
     updateDraftId,

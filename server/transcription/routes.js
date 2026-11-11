@@ -112,6 +112,14 @@ export function registerRoutes(app, runtime) {
       response.json({ result: await service.mergeSegment(request.params.id, index) })
     } catch (error) { fail(response, error) }
   })
+  app.post('/api/transcriptions/:id/speakers/merge', async (request, response) => {
+    try {
+      if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
+      const { source, target } = request.body ?? {}
+      if (!Number.isInteger(source) || !Number.isInteger(target)) return response.status(400).json({ error: 'source and target must be integers.' })
+      response.json({ result: await service.mergeSpeakers(request.params.id, source, target) })
+    } catch (error) { fail(response, error) }
+  })
   app.get('/api/transcriptions/:id', async (request, response) => {
     try {
       if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
