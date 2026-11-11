@@ -312,13 +312,11 @@ button.transcription-row-main:focus-visible { outline: 2px solid var(--acid); ou
 .player-chip-count { flex: none; }
 
 .player-merge-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; color: var(--muted); font-size: 11px; }
-.player-merge-trigger, .player-merge-keep, .player-merge-confirm, .player-merge-cancel { padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: transparent; font: inherit; cursor: pointer; }
-.player-merge-trigger:hover, .player-merge-keep:hover, .player-merge-cancel:hover { color: var(--ink); border-color: var(--muted); }
-.player-merge-keep.is-selected, .player-merge-confirm { color: var(--ink); border-color: var(--acid); background: rgba(var(--acid-rgb), 0.12); }
+.player-merge-trigger, .player-merge-confirm, .player-merge-cancel { padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: transparent; font: inherit; cursor: pointer; }
+.player-merge-trigger:hover, .player-merge-cancel:hover { color: var(--ink); border-color: var(--muted); }
+.player-merge-confirm { color: var(--ink); border-color: var(--acid); background: rgba(var(--acid-rgb), 0.12); }
 .player-merge-confirm:disabled { opacity: 0.45; cursor: default; }
 .player-merge-hint { flex: 1 1 100%; }
-.player-merge-survivors { display: flex; flex-wrap: wrap; gap: 4px; max-width: 100%; }
-.player-merge-keep { max-width: calc(50% - 2px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .player-merge-controls :focus-visible { outline: 2px solid var(--acid); outline-offset: 2px; }
 
 .player-chip-group {

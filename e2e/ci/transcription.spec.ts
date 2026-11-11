@@ -227,7 +227,7 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   await player.getByRole('button', { name: 'Pause', exact: true }).click()
   await expect(player.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
 
-  // Recording-wide speaker merge keeps one chosen identity and persists the new transcript result.
+  // Recording-wide speaker merge keeps the first selected identity and persists the new result.
   const speakerResult = {
     summary: '', speakers: true, speakerCount: 3, speakerNumbers: [1, 2, 3],
     segments: [
@@ -260,13 +260,12 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   await player.getByRole('button', { name: 'Merge speakers' }).click()
   await player.getByRole('button', { name: /Speaker 1/ }).first().click()
   await player.getByRole('button', { name: /Speaker 2/ }).first().click()
-  await player.getByRole('button', { name: 'Keep Speaker 1' }).click()
+  await expect(player.getByRole('button', { name: 'Merge', exact: true })).toBeEnabled()
   await player.getByRole('button', { name: 'Cancel' }).click()
   await expect(player.getByRole('button', { name: 'Merge speakers' })).toBeFocused()
   await player.getByRole('button', { name: 'Merge speakers' }).click()
   await player.getByRole('button', { name: /Speaker 1/ }).first().click()
   await player.getByRole('button', { name: /Speaker 2/ }).first().click()
-  await player.getByRole('button', { name: 'Keep Speaker 1' }).click()
   await player.getByRole('button', { name: 'Merge', exact: true }).click()
   await expect(player.getByRole('alert')).toContainText('Both speakers must be present')
   await player.getByRole('button', { name: 'Merge', exact: true }).click()

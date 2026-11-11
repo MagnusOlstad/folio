@@ -166,11 +166,12 @@ describe("player", () => {
     fireEvent.click(await within(player).findByRole("button", { name: /Speaker 2 · 2/ }));
     const playhead = FakeAudio.last!.currentTime;
     fireEvent.click(within(player).getByRole("button", { name: "Merge speakers" }));
-    fireEvent.click(within(player).getByRole("button", { name: /Speaker 2 · 2/ }));
     fireEvent.click(within(player).getByRole("button", { name: /Speaker 1 · 2/ }));
-    fireEvent.click(within(player).getByRole("button", { name: "Keep Speaker 1" }));
+    fireEvent.click(within(player).getByRole("button", { name: /Speaker 2 · 2/ }));
+    expect(within(player).getByRole("button", { name: "Merge", exact: true })).toBeEnabled();
     fireEvent.click(within(player).getByRole("button", { name: "Merge", exact: true }));
     await waitFor(() => expect(playbackStore.getSnapshot()).toMatchObject({ solo: 1, currentTime: playhead }));
+    expect(dockActions.mergeSpeakers).toHaveBeenCalledWith(ready, 2, 1);
   });
 
   it("toggles playback with Space only when focus is inside the player", async () => {

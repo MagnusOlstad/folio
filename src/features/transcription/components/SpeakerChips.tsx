@@ -26,13 +26,12 @@ export function SpeakerChips({ speakers, names, counts, solo, active, onRename, 
   const [error, setError] = useState('')
   const [selecting, setSelecting] = useState(false)
   const [selected, setSelected] = useState<number[]>([])
-  const [survivor, setSurvivor] = useState<number | null>(null)
   const focusIntent = useRef<'trigger' | null>(null)
   const focusTarget = useRef<HTMLButtonElement | null>(null)
   const statusRef = useRef<HTMLParagraphElement | null>(null)
   const finishedRef = useRef(true)
 
-  function cancelMerge(restoreFocus = true) { if (restoreFocus) focusIntent.current = 'trigger'; setSelecting(false); setSelected([]); setSurvivor(null); setError('') }
+  function cancelMerge(restoreFocus = true) { if (restoreFocus) focusIntent.current = 'trigger'; setSelecting(false); setSelected([]); setError('') }
   useEffect(() => { if (note.startsWith('Speakers merged')) statusRef.current?.focus() }, [note])
   useEffect(() => {
     if (selecting) return
@@ -48,16 +47,15 @@ export function SpeakerChips({ speakers, names, counts, solo, active, onRename, 
       if (current.length >= 2) return [current[1], speaker]
       return [...current, speaker]
     })
-    setSurvivor(null)
   }
   async function confirmMerge() {
-    if (selected.length !== 2 || survivor === null || saving) return
-    const source = selected.find((speaker) => speaker !== survivor)
-    if (source === undefined) return
+    if (selected.length !== 2 || saving) return
+    const [target, source] = selected
+    if (target === undefined || source === undefined) return
     setSaving(true); setError('')
     try {
-      const outcome = await onMerge(source, survivor)
-      onApplied(outcome, source, survivor)
+      const outcome = await onMerge(source, target)
+      onApplied(outcome, source, target)
       setNote(outcome.draftUpdated ? 'Speakers merged in the recording and draft.' : 'Speakers merged in the saved recording.')
       cancelMerge(false)
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not merge speakers.') }
@@ -139,11 +137,8 @@ export function SpeakerChips({ speakers, names, counts, solo, active, onRename, 
       </div>
       {speakers.length >= 2 && <div className="player-merge-controls" onKeyDown={(event) => { if (event.key === 'Escape' && selecting && !saving) { event.preventDefault(); event.stopPropagation(); cancelMerge() } }}>
         {!selecting ? <button ref={focusTarget} type="button" className="player-merge-trigger" onClick={() => { setError(''); setNote(''); setSelecting(true) }} disabled={saving}>Merge speakers</button> : <>
-          <span className="player-merge-hint">Select two speakers, then choose which name to keep.</span>
-          {selected.length === 2 && <span className="player-merge-survivors" role="group" aria-label="Keep speaker identity">
-            {selected.map((speaker) => <button type="button" key={speaker} className={`player-merge-keep${survivor === speaker ? ' is-selected' : ''}`} aria-pressed={survivor === speaker} title={`Keep ${speakerDisplayName(speaker, names)}`} onClick={() => setSurvivor(speaker)} disabled={saving}>Keep {speakerDisplayName(speaker, names)}</button>)}
-          </span>}
-          <button type="button" className="player-merge-confirm" onClick={() => void confirmMerge()} disabled={selected.length !== 2 || survivor === null || saving}>{saving ? 'Merging…' : 'Merge'}</button>
+          <span className="player-merge-hint">Select two speakers to merge.</span>
+          <button type="button" className="player-merge-confirm" onClick={() => void confirmMerge()} disabled={selected.length !== 2 || saving}>{saving ? 'Merging…' : 'Merge'}</button>
           <button type="button" className="player-merge-cancel" onClick={() => cancelMerge()} disabled={saving}>Cancel</button>
         </>}
       </div>}
