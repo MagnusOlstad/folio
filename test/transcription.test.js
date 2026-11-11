@@ -504,6 +504,7 @@ test('bundle-local transcription status reflects the shared Whisper installation
     await mlxService.install('gemma4')
     await fs.writeFile(controlPath, JSON.stringify({ operationDelayMs: 10_000 }))
     const session = await first.createFileSession({ fileName: 'meeting.wav' })
+    await runtime.transcriptionStorage.writeResult(session.id, { summary: '', transcript: 'The meeting starts at ten and ends at noon.' })
     const summary = first.summarize(session.id, 'The meeting starts at ten and ends at noon.')
     const summaryResult = assert.rejects(summary, /Summary cancelled/)
     const deadline = Date.now() + 2_000
@@ -595,7 +596,7 @@ test('summary failure leaves the raw session result unchanged', async (t) => {
   await service.close()
 })
 
-test('summary generation returns a derived result without changing the raw session result', async (t) => {
+test('summary generation persists summary fields without replacing the canonical transcript', async (t) => {
   const { runtime } = await fixture(t)
   runtime.mlxService = { generate: async () => ({ text: 'Derived summary.' }) }
   const service = createTranscriptionService(runtime)
@@ -603,11 +604,11 @@ test('summary generation returns a derived result without changing the raw sessi
   const raw = { summary: 'Original summary.', transcript: 'Original transcript.' }
   await runtime.transcriptionStorage.writeResult(session.id, raw)
 
-  const derived = await service.summarize(session.id, 'Edited draft transcript.')
+  const derived = await service.summarize(session.id)
 
   assert.equal(derived.summary, 'Derived summary.')
-  assert.equal(derived.transcript, 'Edited draft transcript.')
-  assert.deepEqual(await runtime.transcriptionStorage.readResult(session.id), raw)
+  assert.equal(derived.transcript, 'Original transcript.')
+  assert.deepEqual(await runtime.transcriptionStorage.readResult(session.id), derived)
   await service.close()
 })
 
@@ -621,7 +622,7 @@ test('cancelling summary generation retains the draft text and original session 
   const session = await runtime.transcriptionStorage.createSession({ fileName: 'meeting.wav' })
   const raw = { summary: 'Previous summary.', transcript: 'Previous transcript.' }
   await runtime.transcriptionStorage.writeResult(session.id, raw)
-  const summarizing = service.summarize(session.id, 'Edited transcript, preserved even if cancelled.')
+  const summarizing = service.summarize(session.id)
   await started
   const cancelling = service.cancelSummary(session.id)
   finishGeneration({ text: 'This result must be discarded.' })
@@ -989,6 +990,9 @@ test('recording playback supports ranges and speaker reassignment persists', asy
   const mergeSpeakers = (id, body) => fetch(`${base}/api/transcriptions/${id}/speakers/merge`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
   })
+  const renameSpeaker = (id, body) => fetch(`${base}/api/transcriptions/${id}/speakers/name`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  })
   assert.equal((await post(bare.id, { index: 0, speaker: 1 })).status, 404)
   assert.equal((await post(session.id, { index: 0, speaker: 1 })).status, 404)
   const segments = [
@@ -1005,12 +1009,23 @@ test('recording playback supports ranges and speaker reassignment persists', asy
   assert.deepEqual((await storage.readResult(session.id)), result)
   assert.deepEqual((await (await fetch(`${base}/api/transcriptions/${session.id}`)).json()).result, result)
 
+  const namedResponse = await renameSpeaker(session.id, { speaker: 3, name: '  Ola\nNord ' })
+  assert.equal(namedResponse.status, 200)
+  const namedResult = (await namedResponse.json()).result
+  assert.deepEqual(namedResult.speakerNames, { '3': 'Ola Nord' })
+  assert.deepEqual(await storage.readResult(session.id), namedResult)
+  for (const body of [{ speaker: 2, name: 'Absent' }, { speaker: 3.5, name: 'Bad ID' }, { speaker: 3, name: null }]) {
+    assert.equal((await renameSpeaker(session.id, body)).status, 400)
+  }
+  assert.deepEqual(await storage.readResult(session.id), namedResult)
+
   const mergedResponse = await mergeSpeakers(session.id, { source: 3, target: 1 })
   assert.equal(mergedResponse.status, 200)
   const merged = (await mergedResponse.json()).result
   assert.deepEqual(merged.segments.map((segment) => segment.speaker), [1, 1])
   assert.deepEqual(merged.speakerNumbers, [1])
   assert.equal(merged.summary, 'sum')
+  assert.deepEqual(merged.speakerNames, { '1': 'Ola Nord' })
   assert.deepEqual(await storage.readResult(session.id), merged)
   for (const body of [{ source: 1, target: 1 }, { source: 1, target: 2 }, { source: '1', target: 2 }, { source: 0, target: 1 }]) {
     assert.equal((await mergeSpeakers(session.id, body)).status, 400)
@@ -1024,6 +1039,7 @@ test('recording playback supports ranges and speaker reassignment persists', asy
   await storage.writeManifest({ ...ready, state: 'transcribing' })
   assert.equal((await post(session.id, { index: 0, speaker: 2 })).status, 409)
   assert.equal((await mergeSpeakers(session.id, { source: 1, target: 2 })).status, 409)
+  assert.equal((await renameSpeaker(session.id, { speaker: 1, name: 'Blocked' })).status, 409)
 })
 
 test('segment split and merge routes persist and validate', async (t) => {

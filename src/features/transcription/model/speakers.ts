@@ -1,5 +1,5 @@
-// Speaker names live in the draft as note variables: `speaker1:: Alex` under `## Speakers`, referenced
-// from the transcript as `{{speaker1}}`. These helpers stay local to the transcription feature.
+// Saved recordings own speaker names; explicit transcript drafts export them as note variables
+// such as `speaker1:: Alex` under `## Speakers`, referenced as `{{speaker1}}` in the transcript.
 
 const SPEAKERS_HEADING = /^##\s+speakers\s*$/i
 const DEFINITION = /^speaker(\d{1,3})\s*::\s*(.*)$/i
@@ -24,8 +24,16 @@ export function resultSpeakerNumbers(result: SpeakerSource): number[] {
   return []
 }
 
-export function speakerDefinitionLine(number: number) {
-  return `speaker${number}:: Speaker ${number}`
+export function speakerDefinitionLine(number: number, name?: string) {
+  return `speaker${number}:: ${name || `Speaker ${number}`}`
+}
+
+/** Names saved on the transcription result, independent of any linked note draft. */
+export function resultSpeakerNames(result: { speakerNames?: Record<string, string> } | null): Map<number, string> {
+  if (!result?.speakerNames || typeof result.speakerNames !== 'object') return new Map()
+  return new Map(Object.entries(result.speakerNames)
+    .map(([number, name]) => [Number(number), name] as const)
+    .filter(([number, name]) => Number.isInteger(number) && number > 0 && typeof name === 'string' && Boolean(name.trim())))
 }
 
 function sectionBounds(lines: string[]) {
@@ -69,7 +77,7 @@ export function reconcileSpeakersSection(markdown: string, numbers: number[]) {
       if (match) defined.add(Number(match[1]))
     }
   }
-  const additions = numbers.filter((number) => !defined.has(number)).map(speakerDefinitionLine)
+  const additions = numbers.filter((number) => !defined.has(number)).map((number) => speakerDefinitionLine(number))
   if (bounds) {
     if (!additions.length) return markdown
     const body = lines.slice(bounds.start + 1, bounds.end)
@@ -128,12 +136,3 @@ export function setSpeakerName(markdown: string, number: number, name: string) {
 }
 
 /** Retargets note variable references to the surviving identity and removes the absorbed definition. */
-export function mergeSpeakerIdentity(markdown: string, source: number, target: number) {
-  const remapped = markdown.replace(new RegExp(`\\{\\{\\s*speaker${source}\\s*\\}\\}`, 'gi'), `{{speaker${target}}}`)
-  const lines = remapped.replace(/\r\n/g, '\n').split('\n')
-  const bounds = sectionBounds(lines)
-  if (!bounds) return remapped
-  const definition = new RegExp(`^speaker${source}\\s*::`, 'i')
-  const kept = lines.filter((line, index) => index <= bounds.start || index >= bounds.end || !definition.test(line.trim()))
-  return kept.join(markdown.includes('\r\n') ? '\r\n' : '\n')
-}

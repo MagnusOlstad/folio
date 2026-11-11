@@ -95,6 +95,14 @@ export function registerRoutes(app, runtime) {
       response.json({ result: await service.reassignSpeaker(request.params.id, index, speaker) })
     } catch (error) { fail(response, error) }
   })
+  app.post('/api/transcriptions/:id/speakers/name', async (request, response) => {
+    try {
+      if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
+      const { speaker, name } = request.body ?? {}
+      if (!Number.isInteger(speaker) || typeof name !== 'string') return response.status(400).json({ error: 'speaker must be an integer and name must be text.' })
+      response.json({ result: await service.renameSpeaker(request.params.id, speaker, name) })
+    } catch (error) { fail(response, error) }
+  })
   app.post('/api/transcriptions/:id/segments/split', async (request, response) => {
     try {
       if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })

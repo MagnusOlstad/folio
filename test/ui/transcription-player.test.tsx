@@ -32,7 +32,7 @@ function model(overrides: Partial<TranscriptionDockModel> = {}): TranscriptionDo
   return {
     phase: "idle", activeSession: null, pending: [], status: null, progress: "", error: "",
     deletingSessionId: null, recording: { phase: "idle", duration: "0:00", error: "", saving: false },
-    speakerNamesFor: () => null, audioUrlFor: (item) => `/api/transcriptions/${item.id}/audio`, ...overrides,
+    hasOpenDraftFor: () => false, audioUrlFor: (item) => `/api/transcriptions/${item.id}/audio`, ...overrides,
   };
 }
 
@@ -41,7 +41,7 @@ function actions(overrides: Partial<TranscriptionDockActions> = {}): Transcripti
     importFile: vi.fn(), startRecording: vi.fn(), stopRecording: vi.fn(), discardRecording: vi.fn(), retryRecording: vi.fn(),
     installModel: vi.fn(), installSpeakerModel: vi.fn(),
     transcribe: vi.fn(), retranscribe: vi.fn(), cancel: vi.fn(), openTranscript: vi.fn(), regenerateSummary: vi.fn(),
-    deleteSession: vi.fn(async () => undefined), loadResult: vi.fn(async () => storedResult), reassignSpeaker: vi.fn(), splitSegment: vi.fn(), mergeSegment: vi.fn(), mergeSpeakers: vi.fn(), renameSpeaker: vi.fn(async () => undefined),
+    deleteSession: vi.fn(async () => undefined), loadResult: vi.fn(async () => storedResult), reassignSpeaker: vi.fn(), splitSegment: vi.fn(), mergeSegment: vi.fn(), mergeSpeakers: vi.fn(), renameSpeaker: vi.fn(async () => storedResult),
     ...overrides,
   };
 }
@@ -160,7 +160,7 @@ describe("player", () => {
       segments: segments.map((segment) => ({ ...segment, speaker: 1 })),
       transcript: "**{{speaker1}}** [00:00]\nHello there. Hi, thanks. Let us begin. Sounds good.",
     };
-    const dockActions = actions({ mergeSpeakers: vi.fn(async () => ({ result: mergedResult, draftUpdated: false })) });
+    const dockActions = actions({ mergeSpeakers: vi.fn(async () => ({ result: mergedResult })) });
     render(<TranscriptionDock model={model({ pending: [ready] })} actions={dockActions} />);
     const player = await expandReadyRow();
     fireEvent.click(await within(player).findByRole("button", { name: /Speaker 2 · 2/ }));
@@ -187,7 +187,7 @@ describe("player", () => {
 });
 
 describe("speaker reassignment", () => {
-  it("confirms once, posts the change, and rewrites the Transcript section of the open draft", async () => {
+  it("posts corrections while leaving the open draft unchanged", async () => {
     const updatedResult: TranscriptionResult = {
       ...storedResult,
       transcript: "**{{speaker2}}** [00:00]\nHello there.\n\n**{{speaker2}}** [00:05]\nHi, thanks.",
@@ -225,34 +225,30 @@ describe("speaker reassignment", () => {
     fireEvent.click(screen.getByRole("button", { name: "More actions for meeting.wav" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Open draft" }));
     await waitFor(() => expect(adapter.createDraft).toHaveBeenCalled());
-    drafts.set("untitled:one", "# Meeting\n\n## Speakers\n\nspeaker1:: Alex\n\n## Transcript\n\nstale\n");
+    const originalDraft = "# Meeting\n\n## Speakers\n\nspeaker1:: Alex\n\n## Transcript\n\nstale\n";
+    drafts.set("untitled:one", originalDraft);
 
     const player = await expandReadyRow();
     const trigger = await within(player).findByRole("button", { name: "Wrong speaker? Move this sentence to another speaker" });
-    expect(within(player).getByRole("button", { name: /Alex · 2/ })).toBeInTheDocument();
+    expect(within(player).getByRole("button", { name: /Speaker 1 · 2/ })).toBeInTheDocument();
     fireEvent.click(trigger);
     const menu = screen.getByRole("menu", { name: "Move this sentence to" });
     expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Speaker 2", "New speaker"]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Speaker 2" }));
-    expect(within(player).getByText("Editing speakers rebuilds the Transcript section of the draft. Edits you made inside that section will be replaced.")).toBeInTheDocument();
-    expect(bodies).toEqual([]);
-    fireEvent.click(within(player).getByRole("button", { name: "Move sentence" }));
-    await waitFor(() => expect(drafts.get("untitled:one")).toContain("**{{speaker2}}** [00:00]\nHello there."));
-    expect(bodies).toEqual([{ index: 0, speaker: 2 }]);
-    expect(drafts.get("untitled:one")).toContain("speaker1:: Alex");
-    expect(drafts.get("untitled:one")).not.toContain("stale");
+    expect(within(player).queryByText(/Editing speakers rebuild/)).not.toBeInTheDocument();
+    await waitFor(() => expect(bodies).toEqual([{ index: 0, speaker: 2 }]));
+    expect(drafts.get("untitled:one")).toBe(originalDraft);
+    expect(adapter.updateDraftContent).not.toHaveBeenCalled();
     expect(await within(player).findByText("Moved to Speaker 2.")).toBeInTheDocument();
 
-    // The confirmation is only shown the first time for a recording.
     fireEvent.click(within(player).getByRole("button", { name: "Wrong speaker? Move this sentence to another speaker" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "New speaker" }));
-    expect(within(player).queryByText(/Editing speakers rebuilds/)).not.toBeInTheDocument();
     await waitFor(() => expect(bodies).toHaveLength(2));
     expect(bodies[1]).toEqual({ index: 0, speaker: 3 });
   });
 
-  it("closes the move menu with Escape and says when the draft was not open", async () => {
-    const reassignSpeaker = vi.fn(async () => ({ result: storedResult, draftUpdated: false }));
+  it("closes the move menu with Escape and saves the correction directly", async () => {
+    const reassignSpeaker = vi.fn(async () => ({ result: storedResult }));
     const fresh: TranscriptionSession = { ...ready, id: "66666666-6666-4666-8666-666666666666" };
     render(<TranscriptionDock model={model({ pending: [fresh] })} actions={actions({ reassignSpeaker })} />);
     const player = await expandReadyRow();
@@ -262,117 +258,59 @@ describe("speaker reassignment", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole("menuitem", { name: "Speaker 2" }));
-    fireEvent.click(within(player).getByRole("button", { name: "Cancel" }));
-    expect(reassignSpeaker).not.toHaveBeenCalled();
-    fireEvent.click(trigger);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Speaker 2" }));
-    fireEvent.click(within(player).getByRole("button", { name: "Move sentence" }));
-    expect(await within(player).findByText("Moved to Speaker 2. Draft not open, so only the recording's transcript changed.")).toBeInTheDocument();
+    expect(await within(player).findByText("Moved to Speaker 2.")).toBeInTheDocument();
     expect(reassignSpeaker).toHaveBeenCalledWith(fresh, 0, 2);
     playbackStore.unload(fresh.id);
   });
 });
 
 describe("speaker renaming", () => {
-  it("edits a name inline: Enter saves, Escape cancels, empty resets", async () => {
-    const renameSpeaker = vi.fn(async () => undefined);
-    render(<TranscriptionDock model={model({ pending: [ready] })} actions={actions({ renameSpeaker })} />);
-    const player = await expandReadyRow();
-    await within(player).findByRole("button", { name: /Speaker 2 · 2/ });
+  it("renames the saved result and uses it after the player is reopened", async () => {
+    let saved = storedResult;
+    const renameSpeaker = vi.fn(async (_session: TranscriptionSession, speaker: number, name: string) => {
+      saved = { ...saved, speakerNames: { ...saved.speakerNames, [String(speaker)]: name || `Speaker ${speaker}` } };
+      return saved;
+    });
+    render(<TranscriptionDock model={model({ pending: [ready] })} actions={actions({ renameSpeaker, loadResult: vi.fn(async () => saved) })} />);
+    let player = await expandReadyRow();
+    fireEvent.click(within(player).getByRole("button", { name: "Rename Speaker 2" }));
+    fireEvent.change(within(player).getByRole("textbox"), { target: { value: "Discarded" } });
+    fireEvent.keyDown(within(player).getByRole("textbox"), { key: "Escape" });
+    expect(renameSpeaker).not.toHaveBeenCalled();
     fireEvent.click(within(player).getByRole("button", { name: "Rename Speaker 2" }));
     const input = within(player).getByRole("textbox", { name: "Name for Speaker 2" });
     expect(input).toHaveAttribute("maxlength", "64");
-    fireEvent.change(input, { target: { value: "Nope" } });
-    fireEvent.keyDown(input, { key: "Escape" });
-    expect(within(player).queryByRole("textbox")).not.toBeInTheDocument();
-    expect(renameSpeaker).not.toHaveBeenCalled();
-
-    fireEvent.click(within(player).getByRole("button", { name: "Rename Speaker 2" }));
-    fireEvent.change(within(player).getByRole("textbox"), { target: { value: "  Ola " } });
-    fireEvent.keyDown(within(player).getByRole("textbox"), { key: "Enter" });
+    fireEvent.change(input, { target: { value: "  Ola " } });
+    fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(renameSpeaker).toHaveBeenCalledWith(ready, 2, "Ola"));
-    expect(await within(player).findByText("Renamed in the draft.")).toBeInTheDocument();
+    expect(await within(player).findByText("Name saved to the recording.")).toBeInTheDocument();
     expect(within(player).getByRole("button", { name: /Ola · 2/ })).toBeInTheDocument();
     expect(within(player).getByText("Ola", { selector: ".player-lane-name" })).toBeInTheDocument();
-
+    fireEvent.click(screen.getByRole("button", { name: /^meeting\.wav, / }));
+    player = await expandReadyRow();
+    expect(await within(player).findByRole("button", { name: /Ola · 2/ })).toBeInTheDocument();
     fireEvent.click(within(player).getByRole("button", { name: "Rename Ola" }));
     fireEvent.change(within(player).getByRole("textbox"), { target: { value: "   " } });
     fireEvent.blur(within(player).getByRole("textbox"));
-    await waitFor(() => expect(renameSpeaker).toHaveBeenLastCalledWith(ready, 2, ""));
     expect(await within(player).findByRole("button", { name: /Speaker 2 · 2/ })).toBeInTheDocument();
   });
 
-  it("shows an inline error when renaming fails", async () => {
-    const renameSpeaker = vi.fn(async () => { throw new Error("No draft."); });
+  it("keeps the saved recording name authoritative when a linked draft has another name", async () => {
+    const saved = { ...storedResult, speakerNames: { "1": "Saved name" } };
+    render(<TranscriptionDock model={model({ pending: [ready], hasOpenDraftFor: () => true })} actions={actions({ loadResult: vi.fn(async () => saved) })} />);
+    const player = await expandReadyRow();
+    expect(await within(player).findByRole("button", { name: /Saved name · 2/ })).toBeInTheDocument();
+    expect(within(player).queryByRole("button", { name: /Speaker 1 · 2/ })).not.toBeInTheDocument();
+  });
+
+  it("shows errors from the recording rename endpoint", async () => {
+    const renameSpeaker = vi.fn(async () => { throw new Error("Recording is busy."); });
     render(<TranscriptionDock model={model({ pending: [ready] })} actions={actions({ renameSpeaker })} />);
     const player = await expandReadyRow();
-    await within(player).findByRole("button", { name: /Speaker 1 · 2/ });
-    fireEvent.click(within(player).getByRole("button", { name: "Rename Speaker 1" }));
+    fireEvent.click(await within(player).findByRole("button", { name: "Rename Speaker 1" }));
     fireEvent.change(within(player).getByRole("textbox"), { target: { value: "Kim" } });
     fireEvent.keyDown(within(player).getByRole("textbox"), { key: "Enter" });
-    expect(await within(player).findByRole("alert")).toHaveTextContent("No draft.");
-  });
-
-  function renameHarness(drafts: Map<string, string>, open: { value: boolean }) {
-    apiMock.mockImplementation(async (url: string) => {
-      if (url === "/api/transcriptions/status") return { canTranscribe: true, modelState: "ready" };
-      if (url === "/api/transcriptions?pending=1") return [ready];
-      throw new Error(`Unexpected API request: ${url}`);
-    });
-    apiForBundleMock.mockImplementation(async (_bundle: string | null, url: string) => {
-      if (/\/api\/transcriptions\/[^/]+$/.test(url)) return { session: ready, result: storedResult };
-      throw new Error(`Unexpected bundle request: ${url}`);
-    });
-    const adapter = {
-      createDraft: vi.fn((content = "") => { drafts.set("untitled:one", content); open.value = true; return "untitled:one"; }),
-      getDraftContent: vi.fn((id: string) => drafts.get(id)),
-      getDraftDocument: vi.fn(() => undefined),
-      isDraftOpen: vi.fn(() => open.value),
-      updateDraftContent: vi.fn((id: string, content: string) => { drafts.set(id, content); }),
-      openDraft: vi.fn(),
-    };
-    function Harness() {
-      const { model: hookModel, actions: hookActions } = useTranscription({ drafts: adapter, setMessage: vi.fn(), sourceBundleId: "bundle-a" });
-      return <TranscriptionDock model={hookModel} actions={hookActions} />;
-    }
-    render(<Harness />);
-    return adapter;
-  }
-
-  async function renameSpeakerTwo(player: HTMLElement, name: string) {
-    await within(player).findByRole("button", { name: /Speaker 2 · 2/ });
-    fireEvent.click(within(player).getByRole("button", { name: "Rename Speaker 2" }));
-    fireEvent.change(within(player).getByRole("textbox"), { target: { value: name } });
-    fireEvent.keyDown(within(player).getByRole("textbox"), { key: "Enter" });
-  }
-
-  it("writes the name into the linked draft", async () => {
-    const drafts = new Map<string, string>([["untitled:one", "# Meeting\n\n## Speakers\n\nspeaker1:: Alex\n\n## Transcript\n\nbody\n"]]);
-    const adapter = renameHarness(drafts, { value: true });
-    // Open the draft through the menu so the session is linked, then replace its text.
-    await screen.findByRole("button", { name: "More actions for meeting.wav" });
-    fireEvent.click(screen.getByRole("button", { name: "More actions for meeting.wav" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Open draft" }));
-    await waitFor(() => expect(adapter.createDraft).toHaveBeenCalled());
-    drafts.set("untitled:one", "# Meeting\n\n## Speakers\n\nspeaker1:: Alex\n\n## Transcript\n\nbody\n");
-    const player = await expandReadyRow();
-    await renameSpeakerTwo(player, "Ola");
-    await waitFor(() => expect(drafts.get("untitled:one")).toContain("speaker1:: Alex\nspeaker2:: Ola\n"));
-    expect(adapter.createDraft).toHaveBeenCalledTimes(1);
-    expect(await within(player).findByRole("button", { name: /Ola · 2/ })).toBeInTheDocument();
-    expect(within(player).getByRole("button", { name: /Alex · 2/ })).toBeInTheDocument();
-  });
-
-  it("opens the draft first when none is linked", async () => {
-    const drafts = new Map<string, string>();
-    const adapter = renameHarness(drafts, { value: false });
-    await screen.findByRole("button", { name: /^meeting\.wav, / });
-    const player = await expandReadyRow();
-    await renameSpeakerTwo(player, "Ola");
-    await waitFor(() => expect(adapter.createDraft).toHaveBeenCalledTimes(1));
-    expect(drafts.get("untitled:one")).toContain("speaker1:: Speaker 1\nspeaker2:: Ola");
-    expect(await within(player).findByText("Renamed in the draft.")).toBeInTheDocument();
-    expect(await within(player).findByRole("button", { name: /Ola · 2/ })).toBeInTheDocument();
+    expect(await within(player).findByRole("alert")).toHaveTextContent("Recording is busy.");
   });
 });
 
@@ -392,10 +330,10 @@ describe("draft link", () => {
     };
     const { result } = renderHook(() => useTranscription({ drafts: adapter, setMessage: vi.fn(), sourceBundleId: "bundle-a" }));
     await act(async () => { await result.current.actions.openTranscript(ready); });
-    // A render before the tab list catches up reads names while the adapter reports "not open".
-    expect(result.current.model.speakerNamesFor(ready)).toBeNull();
+    // A render before the tab list catches up still reads the independent draft status.
+    expect(result.current.model.hasOpenDraftFor(ready)).toBe(false);
     open = true;
-    expect(result.current.model.speakerNamesFor(ready)).not.toBeNull();
+    expect(result.current.model.hasOpenDraftFor(ready)).toBe(true);
   });
 });
 
@@ -440,7 +378,7 @@ describe("long recordings and long text", () => {
 
   it("shows h:mm:ss clocks, bounded lane bars, a keyboard slider and truncated names with titles", async () => {
     const names = new Map([[1, longName], [2, "Sam"]]);
-    render(<TranscriptionDock model={model({ pending: [longSession], speakerNamesFor: () => names })} actions={actions({ loadResult: vi.fn(async () => longResult) })} />);
+    render(<TranscriptionDock model={model({ pending: [longSession] })} actions={actions({ loadResult: vi.fn(async () => ({ ...longResult, speakerNames: { "1": names.get(1) ?? "Speaker 1" } })) })} />);
     fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${longFile.replace(/\./g, "\\.")}, `) }));
     const player = await screen.findByRole("group", { name: `Player for ${longFile}` });
     const lanes = await within(player).findByTestId("speaker-lanes");

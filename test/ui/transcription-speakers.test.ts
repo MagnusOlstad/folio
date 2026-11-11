@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { applyRetranscription } from "../../src/features/transcription/model/retranscribe.ts";
 import {
   parseSpeakerNames,
-  mergeSpeakerIdentity,
   reconcileSpeakersSection,
   resolveSpeakerNames,
   resultSpeakerNumbers,
@@ -34,6 +33,11 @@ describe("speaker variables in transcription drafts", () => {
     expect(resultSpeakerNumbers(result({ speakers: true, speakerCount: 2 }))).toEqual([1, 2]);
     expect(resultSpeakerNumbers(result({ segments: [{ start: 0, end: 1, text: "a", speaker: 2 }, { start: 1, end: 2, text: "b", speaker: 1 }] }))).toEqual([1, 2]);
     expect(resultSpeakerNumbers(result({ speakers: false }))).toEqual([]);
+  });
+
+  it("uses saved speaker names when creating a fresh draft and falls back for unnamed IDs", () => {
+    const named = mergeTranscriptionDraft(session, result({ ...spoken, speakerNames: { "1": "Saved Alex" } }));
+    expect(named).toContain("speaker1:: Saved Alex\nspeaker2:: Speaker 2");
   });
 
   it("reads names from the Speakers section only and resolves references", () => {
@@ -113,12 +117,5 @@ describe("setSpeakerName", () => {
 
   it("round-trips through parseSpeakerNames", () => {
     expect(parseSpeakerNames(setSpeakerName(note, 2, "Ola")).get(2)).toBe("Ola");
-  });
-});
-
-describe("mergeSpeakerIdentity", () => {
-  it("retargets references, removes only the absorbed definition, and keeps custom content and name", () => {
-    const draft = "# Meeting\n\n## Summary\n\n{{speaker2}} spoke first.\n\n## Speakers\n\nspeaker1:: Alex\nspeaker2:: Sam\nKeep this note.\n\n## Transcript\n\n**{{speaker2}}** [00:00]\nHi.\n";
-    expect(mergeSpeakerIdentity(draft, 2, 1)).toBe("# Meeting\n\n## Summary\n\n{{speaker1}} spoke first.\n\n## Speakers\n\nspeaker1:: Alex\nKeep this note.\n\n## Transcript\n\n**{{speaker1}}** [00:00]\nHi.\n");
   });
 });

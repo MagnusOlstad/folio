@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { NowSpeaking } from "../../src/features/transcription/components/NowSpeaking.tsx";
 import type { ReassignOutcome } from "../../src/features/transcription/hooks/speakerReassign.ts";
@@ -10,22 +10,18 @@ const segments: TranscriptionSegment[] = [
   { start: 4, end: 12, text: "Sure thing and then another one", speaker: 2 },
   { start: 12, end: 14, text: "Okay", speaker: 1 },
 ];
-const outcome: ReassignOutcome = { result: { summary: "", transcript: "", segments }, draftUpdated: true };
+const outcome: ReassignOutcome = { result: { summary: "", transcript: "", segments } };
 let counter = 0;
 
 function setup(index: number, time = 0, overrides: Partial<Parameters<typeof NowSpeaking>[0]> = {}) {
   counter += 1;
   const props = {
-    sessionId: `session-${counter}`, segments, index, time, present: [1, 2], names: null, hasSpeakers: true,
+    segments, index, time, present: [1, 2], names: null, hasSpeakers: true,
     onReassign: vi.fn(async () => outcome), onSplit: vi.fn(async () => outcome), onMerge: vi.fn(async () => outcome), onApplied: vi.fn(),
     ...overrides,
   };
   const { rerender } = render(<NowSpeaking {...props} />);
   return { ...props, rerender: (next: Partial<Parameters<typeof NowSpeaking>[0]>) => rerender(<NowSpeaking {...props} {...next} />) };
-}
-
-function confirmSplit() {
-  fireEvent.click(within(screen.getByRole("group", { name: "Confirm speaker change" })).getByRole("button", { name: "Split sentence" }));
 }
 
 describe("split sentence helpers", () => {
@@ -56,7 +52,6 @@ describe("split and merge controls", () => {
     fireEvent.click(screen.getByRole("button", { name: 'Split before "and"' }));
     fireEvent.click(screen.getByRole("button", { name: "New speaker" }));
     fireEvent.click(screen.getByRole("button", { name: "Split" }));
-    confirmSplit();
     await waitFor(() => expect(props.onSplit).toHaveBeenCalledWith(1, 11, 3));
   });
 
@@ -92,11 +87,9 @@ describe("split and merge controls", () => {
     expect(screen.queryByRole("button", { name: "Merge with the previous sentence" })).not.toBeInTheDocument();
   });
 
-  it("merges after confirmation, reports it, and undoes with a split", async () => {
+  it("merges the saved sentence, reports it, and undoes with a split", async () => {
     const props = setup(1);
     fireEvent.click(screen.getByRole("button", { name: "Merge with the previous sentence" }));
-    expect(props.onMerge).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Merge sentences" }));
     expect(await screen.findByText(/Merged with the previous sentence\./)).toBeInTheDocument();
     expect(props.onMerge).toHaveBeenCalledWith(1);
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
@@ -104,15 +97,10 @@ describe("split and merge controls", () => {
     await waitFor(() => expect(screen.queryByText(/Merged with the previous sentence\./)).not.toBeInTheDocument());
   });
 
-  it("keeps the sentence under a pending confirmation while playback moves on", async () => {
+  it("saves a speaker correction immediately", async () => {
     const props = setup(0);
     fireEvent.click(screen.getByRole("button", { name: "Wrong speaker? Move this sentence to another speaker" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Speaker 2" }));
-    expect(props.onReassign).not.toHaveBeenCalled();
-    props.rerender({ index: 2, time: 13 });
-    expect(screen.getByText("Hello there.")).toBeInTheDocument();
-    expect(screen.queryByText("Okay")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Move sentence" }));
     await waitFor(() => expect(props.onReassign).toHaveBeenCalledWith(0, 2));
   });
 
@@ -120,7 +108,6 @@ describe("split and merge controls", () => {
     const props = setup(1, 8);
     fireEvent.click(screen.getByRole("button", { name: "Split this sentence where another speaker starts" }));
     fireEvent.click(screen.getByRole("button", { name: "Split" }));
-    confirmSplit();
     expect(await screen.findByText(/Split\. The rest is now Speaker 1\./)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     await waitFor(() => expect(props.onMerge).toHaveBeenCalledWith(2));
@@ -130,7 +117,6 @@ describe("split and merge controls", () => {
     setup(1, 8, { onSplit: vi.fn(async () => { throw new Error("nope"); }) });
     fireEvent.click(screen.getByRole("button", { name: "Split this sentence where another speaker starts" }));
     fireEvent.click(screen.getByRole("button", { name: "Split" }));
-    confirmSplit();
     expect(await screen.findByRole("alert")).toHaveTextContent("nope");
   });
 });

@@ -5,9 +5,8 @@ import type { SourceLevels, SourceSilence } from '../model/level-monitor.ts'
 import type { RecordingAssociation } from '../model/recording.ts'
 import { systemAudioSupported, type RecordingSource } from '../model/recording-source.ts'
 import { audioDuration } from '../model/audio-duration.ts'
-import { applyRetranscribedResult, regenerateSummary, type DraftWorkContext, type SessionDraft } from './draftWork.ts'
-import { linkedSpeakerNames, mergeRecordingSpeakers, mergeTranscriptSegment, reassignSegmentSpeaker, splitTranscriptSegment, type ReassignOutcome } from './speakerReassign.ts'
-import { renameSpeakerInDraft } from './speakerRename.ts'
+import { regenerateSummary, hasOpenLinkedDraft, type DraftWorkContext, type SessionDraft } from './draftWork.ts'
+import { mergeRecordingSpeakers, mergeTranscriptSegment, reassignSegmentSpeaker, renameRecordingSpeaker, splitTranscriptSegment, type ReassignOutcome } from './speakerReassign.ts'
 import { transcriptionAudioUrl } from '../model/audio-url.ts'
 import { plainTranscriptResult } from '../model/plain-transcript.ts'
 import { playbackStore } from '../model/playback-store.ts'
@@ -44,8 +43,8 @@ export type TranscriptionDockModel = {
   error: string
   deletingSessionId: string | null
   recording: RecordingModel
-  /** Speaker names from the session's open draft (`speakerN::`), or null when no draft is open. */
-  speakerNamesFor: (session: TranscriptionSession) => ReadonlyMap<number, string> | null
+  /** Whether the recording has an open, independent draft. */
+  hasOpenDraftFor: (session: TranscriptionSession) => boolean
   audioUrlFor: (session: TranscriptionSession) => string
 }
 
@@ -59,7 +58,7 @@ export type TranscriptionDockActions = {
   installModel: () => void
   installSpeakerModel: () => void
   transcribe: (session: TranscriptionSession) => void
-  /** Re-runs transcription on a ready session and replaces the transcript in its open draft. */
+  /** Re-runs transcription on a ready session and updates its saved recording result. */
   retranscribe: (session: TranscriptionSession) => void
   cancel: (session: TranscriptionSession) => void
   /** Opens the transcript in a new draft; `speakers: false` writes plain paragraphs and leaves the draft unlinked from the session. */
@@ -71,11 +70,11 @@ export type TranscriptionDockActions = {
   reassignSpeaker: (session: TranscriptionSession, index: number, speaker: number) => Promise<ReassignOutcome>
   /** Splits a sentence at a character offset; the rest goes to `speaker` (the same speaker when null). */
   splitSegment: (session: TranscriptionSession, index: number, offset: number, speaker: number | null) => Promise<ReassignOutcome>
-  /** Merges a sentence into the previous one. */
+  /** Merges a sentence into the previous one in the saved recording. */
   mergeSegment: (session: TranscriptionSession, index: number) => Promise<ReassignOutcome>
   mergeSpeakers: (session: TranscriptionSession, source: number, target: number) => Promise<ReassignOutcome>
-  /** Writes a speaker's name into the linked draft, opening the draft first when needed. */
-  renameSpeaker: (session: TranscriptionSession, speaker: number, name: string) => Promise<void>
+  /** Saves a speaker's display name on the recording result. */
+  renameSpeaker: (session: TranscriptionSession, speaker: number, name: string) => Promise<TranscriptionResult>
 }
 
 type Options = {
@@ -310,10 +309,9 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
       if (activeBundle.current === taskBundle && bundleGeneration.current === taskGeneration
         && activeTranscriptionId.current === session.id) {
         const readySession = { ...response.session, sourceBundleId: taskBundle }
-        if (retranscribe && applyRetranscribedResult(draftWork, readySession, response.result)) {
-          setMessage(response.result.speakerWarning
-            ? `Transcript replaced in your open draft. ${response.result.speakerWarning}` : 'Transcript replaced in your open draft.')
-        } else openTranscriptDraft(readySession, response.result)
+        if (retranscribe) setMessage(response.result.speakerWarning
+          ? `Re-transcription saved to the recording. ${response.result.speakerWarning}` : 'Re-transcription saved to the recording.')
+        else openTranscriptDraft(readySession, response.result)
         setPhase('idle')
         setProgress('')
         setActiveSession(null)
@@ -342,12 +340,12 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
       try {
         const response = await apiForBundle<{ cancelled: boolean }>(session.sourceBundleId ?? null, `/api/transcriptions/${encodeURIComponent(session.id)}/summarize/cancel`, { method: 'POST' })
         setMessage(response.cancelled
-          ? 'Summary cancelled. Your draft and original transcript were kept.'
+          ? 'Summary cancelled. The saved recording was kept.'
           : 'Summary generation had already finished.')
       } catch (cancelError) {
         setError(errorMessage(cancelError, 'Could not cancel summary generation.'))
         setPhase('summarizing')
-        setProgress('Summarizing the editable draft with the selected local text model…')
+        setProgress('Summarizing the saved recording with the selected local text model…')
       }
       await refresh()
       return
@@ -374,7 +372,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
       if (!response.result) throw new Error('No transcript has been saved for this audio yet. Transcribe it first.')
       if (withSpeakers) openTranscriptDraft({ ...session, sourceBundleId: taskBundle }, response.result)
       else {
-        // Not registered in sessionDrafts: speaker edits rebuild the linked draft only, so this plain copy stays untouched.
+        // Not registered in sessionDrafts: this explicit plain-text copy is independent of the recording.
         draftsRef.current.createDraft(mergeTranscriptionDraft(session, plainTranscriptResult(response.result)))
         setMessage('Transcript opened as plain text in a new editable draft.')
       }
@@ -442,7 +440,7 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
       levels: recorder.levels,
       silent: recorder.silent,
     },
-    speakerNamesFor: (session) => linkedSpeakerNames(draftWork, session),
+    hasOpenDraftFor: (session) => hasOpenLinkedDraft(draftWork, session),
     audioUrlFor: transcriptionAudioUrl,
   }
   const actions: TranscriptionDockActions = {
@@ -464,11 +462,11 @@ export function useTranscription({ drafts, setMessage, sourceBundleId }: Options
       const response = await apiForBundle<TranscriptionProcessResponse>(session.sourceBundleId ?? null, `/api/transcriptions/${encodeURIComponent(session.id)}`)
       return response.result ?? null
     },
-    reassignSpeaker: (session, index, speaker) => reassignSegmentSpeaker(draftWork, session, index, speaker),
-    splitSegment: (session, index, offset, speaker) => splitTranscriptSegment(draftWork, session, index, offset, speaker),
-    mergeSegment: (session, index) => mergeTranscriptSegment(draftWork, session, index),
-    mergeSpeakers: (session, source, target) => mergeRecordingSpeakers(draftWork, session, source, target),
-    renameSpeaker: (session, speaker, name) => renameSpeakerInDraft(draftWork, session, speaker, name, openTranscriptDraft),
+    reassignSpeaker: (session, index, speaker) => reassignSegmentSpeaker(session, index, speaker),
+    splitSegment: (session, index, offset, speaker) => splitTranscriptSegment(session, index, offset, speaker),
+    mergeSegment: (session, index) => mergeTranscriptSegment(session, index),
+    mergeSpeakers: (session, source, target) => mergeRecordingSpeakers(session, source, target),
+    renameSpeaker: (session, speaker, name) => renameRecordingSpeaker(session, speaker, name),
   }
   return { model, actions, draftFiled }
 }

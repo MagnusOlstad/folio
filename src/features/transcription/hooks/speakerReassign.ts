@@ -1,52 +1,37 @@
 import { apiForBundle } from '../../../lib/api.ts'
-import { applyRetranscription } from '../model/retranscribe.ts'
-import { mergeSpeakerIdentity, parseSpeakerNames } from '../model/speakers.ts'
 import type { TranscriptionResult, TranscriptionSession } from '../model/types.ts'
-import { linkedDraft, type DraftWorkContext } from './draftWork.ts'
 
-export type ReassignOutcome = { result: TranscriptionResult; draftUpdated: boolean }
+export type ReassignOutcome = { result: TranscriptionResult }
 
-/** Speaker names defined in the session's open draft, or null when no draft is open. Read-only: safe during render. */
-export function linkedSpeakerNames(ctx: DraftWorkContext, session: TranscriptionSession) {
-  const linked = linkedDraft(ctx, session.id, session.sourceBundleId ?? null, false)
-  return linked ? parseSpeakerNames(linked.content) : null
-}
-
-/** POSTs a segment edit, then rewrites the Transcript section of the open linked draft (reconciling `## Speakers`). */
-async function editSegments(ctx: DraftWorkContext, session: TranscriptionSession, action: string, body: object): Promise<ReassignOutcome> {
-  const bundle = session.sourceBundleId ?? null
-  const response = await apiForBundle<{ result: TranscriptionResult }>(bundle,
-    `/api/transcriptions/${encodeURIComponent(session.id)}/segments/${action}`,
+async function postResult(session: TranscriptionSession, path: string, body: object): Promise<ReassignOutcome> {
+  const response = await apiForBundle<{ result: TranscriptionResult }>(session.sourceBundleId ?? null,
+    `/api/transcriptions/${encodeURIComponent(session.id)}/${path}`,
     { method: 'POST', body: JSON.stringify(body) })
-  const existing = linkedDraft(ctx, session.id, bundle)
-  if (!existing) return { result: response.result, draftUpdated: false }
-  ctx.draftsRef.current.updateDraftContent(existing.draft.draftId, applyRetranscription(existing.content, response.result))
-  return { result: response.result, draftUpdated: true }
+  return { result: response.result }
 }
 
-/** Moves one segment to another speaker. Without an open draft only the stored result changes. */
-export function reassignSegmentSpeaker(ctx: DraftWorkContext, session: TranscriptionSession, index: number, speaker: number) {
-  return editSegments(ctx, session, 'speaker', { index, speaker })
+/** Segment corrections update only the saved recording result. */
+export function reassignSegmentSpeaker(session: TranscriptionSession, index: number, speaker: number) {
+  return postResult(session, 'segments/speaker', { index, speaker })
 }
 
-/** Splits one segment at a character offset; the rest goes to `speaker` (the same speaker when null). */
-export function splitTranscriptSegment(ctx: DraftWorkContext, session: TranscriptionSession, index: number, offset: number, speaker: number | null) {
-  return editSegments(ctx, session, 'split', { index, offset, speaker })
+/** Splits a segment at a character offset; the rest goes to `speaker` (the same speaker when null). */
+export function splitTranscriptSegment(session: TranscriptionSession, index: number, offset: number, speaker: number | null) {
+  return postResult(session, 'segments/split', { index, offset, speaker })
 }
 
-/** Merges one segment into the previous one. */
-export function mergeTranscriptSegment(ctx: DraftWorkContext, session: TranscriptionSession, index: number) {
-  return editSegments(ctx, session, 'merge', { index })
+/** Merges one segment into the previous one in the saved recording. */
+export function mergeTranscriptSegment(session: TranscriptionSession, index: number) {
+  return postResult(session, 'segments/merge', { index })
 }
 
-/** Merges all segments assigned to a speaker; updates only the transcript and speaker definitions in an open draft. */
-export async function mergeRecordingSpeakers(ctx: DraftWorkContext, session: TranscriptionSession, source: number, target: number): Promise<ReassignOutcome> {
-  const bundle = session.sourceBundleId ?? null
-  const response = await apiForBundle<{ result: TranscriptionResult }>(bundle,
-    `/api/transcriptions/${encodeURIComponent(session.id)}/speakers/merge`,
-    { method: 'POST', body: JSON.stringify({ source, target }) })
-  const existing = linkedDraft(ctx, session.id, bundle)
-  if (!existing) return { result: response.result, draftUpdated: false }
-  ctx.draftsRef.current.updateDraftContent(existing.draft.draftId, mergeSpeakerIdentity(existing.content, source, target))
-  return { result: response.result, draftUpdated: true }
+/** Merges all segments assigned to a speaker in the saved recording. */
+export function mergeRecordingSpeakers(session: TranscriptionSession, source: number, target: number) {
+  return postResult(session, 'speakers/merge', { source, target })
+}
+
+/** Renames a speaker in the saved recording result. */
+export async function renameRecordingSpeaker(session: TranscriptionSession, speaker: number, name: string): Promise<TranscriptionResult> {
+  const response = await postResult(session, 'speakers/name', { speaker, name })
+  return response.result
 }

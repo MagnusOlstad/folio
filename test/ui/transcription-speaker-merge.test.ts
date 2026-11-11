@@ -1,48 +1,43 @@
-import { describe, expect, it, vi } from 'vitest'
-import { mergeRecordingSpeakers } from '../../src/features/transcription/hooks/speakerReassign.ts'
-import type { DraftWorkContext } from '../../src/features/transcription/hooks/draftWork.ts'
-import type { TranscriptionResult, TranscriptionSession } from '../../src/features/transcription/model/types.ts'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mergeRecordingSpeakers, reassignSegmentSpeaker, renameRecordingSpeaker } from '../../src/features/transcription/hooks/speakerReassign.ts'
+import { resultSpeakerNames } from '../../src/features/transcription/model/speakers.ts'
+import { mergeTranscriptionDraft, type TranscriptionResult, type TranscriptionSession } from '../../src/features/transcription/model/types.ts'
 
-const session: TranscriptionSession = { id: 'merge-session', state: 'ready', draftId: null, durationMs: 10_000, error: null, sourceBundleId: 'bundle-a' }
+const { apiMock } = vi.hoisted(() => ({ apiMock: vi.fn() }))
+vi.mock('../../src/lib/api.ts', () => ({ apiForBundle: apiMock }))
+beforeEach(() => apiMock.mockReset())
+
+const session: TranscriptionSession = { id: 'merge-session', state: 'ready', draftId: null, durationMs: 10_000, error: null, sourceBundleId: 'bundle-a', fileName: 'meeting.wav' }
 const result: TranscriptionResult = {
-  summary: 'stored summary', speakers: true, speakerCount: 1, speakerNumbers: [1],
-  transcript: '**{{speaker1}}** [00:00]\nFirst. Second.',
-  segments: [{ start: 0, end: 1, text: 'First.', speaker: 1 }, { start: 1, end: 2, text: 'Second.', speaker: 1 }],
+  summary: 'saved summary', speakers: true, speakerCount: 2, speakerNumbers: [1, 2],
+  transcript: '**{{speaker1}}** [00:00]\nFirst.\n\n**{{speaker2}}** [00:03]\nSecond.',
+  segments: [{ start: 0, end: 1, text: 'First.', speaker: 1 }, { start: 3, end: 4, text: 'Second.', speaker: 2 }],
 }
 
-function context(content?: string) {
-  const updated = vi.fn()
-  const getDraftContent = vi.fn(() => content)
-  const sessionDrafts = { current: content ? new Map([['merge-session', { draftId: 'untitled:merge', bundleId: 'bundle-a' }]]) : new Map() }
-  const ctx = {
-    busyRef: { current: false }, deletingRef: { current: null }, activeBundle: { current: 'bundle-a' }, bundleGeneration: { current: 0 },
-    sessionDrafts,
-    draftsRef: { current: {
-      getDraftContent, getDraftDocument: vi.fn(), isDraftOpen: () => true, updateDraftContent: updated,
-      createDraft: vi.fn(), openDraft: vi.fn(),
-    } },
-    setError: vi.fn(), setMessage: vi.fn(), setPhase: vi.fn(), setProgress: vi.fn(), setActiveSession: vi.fn(), refresh: vi.fn(async () => undefined),
-  } as DraftWorkContext
-  return { ctx, updated }
-}
-
-describe('recording speaker merge draft updates', () => {
-  it('preserves custom summary and transcript text while remapping source references and removing its definition', async () => {
-    const draft = '# Meeting\n\n## Summary\n\nCustom {{speaker2}} summary.\n\n## Speakers\n\nspeaker1:: Alex\nspeaker2:: Sam\n\n## Transcript\n\nCustom edited text at [00:00].\n'
-    const { ctx, updated } = context(draft)
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ result }), { status: 200 })))
-    const outcome = await mergeRecordingSpeakers(ctx, session, 2, 1)
-    expect(outcome).toEqual({ result, draftUpdated: true })
-    expect(updated).toHaveBeenCalledWith('untitled:merge', '# Meeting\n\n## Summary\n\nCustom {{speaker1}} summary.\n\n## Speakers\n\nspeaker1:: Alex\n\n## Transcript\n\nCustom edited text at [00:00].\n')
-    vi.unstubAllGlobals()
+describe('recording-owned speaker data', () => {
+  it('formats a fresh draft from saved speaker names', () => {
+    const named = { ...result, speakerNames: { '1': 'Saved Alex', '2': 'Saved Sam' } }
+    expect(mergeTranscriptionDraft(session, named)).toContain('speaker1:: Saved Alex\nspeaker2:: Saved Sam')
+    expect([...resultSpeakerNames(named)]).toEqual([[1, 'Saved Alex'], [2, 'Saved Sam']])
+    expect([...resultSpeakerNames(result)]).toEqual([])
   })
 
-  it('updates the saved result without creating a draft when none is open', async () => {
-    const { ctx, updated } = context()
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ result }), { status: 200 })))
-    const outcome = await mergeRecordingSpeakers(ctx, session, 2, 1)
-    expect(outcome).toEqual({ result, draftUpdated: false })
-    expect(updated).not.toHaveBeenCalled()
-    vi.unstubAllGlobals()
+  it('persists a rename through the recording API without a draft adapter', async () => {
+    const named = { ...result, speakerNames: { '2': 'Ola' } }
+    apiMock.mockResolvedValueOnce({ result: named })
+    await expect(renameRecordingSpeaker(session, 2, 'Ola')).resolves.toEqual(named)
+    expect(apiMock).toHaveBeenCalledWith('bundle-a', '/api/transcriptions/merge-session/speakers/name', {
+      method: 'POST', body: JSON.stringify({ speaker: 2, name: 'Ola' }),
+    })
+  })
+
+  it('sends every other speaker edit only to the recording endpoint', async () => {
+    apiMock.mockResolvedValueOnce({ result }).mockResolvedValueOnce({ result })
+    await reassignSegmentSpeaker(session, 0, 2)
+    await mergeRecordingSpeakers(session, 2, 1)
+    expect(apiMock.mock.calls.map(([, path]) => path)).toEqual([
+      '/api/transcriptions/merge-session/segments/speaker',
+      '/api/transcriptions/merge-session/speakers/merge',
+    ])
   })
 })

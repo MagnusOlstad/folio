@@ -12,7 +12,7 @@ import { NextIcon, PauseIcon, PlayIcon, PrevIcon } from './icons.tsx'
 import { NowSpeaking } from './NowSpeaking.tsx'
 import { SpeakerChips } from './SpeakerChips.tsx'
 import { SpeakerLanes } from './SpeakerLanes.tsx'
-import { normalizeSpeakerName } from '../model/speakers.ts'
+import { resultSpeakerNames } from '../model/speakers.ts'
 
 type PlayerPanelProps = {
   id: string
@@ -26,12 +26,9 @@ export function PlayerPanel({ id, session, model, actions, onSpeakerCount }: Pla
   const rootRef = useRef<HTMLDivElement>(null)
   const playback = useSyncExternalStore(playbackStore.subscribe, playbackStore.getSnapshot)
   const { result, error, setResult } = usePlayerResult(session, actions.loadResult)
-  const draftNames = model.speakerNamesFor(session)
-  // Names just saved fill in until the draft adapter reports them (a draft created by the rename can lag a render).
-  const [renamed, setRenamed] = useState<ReadonlyMap<number, string>>(new Map())
   const [mergingSpeakers, setMergingSpeakers] = useState(false)
-  const names = useMemo(() => renamed.size ? new Map([...renamed, ...(draftNames ?? [])]) : draftNames, [draftNames, renamed])
   const segments = useMemo(() => result?.segments ?? [], [result])
+  const names = useMemo(() => resultSpeakerNames(result), [result])
   const turns = useMemo(() => buildTurns(segments), [segments])
   const speakers = useMemo(() => segmentSpeakers(segments), [segments])
   const counts = useMemo(() => turnCounts(turns), [turns])
@@ -53,8 +50,9 @@ export function PlayerPanel({ id, session, model, actions, onSpeakerCount }: Pla
   useEffect(() => { if (speakers.length) onSpeakerCount(speakers.length) }, [speakers.length, onSpeakerCount])
 
   async function renameSpeaker(speaker: number, name: string) {
-    await actions.renameSpeaker(session, speaker, name)
-    setRenamed((current) => new Map(current).set(speaker, normalizeSpeakerName(speaker, name)))
+    const updated = await actions.renameSpeaker(session, speaker, name)
+    setResult(updated)
+    return updated
   }
 
   function applySpeakerMerge(outcome: ReassignOutcome, source: number, target: number) {
@@ -125,7 +123,6 @@ export function PlayerPanel({ id, session, model, actions, onSpeakerCount }: Pla
       {error && <p className="transcription-item-error" role="status">{error}</p>}
       {result && segments.length > 0 && (
         <NowSpeaking
-          sessionId={session.id}
           segments={segments}
           index={segmentIndex}
           present={speakers}

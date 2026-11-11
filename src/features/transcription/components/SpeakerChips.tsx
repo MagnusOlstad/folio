@@ -5,6 +5,7 @@ import { speakerColor, speakerDisplayName } from '../model/playback-turns.ts'
 import { MAX_SPEAKER_NAME_LENGTH } from '../model/speakers.ts'
 import { PencilIcon } from './icons.tsx'
 import type { ReassignOutcome } from '../hooks/speakerReassign.ts'
+import type { TranscriptionResult } from '../model/types.ts'
 
 type SpeakerChipsProps = {
   speakers: readonly number[]
@@ -12,12 +13,12 @@ type SpeakerChipsProps = {
   counts: ReadonlyMap<number, number>
   solo: number | null
   active: boolean
-  onRename: (speaker: number, name: string) => Promise<void>
+  onRename: (speaker: number, name: string) => Promise<TranscriptionResult>
   onMerge: (source: number, target: number) => Promise<ReassignOutcome>
   onApplied: (outcome: ReassignOutcome, source: number, target: number) => void
 }
 
-/** Solo chips for each speaker; the pencil beside a chip renames that speaker in the linked draft. */
+/** Solo chips for each speaker; the pencil beside a chip renames that recording speaker. */
 export function SpeakerChips({ speakers, names, counts, solo, active, onRename, onMerge, onApplied }: SpeakerChipsProps) {
   const [editing, setEditing] = useState<number | null>(null)
   const [value, setValue] = useState('')
@@ -56,7 +57,7 @@ export function SpeakerChips({ speakers, names, counts, solo, active, onRename, 
     try {
       const outcome = await onMerge(source, target)
       onApplied(outcome, source, target)
-      setNote(outcome.draftUpdated ? 'Speakers merged in the recording and draft.' : 'Speakers merged in the saved recording.')
+      setNote('Speakers merged in the recording.')
       cancelMerge(false)
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not merge speakers.') }
     finally { setSaving(false) }
@@ -80,7 +81,7 @@ export function SpeakerChips({ speakers, names, counts, solo, active, onRename, 
     setSaving(true)
     try {
       await onRename(speaker, next)
-      setNote('Renamed in the draft.')
+      setNote('Name saved to the recording.')
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not rename the speaker.')
     } finally { setSaving(false) }

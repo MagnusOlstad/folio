@@ -23,7 +23,7 @@ function model(overrides: Partial<TranscriptionDockModel> = {}): TranscriptionDo
     error: "",
     deletingSessionId: null,
     recording: { phase: "idle", duration: "0:00", error: "", saving: false, source: "microphone", systemAudioSupported: false, systemAudioBlocked: false, levels: { mic: 0, system: 0 }, silent: { mic: false, system: false } },
-    speakerNamesFor: () => null,
+    hasOpenDraftFor: () => false,
     audioUrlFor: (item) => `/api/transcriptions/${item.id}/audio`,
     ...overrides,
   };
@@ -46,7 +46,7 @@ function actions(): TranscriptionDockActions {
     regenerateSummary: vi.fn(),
     deleteSession: vi.fn(async () => undefined),
     loadResult: vi.fn(async () => null),
-    reassignSpeaker: vi.fn(), splitSegment: vi.fn(), mergeSegment: vi.fn(), mergeSpeakers: vi.fn(), renameSpeaker: vi.fn(),
+    reassignSpeaker: vi.fn(), splitSegment: vi.fn(), mergeSegment: vi.fn(), mergeSpeakers: vi.fn(), renameSpeaker: vi.fn(async () => ({ summary: '', transcript: '' })),
   };
 }
 
@@ -707,14 +707,14 @@ describe("transcription UI", () => {
     expect(contents[0]).toContain("Hello there.\n\nHi.");
     expect(contents[0]).not.toMatch(/## Speakers|\{\{speaker|\[\d\d:\d\d\]/);
     expect(setMessage).toHaveBeenCalledWith("Transcript opened as plain text in a new editable draft.");
-    expect(result.current.model.speakerNamesFor(session)).toBeNull();
+    expect(result.current.model.hasOpenDraftFor(session)).toBe(false);
 
     await act(async () => { await result.current.actions.openTranscript(session, { speakers: true }); });
     expect(contents[1]).toContain("## Speakers");
     expect(contents[1]).toContain("**{{speaker1}}** [00:00]");
   });
 
-  it("summarizes edited draft text without changing a filed note or the raw session", async () => {
+  it("summarizes the saved recording without mutating its open draft", async () => {
     const raw = { summary: "Original summary.", transcript: "Original transcript." };
     const initialDraft = "# Meeting\n\n## Summary\n\nOriginal summary.\n\n## Transcript\n\nEdited draft transcript.\n";
     const draftsById = new Map<string, string>();
@@ -761,10 +761,10 @@ describe("transcription UI", () => {
     await act(async () => { finishSummary?.({ result: { summary: "Derived summary.", transcript: "Edited draft transcript." } }); });
 
     expect(draftsById.get(draftId)).toBe(initialDraft);
-    expect([...draftsById.entries()].some(([id, content]) => id !== draftId && content.includes("Derived summary."))).toBe(true);
-    expect(draftNumber).toBe(2);
-    expect(drafts.openDraft).toHaveBeenCalledTimes(1);
-    expect(drafts.openDraft).toHaveBeenCalledWith(draftId);
+    expect(draftNumber).toBe(1);
+    expect(drafts.createDraft).toHaveBeenCalledTimes(1);
+    expect(drafts.updateDraftContent).not.toHaveBeenCalled();
+    expect(drafts.openDraft).not.toHaveBeenCalled();
     expect(apiForBundleMock.mock.calls.some(([, , options]) => options?.method === "PATCH")).toBe(false);
   });
 
@@ -957,11 +957,11 @@ describe("transcription UI", () => {
       phase: "summarizing",
       activeSession: session,
       pending: [session],
-      progress: "Summarizing the editable draft with the selected local text model…",
+      progress: "Summarizing the saved recording with the selected local text model…",
     })} actions={dockActions} />);
     fireEvent.click(screen.getByRole("button", { name: "Cancel summary" }));
     expect(dockActions.cancel).toHaveBeenCalledWith(session);
-    expect(screen.getByText(/your draft and original transcript stay unchanged/i)).toBeInTheDocument();
+    expect(screen.getByText(/saved recording stays unchanged/i)).toBeInTheDocument();
   });
 
   it("has no speaker toggles anywhere and offers the speaker model download whenever it is missing", () => {
@@ -1048,7 +1048,7 @@ describe("transcription UI", () => {
     vi.unstubAllGlobals();
   });
 
-  it("confirms re-transcription inline without a speaker toggle", () => {
+  it("confirms re-transcription of the saved recording without a speaker toggle", () => {
     const dockActions = actions();
     const ready: TranscriptionSession = { ...session };
     render(<TranscriptionDock model={model({ status: { ...readyStatus, diarization: { ...speakerStatus, modelState: "ready", canDiarize: true } }, pending: [ready] })} actions={dockActions} />);
@@ -1058,7 +1058,8 @@ describe("transcription UI", () => {
     expect(screen.queryByRole("checkbox", { name: /Identify speakers/ })).not.toBeInTheDocument();
     expect(dockActions.retranscribe).not.toHaveBeenCalled();
     const group = screen.getByRole("group", { name: "Confirm re-transcription of meeting.wav" });
-    expect(group).toHaveTextContent("Only the Transcript section of the open draft is replaced");
+    expect(group).toHaveTextContent("saved recording transcript will be replaced");
+    expect(group).toHaveTextContent("Open drafts will stay unchanged");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("group", { name: /Confirm re-transcription/ })).not.toBeInTheDocument();
     openMenu();
@@ -1067,7 +1068,7 @@ describe("transcription UI", () => {
     expect(dockActions.retranscribe).toHaveBeenCalledWith(ready);
   });
 
-  it("re-transcribes into the open linked draft, keeping edited speaker names and the summary", async () => {
+  it("re-transcribes the saved result and leaves an open draft unchanged", async () => {
     const draftsById = new Map<string, string>();
     apiForBundleMock.mockImplementation(async (_bundle: string | null, url: string, options?: { body?: string }) => {
       if (url.endsWith("/process")) {
@@ -1095,18 +1096,19 @@ describe("transcription UI", () => {
     draftsById.set("untitled:one", "# Meeting\n\n## Summary\n\n- Mine\n\n## Speakers\n\nspeaker1:: Alex\n\n## Transcript\n\nold text\n");
     apiForBundleMock.mockClear();
     await act(async () => { result.current.actions.retranscribe(session); });
-    await waitFor(() => expect(drafts.updateDraftContent).toHaveBeenCalled());
-    expect(draftsById.get("untitled:one")).toBe("# Meeting\n\n## Summary\n\n- Mine\n\n## Speakers\n\nspeaker1:: Alex\nspeaker2:: Speaker 2\n\n## Transcript\n\n**{{speaker1}}** [00:00]\nNew.\n\n**{{speaker2}}** [00:05]\nMore.\n");
+    await waitFor(() => expect(setMessage).toHaveBeenCalledWith("Re-transcription saved to the recording."));
+    expect(draftsById.get("untitled:one")).toBe("# Meeting\n\n## Summary\n\n- Mine\n\n## Speakers\n\nspeaker1:: Alex\n\n## Transcript\n\nold text\n");
+    expect(drafts.updateDraftContent).not.toHaveBeenCalled();
     expect(drafts.createDraft).toHaveBeenCalledTimes(1);
-    expect(setMessage).toHaveBeenCalledWith("Transcript replaced in your open draft.");
+    expect(setMessage).toHaveBeenCalledWith("Re-transcription saved to the recording.");
   });
 
-  it("opens a new draft after re-transcribing when no linked draft is open", async () => {
+  it("does not create a draft after re-transcribing when none is open", async () => {
     apiForBundleMock.mockResolvedValue({ session, result: { summary: "", transcript: "[00:01] Hi." } });
     const drafts = { createDraft: vi.fn(() => "untitled:new"), getDraftContent: vi.fn(), getDraftDocument: vi.fn(), updateDraftContent: vi.fn(), openDraft: vi.fn() };
     const { result } = renderHook(() => useTranscription({ drafts, setMessage: vi.fn(), sourceBundleId: "bundle-a" }));
     await act(async () => { result.current.actions.retranscribe(session); });
-    await waitFor(() => expect(drafts.createDraft).toHaveBeenCalledWith(expect.stringContaining("[00:01] Hi.")));
+    await waitFor(() => expect(drafts.createDraft).not.toHaveBeenCalled());
     expect(drafts.updateDraftContent).not.toHaveBeenCalled();
   });
 
@@ -1121,12 +1123,13 @@ describe("transcription UI", () => {
     expect(drafts.createDraft).not.toHaveBeenCalled();
   });
 
-  it("resolves speaker names from the draft before sending the transcript to be summarized", async () => {
-    const draft = "# Meeting\n\n## Summary\n\nx\n\n## Speakers\n\nspeaker1:: Alex\nspeaker2:: Sam\n\n## Transcript\n\n**{{speaker1}}** [00:00]\nHi.\n\n**{{speaker2}}** [00:04]\nHey.\n";
-    let sent = "";
+  it("summarizes saved speaker names without editing the open draft", async () => {
+    const draft = "# Meeting\n\n## Summary\n\nx\n\n## Speakers\n\nspeaker1:: Draft Alex\nspeaker2:: Draft Sam\n\n## Transcript\n\nCustom draft transcript.\n";
+    const raw = { summary: "", transcript: "**{{speaker1}}** [00:00]\nHi.\n\n**{{speaker2}}** [00:04]\nHey.", speakerNames: { "1": "Saved Alex", "2": "Saved Sam" } };
+    let summaryBody: Record<string, unknown> | null = null;
     apiForBundleMock.mockImplementation(async (_bundle: string | null, url: string, options?: { body?: string }) => {
-      if (url.endsWith("/summarize")) { sent = JSON.parse(options?.body ?? "{}").transcript; return { result: { summary: "- Done", transcript: sent } }; }
-      return { session, result: { summary: "", transcript: "x" } };
+      if (url.endsWith("/summarize")) { summaryBody = JSON.parse(options?.body ?? "{}"); return { result: { ...raw, summary: "- Done" } }; }
+      return { session, result: raw };
     });
     const drafts = {
       createDraft: vi.fn(() => "untitled:one"),
@@ -1140,8 +1143,9 @@ describe("transcription UI", () => {
     await act(async () => { await result.current.actions.openTranscript(session); });
     apiMock.mockResolvedValue([]);
     await act(async () => { result.current.actions.regenerateSummary(session); });
-    await waitFor(() => expect(drafts.updateDraftContent).toHaveBeenCalled());
-    expect(sent).toBe("**Alex** [00:00]\nHi.\n\n**Sam** [00:04]\nHey.");
-    expect(sent).not.toContain("{{");
+    await waitFor(() => expect(summaryBody).not.toBeNull());
+    expect(summaryBody).toEqual({});
+    expect(drafts.updateDraftContent).not.toHaveBeenCalled();
+    expect(drafts.getDraftContent("untitled:one")).toContain("Custom draft transcript.");
   });
 });

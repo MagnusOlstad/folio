@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { createSerialQueue } from '../core/queue.js'
 import { markdownFromResult, splitTranscript } from './model.js'
 import { createDiarizationSupport } from './diarization.js'
-import { buildTranscriptResult, mergeRecordingSpeakers, mergeSegmentWithPrevious, normalizeSegments, reassignSegmentSpeaker, splitSegment as splitResultSegment } from './segments.js'
+import { buildTranscriptResult, mergeRecordingSpeakers, mergeSegmentWithPrevious, normalizeSegments, reassignSegmentSpeaker, renameRecordingSpeaker, splitSegment as splitResultSegment } from './segments.js'
 import { folderBytes, installedSnapshot } from './snapshots.js'
 import { DEFAULT_TRANSCRIPTION_MODEL_ID, DIARIZATION_MODELS, DIARIZATION_MODEL_ID, TRANSCRIPTION_MODELS } from './models.js'
 import { createSessionLocks } from './locks.js'
@@ -264,6 +264,15 @@ export function createTranscriptionService(runtime) {
         const built = buildTranscriptResult(response.text, segments, speakerTurns)
         const result = { summary: '', ...built, ...(speakerWarning ? { speakerWarning } : {}),
           markdown: markdownFromResult({ summary: '', transcript: built.transcript }, built.transcript), generatedAt: new Date().toISOString() }
+        if (rerun) {
+          const previous = await runtime.transcriptionStorage.readResult(id)
+          const priorNames = previous?.speakerNames
+          if (priorNames && typeof priorNames === 'object') {
+            const present = new Set(result.speakerNumbers ?? [])
+            const speakerNames = Object.fromEntries(Object.entries(priorNames).filter(([number]) => present.has(Number(number))))
+            if (Object.keys(speakerNames).length) result.speakerNames = speakerNames
+          }
+        }
         await runtime.transcriptionStorage.writeResult(id, result)
         const ready = await runtime.transcriptionStorage.writeManifest({ ...(await runtime.transcriptionStorage.readManifest(id)), state: 'ready', error: null })
         return { session: withProgress(ready), result }
@@ -315,6 +324,7 @@ export function createTranscriptionService(runtime) {
 
   const maxSpeakers = () => DIARIZATION_MODELS[DIARIZATION_MODEL_ID].maxSpeakers
   const reassignSpeaker = (id, index, speaker) => editSegments(id, (result) => reassignSegmentSpeaker(result, index, speaker, { maxSpeakers: maxSpeakers() }))
+  const renameSpeaker = (id, speaker, name) => editSegments(id, (result) => renameRecordingSpeaker(result, speaker, name, { maxSpeakers: maxSpeakers() }))
   const splitSegment = (id, index, offset, speaker) => editSegments(id, (result) => splitResultSegment(result, index, offset, speaker, { maxSpeakers: maxSpeakers() }))
   const mergeSegment = (id, index) => editSegments(id, (result) => mergeSegmentWithPrevious(result, index))
   const mergeSpeakers = (id, source, target) => editSegments(id, (result) => mergeRecordingSpeakers(result, source, target, { maxSpeakers: maxSpeakers() }))
@@ -338,7 +348,7 @@ export function createTranscriptionService(runtime) {
     return updated.length
   }
 
-  async function summarize(id, transcript) {
+  async function summarize(id) {
     locks.beginSummary(id)
     try {
     const session = await runtime.transcriptionStorage.readManifest(id)
@@ -349,11 +359,12 @@ export function createTranscriptionService(runtime) {
     let finishSummary
     const finished = new Promise((resolve) => { finishSummary = resolve })
     activeSummaries.set(id, { controller, finished, finish: finishSummary })
-    const content = String(transcript || '').trim()
     try {
+      const sourceResult = await runtime.transcriptionStorage.readResult(id)
+      if (!sourceResult) throw Object.assign(new Error('Transcription result not found.'), { status: 404 })
+      const content = String(sourceResult.transcript || '').replace(/\{\{\s*speaker(\d{1,3})\s*\}\}/gi, (_match, digits) => sourceResult.speakerNames?.[digits] || `Speaker ${Number(digits)}`)
       if (!content) throw Object.assign(new Error('Add transcript text before generating a summary.'), { status: 400 })
       if (content.length > 250_000) throw Object.assign(new Error('The transcript is too long to summarize safely. Shorten it and try again.'), { status: 413 })
-      const previous = await runtime.transcriptionStorage.readResult(id)
       const pieces = splitTranscript(content, 10_000)
       const summaries = []
       for (const piece of pieces) {
@@ -361,7 +372,7 @@ export function createTranscriptionService(runtime) {
           { role: 'system', content: 'Write a concise factual summary of the supplied transcript in Markdown bullets. Keep names, numbers, dates, decisions, and uncertainty accurate. Do not infer facts that are not stated. The transcript may contain [mm:ss] timestamps and bold speaker names at the start of each turn (for example **Speaker 1** or **Alex**); use the names to attribute statements and decisions exactly as written, but do not copy timestamps into the summary.' },
           { role: 'user', content: `<transcript>\n${piece}\n</transcript>` },
         ], { maxTokens: 384, temperature: 0 })
-        if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. Your draft and original transcript were kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
+        if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. The saved recording was kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
         const summary = String(generated.text || '').trim()
         if (!summary) throw new Error('The selected local language model returned an empty summary.')
         summaries.push(summary)
@@ -381,17 +392,19 @@ export function createTranscriptionService(runtime) {
             { role: 'system', content: 'Combine these notes into a concise factual summary in Markdown bullets. Preserve names, dates, decisions, and uncertainty. Do not add facts.' },
             { role: 'user', content: batchContent },
           ], { maxTokens: 384, temperature: 0 })
-          if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. Your draft and original transcript were kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
+          if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. The saved recording was kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
           finalPieces.push(String(generated.text || '').trim())
         }
       }
       const summary = finalPieces[0] || ''
       if (!summary) throw new Error('The selected local language model returned an empty summary.')
-      const result = { ...(previous || {}), summary, transcript: content, markdown: markdownFromResult({ summary, transcript: content }, content), summaryGeneratedAt: new Date().toISOString() }
-      return result
+      return await editSegments(id, (latest) => {
+        if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. The saved recording was kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
+        return { ...latest, summary, summaryGeneratedAt: new Date().toISOString(), markdown: markdownFromResult({ summary, transcript: latest.transcript }, latest.transcript) }
+      })
     } catch (error) {
-      if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. Your draft and original transcript were kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
-      if (error?.status === 400 || error?.status === 413) throw error
+      if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. The saved recording was kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
+      if ([400, 404, 409, 413].includes(error?.status)) throw error
       const detail = error instanceof Error ? error.message : 'Unknown local summary error.'
       throw Object.assign(new Error(`Could not generate a local summary. Install and start a text generation model in Settings, then retry. ${detail}`), { status: 503 })
     } finally {
@@ -477,6 +490,7 @@ export function createTranscriptionService(runtime) {
     installDiarization: diarization.install,
     updateOptions,
     reassignSpeaker,
+    renameSpeaker,
     splitSegment,
     mergeSegment,
     mergeSpeakers,
