@@ -7,11 +7,12 @@ import {
   buildTurns, findSegmentIndex, formatClock, segmentSpeakers, totalDuration, turnCounts,
 } from '../model/playback-turns.ts'
 import type { TranscriptionSession } from '../model/types.ts'
+import type { ReassignOutcome } from '../hooks/speakerReassign.ts'
 import { NextIcon, PauseIcon, PlayIcon, PrevIcon } from './icons.tsx'
 import { NowSpeaking } from './NowSpeaking.tsx'
 import { SpeakerChips } from './SpeakerChips.tsx'
 import { SpeakerLanes } from './SpeakerLanes.tsx'
-import { normalizeSpeakerName } from '../model/speakers.ts'
+import { resultSpeakerNames } from '../model/speakers.ts'
 
 type PlayerPanelProps = {
   id: string
@@ -25,11 +26,9 @@ export function PlayerPanel({ id, session, model, actions, onSpeakerCount }: Pla
   const rootRef = useRef<HTMLDivElement>(null)
   const playback = useSyncExternalStore(playbackStore.subscribe, playbackStore.getSnapshot)
   const { result, error, setResult } = usePlayerResult(session, actions.loadResult)
-  const draftNames = model.speakerNamesFor(session)
-  // Names just saved fill in until the draft adapter reports them (a draft created by the rename can lag a render).
-  const [renamed, setRenamed] = useState<ReadonlyMap<number, string>>(new Map())
-  const names = useMemo(() => renamed.size ? new Map([...renamed, ...(draftNames ?? [])]) : draftNames, [draftNames, renamed])
+  const [mergingSpeakers, setMergingSpeakers] = useState(false)
   const segments = useMemo(() => result?.segments ?? [], [result])
+  const names = useMemo(() => resultSpeakerNames(result), [result])
   const turns = useMemo(() => buildTurns(segments), [segments])
   const speakers = useMemo(() => segmentSpeakers(segments), [segments])
   const counts = useMemo(() => turnCounts(turns), [turns])
@@ -51,8 +50,24 @@ export function PlayerPanel({ id, session, model, actions, onSpeakerCount }: Pla
   useEffect(() => { if (speakers.length) onSpeakerCount(speakers.length) }, [speakers.length, onSpeakerCount])
 
   async function renameSpeaker(speaker: number, name: string) {
-    await actions.renameSpeaker(session, speaker, name)
-    setRenamed((current) => new Map(current).set(speaker, normalizeSpeakerName(speaker, name)))
+    const updated = await actions.renameSpeaker(session, speaker, name)
+    setResult(updated)
+    return updated
+  }
+
+  function applySpeakerMerge(outcome: ReassignOutcome, source: number, target: number) {
+    const current = playbackStore.getSnapshot()
+    if (current.sessionId === session.id) {
+      if (current.solo === source) playbackStore.setSolo(target)
+      else if (current.solo !== null && !outcome.result.speakerNumbers?.includes(current.solo)) playbackStore.setSolo(null)
+    }
+    setResult(outcome.result)
+  }
+
+  async function mergeSpeakers(source: number, target: number) {
+    setMergingSpeakers(true)
+    try { return await actions.mergeSpeakers(session, source, target) }
+    finally { setMergingSpeakers(false) }
   }
 
   function focusPanel() { rootRef.current?.focus() }
@@ -100,12 +115,18 @@ export function PlayerPanel({ id, session, model, actions, onSpeakerCount }: Pla
         />
       )}
 
-      {hasSpeakers && <SpeakerChips speakers={speakers} names={names} counts={counts} solo={solo} active={active} onRename={renameSpeaker} />}
+      {hasSpeakers && <SpeakerChips speakers={speakers} names={names} counts={counts} solo={solo} active={active} onRename={renameSpeaker}
+        onMerge={mergeSpeakers} onApplied={applySpeakerMerge} />}
 
       {error && <p className="transcription-item-error" role="status">{error}</p>}
+      {result?.summary?.trim() && (
+        <section className="player-summary" aria-label="Summary">
+          <h4 className="player-summary-title">Summary</h4>
+          <p className="player-summary-text">{result.summary.trim()}</p>
+        </section>
+      )}
       {result && segments.length > 0 && (
         <NowSpeaking
-          sessionId={session.id}
           segments={segments}
           index={segmentIndex}
           present={speakers}
@@ -116,6 +137,7 @@ export function PlayerPanel({ id, session, model, actions, onSpeakerCount }: Pla
           onSplit={(index, offset, speaker) => actions.splitSegment(session, index, offset, speaker)}
           onMerge={(index) => actions.mergeSegment(session, index)}
           onApplied={(outcome) => setResult(outcome.result)}
+          locked={mergingSpeakers}
         />
       )}
       {result && segments.length === 0 && <p className="transcription-empty">This recording has no timed segments to follow.</p>}

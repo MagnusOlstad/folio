@@ -35,6 +35,8 @@ export type TranscriptionResult = {
   speakers?: boolean
   /** Speaker numbers that appear in the transcript, in ascending order. */
   speakerNumbers?: number[]
+  /** Recording-owned display names, keyed by the stable one-based segment speaker number. */
+  speakerNames?: Record<string, string>
   speakerCount?: number
   /** Set when speaker labels were requested but could not be added. */
   speakerWarning?: string
@@ -101,7 +103,7 @@ export function mergeTranscriptionDraft(session: TranscriptionSession, result: T
     '',
     result.summary.trim() || 'Generate a summary from this transcript.',
     '',
-    ...(speakerNumbers.length ? ['## Speakers', '', ...speakerNumbers.map(speakerDefinitionLine), ''] : []),
+    ...(speakerNumbers.length ? ['## Speakers', '', ...speakerNumbers.map((number) => speakerDefinitionLine(number, result.speakerNames?.[String(number)])), ''] : []),
     '## Transcript',
     '',
     result.transcript.trim() || '(No speech was recognized.)',

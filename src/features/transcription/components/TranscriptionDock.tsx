@@ -124,7 +124,7 @@ export function TranscriptionDock({ model, actions }: TranscriptionDockProps) {
       />
 
       {model.progress && model.phase !== 'transcribing' && <p className="transcription-progress" role="status">{model.progress}</p>}
-      {(model.phase === 'summarizing' || model.phase === 'cancelling-summary') && <p className="transcription-empty">Cancel waits for the current local model request; your draft and original transcript stay unchanged.</p>}
+      {(model.phase === 'summarizing' || model.phase === 'cancelling-summary') && <p className="transcription-empty">Cancel waits for the current local model request; the saved recording stays unchanged.</p>}
       {model.error && <p className="transcription-error" role="alert">{model.error}</p>}
 
       {model.pending.length === 0 ? (

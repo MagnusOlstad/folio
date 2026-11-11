@@ -21,7 +21,7 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   let importBody: Record<string, unknown> | null = null
   const processedSessionIds = new Set<string>()
   const activeSessionIds = new Set<string>()
-  const rawResults = new Map<string, { summary: string; transcript: string }>()
+  const rawResults = new Map<string, Record<string, unknown>>()
   const processBodies: Record<string, unknown>[] = []
   let releaseTranscription = () => {}
   await page.addInitScript(() => localStorage.setItem('folio:model-setup-prompt-seen', '1'))
@@ -97,7 +97,8 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
     await route.fulfill({ json: { session: { ...session, state: 'ready' }, result } })
   })
   await page.route('**/api/transcriptions/*/summarize', async (route) => {
-    summarizedTranscript = JSON.parse(route.request().postData() || '{}').transcript
+    const id = new URL(route.request().url()).pathname.split('/').at(-2) || ''
+    summarizedTranscript = String(rawResults.get(id)?.transcript || '')
     await route.fulfill({ json: { result: {
       summary: '- The project review is Wednesday at noon.',
       transcript: summarizedTranscript,
@@ -186,9 +187,9 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   await page.getByRole('tab', { name: 'Transcription' }).click()
   await filed.getByRole('button', { name: 'More actions for project-review.wav' }).click()
   await page.getByRole('menuitem', { name: 'Summarize again' }).click()
-  await expect.poll(() => summarizedTranscript).toBe('Edited only in the new draft.')
-  await expect(summaryDraft).toContainText('The project review is Wednesday at noon.')
+  await expect.poll(() => summarizedTranscript).toBe('[00:01] The project review is next Tuesday at noon.')
   await expect(summaryDraft).toContainText('Edited only in the new draft.')
+  await expect(summaryDraft).not.toContainText('The project review is Wednesday at noon.')
   const filedNoteAfterSummary = await request.get(`/api/note?id=${encodeURIComponent(filedNoteId)}`, {
     headers: { 'x-folio-bundle': sourceBundleId },
   })
@@ -202,16 +203,15 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   }, rawSessionId)
   expect(rawSession.result.transcript).toBe('[00:01] The project review is next Tuesday at noon.')
 
-  // Re-transcribing replaces only the transcript section of the open draft; the summary stays.
+  // Re-transcribing updates the recording while leaving the open draft alone.
   await page.getByRole('tab', { name: 'Transcription' }).click()
   await filed.getByRole('button', { name: 'More actions for project-review.wav' }).click()
   await page.getByRole('menuitem', { name: 'Re-transcribe…' }).click()
-  await expect(filed.getByText(/Only the Transcript section of the open draft is replaced/)).toBeVisible()
+  await expect(filed.getByText(/Open drafts will stay unchanged/)).toBeVisible()
   await filed.getByRole('group', { name: /Confirm re-transcription/ }).getByRole('button', { name: 'Re-transcribe' }).click()
   await expect.poll(() => processBodies.at(-1)).toEqual({ retranscribe: true })
-  await expect(summaryDraft).toContainText('[00:02] The project review moved to Thursday at noon.')
-  await expect(summaryDraft).toContainText('The project review is Wednesday at noon.')
-  await expect(summaryDraft).not.toContainText('Edited only in the new draft.')
+  await expect(summaryDraft).toContainText('Edited only in the new draft.')
+  await expect(summaryDraft).not.toContainText('[00:02] The project review moved to Thursday at noon.')
   expect(processBodies[0]).toEqual({})
 
   // Expanding the ready card shows the player inside it; the play button toggles real audio playback.
@@ -226,6 +226,79 @@ test('imports audio, downloads local Whisper, files an editable note, and summar
   await expect(player.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
   await player.getByRole('button', { name: 'Pause', exact: true }).click()
   await expect(player.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
+
+  // Recording-wide speaker merge keeps the first selected identity and persists the new result.
+  const speakerResult = {
+    summary: '', speakers: true, speakerCount: 3, speakerNumbers: [1, 2, 3],
+    segments: [
+      { start: 1, end: 2, text: 'First.', speaker: 1 },
+      { start: 2, end: 3, text: 'Second.', speaker: 2 },
+      { start: 3, end: 4, text: 'Third.', speaker: 3 },
+    ],
+    transcript: '**{{speaker1}}** [00:01]\nFirst.\n\n**{{speaker2}}** [00:02]\nSecond.\n\n**{{speaker3}}** [00:03]\nThird.',
+  }
+  rawResults.set(rawSessionId, speakerResult)
+  let mergeAttempts = 0
+  await page.route(/\/api\/transcriptions\/[^/]+\/speakers\/merge$/, async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ source: 2, target: 1 })
+    mergeAttempts += 1
+    if (mergeAttempts === 1) {
+      await route.fulfill({ status: 400, json: { error: 'Both speakers must be present in this transcript.' } })
+      return
+    }
+    const mergedResult = {
+      ...speakerResult, speakerCount: 2, speakerNumbers: [1, 3],
+      segments: speakerResult.segments.map((segment) => segment.speaker === 2 ? { ...segment, speaker: 1 } : segment),
+      transcript: '**{{speaker1}}** [00:01]\nFirst. Second.\n\n**{{speaker3}}** [00:03]\nThird.',
+    }
+    rawResults.set(rawSessionId, mergedResult)
+    await route.fulfill({ json: { result: mergedResult } })
+  })
+  await header.click()
+  await header.click()
+  await expect(player.getByRole('button', { name: 'Merge speakers' })).toBeVisible()
+  await player.getByRole('button', { name: 'Merge speakers' }).click()
+  await player.getByRole('button', { name: /Speaker 1/ }).first().click()
+  await player.getByRole('button', { name: /Speaker 2/ }).first().click()
+  await expect(player.getByRole('button', { name: 'Merge', exact: true })).toBeEnabled()
+  await player.getByRole('button', { name: 'Cancel' }).click()
+  await expect(player.getByRole('button', { name: 'Merge speakers' })).toBeFocused()
+  await player.getByRole('button', { name: 'Merge speakers' }).click()
+  await player.getByRole('button', { name: /Speaker 1/ }).first().click()
+  await player.getByRole('button', { name: /Speaker 2/ }).first().click()
+  await player.getByRole('button', { name: 'Merge', exact: true }).click()
+  await expect(player.getByRole('alert')).toContainText('Both speakers must be present')
+  await player.getByRole('button', { name: 'Merge', exact: true }).click()
+  await expect(player.getByText('Speakers merged in the recording.')).toBeVisible()
+  await expect(player.getByRole('button', { name: /Speaker 2/ })).toHaveCount(0)
+  await expect(player.locator('.player-chip').filter({ hasText: 'Speaker 3' })).toBeVisible()
+  await expect(player.getByRole('status').filter({ hasText: 'Speakers merged' })).toBeFocused()
+
+  // A recording-pane rename is saved to the result and reloads independently of the open draft.
+  const mergedRecording = rawResults.get(rawSessionId)
+  if (!mergedRecording) throw new Error('The merged result was not recorded.')
+  let namedRecording: Record<string, unknown> = mergedRecording
+  await page.route(/\/api\/transcriptions\/[^/]+\/speakers\/name$/, async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ speaker: 1, name: 'Recorded Alex' })
+    namedRecording = { ...namedRecording, speakerNames: { '1': 'Recorded Alex' } }
+    rawResults.set(rawSessionId, namedRecording)
+    await route.fulfill({ json: { result: namedRecording } })
+  })
+  const savedDraftContent = await summaryDraft.textContent()
+  await player.getByRole('button', { name: /Speaker 1/ }).first().click()
+  await player.getByRole('button', { name: 'Rename Speaker 1' }).click()
+  const renameInput = player.getByRole('textbox', { name: 'Name for Speaker 1' })
+  await renameInput.fill('Recorded Alex')
+  await renameInput.press('Enter')
+  await expect(player.getByText('Recorded Alex', { exact: true }).first()).toBeVisible()
+  await expect(summaryDraft).toHaveText(savedDraftContent || '')
+  await page.reload()
+  await page.getByRole('button', { name: 'Todo List', exact: true }).click()
+  await page.getByRole('tab', { name: 'Transcription' }).click()
+  const reloaded = page.locator('.transcription-row').filter({ hasText: 'project-review.wav' })
+  await reloaded.getByRole('button', { name: /^project-review\.wav, / }).click()
+  const reloadedPlayer = reloaded.getByRole('group', { name: 'Player for project-review.wav' })
+  await expect(reloadedPlayer.getByText('Recorded Alex', { exact: true }).first()).toBeVisible()
 
   // Speaker labels are a per-audio choice made on the imported item; choosing them offers the optional model download.
   await page.getByRole('tab', { name: 'Transcription' }).click()

@@ -42,7 +42,7 @@ export function RecordingRow(props: RecordingRowProps) {
   const ready = session.state === 'ready'
   const deleteDisabled = controlsBusy || model.recording.phase !== 'idle' || processing || summarizing || Boolean(model.deletingSessionId)
   const hasSpeakers = (speakerCount ?? 0) > 0
-  const draftOpen = ready && model.speakerNamesFor(session) !== null
+  const draftOpen = ready && model.hasOpenDraftFor(session)
 
   useEffect(() => { if (confirming === 'delete') cancelRef.current?.focus() }, [confirming])
   useEffect(() => {
@@ -113,7 +113,7 @@ export function RecordingRow(props: RecordingRowProps) {
       {ready && expanded && <PlayerPanel id={panelId} session={session} model={model} actions={actions} onSpeakerCount={props.onSpeakerCount} />}
       {ready && confirming === 'retranscribe' && (
         <div className="transcription-retranscribe-confirm" role="group" aria-label={`Confirm re-transcription of ${name}`}>
-          <p>Transcribe again with {selectedModelName}? Only the Transcript section of the open draft is replaced; speaker names you set are kept.</p>
+          <p>Transcribe again with {selectedModelName}? The saved recording transcript and speaker names will be replaced. Open drafts will stay unchanged.</p>
           <button type="button" onClick={() => onConfirm(null)}>Cancel</button>
           <button
             type="button"

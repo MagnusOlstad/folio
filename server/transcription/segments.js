@@ -200,8 +200,11 @@ function labelledSegments(result, index) {
 // Speaker numbers are never renumbered because notes reference `speakerN::` names.
 function withSegments(result, segments) {
   const speakerNumbers = speakerNumbersOf(segments)
+  const { speakerNames: priorNames, ...base } = result
+  const kept = Object.entries(priorNames || {}).filter(([number]) => speakerNumbers.includes(Number(number)))
   return {
-    ...result,
+    ...base,
+    ...(kept.length ? { speakerNames: Object.fromEntries(kept) } : {}),
     segments,
     transcript: formatTranscript(segments, { speakers: true }),
     speakers: true,
@@ -214,6 +217,21 @@ function checkSpeaker(speaker, maxSpeakers) {
   if (!Number.isInteger(speaker) || speaker < 1 || speaker > maxSpeakers) throw badRequest(`Speaker must be a whole number from 1 to ${maxSpeakers}.`)
 }
 
+function normalizedSpeakerName(speaker, name) {
+  const cleaned = name.replace(/\s+/g, ' ').trim().slice(0, 64).trim()
+  return cleaned || `Speaker ${speaker}`
+}
+
+/** Saves a recording-owned speaker label without changing the segment identities. */
+export function renameRecordingSpeaker(result, speaker, name, { maxSpeakers = 4 } = {}) {
+  const segments = labelledSegments(result, 0)
+  checkSpeaker(speaker, maxSpeakers)
+  if (!segments.some((segment) => segment.speaker === speaker)) throw badRequest('This speaker is not present in the transcript.')
+  if (typeof name !== 'string') throw badRequest('Speaker name must be text.')
+  const speakerNames = { ...(result.speakerNames || {}), [String(speaker)]: normalizedSpeakerName(speaker, name) }
+  return { ...result, speakerNames }
+}
+
 /**
  * Reassigns one segment to another speaker and rebuilds the derived fields (transcript, speakerNumbers,
  * speakerCount, speakers). Throws a 400-status error for bad input or a result without speaker labels.
@@ -222,6 +240,23 @@ export function reassignSegmentSpeaker(result, index, speaker, { maxSpeakers = 4
   const segments = labelledSegments(result, index)
   checkSpeaker(speaker, maxSpeakers)
   return withSegments(result, segments.map((segment, position) => (position === index ? { ...segment, speaker } : segment)))
+}
+
+/** Reassigns every segment for one existing speaker to another without changing other segment data. */
+export function mergeRecordingSpeakers(result, source, target, { maxSpeakers = 4 } = {}) {
+  const segments = labelledSegments(result, 0)
+  checkSpeaker(source, maxSpeakers)
+  checkSpeaker(target, maxSpeakers)
+  if (source === target) throw badRequest('Choose two different speakers.')
+  const present = new Set(segments.map((segment) => segment.speaker))
+  if (!present.has(source) || !present.has(target)) throw badRequest('Both speakers must be present in this transcript.')
+  const merged = withSegments(result, segments.map((segment) => segment.speaker === source ? { ...segment, speaker: target } : segment))
+  const targetName = merged.speakerNames?.[String(target)]
+  const sourceName = result.speakerNames?.[String(source)]
+  const targetIsDefault = !targetName || targetName === `Speaker ${target}`
+  const sourceIsCustom = typeof sourceName === 'string' && sourceName !== `Speaker ${source}`
+  if (!targetIsDefault || !sourceIsCustom) return merged
+  return { ...merged, speakerNames: { ...merged.speakerNames, [String(target)]: sourceName } }
 }
 
 /**

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import test from 'node:test'
 import {
   assignSpeakers, buildTranscript, buildTranscriptResult, formatTimestamp, formatTranscript,
-  mergeSpeakerTurns, normalizeSegments, normalizeSpeakerSegments, reassignSegmentSpeaker, splitSegment, mergeSegmentWithPrevious,
+  mergeSpeakerTurns, normalizeSegments, normalizeSpeakerSegments, reassignSegmentSpeaker, renameRecordingSpeaker, splitSegment, mergeSegmentWithPrevious, mergeRecordingSpeakers,
 } from '../server/transcription/segments.js'
 import { stripTranscriptMarkup } from '../server/knowledge/transcript-markup.js'
 import { DIARIZATION_MODELS } from '../server/transcription/models.js'
@@ -203,6 +203,38 @@ test('reassigning a segment speaker rejects bad input', () => {
   assert.throws(() => reassignSegmentSpeaker({ segments: [] }, 0, 1), { status: 400 })
 })
 
+test('recording speaker names validate the existing ID and normalize blank, multiline, and long names', () => {
+  const result = { segments: [{ start: 0, end: 1, text: 'A', speaker: 1 }], speakerNames: { '1': 'Old' }, summary: 'kept' }
+  assert.deepEqual(renameRecordingSpeaker(result, 1, '  Kai\n Olsen '), { ...result, speakerNames: { '1': 'Kai Olsen' } })
+  assert.deepEqual(renameRecordingSpeaker(result, 1, '  '), { ...result, speakerNames: { '1': 'Speaker 1' } })
+  assert.equal(renameRecordingSpeaker(result, 1, 'x'.repeat(70)).speakerNames['1'], 'x'.repeat(64))
+  for (const [speaker, name] of [[0, 'A'], [5, 'A'], [1.5, 'A'], [2, 'A'], [1, null], ['1', 'A']]) {
+    assert.throws(() => renameRecordingSpeaker(result, speaker, name), { status: 400 })
+  }
+})
+
+test('merging recording speakers preserves segment fields and identity numbers', () => {
+  const result = { ...splitFixture(), segments: [
+    { start: 0, end: 1, text: 'A', speaker: 1, extra: { keep: true } },
+    { start: 1, end: 2, text: 'B', speaker: 2, custom: 'preserve' },
+    { start: 2, end: 3, text: 'C', speaker: 3 },
+  ] }
+  const merged = mergeRecordingSpeakers(result, 2, 1)
+  assert.deepEqual(merged.segments, [
+    result.segments[0], { ...result.segments[1], speaker: 1 }, result.segments[2],
+  ])
+  assert.deepEqual(merged.speakerNumbers, [1, 3])
+  assert.equal(merged.speakerCount, 2)
+  assert.equal(merged.summary, result.summary)
+  assert.equal(merged.transcript, formatTranscript(merged.segments, { speakers: true }))
+  const named = { ...result, speakerNames: { '1': 'Speaker 1', '2': 'Sam', '3': 'Taylor' } }
+  assert.deepEqual(mergeRecordingSpeakers(named, 2, 1).speakerNames, { '1': 'Sam', '3': 'Taylor' })
+  assert.deepEqual(mergeRecordingSpeakers({ ...named, speakerNames: { '1': 'Alex', '2': 'Sam', '3': 'Taylor' } }, 2, 1).speakerNames, { '1': 'Alex', '3': 'Taylor' })
+  for (const [source, target] of [[1, 1], [0, 2], [2, 5], [4, 1], [3, 4]]) {
+    assert.throws(() => mergeRecordingSpeakers(result, source, target), { status: 400 })
+  }
+})
+
 function splitFixture() {
   const segments = [
     { start: 0, end: 2, text: 'Intro.', speaker: 1, extra: 'keep' },
@@ -245,10 +277,11 @@ test('splitting rejects non-boundaries, empty halves and bad speakers', () => {
 })
 
 test('merging with the previous segment keeps its speaker and undoes a split', () => {
-  const result = splitFixture()
+  const result = { ...splitFixture(), speakerNames: { '1': 'Alex', '2': 'Sam' } }
   const split = splitSegment(result, 1, 11, 2)
   const merged = mergeSegmentWithPrevious(split, 2)
   assert.deepEqual(merged.segments, result.segments)
+  assert.deepEqual(merged.speakerNames, result.speakerNames)
   assert.deepEqual(merged.speakerNumbers, [1, 2])
   assert.equal(merged.transcript, formatTranscript(result.segments, { speakers: true }))
   const across = mergeSegmentWithPrevious(result, 2)
@@ -256,4 +289,34 @@ test('merging with the previous segment keeps its speaker and undoes a split', (
   assert.throws(() => mergeSegmentWithPrevious(result, 0), { status: 400 })
   assert.throws(() => mergeSegmentWithPrevious(result, 3), { status: 400 })
   assert.throws(() => mergeSegmentWithPrevious({ segments: [] }, 1), { status: 400 })
+})
+
+test('merging away the last occurrence drops that speaker name and a later split shows none', () => {
+  const result = {
+    speakerNames: { '1': 'Alex', '2': 'Sam' },
+    segments: [
+      { start: 0, end: 2, text: 'Alpha beta', speaker: 1 },
+      { start: 2, end: 4, text: 'Gamma delta', speaker: 2 },
+    ],
+  }
+  const merged = mergeSegmentWithPrevious(result, 1)
+  assert.deepEqual(merged.speakerNumbers, [1])
+  assert.deepEqual(merged.speakerNames, { '1': 'Alex' })
+  const restored = splitSegment(merged, 0, 11, 2)
+  assert.deepEqual(restored.speakerNumbers, [1, 2])
+  assert.deepEqual(restored.speakerNames, { '1': 'Alex' })
+})
+
+test('segment edits drop names of speakers that are no longer present', () => {
+  const result = { segments: [
+    { start: 0, end: 1, text: 'A', speaker: 1 },
+    { start: 1, end: 2, text: 'B', speaker: 2 },
+  ], speakerNames: { '1': 'Alex', '2': 'Sam' } }
+  const reassigned = reassignSegmentSpeaker(result, 1, 1)
+  assert.deepEqual(reassigned.speakerNames, { '1': 'Alex' })
+  const solo = reassignSegmentSpeaker({ ...result, speakerNames: { '2': 'Sam' } }, 1, 1)
+  assert.equal('speakerNames' in solo, false)
+  const split = splitSegment({ ...reassigned, segments: [{ start: 0, end: 2, text: 'One two.', speaker: 1 }] }, 0, 4, 2)
+  assert.deepEqual(split.speakerNumbers, [1, 2])
+  assert.deepEqual(split.speakerNames, { '1': 'Alex' })
 })

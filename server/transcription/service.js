@@ -5,12 +5,13 @@ import { randomUUID } from 'node:crypto'
 import { createSerialQueue } from '../core/queue.js'
 import { markdownFromResult, splitTranscript } from './model.js'
 import { createDiarizationSupport } from './diarization.js'
-import { buildTranscriptResult, mergeSegmentWithPrevious, normalizeSegments, reassignSegmentSpeaker, splitSegment as splitResultSegment } from './segments.js'
+import { buildTranscriptResult, normalizeSegments } from './segments.js'
 import { folderBytes, installedSnapshot } from './snapshots.js'
 import { DEFAULT_TRANSCRIPTION_MODEL_ID, DIARIZATION_MODELS, DIARIZATION_MODEL_ID, TRANSCRIPTION_MODELS } from './models.js'
 import { createSessionLocks } from './locks.js'
 import { runHelper } from './helper.js'
 import { recordDownloadProgress, summarizeDownloadProgress } from '../mlx/download-progress.js'
+import { createRecordingEdits } from './recording-edits.js'
 
 export const TRANSCRIPTION_MODEL = Object.freeze({
   id: TRANSCRIPTION_MODELS.whisper.repository,
@@ -38,6 +39,12 @@ export function createTranscriptionService(runtime) {
   const active = new Map()
   const activeSummaries = new Map()
   const locks = createSessionLocks()
+  const recordingEdits = createRecordingEdits({
+    storage: runtime.transcriptionStorage,
+    active,
+    locks,
+    maxSpeakers: () => DIARIZATION_MODELS[DIARIZATION_MODEL_ID].maxSpeakers,
+  })
   const installing = new Map()
   const installProgress = new Map()
   const installPromises = new Map()
@@ -295,29 +302,6 @@ export function createTranscriptionService(runtime) {
     return runtime.transcriptionStorage.writeManifest({ ...session, identifySpeakers: identifySpeakers === true })
   }
 
-  const speakerEdits = new Map()
-  async function editSegments(id, transform) {
-    const storage = runtime.transcriptionStorage
-    const run = async () => {
-      const session = await storage.readManifest(id)
-      if (!session) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
-      if (active.has(id) || locks.pendingTranscriptions.has(id) || session.state === 'transcribing') {
-        throw Object.assign(new Error('Speakers cannot be changed while a transcription is running.'), { status: 409 })
-      }
-      const result = await storage.readResult(id)
-      if (!result) throw Object.assign(new Error('Transcription result not found.'), { status: 404 })
-      return storage.writeResult(id, transform(result))
-    }
-    const next = (speakerEdits.get(id) ?? Promise.resolve()).catch(() => undefined).then(run)
-    speakerEdits.set(id, next)
-    try { return await next } finally { if (speakerEdits.get(id) === next) speakerEdits.delete(id) }
-  }
-
-  const maxSpeakers = () => DIARIZATION_MODELS[DIARIZATION_MODEL_ID].maxSpeakers
-  const reassignSpeaker = (id, index, speaker) => editSegments(id, (result) => reassignSegmentSpeaker(result, index, speaker, { maxSpeakers: maxSpeakers() }))
-  const splitSegment = (id, index, offset, speaker) => editSegments(id, (result) => splitResultSegment(result, index, offset, speaker, { maxSpeakers: maxSpeakers() }))
-  const mergeSegment = (id, index) => editSegments(id, (result) => mergeSegmentWithPrevious(result, index))
-
   async function updateDraftId(id, draftId) {
     const session = await runtime.transcriptionStorage.readManifest(id)
     if (!session) throw Object.assign(new Error('Transcription session not found.'), { status: 404 })
@@ -337,7 +321,11 @@ export function createTranscriptionService(runtime) {
     return updated.length
   }
 
-  async function summarize(id, transcript) {
+  function resolveTranscriptNames(result) {
+    return String(result.transcript || '').replace(/\{\{\s*speaker(\d{1,3})\s*\}\}/gi, (_match, digits) => result.speakerNames?.[digits] || `Speaker ${Number(digits)}`)
+  }
+
+  async function summarize(id) {
     locks.beginSummary(id)
     try {
     const session = await runtime.transcriptionStorage.readManifest(id)
@@ -348,11 +336,12 @@ export function createTranscriptionService(runtime) {
     let finishSummary
     const finished = new Promise((resolve) => { finishSummary = resolve })
     activeSummaries.set(id, { controller, finished, finish: finishSummary })
-    const content = String(transcript || '').trim()
     try {
+      const sourceResult = await runtime.transcriptionStorage.readResult(id)
+      if (!sourceResult) throw Object.assign(new Error('Transcription result not found.'), { status: 404 })
+      const content = resolveTranscriptNames(sourceResult)
       if (!content) throw Object.assign(new Error('Add transcript text before generating a summary.'), { status: 400 })
       if (content.length > 250_000) throw Object.assign(new Error('The transcript is too long to summarize safely. Shorten it and try again.'), { status: 413 })
-      const previous = await runtime.transcriptionStorage.readResult(id)
       const pieces = splitTranscript(content, 10_000)
       const summaries = []
       for (const piece of pieces) {
@@ -360,7 +349,7 @@ export function createTranscriptionService(runtime) {
           { role: 'system', content: 'Write a concise factual summary of the supplied transcript in Markdown bullets. Keep names, numbers, dates, decisions, and uncertainty accurate. Do not infer facts that are not stated. The transcript may contain [mm:ss] timestamps and bold speaker names at the start of each turn (for example **Speaker 1** or **Alex**); use the names to attribute statements and decisions exactly as written, but do not copy timestamps into the summary.' },
           { role: 'user', content: `<transcript>\n${piece}\n</transcript>` },
         ], { maxTokens: 384, temperature: 0 })
-        if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. Your draft and original transcript were kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
+        if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. The saved recording was kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
         const summary = String(generated.text || '').trim()
         if (!summary) throw new Error('The selected local language model returned an empty summary.')
         summaries.push(summary)
@@ -380,17 +369,24 @@ export function createTranscriptionService(runtime) {
             { role: 'system', content: 'Combine these notes into a concise factual summary in Markdown bullets. Preserve names, dates, decisions, and uncertainty. Do not add facts.' },
             { role: 'user', content: batchContent },
           ], { maxTokens: 384, temperature: 0 })
-          if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. Your draft and original transcript were kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
+          if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. The saved recording was kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
           finalPieces.push(String(generated.text || '').trim())
         }
       }
       const summary = finalPieces[0] || ''
       if (!summary) throw new Error('The selected local language model returned an empty summary.')
-      const result = { ...(previous || {}), summary, transcript: content, markdown: markdownFromResult({ summary, transcript: content }, content), summaryGeneratedAt: new Date().toISOString() }
-      return result
+      const saved = await recordingEdits.editSegments(id, (latest) => {
+        if (resolveTranscriptNames(latest) !== content) throw Object.assign(new Error('The transcript changed while the summary was being generated. Summarize again.'), { status: 409 })
+        if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. The saved recording was kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
+        return { ...latest, summary, summaryGeneratedAt: new Date().toISOString(), markdown: markdownFromResult({ summary, transcript: latest.transcript }, latest.transcript) }
+      })
+      // Bump the manifest so open players notice the saved summary and reload the result.
+      const touched = await runtime.transcriptionStorage.readManifest(id)
+      if (touched) await runtime.transcriptionStorage.writeManifest(touched)
+      return saved
     } catch (error) {
-      if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. Your draft and original transcript were kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
-      if (error?.status === 400 || error?.status === 413) throw error
+      if (controller.signal.aborted) throw Object.assign(new Error('Summary cancelled. The saved recording was kept.'), { code: 'SUMMARY_CANCELLED', status: 409 })
+      if ([400, 404, 409, 413].includes(error?.status)) throw error
       const detail = error instanceof Error ? error.message : 'Unknown local summary error.'
       throw Object.assign(new Error(`Could not generate a local summary. Install and start a text generation model in Settings, then retry. ${detail}`), { status: 503 })
     } finally {
@@ -475,9 +471,11 @@ export function createTranscriptionService(runtime) {
     selectModel,
     installDiarization: diarization.install,
     updateOptions,
-    reassignSpeaker,
-    splitSegment,
-    mergeSegment,
+    reassignSpeaker: recordingEdits.reassignSpeaker,
+    renameSpeaker: recordingEdits.renameSpeaker,
+    splitSegment: recordingEdits.splitSegment,
+    mergeSegment: recordingEdits.mergeSegment,
+    mergeSpeakers: recordingEdits.mergeSpeakers,
     transcribe,
     cancel,
     updateDraftId,

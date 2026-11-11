@@ -504,6 +504,7 @@ test('bundle-local transcription status reflects the shared Whisper installation
     await mlxService.install('gemma4')
     await fs.writeFile(controlPath, JSON.stringify({ operationDelayMs: 10_000 }))
     const session = await first.createFileSession({ fileName: 'meeting.wav' })
+    await runtime.transcriptionStorage.writeResult(session.id, { summary: '', transcript: 'The meeting starts at ten and ends at noon.' })
     const summary = first.summarize(session.id, 'The meeting starts at ten and ends at noon.')
     const summaryResult = assert.rejects(summary, /Summary cancelled/)
     const deadline = Date.now() + 2_000
@@ -595,7 +596,7 @@ test('summary failure leaves the raw session result unchanged', async (t) => {
   await service.close()
 })
 
-test('summary generation returns a derived result without changing the raw session result', async (t) => {
+test('summary generation persists summary fields without replacing the canonical transcript', async (t) => {
   const { runtime } = await fixture(t)
   runtime.mlxService = { generate: async () => ({ text: 'Derived summary.' }) }
   const service = createTranscriptionService(runtime)
@@ -603,11 +604,14 @@ test('summary generation returns a derived result without changing the raw sessi
   const raw = { summary: 'Original summary.', transcript: 'Original transcript.' }
   await runtime.transcriptionStorage.writeResult(session.id, raw)
 
-  const derived = await service.summarize(session.id, 'Edited draft transcript.')
+  const before = (await runtime.transcriptionStorage.readManifest(session.id)).updatedAt
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  const derived = await service.summarize(session.id)
 
+  assert.notEqual((await runtime.transcriptionStorage.readManifest(session.id)).updatedAt, before)
   assert.equal(derived.summary, 'Derived summary.')
-  assert.equal(derived.transcript, 'Edited draft transcript.')
-  assert.deepEqual(await runtime.transcriptionStorage.readResult(session.id), raw)
+  assert.equal(derived.transcript, 'Original transcript.')
+  assert.deepEqual(await runtime.transcriptionStorage.readResult(session.id), derived)
   await service.close()
 })
 
@@ -621,7 +625,7 @@ test('cancelling summary generation retains the draft text and original session 
   const session = await runtime.transcriptionStorage.createSession({ fileName: 'meeting.wav' })
   const raw = { summary: 'Previous summary.', transcript: 'Previous transcript.' }
   await runtime.transcriptionStorage.writeResult(session.id, raw)
-  const summarizing = service.summarize(session.id, 'Edited transcript, preserved even if cancelled.')
+  const summarizing = service.summarize(session.id)
   await started
   const cancelling = service.cancelSummary(session.id)
   finishGeneration({ text: 'This result must be discarded.' })
@@ -860,16 +864,22 @@ test('a failed or cancelled re-transcription keeps the previous result and the r
   await installSnapshot(runtime)
   runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
   let mode = 'ok'
+  let signalRunnerStarted
+  const cancelRunnerStarted = new Promise((resolve) => { signalRunnerStarted = resolve })
   runtime.transcriptionRunner = async ({ request, signal }) => {
     if (mode === 'fail') throw new Error('Whisper crashed.')
     if (mode === 'cancel') {
-      await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }))
+      await new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true })
+        signalRunnerStarted()
+      })
       throw Object.assign(new Error('Transcription was cancelled.'), { code: 'TRANSCRIPTION_CANCELLED' })
     }
     return { id: request.id, text: 'Original.', segments: [{ start: 0, end: 1, text: 'Original.' }] }
   }
   const service = createTranscriptionService(runtime)
   const session = await recordedSession(runtime, service)
+  t.after(async () => { await service.cancel(session.id); await service.close() })
   await service.transcribe(session.id)
   mode = 'fail'
   await assert.rejects(service.transcribe(session.id, { retranscribe: true }), /Whisper crashed/)
@@ -881,7 +891,7 @@ test('a failed or cancelled re-transcription keeps the previous result and the r
   mode = 'cancel'
   const running = service.transcribe(session.id, { retranscribe: true })
   const rejection = assert.rejects(running, /cancelled/)
-  while (!service.active.has(session.id)) await new Promise((resolve) => setTimeout(resolve, 5))
+  await cancelRunnerStarted
   assert.equal((await runtime.transcriptionStorage.readManifest(session.id)).state, 'transcribing')
   await service.cancel(session.id)
   await rejection
@@ -986,6 +996,12 @@ test('recording playback supports ranges and speaker reassignment persists', asy
   const post = (id, body) => fetch(`${base}/api/transcriptions/${id}/segments/speaker`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
   })
+  const mergeSpeakers = (id, body) => fetch(`${base}/api/transcriptions/${id}/speakers/merge`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  })
+  const renameSpeaker = (id, body) => fetch(`${base}/api/transcriptions/${id}/speakers/name`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  })
   assert.equal((await post(bare.id, { index: 0, speaker: 1 })).status, 404)
   assert.equal((await post(session.id, { index: 0, speaker: 1 })).status, 404)
   const segments = [
@@ -1002,6 +1018,28 @@ test('recording playback supports ranges and speaker reassignment persists', asy
   assert.deepEqual((await storage.readResult(session.id)), result)
   assert.deepEqual((await (await fetch(`${base}/api/transcriptions/${session.id}`)).json()).result, result)
 
+  const namedResponse = await renameSpeaker(session.id, { speaker: 3, name: '  Ola\nNord ' })
+  assert.equal(namedResponse.status, 200)
+  const namedResult = (await namedResponse.json()).result
+  assert.deepEqual(namedResult.speakerNames, { '3': 'Ola Nord' })
+  assert.deepEqual(await storage.readResult(session.id), namedResult)
+  for (const body of [{ speaker: 2, name: 'Absent' }, { speaker: 3.5, name: 'Bad ID' }, { speaker: 3, name: null }]) {
+    assert.equal((await renameSpeaker(session.id, body)).status, 400)
+  }
+  assert.deepEqual(await storage.readResult(session.id), namedResult)
+
+  const mergedResponse = await mergeSpeakers(session.id, { source: 3, target: 1 })
+  assert.equal(mergedResponse.status, 200)
+  const merged = (await mergedResponse.json()).result
+  assert.deepEqual(merged.segments.map((segment) => segment.speaker), [1, 1])
+  assert.deepEqual(merged.speakerNumbers, [1])
+  assert.equal(merged.summary, 'sum')
+  assert.deepEqual(merged.speakerNames, { '1': 'Ola Nord' })
+  assert.deepEqual(await storage.readResult(session.id), merged)
+  for (const body of [{ source: 1, target: 1 }, { source: 1, target: 2 }, { source: '1', target: 2 }, { source: 0, target: 1 }]) {
+    assert.equal((await mergeSpeakers(session.id, body)).status, 400)
+  }
+
   assert.equal((await post(session.id, { index: 9, speaker: 1 })).status, 400)
   assert.equal((await post(session.id, { index: 0, speaker: 5 })).status, 400)
   assert.equal((await post(session.id, { index: 0, speaker: 0 })).status, 400)
@@ -1009,6 +1047,8 @@ test('recording playback supports ranges and speaker reassignment persists', asy
   assert.equal((await post('not-an-id', { index: 0, speaker: 1 })).status, 400)
   await storage.writeManifest({ ...ready, state: 'transcribing' })
   assert.equal((await post(session.id, { index: 0, speaker: 2 })).status, 409)
+  assert.equal((await mergeSpeakers(session.id, { source: 1, target: 2 })).status, 409)
+  assert.equal((await renameSpeaker(session.id, { speaker: 1, name: 'Blocked' })).status, 409)
 })
 
 test('segment split and merge routes persist and validate', async (t) => {
@@ -1054,4 +1094,35 @@ test('segment split and merge routes persist and validate', async (t) => {
   await storage.writeManifest({ ...ready, state: 'transcribing' })
   assert.equal((await post(session.id, 'split', { index: 0, offset: 6 })).status, 409)
   assert.equal((await post(session.id, 'merge', { index: 1 })).status, 409)
+})
+
+test('summary generation refuses to save when the transcript changed during generation', async (t) => {
+  const { runtime } = await fixture(t)
+  const service = createTranscriptionService(runtime)
+  const session = await runtime.transcriptionStorage.createSession({ fileName: 'meeting.wav' })
+  const raw = { summary: '', transcript: 'Original transcript.' }
+  await runtime.transcriptionStorage.writeResult(session.id, raw)
+  runtime.mlxService = { generate: async () => {
+    await runtime.transcriptionStorage.writeResult(session.id, { ...raw, transcript: 'Edited transcript.' })
+    return { text: 'Stale summary.' }
+  } }
+  await assert.rejects(service.summarize(session.id), (error) => error.status === 409 && /transcript changed/.test(error.message))
+  assert.equal((await runtime.transcriptionStorage.readResult(session.id)).summary, '')
+  await service.close()
+})
+
+test('re-transcribing resets speaker names instead of carrying them over by number', async (t) => {
+  const { runtime } = await fixture(t)
+  await installSnapshot(runtime)
+  runtime.mlxService = { selectedTranscriptionModel: async () => 'whisper' }
+  runtime.transcriptionRunner = async ({ request }) => ({ id: request.id, text: 'Hello.', segments: [{ start: 0, end: 1, text: 'Hello.' }] })
+  const service = createTranscriptionService(runtime)
+  const session = await recordedSession(runtime, service)
+  await service.transcribe(session.id)
+  const first = await runtime.transcriptionStorage.readResult(session.id)
+  await runtime.transcriptionStorage.writeResult(session.id, { ...first, speakerNames: { '1': 'Alex' } })
+  const redone = await service.transcribe(session.id, { retranscribe: true })
+  assert.equal(redone.result.speakerNames, undefined)
+  assert.equal((await runtime.transcriptionStorage.readResult(session.id)).speakerNames, undefined)
+  await service.close()
 })

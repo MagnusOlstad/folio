@@ -204,7 +204,7 @@ function dockActions(): TranscriptionDockActions {
 function dockModel(recording: TranscriptionDockModel["recording"]): TranscriptionDockModel {
   return {
     phase: "idle", activeSession: null, pending: [], status: null, progress: "", error: "",
-    deletingSessionId: null, recording, speakerNamesFor: () => null, audioUrlFor: () => "",
+    deletingSessionId: null, recording, hasOpenDraftFor: () => false, audioUrlFor: () => "",
   };
 }
 

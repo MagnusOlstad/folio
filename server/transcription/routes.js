@@ -95,6 +95,14 @@ export function registerRoutes(app, runtime) {
       response.json({ result: await service.reassignSpeaker(request.params.id, index, speaker) })
     } catch (error) { fail(response, error) }
   })
+  app.post('/api/transcriptions/:id/speakers/name', async (request, response) => {
+    try {
+      if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
+      const { speaker, name } = request.body ?? {}
+      if (!Number.isInteger(speaker) || typeof name !== 'string') return response.status(400).json({ error: 'speaker must be an integer and name must be text.' })
+      response.json({ result: await service.renameSpeaker(request.params.id, speaker, name) })
+    } catch (error) { fail(response, error) }
+  })
   app.post('/api/transcriptions/:id/segments/split', async (request, response) => {
     try {
       if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
@@ -110,6 +118,14 @@ export function registerRoutes(app, runtime) {
       const { index } = request.body ?? {}
       if (!Number.isInteger(index)) return response.status(400).json({ error: 'index must be an integer.' })
       response.json({ result: await service.mergeSegment(request.params.id, index) })
+    } catch (error) { fail(response, error) }
+  })
+  app.post('/api/transcriptions/:id/speakers/merge', async (request, response) => {
+    try {
+      if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
+      const { source, target } = request.body ?? {}
+      if (!Number.isInteger(source) || !Number.isInteger(target)) return response.status(400).json({ error: 'source and target must be integers.' })
+      response.json({ result: await service.mergeSpeakers(request.params.id, source, target) })
     } catch (error) { fail(response, error) }
   })
   app.get('/api/transcriptions/:id', async (request, response) => {
@@ -150,7 +166,7 @@ export function registerRoutes(app, runtime) {
   app.post('/api/transcriptions/:id/summarize', async (request, response) => {
     try {
       if (!safeTranscriptionId(request.params.id)) return response.status(400).json({ error: 'Invalid transcription ID.' })
-      response.json({ result: await service.summarize(request.params.id, request.body?.transcript) })
+      response.json({ result: await service.summarize(request.params.id) })
     } catch (error) { fail(response, error) }
   })
   app.post('/api/transcriptions/:id/summarize/cancel', async (request, response) => {
